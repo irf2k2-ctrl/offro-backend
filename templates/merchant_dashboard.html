@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Merchant Dashboard - LocalSaver</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+<style>
+:root {
+    --bg:       #FDFBF6;
+    --sidebar:  #3E5F55;
+    --primary:  #3E5F55;
+    --accent:   #A9CDBA;
+    --light:    #CDEBD6;
+    --beige:    #E7D7C8;
+    --text:     #2c3e35;
+    --muted:    #6b8c7e;
+    --border:   #d4e8de;
+    --white:    #ffffff;
+    --danger:   #c0392b;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; }
+
+.sidebar {
+    width: 240px; height: 100vh; background: var(--sidebar);
+    position: fixed; padding: 28px 18px; top: 0; left: 0;
+    overflow-y: auto; display: flex; flex-direction: column;
+}
+.sidebar .brand { color: white; font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.sidebar .merchant-label { color: var(--accent); font-size: 12px; margin-bottom: 28px; }
+.sidebar a {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--light); text-decoration: none;
+    padding: 10px 14px; border-radius: 8px; margin: 3px 0;
+    font-size: 14px; transition: 0.2s;
+}
+.sidebar a:hover, .sidebar a.active { background: rgba(255,255,255,0.15); color: white; }
+.sidebar .logout { margin-top: auto; color: #f4a49a !important; }
+.sidebar .logout:hover { background: rgba(255,100,80,0.15) !important; }
+
+.main { margin-left: 240px; padding: 32px; min-height: 100vh; }
+.page-title { font-size: 22px; font-weight: 700; color: var(--primary); margin-bottom: 24px; }
+
+.card-stat {
+    background: white; border-radius: 14px; padding: 24px;
+    text-align: center; border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgba(62,95,85,0.07);
+}
+.card-stat h3 { font-size: 38px; color: var(--primary); font-weight: 700; margin: 0; }
+.card-stat p { color: var(--muted); margin: 6px 0 0; font-size: 13px; }
+
+.section { display: none; }
+.section.active { display: block; }
+
+.table-wrap { background: white; border-radius: 14px; border: 1px solid var(--border); overflow: hidden; box-shadow: 0 2px 8px rgba(62,95,85,0.06); }
+table { width: 100%; border-collapse: collapse; }
+th { background: var(--primary); color: white; padding: 12px 14px; text-align: left; font-size: 13px; font-weight: 600; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13px; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #f7faf8; }
+
+.badge-active { background: #d1f0e0; color: #1a6640; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+.badge-inactive { background: #fde8e6; color: #b33a2d; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+
+.btn-primary-custom { background: var(--primary); color: white; border: none; border-radius: 8px; padding: 7px 16px; font-size: 13px; cursor: pointer; transition: 0.2s; }
+.btn-primary-custom:hover { background: #2d4a42; }
+.btn-outline { background: transparent; color: var(--primary); border: 1px solid var(--primary); border-radius: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; transition: 0.2s; }
+.btn-outline:hover { background: var(--primary); color: white; }
+.btn-danger-sm { background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+.btn-danger-sm:hover { background: var(--danger); color: white; }
+
+.modal-content { background: white; color: var(--text); border-radius: 14px; border: none; }
+.modal-header { background: var(--primary); color: white; border-radius: 14px 14px 0 0; padding: 18px 24px; border-bottom: none; }
+.modal-title { font-weight: 600; font-size: 16px; }
+.modal-body { padding: 24px; }
+.modal-footer { border-top: 1px solid var(--border); padding: 16px 24px; }
+.form-label { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+.form-control, .form-select {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; font-size: 14px; padding: 9px 12px;
+}
+.form-control:focus, .form-select:focus {
+    border-color: var(--primary); box-shadow: 0 0 0 3px rgba(62,95,85,0.12); outline: none;
+}
+
+.store-card {
+    background: white; border-radius: 14px; border: 1px solid var(--border);
+    padding: 20px; margin-bottom: 16px;
+    box-shadow: 0 2px 8px rgba(62,95,85,0.06);
+}
+.store-card h5 { color: var(--primary); font-weight: 700; margin-bottom: 4px; }
+.store-card .meta { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+.store-card .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+#qrImage { width: 180px; height: 180px; border-radius: 10px; border: 3px solid var(--accent); }
+.section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+    <div class="brand">🌿 LocalSaver</div>
+    <div id="merchant_label" class="merchant-label">Loading...</div>
+    <a href="#" class="active" onclick="showSection('overview', this)"><i class="fas fa-chart-pie"></i> Overview</a>
+    <a href="#" onclick="showSection('stores', this)"><i class="fas fa-store"></i> My Stores</a>
+    <a href="#" onclick="showSection('deals', this)"><i class="fas fa-tags"></i> My Deals</a>
+    <a href="#" class="logout" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</a>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+    <!-- OVERVIEW -->
+    <div id="section-overview" class="section active">
+        <div class="page-title">Dashboard Overview</div>
+        <div class="row g-3">
+            <div class="col-md-3"><div class="card-stat"><h3 id="total_stores">--</h3><p>My Stores</p></div></div>
+            <div class="col-md-3"><div class="card-stat"><h3 id="total_deals">--</h3><p>Active Deals</p></div></div>
+            <div class="col-md-3"><div class="card-stat"><h3 id="total_redemptions">--</h3><p>Redemptions</p></div></div>
+            <div class="col-md-3"><div class="card-stat"><h3 id="total_customers">--</h3><p>Total Customers</p></div></div>
+        </div>
+    </div>
+
+    <!-- STORES -->
+    <div id="section-stores" class="section">
+        <div class="page-title">My Stores</div>
+        <div id="stores_list">
+            <div style="color:var(--muted); text-align:center; padding:40px">Loading stores...</div>
+        </div>
+    </div>
+
+    <!-- DEALS -->
+    <div id="section-deals" class="section">
+        <div class="section-header">
+            <div class="page-title" style="margin:0">My Deals</div>
+            <button class="btn-primary-custom" onclick="openAddDeal()">+ Add Deal</button>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr>
+                    <th>Store</th><th>Title</th><th>Discount</th><th>Category</th><th>Start</th><th>End</th><th>Status</th><th>Action</th>
+                </tr></thead>
+                <tbody id="deals_table"></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- QR CODE MODAL -->
+<div class="modal fade" id="qrModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Store QR Code</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center py-4">
+                <img id="qrImage" src="" alt="QR Code">
+                <div id="qrStoreName" style="font-size:16px;font-weight:600;color:var(--primary);margin-top:12px;"></div>
+                <a id="qrDownload" download="store_qr.png" style="color:var(--primary);text-decoration:none;font-size:13px;margin-top:8px;display:inline-block;">
+                    <i class="fas fa-download"></i> Download QR
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ADD DEAL MODAL -->
+<div class="modal fade" id="dealModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add New Deal</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label">Store *</label>
+                        <select id="deal_store" class="form-select"></select>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label">Deal Title *</label>
+                        <input id="deal_title" class="form-control" placeholder="e.g. Weekend Special 20% off">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Discount %</label>
+                        <input id="deal_discount" class="form-control" type="number" placeholder="e.g. 20" min="1" max="100">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Category</label>
+                        <select id="deal_category" class="form-select">
+                            <option value="">Select</option>
+                            <option>Food</option><option>Electronics</option>
+                            <option>Clothing</option><option>Health</option>
+                            <option>Beauty</option><option>Other</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Description</label>
+                        <input id="deal_desc" class="form-control" placeholder="Short description">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Start Date</label>
+                        <input id="deal_start" class="form-control" type="date">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">End Date</label>
+                        <input id="deal_end" class="form-control" type="date">
+                    </div>
+                </div>
+                <p id="deal_msg" class="mt-3 mb-0" style="color:#c0392b;font-size:13px;"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button class="btn-primary-custom" onclick="submitDeal()">Add Deal</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let myStores = [];
+let qrModal, dealModal;
+
+window.onload = function() {
+    qrModal = new bootstrap.Modal(document.getElementById("qrModal"));
+    dealModal = new bootstrap.Modal(document.getElementById("dealModal"));
+
+    let name = localStorage.getItem("merchant_name") || "Merchant";
+    document.getElementById("merchant_label").innerText = "👤 " + name;
+
+    loadOverview();
+};
+
+function showSection(name, el) {
+    document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+    document.querySelectorAll(".sidebar a").forEach(a => a.classList.remove("active"));
+    document.getElementById("section-" + name).classList.add("active");
+    if (el) el.classList.add("active");
+    if (name === "stores") loadStores();
+    if (name === "deals") loadDeals();
+}
+
+async function loadOverview() {
+    try {
+        let res = await fetch("/merchant/dashboard/overview", { credentials: "include" });
+        if (res.status === 401 || res.status === 403) { window.location.href = "/"; return; }
+        let data = await res.json();
+        document.getElementById("total_stores").innerText = data.total_stores;
+        document.getElementById("total_deals").innerText = data.total_deals;
+        document.getElementById("total_redemptions").innerText = data.total_redemptions;
+        document.getElementById("total_customers").innerText = data.total_customers;
+    } catch(e) { console.error("Overview error:", e); }
+}
+
+async function loadStores() {
+    try {
+        let res = await fetch("/merchant/dashboard/stores", { credentials: "include" });
+        if (!res.ok) { window.location.href = "/"; return; }
+        myStores = await res.json();
+        let html = "";
+        if (myStores.length === 0) {
+            html = `<div style="text-align:center;color:var(--muted);padding:40px">
+                <i class="fas fa-store fa-3x" style="opacity:0.3;margin-bottom:16px;display:block"></i>
+                No stores assigned yet. Contact admin to create stores for you.
+            </div>`;
+        } else {
+            myStores.forEach(s => {
+                html += `<div class="store-card">
+                    <h5>${s.store_name || "-"}</h5>
+                    <div class="meta">
+                        <span class="me-3"><i class="fas fa-tag"></i> ${s.category || "General"}</span>
+                        <span class="me-3"><i class="fas fa-map-marker-alt"></i> ${s.city || "-"}, ${s.area || "-"}</span>
+                        <span class="me-3"><i class="fas fa-tags"></i> ${s.deal_count || 0} deals</span>
+                        <span><i class="fas fa-coins"></i> ${s.points_per_scan || 10} pts/scan</span>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <span class="badge-${s.status}">${s.status}</span>
+                    </div>
+                    <div class="actions">
+                        <button class="btn-outline" onclick="showQR('${s._id}', \`${s.store_name}\`, \`${s.qr_code}\`)">
+                            <i class="fas fa-qrcode"></i> View QR
+                        </button>
+                        <button class="btn-outline" onclick="quickAddDeal('${s._id}', \`${s.store_name}\`)">
+                            <i class="fas fa-plus"></i> Add Deal
+                        </button>
+                    </div>
+                </div>`;
+            });
+        }
+        document.getElementById("stores_list").innerHTML = html;
+    } catch(e) { console.error("Stores error:", e); }
+}
+
+async function loadDeals() {
+    try {
+        let res = await fetch("/merchant/dashboard/deals", { credentials: "include" });
+        if (!res.ok) return;
+        let deals = await res.json();
+        let html = "";
+        deals.forEach(d => {
+            html += `<tr>
+                <td>${d.store_name || "-"}</td>
+                <td><strong>${d.title || "-"}</strong></td>
+                <td>${d.discount || "-"}%</td>
+                <td>${d.category || "-"}</td>
+                <td>${d.start_date || "-"}</td>
+                <td>${d.end_date || "-"}</td>
+                <td><span class="badge-${d.status}">${d.status}</span></td>
+                <td><button class="btn-danger-sm" onclick="deleteDeal('${d._id}')">Delete</button></td>
+            </tr>`;
+        });
+        document.getElementById("deals_table").innerHTML = html ||
+            `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">No deals yet. Add your first deal!</td></tr>`;
+    } catch(e) { console.error("Deals error:", e); }
+}
+
+function showQR(store_id, store_name, qr_code) {
+    if (!qr_code || qr_code === "undefined") { alert("QR not available. Contact admin."); return; }
+    document.getElementById("qrImage").src = qr_code;
+    document.getElementById("qrStoreName").innerText = store_name;
+    document.getElementById("qrDownload").href = qr_code;
+    document.getElementById("qrDownload").download = `qr_${store_name.replace(/\s+/g, "_")}.png`;
+    qrModal.show();
+}
+
+async function openAddDeal() {
+    if (myStores.length === 0) {
+        await loadStores();
+    }
+    let select = document.getElementById("deal_store");
+    select.innerHTML = '<option value="">-- Select Store --</option>';
+    myStores.forEach(s => {
+        select.innerHTML += `<option value="${s._id}">${s.store_name}</option>`;
+    });
+    document.getElementById("deal_msg").innerText = "";
+    dealModal.show();
+}
+
+function quickAddDeal(store_id, store_name) {
+    openAddDeal().then(() => {
+        document.getElementById("deal_store").value = store_id;
+    });
+}
+
+async function submitDeal() {
+    let store_id = document.getElementById("deal_store").value;
+    let title = document.getElementById("deal_title").value.trim();
+    if (!store_id) { document.getElementById("deal_msg").innerText = "Select a store"; return; }
+    if (!title) { document.getElementById("deal_msg").innerText = "Deal title is required"; return; }
+
+    let payload = {
+        store_id,
+        title,
+        discount: parseInt(document.getElementById("deal_discount").value) || 0,
+        category: document.getElementById("deal_category").value,
+        description: document.getElementById("deal_desc").value,
+        start_date: document.getElementById("deal_start").value,
+        end_date: document.getElementById("deal_end").value,
+    };
+
+    try {
+        let res = await fetch("/merchant/dashboard/deals", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            credentials: "include"
+        });
+        let data = await res.json();
+        if (!res.ok) { document.getElementById("deal_msg").innerText = data.detail; return; }
+        dealModal.hide();
+        loadDeals();
+        loadOverview();
+    } catch(e) { document.getElementById("deal_msg").innerText = "Server error"; }
+}
+
+async function deleteDeal(id) {
+    if (!confirm("Delete this deal?")) return;
+    await fetch(`/merchant/dashboard/deals/${id}`, { method: "DELETE", credentials: "include" });
+    loadDeals(); loadOverview();
+}
+
+async function logout() {
+    localStorage.clear();
+    await fetch("/merchant/logout", { method: "POST", credentials: "include" });
+    window.location.href = "/";
+}
+</script>
+
+</body>
+</html>
