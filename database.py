@@ -2,7 +2,7 @@ import os
 from pymongo import MongoClient
 
 client = MongoClient(os.getenv("MONGO_URL"))
-db = client.get_database()
+db = client["offro_db"]
 
 # EXISTING COLLECTIONS
 users_collection = db["users"]
