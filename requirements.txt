@@ -15,7 +15,8 @@ uvicorn==0.41.0
 qrcode[pil]
 jinja2
 requests==2.31.0
-Pillow==10.3.0
+Pillow==10.4.0
 aiofiles==23.2.1
 python-multipart==0.0.9
+qrcode==8.0
 
