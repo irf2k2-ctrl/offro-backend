@@ -229,18 +229,27 @@ tr:hover td{background:#f7faf8;}
   <!-- MERCHANT TRANSACTIONS -->
   <div id="section-merchant_txns" class="section">
     <div class="page-title">Merchant Payment Transactions</div>
+    <!-- Stats row -->
+    <div class="row g-3 mb-3">
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_merchants">--</h3><p>Total Merchants</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_subs" style="color:#198754">--</h3><p>Paid Invoices</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat warn"><h3 id="txn_pending_subs">--</h3><p>Pending Payments</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_revenue" style="color:#198754">--</h3><p>Total Revenue</p></div></div>
+    </div>
     <div class="table-wrap">
-      <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;">
+      <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <input id="txn_search" class="form-control" placeholder="Search merchant/store..." style="max-width:280px;" oninput="filterTxns()">
         <span id="txn_total" style="font-size:13px;color:var(--muted);"></span>
       </div>
-      <table class="table table-hover" id="txn_table">
+      <div style="overflow-x:auto;">
+      <table class="table table-hover" style="min-width:900px;">
         <thead><tr>
           <th>Date</th><th>Invoice No</th><th>Merchant</th><th>Phone</th>
           <th>Store</th><th>Plan</th><th>Base</th><th>GST</th><th>Total</th><th>Payment ID</th>
         </tr></thead>
         <tbody id="txn_body"></tbody>
       </table>
+      </div>
     </div>
   </div>
 
@@ -1139,9 +1148,9 @@ async function loadMerchantTxns() {
     // Get all merchants for count
     if (!merchantsList.length) {
       let r = await fetch("/admin/merchants", {credentials:"include"});
-      merchantsList = await r.json();
+      if (r.ok) merchantsList = await r.json();
     }
-    // Get paid invoices (merchant-transactions endpoint)
+    // Get paid invoices
     let ir = await fetch("/admin/merchant-transactions", {credentials:"include"});
     let invoices = ir.ok ? await ir.json() : [];
 
@@ -1158,36 +1167,38 @@ async function loadMerchantTxns() {
     document.getElementById("txn_pending_subs").innerText = pending.length;
     let revenue = invoices.reduce((sum, t) => sum + (t.total||0), 0);
     document.getElementById("txn_total_revenue").innerText = "₹" + revenue.toFixed(2);
+    document.getElementById("txn_total").innerText = invoices.length + " records";
 
     filterTxns();
-  } catch(e) { console.error(e); }
+  } catch(e) { console.error("loadMerchantTxns error:", e); }
 }
 
 function filterTxns() {
   let search = (document.getElementById("txn_search")?.value || "").toLowerCase();
-  let type   = document.getElementById("txn_type_filter").value;
   let f = allTxns.filter(t => {
-    let sm = !search || (t.merchant_name||"").toLowerCase().includes(search) ||
-             (t.merchant_phone||"").includes(search) || (t.store_name||"").toLowerCase().includes(search);
-    let tm = !type || (t.type||"") === type;
-    return sm && tm;
+    return !search || (t.merchant_name||"").toLowerCase().includes(search) ||
+           (t.merchant_phone||"").includes(search) || (t.store_name||"").toLowerCase().includes(search) ||
+           (t.invoice_no||"").toLowerCase().includes(search);
   });
   let html = "";
   f.forEach(t => {
-    let amtStyle = t.total > 0 ? "color:#198754;font-weight:700;" : "color:var(--muted);";
-    let invoiceBadge = `<span class="badge-active">✓ Paid</span>`;
-    let rzpId = t.razorpay_payment_id ? `<br><small style="color:var(--muted);font-size:10px">RZP: ${t.razorpay_payment_id}</small>` : "";
+    let rzpId = t.razorpay_payment_id
+      ? `<br><small style="color:var(--muted);font-size:10px">${t.razorpay_payment_id}</small>` : "";
     html += `<tr>
-      <td><strong>${t.merchant_name||"-"}</strong><br><small style="color:var(--muted)">${t.merchant_phone||"-"}</small></td>
-      <td><span style="font-size:11px;color:var(--muted)">${t.invoice_no||"-"}</span>${rzpId}</td>
-      <td>${invoiceBadge}</td>
-      <td>${t.store_name||"-"} — ${t.plan||""}<br><small style="color:var(--muted)">${t.from_date||""} → ${t.end_date||""}</small></td>
-      <td style="${amtStyle}">₹${(t.total||0).toFixed(2)}<br><small style="color:var(--muted);font-size:10px">Base: ₹${t.base_price||0} + GST: ₹${t.gst||0}</small></td>
-      <td style="font-size:11px;color:var(--muted)">${t.created_at||"-"}</td>
+      <td style="font-size:12px;color:var(--muted)">${t.created_at||"-"}</td>
+      <td style="font-size:11px"><strong>${t.invoice_no||"-"}</strong>${rzpId}</td>
+      <td><strong>${t.merchant_name||"-"}</strong></td>
+      <td style="font-size:12px">${t.merchant_phone||"-"}</td>
+      <td style="font-size:12px">${t.store_name||"-"}</td>
+      <td><span class="badge-active" style="font-size:11px">${t.plan||"-"}</span></td>
+      <td style="font-size:12px">₹${(t.base_price||0).toFixed(2)}</td>
+      <td style="font-size:12px">₹${(t.gst||0).toFixed(2)}</td>
+      <td style="color:#198754;font-weight:700">₹${(t.total||0).toFixed(2)}</td>
+      <td style="font-size:11px;color:var(--muted)">${t.razorpay_payment_id||"manual"}</td>
     </tr>`;
   });
-  document.getElementById("txn_table").innerHTML = html ||
-    `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">No records</td></tr>`;
+  document.getElementById("txn_body").innerHTML = html ||
+    `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No payment records found</td></tr>`;
 }
 
 async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"include"});window.location.href="/admin";}
