@@ -1003,15 +1003,23 @@ async function openCreateStore(){
   populateCategoryDropdown("");
   storeModal.show();
 }
-function openEditStore(id){
+async function openEditStore(id){
   let s=allStores.find(x=>x._id===id);if(!s)return;
   editingStore=true;
   document.getElementById("storeModalTitle").innerText="Edit Store";
   document.getElementById("storeSubmitBtn").innerText="Save Changes";
   document.getElementById("edit_store_id").value=id;
+  // Always fetch fresh merchant list so dropdown is populated correctly
+  try{let r=await fetch("/admin/merchants",{credentials:"include"});if(r.ok)merchantsList=await r.json();}catch{}
   let sel=document.getElementById("store_merchant");
   sel.innerHTML='<option value="">-- Select Merchant --</option>';
-  merchantsList.forEach(m=>{let o=document.createElement("option");o.value=m._id;o.innerText=`${m.name} (${m.phone})`;if(m._id===s.merchant_id)o.selected=true;sel.appendChild(o);});
+  merchantsList.forEach(m=>{
+    let o=document.createElement("option");
+    o.value=m._id;
+    o.innerText=`${m.name} (${m.phone})`;
+    if(m._id===s.merchant_id || m._id===String(s.merchant_id)) o.selected=true;
+    sel.appendChild(o);
+  });
   sel.onchange=null;
   document.getElementById("store_name").value=s.store_name||"";
   document.getElementById("store_city").value=s.city||"";
@@ -1042,13 +1050,17 @@ async function submitStore(){
   if(!editingStore&&!mid){document.getElementById("store_msg").innerText="Select a merchant";return;}
   document.getElementById("store_msg").style.color="var(--muted)";
   document.getElementById("store_msg").innerText="Saving...";
-  let payload={store_name:name,merchant_id:mid,category:document.getElementById("store_category").value,
+  // When editing, only include merchant_id if a merchant was explicitly selected
+  let payloadBase={store_name:name,category:document.getElementById("store_category").value,
     city:document.getElementById("store_city").value,area:document.getElementById("store_area").value,
     address:document.getElementById("store_address").value,phone:document.getElementById("store_phone").value,
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
     is_new_in_town:document.getElementById("store_new_in_town").checked};
+  // Only send merchant_id if selected (prevents overwriting with empty on edit)
+  if(mid) payloadBase.merchant_id=mid;
+  let payload=payloadBase;
   let sid=document.getElementById("edit_store_id").value;
   let url=editingStore?`/admin/stores/${sid}`:"/admin/stores";
   let method=editingStore?"PUT":"POST";

@@ -246,7 +246,8 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
     upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng"] if data.get(f) is not None}
     if "points_per_scan" in data and data["points_per_scan"] is not None:
         upd["points_per_scan"] = int(data["points_per_scan"])
-    if "merchant_id" in data: upd["merchant_id"] = data["merchant_id"]
+    if "merchant_id" in data and data["merchant_id"] and data["merchant_id"].strip():
+        upd["merchant_id"] = data["merchant_id"].strip()
     if "image" in data and data["image"]: upd["image"] = data["image"]
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])
     if "status" in data: upd["status"] = data["status"]
