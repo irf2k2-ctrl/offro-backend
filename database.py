@@ -1,8 +1,8 @@
+import os
 from pymongo import MongoClient
 
-client = MongoClient("mongodb://localhost:27017")
-
-db = client["localsaver"]
+client = MongoClient(os.getenv("MONGO_URL"))
+db = client.get_database()
 
 # EXISTING COLLECTIONS
 users_collection = db["users"]
