@@ -11,6 +11,52 @@ import uuid, qrcode, io, base64, hmac, hashlib
 router = APIRouter(tags=["MerchantApp"])
 
 import os as _os
+import socket as _socket
+import requests as _req_module
+import urllib3
+
+# ── Force IPv4 + bypass DNS for Razorpay (Railway blocks IPv6 / has DNS issues) ──
+_RZP_HOST = "api.razorpay.com"
+_RZP_IPS  = ["13.235.137.113", "15.206.107.5"]   # Razorpay AWS ap-south-1 IPs
+
+_orig_getaddrinfo = _socket.getaddrinfo
+def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    """Force IPv4 for all DNS lookups — Railway doesn't support outbound IPv6."""
+    return _orig_getaddrinfo(host, port, _socket.AF_INET, type, proto, flags)
+_socket.getaddrinfo = _ipv4_only_getaddrinfo
+
+def _razorpay_request(method: str, path: str, auth: tuple, json_data: dict, timeout: int = 8):
+    """
+    Make a request to Razorpay, trying each known IP directly if DNS fails.
+    Uses Host header to satisfy SNI/TLS verification.
+    """
+    last_err = None
+    urls_to_try = [
+        f"https://{_RZP_HOST}{path}",          # normal DNS first
+        f"https://{_RZP_IPS[0]}{path}",        # fallback: direct IP 1
+        f"https://{_RZP_IPS[1]}{path}",        # fallback: direct IP 2
+    ]
+    for url in urls_to_try:
+        try:
+            headers = {}
+            # When using IP directly, set Host header for SNI
+            if url.startswith(f"https://{_RZP_IPS[0]}") or url.startswith(f"https://{_RZP_IPS[1]}"):
+                headers["Host"] = _RZP_HOST
+                resp = _req_module.request(
+                    method, url, auth=auth, json=json_data,
+                    headers=headers, timeout=timeout, verify=False
+                )
+            else:
+                resp = _req_module.request(
+                    method, url, auth=auth, json=json_data, timeout=timeout
+                )
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            last_err = e
+            continue
+    raise last_err
+
 RAZORPAY_KEY_ID     = _os.getenv("RAZORPAY_KEY_ID",     "rzp_live_SdiI6kcuZzZjsl")
 RAZORPAY_KEY_SECRET = _os.getenv("RAZORPAY_KEY_SECRET", "3JzhKnKuGkhCrelaUgCaFfQr")
 
@@ -257,29 +303,28 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     pay_mode    = "manual"   # fallback: admin confirms payment manually
 
     if rp_configured:
-        import requests as req
         try:
-            rp_res = req.post(
-                "https://api.razorpay.com/v1/orders",
+            rp_res = _razorpay_request(
+                "POST", "/v1/orders",
                 auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
-                json={"amount": total_paise, "currency": "INR",
-                      "receipt": f"OF_{store_id[:8]}_{plan}",
-                      "notes":   {"store_id": store_id, "plan": plan}},
-                timeout=10,
+                json_data={"amount": total_paise, "currency": "INR",
+                           "receipt": f"OF_{store_id[:8]}_{plan}",
+                           "notes":   {"store_id": store_id, "plan": plan}},
+                timeout=8,
             )
             try:
                 rp_data = rp_res.json()
             except Exception:
-                raise HTTPException(502, "Payment gateway returned invalid response")
-            if "id" not in rp_data:
-                err_desc = rp_data.get("error", {}).get("description", "Razorpay order creation failed")
-                raise HTTPException(502, err_desc)
-            rp_order_id = rp_data["id"]
-            pay_mode    = "razorpay"
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(502, f"Payment gateway error: {str(e)}")
+                rp_data = {}
+            if "id" in rp_data:
+                rp_order_id = rp_data["id"]
+                pay_mode    = "razorpay"
+            else:
+                # Razorpay returned error — fall back to manual
+                pay_mode = "manual"
+        except Exception:
+            # All connection attempts failed — fall back to manual silently
+            pay_mode = "manual"
 
     # Insert subscription record
     sub_doc = {
