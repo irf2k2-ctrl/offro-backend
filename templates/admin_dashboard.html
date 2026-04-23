@@ -964,7 +964,11 @@ function filterStores(){
   f.forEach(s=>{
     let img=s.image?`<img src="${s.image}" style="width:32px;height:32px;border-radius:5px;object-fit:cover;margin-right:6px;">`:"";
     let newBadge=s.is_new_in_town?`<span class="badge-new">New</span>`:`<span style="color:var(--muted);font-size:11px;">—</span>`;
-    let dealBadge=`<span class="badge-deal-${s.deal_status==='active'?'active':s.deal_status==='expired'?'expired':'none'}">${s.deal_status||"none"}</span>`;
+    let dealBadge=s.deal_status==='active'
+      ?`<span class="badge-deal-active" title="${s.deal_text||''}">${s.deal_text?s.deal_text:"active"}</span>`
+      :s.deal_status==='expired'
+      ?`<span class="badge-deal-expired">expired</span>`
+      :`<span style="color:var(--muted);font-size:11px;">—</span>`;
     let statusBadge=s.status==="waiting_approval"?`<span class="badge-waiting">⏳ Waiting</span>`:`<span class="badge-${s.status}">${s.status}</span>`;
     let approveBtn=s.status==="waiting_approval"?`<button class="btn-approve me-1" onclick="approveStore('${s._id}')">✓ Approve</button>`:"";
     html+=`<tr>
@@ -974,8 +978,10 @@ function filterStores(){
       <td><span class="badge-active">${s.points_per_scan!=null?s.points_per_scan:10}</span></td>
       <td>${newBadge}</td><td>${statusBadge}</td><td>${dealBadge}</td>
       <td style="white-space:nowrap;font-size:11px;">
-        ${s.sub_from ? `<span style="color:var(--primary);font-weight:600;">${s.sub_from}</span><br>→ ${s.sub_to}<br>` : ''}
-        <span class="badge-${s.paid_status==='paid'?'active':'warn'}" style="font-size:10px;">${s.paid_status||'unpaid'}</span>
+        ${s.sub_from ? `<span style="color:var(--primary);font-weight:600;">${s.sub_from}</span><br><span style="color:var(--muted)">→ ${s.sub_to}</span><br>` : ''}
+        <span class="badge-${s.paid_status==='paid'?'active':s.paid_status==='expired'?'inactive':'warn'}" style="font-size:10px;">
+          ${s.paid_status==='paid'?'✓ paid':s.paid_status==='expired'?'expired':'unpaid'}
+        </span>
       </td>
       <td style="white-space:nowrap;">
         <button class="btn-o me-1" onclick="showQR('${s._id}',\`${s.store_name}\`,\`${s.qr_code||""}\`)"><i class="fas fa-qrcode"></i></button>

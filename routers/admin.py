@@ -173,58 +173,71 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
     """Format store using pre-loaded batch data - no extra DB calls."""
     store_id = str(s["_id"])
     sub = sub_map.get(store_id)
-    
-    # Deal status from batch
     now = datetime.utcnow()
+
+    # ── Deal status (deals use status:"active" field + end_date field) ──
     deals = deal_map.get(store_id, [])
     deal_status = "none"
+    deal_text = ""
     for d in deals:
-        exp = d.get("expiry_date")
-        if exp:
-            exp_dt = exp if isinstance(exp, datetime) else datetime.strptime(str(exp)[:10], "%Y-%m-%d")
-            deal_status = "active" if exp_dt >= now else "expired"
+        end = d.get("end_date", "")
+        if end:
+            try:
+                end_dt = end if isinstance(end, datetime) else datetime.strptime(str(end)[:10], "%Y-%m-%d")
+                deal_status = "active" if end_dt >= now else "expired"
+            except Exception:
+                deal_status = "active"
         else:
             deal_status = "active"
+        # Display text: use discount% or title
+        disc = d.get("discount", 0)
+        title = d.get("title", "")
+        deal_text = f"{disc}% OFF" if disc else title
         break
-    
-    # Active deal text
-    offer_text = deals[0].get("offer", "") if deals else ""
-    
-    # Subscription info
+
+    # ── Subscription info ──
+    # paid_status = "paid"/"unpaid"/"expired" (what the HTML template reads)
     if sub:
         fd = sub.get("from_date"); ed = sub.get("end_date")
         sub_from = fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or "")[:10]
-        sub_end  = ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or "")[:10]
-        # Check if expired
+        sub_to   = ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or "")[:10]
+        sub_status = sub.get("status", "pending")
         if isinstance(ed, datetime) and ed < now:
             sub_status = "expired"
-        else:
-            sub_status = sub.get("status", "pending")
+        # Map to paid_status that HTML template uses
+        paid_status = "paid" if sub_status in ("paid", "active") else sub_status
     else:
-        sub_from = sub_end = sub_status = "none"
-    
+        sub_from = sub_to = ""
+        paid_status = "unpaid"
+        sub_status = "none"
+
     mid = s.get("merchant_id", "")
     merchant = merchants.get(mid, {})
-    
+
     return {
         "_id":            store_id,
-        "store_name":     s.get("store_name"),
-        "merchant_name":  merchant.get("name", "—"),
+        "store_name":     s.get("store_name", ""),
+        "merchant_name":  merchant.get("name", "Unknown"),
         "merchant_phone": merchant.get("phone", ""),
-        "category":       s.get("category"),
-        "city":           s.get("city"),
-        "area":           s.get("area"),
-        "status":         s.get("status"),
+        "category":       s.get("category", ""),
+        "city":           s.get("city", ""),
+        "area":           s.get("area", ""),
+        "address":        s.get("address", ""),
+        "phone":          s.get("phone", ""),
+        "status":         s.get("status", "active"),
         "points_per_scan":s.get("points_per_scan", 10),
         "visit_points":   s.get("visit_points", 10),
         "is_new_in_town": s.get("is_new_in_town", False),
-        "image":          s.get("image"),
+        "image":          s.get("image") or "",
+        "qr_code":        s.get("qr_code", ""),
+        "lat":            s.get("lat", ""),
+        "lng":            s.get("lng", ""),
         "deal_status":    deal_status,
-        "offer":          offer_text,
-        "sub_status":     sub_status,
+        "deal_text":      deal_text,
+        "paid_status":    paid_status,
         "sub_from":       sub_from,
-        "sub_end":        sub_end,
-        "sub_plan":       sub.get("plan") if sub else None,
+        "sub_to":         sub_to,
+        "sub_plan":       sub.get("plan", "") if sub else "",
         "merchant_id":    mid,
     }
 
@@ -286,22 +299,23 @@ def list_stores(a=Depends(get_current_admin)):
     
     # Batch load all active deals in ONE query
     all_deals = list(db.deals.find(
-        {"store_id": {"$in": store_ids}, "active": True},
-        {"store_id": 1, "offer": 1, "expiry_date": 1}
+        {"store_id": {"$in": store_ids}, "status": "active"},
+        {"store_id": 1, "discount": 1, "title": 1, "end_date": 1}
     ))
     deal_map = {}  # store_id → list of deals
     for d in all_deals:
         sid = d.get("store_id", "")
         deal_map.setdefault(sid, []).append(d)
     
-    # Batch load merchants
-    merchant_ids = list(set(s.get("merchant_id", "") for s in stores if s.get("merchant_id")))
-    merchants = {}
-    for mid in merchant_ids:
-        try:
-            m = db.merchants.find_one({"_id": ObjectId(mid)}, {"name": 1, "phone": 1})
-            if m: merchants[mid] = m
+    # Batch load merchants in ONE query using $in
+    merchant_ids_raw = list(set(s.get("merchant_id", "") for s in stores if s.get("merchant_id")))
+    merch_obj_ids = []
+    for mid in merchant_ids_raw:
+        try: merch_obj_ids.append(ObjectId(mid))
         except: pass
+    merchants = {}
+    for m in db.merchants.find({"_id": {"$in": merch_obj_ids}}, {"name": 1, "phone": 1}):
+        merchants[str(m["_id"])] = m
     
     return [_fmt_store_fast(s, sub_map, deal_map, merchants) for s in stores]
 
