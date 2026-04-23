@@ -8,6 +8,8 @@
 <title>Admin Dashboard - Offro</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
 :root{--bg:#FDFBF6;--sidebar:#3E5F55;--primary:#3E5F55;--accent:#A9CDBA;--light:#CDEBD6;--beige:#E7D7C8;--text:#2c3e35;--muted:#6b8c7e;--border:#d4e8de;--danger:#c0392b;--warning:#e67e22;}
 *{box-sizing:border-box;}
@@ -240,6 +242,8 @@ tr:hover td{background:#f7faf8;}
       <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <input id="txn_search" class="form-control" placeholder="Search merchant/store..." style="max-width:280px;" oninput="filterTxns()">
         <span id="txn_total" style="font-size:13px;color:var(--muted);"></span>
+        <button class="btn btn-sm" onclick="exportPaymentsPDF()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-pdf me-1"></i>PDF</button>
+        <button class="btn btn-sm" onclick="exportPaymentsCSV()" style="background:#6c757d;color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-csv me-1"></i>CSV</button>
       </div>
       <div style="overflow-x:auto;">
       <table class="table table-hover" style="min-width:900px;">
@@ -928,17 +932,22 @@ async function saveMerchant(){
   let payload={name:document.getElementById("edit_merchant_name").value.trim(),phone:document.getElementById("edit_merchant_phone").value.trim(),city:document.getElementById("edit_merchant_city").value.trim(),area:document.getElementById("edit_merchant_area").value.trim()};
   let r=await fetch(`/admin/merchants/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),credentials:"include"});
   if(!r.ok){let d=await r.json();document.getElementById("merchant_edit_msg").innerText=d.detail;return;}
-  merchantModal.hide();loadMerchants();
+  merchantModal.hide(); await loadMerchants(); await loadStats();
 }
 async function toggleMerchant(id){if(!confirm("Toggle status?"))return;await fetch(`/admin/merchants/${id}/status`,{method:"PUT",credentials:"include"});loadMerchants();loadStats();}
 async function deleteMerchant(id){if(!confirm("Delete merchant and all stores?"))return;await fetch(`/admin/merchants/${id}`,{method:"DELETE",credentials:"include"});loadMerchants();loadStats();}
 
 // ===== STORES =====
 async function loadStores(){
-  let r=await fetch("/admin/stores",{credentials:"include"});
-  allStores=await r.json();
-  populateCityFilter("store_city_filter",allStores,"city");
-  filterStores();
+  document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--muted)"><div class="spinner-border spinner-border-sm text-success me-2"></div>Loading stores...</td></tr>`;
+  try {
+    let r=await fetch("/admin/stores",{credentials:"include"});
+    allStores=await r.json();
+    populateCityFilter("store_city_filter",allStores,"city");
+    filterStores();
+  } catch(e) {
+    document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:24px;color:red">Error loading stores: ${e.message}</td></tr>`;
+  }
 }
 function filterStores(){
   let city=document.getElementById("store_city_filter").value;
@@ -1068,14 +1077,14 @@ async function submitStore(){
     let r=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),credentials:"include"});
     let result=await r.json();
     if(!r.ok){document.getElementById("store_msg").style.color="#c0392b";document.getElementById("store_msg").innerText=result.detail||"Failed";return;}
-    storeModal.hide();loadStores();loadStats();
+    storeModal.hide(); await loadStores(); await loadStats();
     if(!editingStore&&result.qr_code)setTimeout(()=>showQR(result.store_id,name,result.qr_code),400);
   }catch(e){document.getElementById("store_msg").style.color="#c0392b";document.getElementById("store_msg").innerText="Server error";}
 }
 async function approveStore(id){
   if(!confirm("Approve and set store to Active?"))return;
   await fetch(`/admin/stores/${id}/approve`,{method:"PUT",credentials:"include"});
-  loadStores();loadStats();
+  await loadStores(); await loadStats();
 }
 function showQR(sid,name,qr){
   if(!qr||qr==="undefined"){alert("QR not available");return;}
@@ -1085,8 +1094,8 @@ function showQR(sid,name,qr){
   document.getElementById("qrDownload").download=`qr_${name.replace(/\s+/g,"_")}.png`;
   qrModal.show();
 }
-async function toggleStore(id){if(!confirm("Toggle store status?"))return;await fetch(`/admin/stores/${id}/status`,{method:"PUT",credentials:"include"});loadStores();}
-async function deleteStore(id){if(!confirm("Delete this store?"))return;await fetch(`/admin/stores/${id}`,{method:"DELETE",credentials:"include"});loadStores();loadStats();}
+async function toggleStore(id){if(!confirm("Toggle store status?"))return;await fetch(`/admin/stores/${id}/status`,{method:"PUT",credentials:"include"});await loadStores();}
+async function deleteStore(id){if(!confirm("Delete this store?"))return;await fetch(`/admin/stores/${id}`,{method:"DELETE",credentials:"include"});await loadStores();await loadStats();}
 
 // ===== USERS =====
 async function loadUsers(){
@@ -1169,14 +1178,21 @@ async function loadMerchantTxns() {
     // Also get pending subscriptions for pending count
     let sr = await fetch("/admin/subscriptions", {credentials:"include"});
     let subs = sr.ok ? await sr.json() : [];
-    let pending = subs.filter(s => s.status === "pending");
+    // De-duplicate pending: count stores with pending subscription (latest record per store)
+    let pendingStores = new Map();
+    subs.forEach(s => {
+      if (!pendingStores.has(s.store_name) || (s.created_at > (pendingStores.get(s.store_name)||{}).created_at)) {
+        pendingStores.set(s.store_name, s);
+      }
+    });
+    let pending = [...pendingStores.values()].filter(s => s.status === "pending");
 
     allTxns = invoices;
 
     // Stats
     document.getElementById("txn_total_merchants").innerText = merchantsList.length;
     document.getElementById("txn_total_subs").innerText = invoices.length;
-    document.getElementById("txn_pending_subs").innerText = pending.length;
+    document.getElementById("txn_pending_subs").innerText = pending.length + " stores";
     let revenue = invoices.reduce((sum, t) => sum + (t.total||0), 0);
     document.getElementById("txn_total_revenue").innerText = "₹" + revenue.toFixed(2);
     document.getElementById("txn_total").innerText = invoices.length + " records";
@@ -1213,7 +1229,91 @@ function filterTxns() {
     `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No payment records found</td></tr>`;
 }
 
+
+// ===== EXPORT PAYMENTS PDF =====
+function exportPaymentsPDF() {
+  const { jsPDF } = window.jspdf;
+  if (!jsPDF) { alert("PDF library not loaded, please refresh"); return; }
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  
+  // Header
+  doc.setFillColor(62, 95, 85);
+  doc.rect(0, 0, 297, 18, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.text("OffrO — Payment Transactions Report", 14, 12);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text(new Date().toLocaleDateString("en-IN", {day:"2-digit",month:"short",year:"numeric"}), 260, 12);
+  
+  const rows = allTxns.map(t => [
+    t.created_at || "-",
+    t.invoice_no || "-",
+    t.merchant_name || "-",
+    t.merchant_phone || "-",
+    t.store_name || "-",
+    t.plan || "-",
+    "₹" + (t.base_price||0).toFixed(2),
+    "₹" + (t.gst||0).toFixed(2),
+    "₹" + (t.total||0).toFixed(2),
+    t.razorpay_payment_id || "manual"
+  ]);
+  
+  doc.autoTable({
+    startY: 22,
+    head: [["Date","Invoice No","Merchant","Phone","Store","Plan","Base","GST","Total","Payment ID"]],
+    body: rows,
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [62, 95, 85], textColor: 255, fontStyle: "bold", fontSize: 8 },
+    alternateRowStyles: { fillColor: [240, 249, 244] },
+    columnStyles: {
+      0: { cellWidth: 22 }, 1: { cellWidth: 28 }, 2: { cellWidth: 30 },
+      3: { cellWidth: 24 }, 4: { cellWidth: 30 }, 5: { cellWidth: 18 },
+      6: { cellWidth: 18 }, 7: { cellWidth: 15 }, 8: { cellWidth: 18 }, 9: { cellWidth: 38 }
+    },
+    didDrawPage: (data) => {
+      doc.setFontSize(8); doc.setTextColor(150);
+      doc.text("Generated by OffrO Admin Dashboard", 14, doc.internal.pageSize.height - 8);
+      doc.text(`Page ${data.pageNumber}`, 270, doc.internal.pageSize.height - 8);
+    }
+  });
+  
+  // Summary footer
+  const total = allTxns.reduce((s,t)=>s+(t.total||0),0);
+  const gstTotal = allTxns.reduce((s,t)=>s+(t.gst||0),0);
+  const finalY = doc.lastAutoTable.finalY + 6;
+  doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(62,95,85);
+  doc.text(`Total Records: ${allTxns.length}   |   Total GST: ₹${gstTotal.toFixed(2)}   |   Total Revenue: ₹${total.toFixed(2)}`, 14, finalY);
+  
+  doc.save(`OffrO_Payments_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+
+// ===== EXPORT PAYMENTS CSV =====
+function exportPaymentsCSV() {
+  const headers = ["Date","Invoice No","Merchant","Phone","Store","Plan","Base Price","GST","Total","Payment ID"];
+  const rows = allTxns.map(t => [
+    t.created_at||"",
+    t.invoice_no||"",
+    t.merchant_name||"",
+    t.merchant_phone||"",
+    t.store_name||"",
+    t.plan||"",
+    (t.base_price||0).toFixed(2),
+    (t.gst||0).toFixed(2),
+    (t.total||0).toFixed(2),
+    t.razorpay_payment_id||"manual"
+  ]);
+  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], {type:"text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `OffrO_Payments_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
 async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"include"});window.location.href="/admin";}
+
 </script>
 </body>
 </html>

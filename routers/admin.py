@@ -169,6 +169,65 @@ def _store_deal_status(store_id: str):
         return "active"
     return "inactive"
 
+def _fmt_store_fast(s, sub_map, deal_map, merchants):
+    """Format store using pre-loaded batch data - no extra DB calls."""
+    store_id = str(s["_id"])
+    sub = sub_map.get(store_id)
+    
+    # Deal status from batch
+    now = datetime.utcnow()
+    deals = deal_map.get(store_id, [])
+    deal_status = "none"
+    for d in deals:
+        exp = d.get("expiry_date")
+        if exp:
+            exp_dt = exp if isinstance(exp, datetime) else datetime.strptime(str(exp)[:10], "%Y-%m-%d")
+            deal_status = "active" if exp_dt >= now else "expired"
+        else:
+            deal_status = "active"
+        break
+    
+    # Active deal text
+    offer_text = deals[0].get("offer", "") if deals else ""
+    
+    # Subscription info
+    if sub:
+        fd = sub.get("from_date"); ed = sub.get("end_date")
+        sub_from = fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or "")[:10]
+        sub_end  = ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or "")[:10]
+        # Check if expired
+        if isinstance(ed, datetime) and ed < now:
+            sub_status = "expired"
+        else:
+            sub_status = sub.get("status", "pending")
+    else:
+        sub_from = sub_end = sub_status = "none"
+    
+    mid = s.get("merchant_id", "")
+    merchant = merchants.get(mid, {})
+    
+    return {
+        "_id":            store_id,
+        "store_name":     s.get("store_name"),
+        "merchant_name":  merchant.get("name", "—"),
+        "merchant_phone": merchant.get("phone", ""),
+        "category":       s.get("category"),
+        "city":           s.get("city"),
+        "area":           s.get("area"),
+        "status":         s.get("status"),
+        "points_per_scan":s.get("points_per_scan", 10),
+        "visit_points":   s.get("visit_points", 10),
+        "is_new_in_town": s.get("is_new_in_town", False),
+        "image":          s.get("image"),
+        "deal_status":    deal_status,
+        "offer":          offer_text,
+        "sub_status":     sub_status,
+        "sub_from":       sub_from,
+        "sub_end":        sub_end,
+        "sub_plan":       sub.get("plan") if sub else None,
+        "merchant_id":    mid,
+    }
+
 def _fmt_store(s):
     sid = str(s["_id"])
     mid = s.get("merchant_id", "")
@@ -207,7 +266,44 @@ def _fmt_store(s):
 
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
-    return [_fmt_store(s) for s in db.stores.find()]
+    stores = list(db.stores.find())
+    if not stores:
+        return []
+    
+    # ── Batch load all subscriptions in ONE query (avoids N per-store DB round trips) ──
+    store_ids = [str(s["_id"]) for s in stores]
+    all_subs = list(db.subscriptions.find(
+        {"store_id": {"$in": store_ids}},
+        {"store_id": 1, "status": 1, "from_date": 1, "end_date": 1, "plan": 1}
+    ).sort("created_at", -1))
+    
+    # Map: store_id → latest subscription (first match since sorted desc)
+    sub_map = {}
+    for sub in all_subs:
+        sid = sub.get("store_id", "")
+        if sid not in sub_map:
+            sub_map[sid] = sub
+    
+    # Batch load all active deals in ONE query
+    all_deals = list(db.deals.find(
+        {"store_id": {"$in": store_ids}, "active": True},
+        {"store_id": 1, "offer": 1, "expiry_date": 1}
+    ))
+    deal_map = {}  # store_id → list of deals
+    for d in all_deals:
+        sid = d.get("store_id", "")
+        deal_map.setdefault(sid, []).append(d)
+    
+    # Batch load merchants
+    merchant_ids = list(set(s.get("merchant_id", "") for s in stores if s.get("merchant_id")))
+    merchants = {}
+    for mid in merchant_ids:
+        try:
+            m = db.merchants.find_one({"_id": ObjectId(mid)}, {"name": 1, "phone": 1})
+            if m: merchants[mid] = m
+        except: pass
+    
+    return [_fmt_store_fast(s, sub_map, deal_map, merchants) for s in stores]
 
 @router.post("/stores")
 def create_store(data: dict, a=Depends(get_current_admin)):
