@@ -154,7 +154,10 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "lat":            data.get("lat", ""),
         "lng":            data.get("lng", ""),
         "image":          data.get("image") or None,
+        "logo":           data.get("logo") or None,
         "images":         data.get("images") or [],      # multiple gallery images
+        "about":          data.get("about", ""),
+        "state":          data.get("state", ""),
         "is_new_in_town": False,
         "created_at":     datetime.utcnow(),
     }
@@ -169,9 +172,10 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
 def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
     if not store: raise HTTPException(404, "Store not found")
-    upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng",
-                                  "open_time","close_time","cost_for_two","dine_in","tags","description"] if data.get(f) is not None}
+    upd = {f: data[f] for f in ["store_name","category","city","state","area","address","phone","lat","lng",
+                                  "about","open_time","close_time","cost_for_two","dine_in","tags","description"] if data.get(f) is not None}
     if data.get("image"): upd["image"] = data["image"]
+    if data.get("logo"): upd["logo"] = data["logo"]
     if "images" in data: upd["images"] = data["images"]   # update gallery images array
     if upd: db.stores.update_one({"_id": ObjectId(sid)}, {"$set": upd})
     return {"message": "Store updated"}

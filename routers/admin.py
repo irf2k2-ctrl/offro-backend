@@ -228,7 +228,7 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "points_per_scan":s.get("points_per_scan", 10),
         "visit_points":   s.get("visit_points", 10),
         "is_new_in_town": s.get("is_new_in_town", False),
-        "image":          s.get("image") or "",
+        "image":          "",  # excluded from list query for performance
         "qr_code":        s.get("qr_code", ""),
         "lat":            s.get("lat", ""),
         "lng":            s.get("lng", ""),
@@ -239,6 +239,8 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "sub_to":         sub_to,
         "sub_plan":       sub.get("plan", "") if sub else "",
         "merchant_id":    mid,
+        "about":          s.get("about", ""),
+        "logo":           "",  # excluded from list for performance
     }
 
 def _fmt_store(s):
@@ -279,7 +281,9 @@ def _fmt_store(s):
 
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
-    stores = list(db.stores.find())
+    # Exclude large base64 image fields from list for performance
+    projection = {"image": 0, "images": 0, "logo": 0}
+    stores = list(db.stores.find({}, projection))
     if not stores:
         return []
     
@@ -353,7 +357,7 @@ def create_store(data: dict, a=Depends(get_current_admin)):
 def update_store(id: str, data: dict, a=Depends(get_current_admin)):
     store = db.stores.find_one({"_id": ObjectId(id)})
     if not store: raise HTTPException(404, "Not found")
-    upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng"] if data.get(f) is not None}
+    upd = {f: data[f] for f in ["store_name","category","city","state","area","address","phone","lat","lng","about"] if data.get(f) is not None}
     if "points_per_scan" in data and data["points_per_scan"] is not None:
         upd["points_per_scan"] = int(data["points_per_scan"])
     if "merchant_id" in data and data["merchant_id"] and data["merchant_id"].strip():

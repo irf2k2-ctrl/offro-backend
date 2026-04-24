@@ -84,7 +84,8 @@ def get_profile(user=Depends(get_current_user)):
         "city": user.get("city", ""),
         "visit_points": user.get("visit_points", 0),
         "pool_points": user.get("pool_points", 0),
-        "total_points": user.get("visit_points", 0) + user.get("pool_points", 0)
+        "total_points": user.get("visit_points", 0) + user.get("pool_points", 0),
+        "profile_image": user.get("profile_image")
     }
 
 @router.put("/city")
@@ -95,7 +96,7 @@ def update_city(data: dict, user=Depends(get_current_user)):
 
 @router.put("/profile")
 def update_profile(data: dict, user=Depends(get_current_user)):
-    allowed = ["name", "city"]
+    allowed = ["name", "city", "profile_image"]
     upd = {k: data[k] for k in allowed if k in data}
     if not upd:
         raise HTTPException(400, "Nothing to update")
@@ -197,7 +198,19 @@ def redemption_history(user=Depends(get_current_user)):
     result = []
     for r in redemptions:
         r["_id"] = str(r["_id"])
-        r["created_at"] = r["created_at"].isoformat() if "created_at" in r else ""
+        created = r.get("created_at")
+        r["date"] = created.isoformat() if created else ""
+        # Fetch store image for the scan history card
+        store_img = None
+        store_id = r.get("store_id")
+        if store_id:
+            try:
+                store_doc = db.stores.find_one({"_id": ObjectId(store_id)}, {"image": 1})
+                if store_doc:
+                    store_img = store_doc.get("image")
+            except Exception:
+                pass
+        r["store_image"] = store_img
         result.append(r)
     return result
 
