@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from routers import admin, users, public, merchant_app
 from database import db
 
-app = FastAPI(title="LocalSaver API", version="3.0")
+app = FastAPI(title="OffrO API", version="4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,6 +24,26 @@ app.include_router(merchant_app.router, prefix="/merchant")
 app.include_router(admin.router, prefix="/admin")
 app.include_router(users.router, prefix="/user")
 app.include_router(public.router)  # /stores /categories — public
+
+# Public gift-voucher endpoint (read-only, no auth needed — Flutter app reads this)
+from bson import ObjectId
+from database import db as _db
+from fastapi.responses import JSONResponse as _JSONResponse
+
+@app.get("/gift-vouchers")
+def public_gift_vouchers():
+    """Returns active gift voucher cards for the app home screen."""
+    docs = list(_db.gift_vouchers.find({"is_active": True}).sort("_id", -1))
+    result = []
+    for v in docs:
+        result.append({
+            "id":       str(v["_id"]),
+            "title":    v.get("title", ""),
+            "text":     v.get("text", ""),
+            "validity": v.get("validity", ""),
+            "logo":     v.get("logo", ""),
+        })
+    return result
 
 @app.on_event("startup")
 def startup():

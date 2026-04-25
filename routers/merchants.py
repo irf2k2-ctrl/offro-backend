@@ -103,7 +103,9 @@ def merchant_stores(merchant=Depends(get_current_merchant)):
             "phone": s.get("phone"),
             "status": s.get("status", "active"),
             "qr_code": s.get("qr_code", ""),
-            "points_per_scan": s.get("points_per_scan", 10),
+            "points_per_scan": s.get("points_per_scan", 0),
+            "visit_points": s.get("visit_points", 0),
+            "image": s.get("image") or "",
             "deal_count": deal_count
         })
     return result

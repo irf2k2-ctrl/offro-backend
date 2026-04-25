@@ -225,10 +225,10 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "address":        s.get("address", ""),
         "phone":          s.get("phone", ""),
         "status":         s.get("status", "active"),
-        "points_per_scan":s.get("points_per_scan", 10),
-        "visit_points":   s.get("visit_points", 10),
+        "points_per_scan":s.get("points_per_scan", 0),
+        "visit_points":   s.get("visit_points", 0),
         "is_new_in_town": s.get("is_new_in_town", False),
-        "image":          "",  # excluded from list query for performance
+        "image":          s.get("image") or "",
         "qr_code":        s.get("qr_code", ""),
         "lat":            s.get("lat", ""),
         "lng":            s.get("lng", ""),
@@ -240,7 +240,7 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "sub_plan":       sub.get("plan", "") if sub else "",
         "merchant_id":    mid,
         "about":          s.get("about", ""),
-        "logo":           "",  # excluded from list for performance
+        "logo":           s.get("logo") or "",
     }
 
 def _fmt_store(s):
@@ -268,7 +268,7 @@ def _fmt_store(s):
         "phone": s.get("phone"), "status": s.get("status", "active"),
         "merchant_name": merchant.get("name") if merchant else "Unknown",
         "merchant_id": mid, "qr_code": s.get("qr_code",""),
-        "points_per_scan": s.get("points_per_scan", 10),
+        "points_per_scan": s.get("points_per_scan", 0),
         "lat": s.get("lat",""), "lng": s.get("lng",""),
         "image": s.get("image") or "",
         "is_new_in_town": s.get("is_new_in_town", False),
@@ -282,8 +282,7 @@ def _fmt_store(s):
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
     # Exclude large base64 image fields from list for performance
-    projection = {"image": 0, "images": 0, "logo": 0}
-    stores = list(db.stores.find({}, projection))
+    stores = list(db.stores.find({}))
     if not stores:
         return []
     
@@ -341,7 +340,7 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "address": data.get("address",""),
         "phone": data.get("phone") or merchant.get("phone",""),
         "status": "active",
-        "points_per_scan": int(data.get("points_per_scan", 10)),
+        "points_per_scan": int(data.get("points_per_scan", 0)),
         "lat": data.get("lat",""), "lng": data.get("lng",""),
         "image": data.get("image") or None,
         "is_new_in_town": bool(data.get("is_new_in_town", False)),
@@ -355,18 +354,38 @@ def create_store(data: dict, a=Depends(get_current_admin)):
 
 @router.put("/stores/{id}")
 def update_store(id: str, data: dict, a=Depends(get_current_admin)):
+    """Update any store field — used by admin dashboard Edit Store form."""
     store = db.stores.find_one({"_id": ObjectId(id)})
     if not store: raise HTTPException(404, "Not found")
     upd = {f: data[f] for f in ["store_name","category","city","state","area","address","phone","lat","lng","about"] if data.get(f) is not None}
     if "points_per_scan" in data and data["points_per_scan"] is not None:
         upd["points_per_scan"] = int(data["points_per_scan"])
+    if "visit_points" in data and data["visit_points"] is not None:
+        upd["visit_points"] = int(data["visit_points"])
     if "merchant_id" in data and data["merchant_id"] and data["merchant_id"].strip():
         upd["merchant_id"] = data["merchant_id"].strip()
-    if "image" in data and data["image"]: upd["image"] = data["image"]
+    # Accept image — can be a URL or base64 data URI
+    if "image" in data:
+        upd["image"] = data["image"] or ""
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])
     if "status" in data: upd["status"] = data["status"]
     if upd: db.stores.update_one({"_id": ObjectId(id)}, {"$set": upd})
     return {"message": "Updated"}
+
+@router.put("/stores/{id}/rating")
+def set_store_rating(id: str, data: dict, a=Depends(get_current_admin)):
+    """Set the admin-controlled rating for a store (1-5 stars).
+    This overwrites the displayed rating so the admin can curate what users see.
+    The raw user ratings are preserved separately in the 'user_rating' field.
+    """
+    rating = float(data.get("admin_rating", 0))
+    if not (0 <= rating <= 5):
+        raise HTTPException(400, "Rating must be between 0 and 5")
+    db.stores.update_one(
+        {"_id": ObjectId(id)},
+        {"$set": {"admin_rating": rating, "rating": rating}}
+    )
+    return {"message": "Rating updated", "rating": rating}
 
 @router.put("/stores/{id}/approve")
 def approve_store(id: str, a=Depends(get_current_admin)):
@@ -712,3 +731,62 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
         }}
     )
     return {"ok": True, "message": f"{voucher_type} voucher sent successfully"}
+
+
+# ===================== GIFT VOUCHERS (app-facing cards) =====================
+
+@router.get("/gift-vouchers")
+def list_gift_vouchers(a=Depends(get_current_admin)):
+    """List all gift vouchers shown in the app home screen."""
+    docs = list(db.gift_vouchers.find().sort("_id", -1))
+    result = []
+    for v in docs:
+        result.append({
+            "id":          str(v["_id"]),
+            "title":       v.get("title", ""),
+            "text":        v.get("text", ""),
+            "validity":    v.get("validity", ""),
+            "logo":        v.get("logo", ""),
+            "merchant_id": v.get("merchant_id", ""),
+            "is_active":   v.get("is_active", True),
+            "created_at":  str(v.get("created_at", ""))[:10],
+        })
+    return result
+
+@router.post("/gift-vouchers")
+def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
+    """Create a new gift voucher card visible in the app."""
+    text = (data.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Offer text is required")
+    doc = {
+        "title":       (data.get("title") or "").strip(),
+        "text":        text,
+        "validity":    (data.get("validity") or "").strip(),
+        "logo":        (data.get("logo") or "").strip(),
+        "merchant_id": (data.get("merchant_id") or "").strip(),
+        "is_active":   bool(data.get("is_active", True)),
+        "created_at":  datetime.utcnow(),
+    }
+    result = db.gift_vouchers.insert_one(doc)
+    return {"message": "Voucher created", "id": str(result.inserted_id)}
+
+@router.put("/gift-vouchers/{vid}")
+def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
+    """Update an existing gift voucher."""
+    upd = {}
+    for field in ["title", "text", "validity", "logo", "merchant_id"]:
+        if field in data:
+            upd[field] = (data[field] or "").strip()
+    if "is_active" in data:
+        upd["is_active"] = bool(data["is_active"])
+    if not upd:
+        raise HTTPException(400, "Nothing to update")
+    db.gift_vouchers.update_one({"_id": ObjectId(vid)}, {"$set": upd})
+    return {"message": "Voucher updated"}
+
+@router.delete("/gift-vouchers/{vid}")
+def delete_gift_voucher(vid: str, a=Depends(get_current_admin)):
+    """Delete a gift voucher."""
+    db.gift_vouchers.delete_one({"_id": ObjectId(vid)})
+    return {"message": "Deleted"}
