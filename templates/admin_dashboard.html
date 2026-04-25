@@ -2,260 +2,612 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Admin Dashboard - OffrO</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Admin Dashboard - Offro</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
-body { background:#0f172a; color:white; font-family:Segoe UI; margin:0; }
+:root{--bg:#FDFBF6;--sidebar:#3E5F55;--primary:#3E5F55;--accent:#A9CDBA;--light:#CDEBD6;--beige:#E7D7C8;--text:#2c3e35;--muted:#6b8c7e;--border:#d4e8de;--danger:#c0392b;--warning:#e67e22;}
+*{box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;margin:0;}
+.sidebar{width:230px;height:100vh;background:var(--sidebar);position:fixed;padding:20px 16px;top:0;left:0;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+.sidebar-logo{display:flex;align-items:center;gap:9px;margin-bottom:2px;}
+.sidebar-logo svg{width:32px;height:32px;flex-shrink:0;}
+.sidebar-logo-text{color:white;font-size:16px;font-weight:800;}
+.sidebar-sub{color:var(--accent);font-size:10px;margin-bottom:18px;padding-left:2px;letter-spacing:.5px;text-transform:uppercase;}
+.sidebar a{display:flex;align-items:center;gap:9px;color:var(--light);text-decoration:none;padding:9px 13px;border-radius:8px;font-size:12.5px;transition:.15s;}
+.sidebar a:hover,.sidebar a.active{background:rgba(255,255,255,0.15);color:white;}
+.sidebar .sep{height:1px;background:rgba(255,255,255,.1);margin:8px 0;}
+.sidebar .logout{margin-top:auto;color:#f4a49a!important;}
+.sidebar .logout:hover{background:rgba(255,100,80,.15)!important;}
+.main{margin-left:230px;padding:24px;min-height:100vh;}
+.page-title{font-size:18px;font-weight:700;color:var(--primary);margin-bottom:18px;}
+.card-stat{background:white;border-radius:12px;padding:18px;text-align:center;border:1px solid var(--border);box-shadow:0 2px 8px rgba(62,95,85,.07);}
+.card-stat h3{font-size:30px;color:var(--primary);font-weight:700;margin:0;}
+.card-stat p{color:var(--muted);margin:4px 0 0;font-size:12px;}
+.card-stat.warn h3{color:var(--warning);}
+.section{display:none;}.section.active{display:block;}
+.table-wrap{background:white;border-radius:12px;border:1px solid var(--border);overflow:hidden;box-shadow:0 2px 8px rgba(62,95,85,.06);}
+table{width:100%;border-collapse:collapse;}
+th{background:var(--primary);color:white;padding:10px 12px;text-align:left;font-size:11.5px;font-weight:600;}
+td{padding:9px 12px;border-bottom:1px solid var(--border);color:var(--text);font-size:12.5px;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:#f7faf8;}
+.badge-active{background:#d1f0e0;color:#1a6640;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
+.badge-inactive{background:#fde8e6;color:#b33a2d;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
+.badge-waiting{background:#fff3cd;color:#856404;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
+.badge-new{background:#d1e7dd;color:#0f5132;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid #badbcc;}
+.badge-deal-active{background:#cff4fc;color:#055160;padding:2px 9px;border-radius:20px;font-size:11px;}
+.badge-deal-none{background:#f8f9fa;color:#6c757d;padding:2px 9px;border-radius:20px;font-size:11px;}
+.badge-deal-expired{background:#f8d7da;color:#721c24;padding:2px 9px;border-radius:20px;font-size:11px;}
+.btn-p{background:var(--primary);color:white;border:none;border-radius:8px;padding:6px 13px;font-size:12px;cursor:pointer;transition:.2s;}
+.btn-p:hover{background:#2d4a42;}
+.btn-o{background:transparent;color:var(--primary);border:1px solid var(--primary);border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;transition:.2s;}
+.btn-o:hover{background:var(--primary);color:white;}
+.btn-d{background:transparent;color:var(--danger);border:1px solid var(--danger);border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;}
+.btn-d:hover{background:var(--danger);color:white;}
+.btn-w{background:transparent;color:var(--warning);border:1px solid var(--warning);border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;}
+.btn-w:hover{background:var(--warning);color:white;}
+.btn-approve{background:#198754;color:white;border:none;border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;}
+.btn-approve:hover{background:#157347;}
+.modal-content{background:white;color:var(--text);border-radius:14px;border:none;box-shadow:0 20px 50px rgba(0,0,0,.15);}
+.modal-header{background:var(--primary);color:white;border-radius:14px 14px 0 0;padding:14px 20px;border-bottom:none;}
+.modal-title{font-weight:600;font-size:14px;}
+.modal-body{padding:20px;}
+.modal-footer{border-top:1px solid var(--border);padding:12px 20px;}
+.form-label{color:var(--muted);font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
+.form-control,.form-select,.form-range{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;font-size:12.5px;padding:7px 10px;}
+.form-control:focus,.form-select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(62,95,85,.12);outline:none;}
+.section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;}
+#qrImage{width:170px;height:170px;border-radius:10px;border:3px solid var(--accent);}
+.store-img-preview{width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;}
+.cat-chip{display:inline-flex;align-items:center;gap:5px;background:var(--light);color:var(--primary);padding:3px 11px;border-radius:20px;font-size:12px;font-weight:500;margin:3px;}
+.cat-chip button{background:none;border:none;cursor:pointer;color:var(--primary);font-size:13px;line-height:1;padding:0;}
+.terms-editor{width:100%;min-height:260px;font-family:monospace;font-size:13px;border:1px solid var(--border);border-radius:8px;padding:12px;resize:vertical;background:white;}
+.plan-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;background:var(--bg);padding:10px 14px;border-radius:8px;border:1px solid var(--border);}
+.plan-row label{font-size:13px;font-weight:600;min-width:90px;color:var(--text);}
+.plan-row input{flex:1;max-width:140px;}
 
-/* ── SIDEBAR ── */
-.sidebar {
-    width:240px; height:100vh; background:#1e293b;
-    position:fixed; padding:30px 20px; top:0; left:0; overflow-y:auto;
-    transition: transform 0.3s ease; z-index:1000;
-}
-.sidebar h2 { color:#3E5F55; font-weight:bold; font-size:18px; }
-.sidebar a {
-    display:block; color:#cbd5e1; text-decoration:none;
-    padding:10px 14px; border-radius:8px; margin:4px 0; transition:0.2s;
-}
-.sidebar a:hover, .sidebar a.active { background:#3E5F55; color:white; }
-/* Fix 17: Close button */
-.sidebar-close-btn {
-    display:none; position:absolute; top:14px; right:14px;
-    background:none; border:none; color:#94a3b8; font-size:20px; cursor:pointer;
-}
-.sidebar-close-btn:hover { color:white; }
-.main { margin-left:240px; padding:30px; transition: margin-left 0.3s ease; }
-/* Mobile sidebar */
-@media (max-width: 768px) {
-    .sidebar { transform: translateX(-100%); }
-    .sidebar.open { transform: translateX(0); }
-    .sidebar-close-btn { display:block; }
-    .main { margin-left:0; padding:16px; }
-    .menu-toggle { display:block !important; }
-}
-.menu-toggle { display:none; background:#3E5F55; border:none; color:white; padding:8px 14px; border-radius:8px; margin-bottom:16px; cursor:pointer; }
-
-/* ── STATS ── */
-.card-stat { background:#1e293b; border-radius:12px; padding:24px; text-align:center; }
-.card-stat h3 { font-size:36px; color:#3E5F55; font-weight:bold; }
-.card-stat p { color:#94a3b8; margin:0; }
-.section { display:none; }
-.section.active { display:block; }
-
-/* ── TABLE ── */
-table { width:100%; border-collapse:collapse; }
-th { background:#3E5F55; padding:10px; text-align:left; font-size:14px; }
-td { padding:10px; border-bottom:1px solid #334155; color:#cbd5e1; font-size:13px; vertical-align:middle; }
-.badge-active { background:#16a34a; padding:3px 10px; border-radius:20px; font-size:11px; }
-.badge-inactive { background:#dc2626; padding:3px 10px; border-radius:20px; font-size:11px; }
-.badge-pending { background:#d97706; padding:3px 10px; border-radius:20px; font-size:11px; }
-.btn-sm { font-size:12px; padding:4px 10px; }
-
-/* Fix 15: Store thumb */
-.store-thumb { width:44px; height:44px; object-fit:cover; border-radius:8px; border:1px solid #334155; }
-.store-thumb-ph { width:44px; height:44px; background:#1e293b; border-radius:8px; display:flex; align-items:center; justify-content:center; color:#64748b; border:1px solid #334155; }
-
-/* ── MODAL ── */
-.modal-content { background:#1e293b; color:white; }
-.modal-header { border-bottom:1px solid #334155; }
-.modal-footer { border-top:1px solid #334155; }
-.form-control, .form-select {
-    background:#0f172a; border:1px solid #334155;
-    color:white; border-radius:8px;
-}
-.form-control:focus, .form-select:focus { background:#0f172a; color:white; border-color:#3E5F55; box-shadow:none; }
-.form-select option { background:#1e293b; }
-label { color:#94a3b8; font-size:13px; }
-
-/* ── RATING STARS ── */
-.star-row .fa-star { cursor:pointer; color:#334155; font-size:18px; transition:color 0.15s; }
-.star-row .fa-star.on { color:#f59e0b; }
-
-/* ── VOUCHER CARD PREVIEW ── */
-.voucher-preview { background:linear-gradient(135deg,#F5E6C8,#EDD5A0); border-radius:12px; padding:12px 16px; color:#3A2A00; }
+/* ── Star Ratings ── */
+.star-row .fa-star{cursor:pointer;color:#ccc;font-size:18px;transition:color 0.15s;}
+.star-row .fa-star.on{color:#f59e0b;}
+.star-row .fa-star:hover{color:#fbbf24;}
 </style>
 </head>
 <body>
 
-<!-- SIDEBAR -->
-<div class="sidebar" id="sidebar">
-    <button class="sidebar-close-btn" onclick="closeSidebar()"><i class="fas fa-times"></i></button>
-    <h2>🛡️ OffrO Admin</h2>
-    <p style="color:#64748b; font-size:12px; margin-bottom:20px;">Management Panel</p>
-    <a href="#" class="active" onclick="showSection('overview',this)">📊 Overview</a>
-    <a href="#" onclick="showSection('merchants',this)">👤 Merchants</a>
-    <a href="#" onclick="showSection('stores',this)">🏪 Stores</a>
-    <a href="#" onclick="showSection('ratings',this)">⭐ Ratings</a>
-    <a href="#" onclick="showSection('vouchers',this)">🎁 Gift Vouchers</a>
-    <a href="#" onclick="logout()" style="margin-top:40px;color:#ef4444;">🚪 Logout</a>
+<div class="sidebar">
+  <div class="sidebar-logo">
+    <svg viewBox="0 0 100 130" fill="none" width="32" height="38">
+      <path d="M50 10C30.1 10 14 26.1 14 46c0 26.5 36 74 36 74s36-47.5 36-74C86 26.1 69.9 10 50 10z" fill="#CDEBD6"/>
+      <circle cx="50" cy="44" r="18" fill="rgba(255,255,255,0.25)"/>
+      <text x="50" y="51" text-anchor="middle" font-size="20" font-weight="900" fill="white" font-family="Arial">%</text>
+    </svg>
+    <div class="sidebar-logo-text">Offr<span style="color:#CDEBD6;">O</span></div>
+  </div>
+  <div class="sidebar-sub">Admin Panel</div>
+  <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
+  <a href="#" onclick="showSection('merchants',this)"><i class="fas fa-user-tie fa-fw"></i> Merchants</a>
+  <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
+  <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
+  <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
+  <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
+  <a href="#" onclick="showSection('gift_cards',this)"><i class="fas fa-id-card fa-fw"></i> Gift Cards (App)</a>
+  <div class="sep"></div>
+  <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
+  <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
+  <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
+  <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
+  <a href="#" onclick="showSection('policies',this)"><i class="fas fa-shield-alt fa-fw"></i> Policies</a>
+  <div class="sep"></div>
+  <a href="#" onclick="showSection('social',this)"><i class="fab fa-whatsapp fa-fw"></i> Social Media</a>
+  <a href="#" onclick="showSection('about',this)"><i class="fas fa-info-circle fa-fw"></i> About Us</a>
+  <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
+  <div class="sep"></div>
+  <a href="#" class="logout" onclick="logout()"><i class="fas fa-sign-out-alt fa-fw"></i> Logout</a>
 </div>
 
-<!-- MAIN -->
-<div class="main" id="mainContent">
-    <button class="menu-toggle" onclick="openSidebar()"><i class="fas fa-bars"></i> Menu</button>
+<div class="main">
 
-    <!-- OVERVIEW -->
-    <div id="section-overview" class="section active">
-        <h4 class="mb-4">Overview</h4>
-        <div class="row g-3">
-            <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_merchants">--</h3><p>Merchants</p></div></div>
-            <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_active">--</h3><p>Active</p></div></div>
-            <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_stores">--</h3><p>Stores</p></div></div>
-            <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_deals">--</h3><p>Deals</p></div></div>
-        </div>
+  <!-- OVERVIEW -->
+  <div id="section-overview" class="section active">
+    <div class="page-title">Overview <button class="btn-o" style="font-size:12px;padding:3px 10px;margin-left:10px;vertical-align:middle;" onclick="loadStats()">↻ Refresh</button></div>
+    <div class="row g-3">
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_merchants">--</h3><p>Total Merchants</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_active">--</h3><p>Active Merchants</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_stores">--</h3><p>Total Stores</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat warn"><h3 id="stat_waiting">--</h3><p>⏳ Waiting Approval</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_users">--</h3><p>Registered Users</p></div></div>
     </div>
+  </div>
 
-    <!-- MERCHANTS -->
-    <div id="section-merchants" class="section">
-        <h4 class="mb-4">Merchants</h4>
-        <div class="table-responsive">
-        <table>
-            <thead><tr><th>Name</th><th>Phone</th><th>City</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody id="merchants_table"></tbody>
-        </table>
-        </div>
+  <!-- MERCHANTS -->
+  <div id="section-vouchers" class="section">
+  <div class="section-header">
+    <div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🎁 Gift Voucher Requests</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Pending and fulfilled gift voucher withdrawal requests</div>
     </div>
-
-    <!-- STORES -->
-    <div id="section-stores" class="section">
-        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-            <h4 class="mb-0">Stores</h4>
-            <button class="btn btn-sm" style="background:#3E5F55;color:white;" onclick="openCreateStore()">+ Create Store</button>
-        </div>
-        <div class="table-responsive">
-        <table>
-            <thead><tr><th>Image</th><th>Store Name</th><th>Merchant</th><th>Category</th><th>City</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody id="stores_table"></tbody>
-        </table>
-        </div>
-    </div>
-
-    <!-- RATINGS -->
-    <div id="section-ratings" class="section">
-        <h4 class="mb-4">Store Ratings</h4>
-        <p style="color:#94a3b8;font-size:13px;">Set the admin rating for any store. User ratings are averaged separately.</p>
-        <div class="table-responsive">
-        <table>
-            <thead><tr><th>Store</th><th>Category</th><th>User Rating</th><th>Admin Rating</th><th>Set Rating</th></tr></thead>
-            <tbody id="ratings_table"></tbody>
-        </table>
-        </div>
-    </div>
-
-    <!-- GIFT VOUCHERS -->
-    <div id="section-vouchers" class="section">
-        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-            <h4 class="mb-0">🎁 Gift Vouchers</h4>
-            <button class="btn btn-sm" style="background:#B8860B;color:white;" onclick="openVoucherModal()">+ Add Voucher</button>
-        </div>
-        <div id="vouchers_list" class="row g-3"></div>
-    </div>
+    <button class="btn-p" onclick="loadVouchers()"><i class="fas fa-sync me-1"></i> Refresh</button>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>User</th><th>Phone</th><th>Points</th><th>Value</th><th>Requested</th><th>Status</th><th>Action</th></tr></thead>
+    <tbody id="vouchers_table"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+  </table></div>
 </div>
 
-<!-- CREATE/EDIT STORE MODAL -->
+
+<div id="section-ratings" class="section">
+  <div class="section-header">
+    <div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)">⭐ Store Ratings</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Set the admin-controlled rating displayed to users in the app</div>
+    </div>
+    <button class="btn-p" onclick="loadRatings()"><i class="fas fa-sync me-1"></i> Refresh</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Store</th><th>Category</th><th>User Avg</th><th>Admin Set</th><th>Set Rating</th></tr>
+      </thead>
+      <tbody id="ratings_table">
+        <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="section-merchants" class="section">
+    <div class="section-header">
+      <div class="page-title" style="margin:0">Merchants</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="merchant_search" class="form-control" style="max-width:190px;" placeholder="🔍 Search..." oninput="filterMerchants()">
+        <select id="merchant_city_filter" class="form-select" style="max-width:140px;" onchange="filterMerchants()"><option value="">All Cities</option></select>
+      </div>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>Phone</th><th>City</th><th>Area</th><th>Stores</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="merchants_table"></tbody>
+    </table></div>
+  </div>
+
+  <!-- STORES -->
+  <div id="section-stores" class="section">
+    <div class="section-header">
+      <div class="page-title" style="margin:0">Stores</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="store_search" class="form-control" style="max-width:190px;" placeholder="🔍 Search store..." oninput="filterStores()">
+        <select id="store_city_filter" class="form-select" style="max-width:130px;" onchange="filterStores()"><option value="">All Cities</option></select>
+        <select id="store_status_filter" class="form-select" style="max-width:150px;" onchange="filterStores()">
+          <option value="">All Status</option>
+          <option value="active">Active</option>
+          <option value="waiting_approval">Waiting Approval</option>
+          <option value="inactive">Inactive</option>
+          <option value="draft">Draft</option>
+        </select>
+        <button class="btn-p" onclick="openCreateStore()">+ Create Store</button>
+      </div>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Store</th><th>Merchant</th><th>Category</th><th>City/Area</th><th>Pts</th><th>New?</th><th>Status</th><th>Deal</th><th>Subscription</th><th>Actions</th></tr></thead>
+      <tbody id="stores_table"></tbody>
+    </table></div>
+  </div>
+
+  <!-- USERS -->
+  <div id="section-users" class="section">
+    <div class="section-header">
+      <div class="page-title" style="margin:0">Users</div>
+      <input id="user_search" class="form-control" style="max-width:220px;" placeholder="🔍 Search name/phone..." oninput="filterUsers()">
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>Phone</th><th>City</th><th>Visit Pts</th><th>Pool Pts</th><th>Total</th><th>Scans</th><th>Registered</th><th>Actions</th></tr></thead>
+      <tbody id="users_table"></tbody>
+    </table></div>
+  </div>
+
+
+
+  <!-- CATEGORIES -->
+  
+<div id="section-gift_cards" class="section">
+  <div class="section-header">
+    <div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🎁 Gift Cards (App Display)</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage the voucher cards shown on the app home screen</div>
+    </div>
+    <button class="btn-p" onclick="openGiftCardModal()"><i class="fas fa-plus me-1"></i> Add Card</button>
+  </div>
+  <div id="gift_cards_list" class="row g-3 mt-1"></div>
+</div>
+
+<div id="section-categories" class="section">
+    <div class="page-title">Categories</div>
+    <div class="table-wrap" style="padding:22px;">
+      <div class="d-flex gap-2 mb-4">
+        <input id="new_category" class="form-control" placeholder="Add category..." style="max-width:260px;">
+        <button class="btn-p" onclick="addCategory()">+ Add</button>
+      </div>
+      <div id="categories_list"></div>
+    </div>
+  </div>
+
+  <!-- PRICING -->
+  <div id="section-pricing" class="section">
+    <div class="page-title">Pricing & GST</div>
+    <div class="table-wrap" style="padding:24px;max-width:640px;">
+      <div class="mb-4">
+        <label class="form-label fw-bold">GST Percentage (%)</label>
+        <input id="gst_input" class="form-control" type="number" style="max-width:160px;" placeholder="18">
+      </div>
+      <div id="plans_editor"></div>
+      <hr style="margin:24px 0;">
+      <div style="background:#f0f9f4;border-radius:12px;padding:20px;border:1px solid #c3dfc6;">
+        <div class="fw-bold mb-3" style="color:#3E5F55;font-size:15px;">💰 Withdrawal / Conversion Settings</div>
+        <div class="mb-3">
+          <label class="form-label">Points → ₹ Conversion Rate <small style="color:#6b8c7e;">(₹ per 1 point)</small></label>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:18px;color:#3E5F55;">₹</span>
+            <input id="conversion_rate_input" class="form-control" type="number" step="0.01" min="0.01" style="max-width:140px;" placeholder="0.10">
+            <span style="color:#6b8c7e;font-size:13px;">per point &nbsp;→&nbsp; e.g. 100 pts = ₹<span id="rate_example">10</span></span>
+          </div>
+          <small class="text-muted">Default: ₹0.10 per point (100 pts = ₹10)</small>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Minimum Points to Withdraw</label>
+          <input id="min_withdraw_input" class="form-control" type="number" min="1" style="max-width:160px;" placeholder="200">
+          <small class="text-muted">Users need at least this many points to request withdrawal</small>
+        </div>
+      </div>
+      <button class="btn-p mt-3" onclick="savePricing()">Save All Settings</button>
+      <p id="pricing_msg" class="mt-2" style="font-size:13px;color:var(--primary);"></p>
+    </div>
+  </div>
+
+  <!-- MERCHANT TRANSACTIONS -->
+  <div id="section-merchant_txns" class="section">
+    <div class="page-title">Merchant Payment Transactions</div>
+    <!-- Stats row -->
+    <div class="row g-3 mb-3">
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_merchants">--</h3><p>Total Merchants</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_subs" style="color:#198754">--</h3><p>Paid Invoices</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat warn"><h3 id="txn_pending_subs">--</h3><p>Pending Payments</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_revenue" style="color:#198754">--</h3><p>Total Revenue</p></div></div>
+    </div>
+    <div class="table-wrap">
+      <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <input id="txn_search" class="form-control" placeholder="Search merchant/store..." style="max-width:280px;" oninput="filterTxns()">
+        <span id="txn_total" style="font-size:13px;color:var(--muted);"></span>
+        <button class="btn btn-sm" onclick="exportPaymentsPDF()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-pdf me-1"></i>PDF</button>
+        <button class="btn btn-sm" onclick="exportPaymentsCSV()" style="background:#6c757d;color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-csv me-1"></i>CSV</button>
+      </div>
+      <div style="overflow-x:auto;">
+      <table class="table table-hover" style="min-width:900px;">
+        <thead><tr>
+          <th>Date</th><th>Invoice No</th><th>Merchant</th><th>Phone</th>
+          <th>Store</th><th>Plan</th><th>Base</th><th>GST</th><th>Total</th><th>Payment ID</th>
+        </tr></thead>
+        <tbody id="txn_body"></tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TERMS -->
+  <div id="section-terms" class="section">
+    <div class="page-title">Terms & Conditions</div>
+    <div class="row g-4">
+      <div class="col-md-6">
+        <div class="table-wrap" style="padding:20px;">
+          <h6 style="color:var(--primary);font-weight:700;margin-bottom:12px;"><i class="fas fa-user-tie"></i> Merchant Terms</h6>
+          <textarea id="merchant_terms" class="terms-editor" placeholder="Enter merchant terms and conditions..."></textarea>
+          <button class="btn-p mt-2" onclick="saveTerms('merchant')">Save Merchant Terms</button>
+          <p id="merchant_terms_msg" class="mt-1" style="font-size:12px;color:var(--primary);"></p>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="table-wrap" style="padding:20px;">
+          <h6 style="color:var(--primary);font-weight:700;margin-bottom:12px;"><i class="fas fa-users"></i> User Terms</h6>
+          <textarea id="user_terms" class="terms-editor" placeholder="Enter user terms and conditions..."></textarea>
+          <button class="btn-p mt-2" onclick="saveTerms('user')">Save User Terms</button>
+          <p id="user_terms_msg" class="mt-1" style="font-size:12px;color:var(--primary);"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- POLICIES -->
+  <div id="section-policies" class="section">
+    <div class="page-title">Policies</div>
+    <div class="row g-4">
+      <div class="col-md-6">
+        <div class="table-wrap" style="padding:20px;">
+          <h6 style="color:var(--primary);font-weight:700;margin-bottom:12px;"><i class="fas fa-user-shield"></i> Privacy Policy</h6>
+          <textarea id="privacy_policy" class="terms-editor" style="min-height:180px;" placeholder="Enter privacy policy..."></textarea>
+          <button class="btn-p mt-2" onclick="savePolicy('privacy')">Save Privacy Policy</button>
+          <p id="privacy_policy_msg" class="mt-1" style="font-size:12px;color:var(--primary);"></p>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="table-wrap" style="padding:20px;">
+          <h6 style="color:var(--primary);font-weight:700;margin-bottom:12px;"><i class="fas fa-undo"></i> Refund Policy</h6>
+          <textarea id="refund_policy" class="terms-editor" style="min-height:180px;" placeholder="Enter refund policy..."></textarea>
+          <button class="btn-p mt-2" onclick="savePolicy('refund')">Save Refund Policy</button>
+          <p id="refund_policy_msg" class="mt-1" style="font-size:12px;color:var(--primary);"></p>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="table-wrap" style="padding:20px;">
+          <h6 style="color:var(--primary);font-weight:700;margin-bottom:12px;"><i class="fas fa-id-card"></i> KYC Policy</h6>
+          <textarea id="kyc_policy" class="terms-editor" style="min-height:180px;" placeholder="Enter KYC policy..."></textarea>
+          <button class="btn-p mt-2" onclick="savePolicy('kyc')">Save KYC Policy</button>
+          <p id="kyc_policy_msg" class="mt-1" style="font-size:12px;color:var(--primary);"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+
+
+  <!-- ABOUT US -->
+  <div id="section-about" class="section">
+    <div class="page-title">About Us</div>
+    <div class="table-wrap" style="padding:24px;max-width:640px;">
+      <h6 style="color:var(--primary);font-weight:700;margin-bottom:14px;"><i class="fas fa-info-circle"></i> About Us Content</h6>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:12px;">This text appears in the "About Us" section in both user and merchant apps.</p>
+      <textarea id="about_content" class="form-control" rows="10" placeholder="Write about your company, mission, values..."></textarea>
+      <button class="btn-p mt-3" onclick="saveAbout()"><i class="fas fa-save"></i> Save</button>
+      <p id="about_msg" class="mt-2" style="font-size:12px;color:var(--primary);"></p>
+    </div>
+  </div>
+
+  <!-- DISCOUNT CODES -->
+  <div id="section-discounts" class="section">
+    <div class="page-title">Discount Codes</div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-4"><div class="card-stat"><h3 id="disc_total_count">--</h3><p>Total Codes</p></div></div>
+      <div class="col-md-4"><div class="card-stat"><h3 id="disc_active_count">--</h3><p>Active Codes</p></div></div>
+      <div class="col-md-4"><div class="card-stat"><h3 id="disc_redeemed_count">--</h3><p>Total Redeemed</p></div></div>
+    </div>
+    <div class="table-wrap" style="padding:20px;max-width:520px;margin-bottom:20px;">
+      <h6 style="color:var(--primary);font-weight:700;margin-bottom:14px;"><i class="fas fa-plus-circle"></i> Add Discount Code</h6>
+      <div class="mb-2">
+        <label class="form-label">Code *</label>
+        <input id="disc_code" class="form-control" placeholder="e.g. SAVE50" style="text-transform:uppercase;">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Discount Value (₹) *</label>
+        <input id="disc_value" class="form-control" type="number" min="1" placeholder="e.g. 50">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Max Uses (0 = unlimited)</label>
+        <input id="disc_max_uses" class="form-control" type="number" min="0" value="0" placeholder="0 = unlimited">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Expiry Date (optional)</label>
+        <input id="disc_expiry" class="form-control" type="date">
+      </div>
+      <button class="btn-p" onclick="addDiscount()"><i class="fas fa-plus"></i> Add Code</button>
+      <p id="disc_msg" class="mt-2" style="font-size:12px;color:var(--primary);"></p>
+    </div>
+    <div class="table-wrap">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+        <input id="disc_search" class="form-control form-control-sm" placeholder="Search code..." style="max-width:220px;" oninput="renderDiscounts()">
+      </div>
+      <table><thead><tr>
+        <th>Code</th><th>Value (₹)</th><th>Used</th><th>Max Uses</th><th>Expiry</th><th>Status</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="disc_body"></tbody></table>
+    </div>
+  </div>
+
+  <!-- SOCIAL MEDIA -->
+  <div id="section-social" class="section">
+    <div class="page-title">Social Media Links</div>
+    <div class="table-wrap" style="padding:24px;max-width:560px;">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:20px;">These links appear in the app for users to contact and follow Offro.</p>
+      <div class="mb-3">
+        <label class="form-label"><i class="fab fa-whatsapp" style="color:#25D366;"></i> WhatsApp Number</label>
+        <div class="input-group">
+          <span class="input-group-text" style="background:#25D366;color:white;border:none;">+</span>
+          <input id="sm_whatsapp" class="form-control" placeholder="919876543210 (with country code, no +)">
+        </div>
+        <small class="text-muted">Users will tap to open WhatsApp chat directly</small>
+      </div>
+      <div class="mb-3">
+        <label class="form-label"><i class="fab fa-facebook" style="color:#1877F2;"></i> Facebook URL</label>
+        <input id="sm_facebook" class="form-control" placeholder="https://facebook.com/yourpage">
+      </div>
+      <div class="mb-3">
+        <label class="form-label"><i class="fab fa-instagram" style="color:#E1306C;"></i> Instagram URL</label>
+        <input id="sm_instagram" class="form-control" placeholder="https://instagram.com/yourhandle">
+      </div>
+      <div class="mb-3">
+        <label class="form-label"><i class="fab fa-youtube" style="color:#FF0000;"></i> YouTube URL</label>
+        <input id="sm_youtube" class="form-control" placeholder="https://youtube.com/@yourchannel">
+      </div>
+      <button class="btn-p" onclick="saveSocialLinks()"><i class="fas fa-save"></i> Save Social Links</button>
+      <p id="social_msg" class="mt-2" style="font-size:12px;color:var(--primary);"></p>
+    </div>
+  </div>
+
+
+</div>
+
+<!-- STORE MODAL -->
 <div class="modal fade" id="storeModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="storeModalTitle">Create Store</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
+      <div class="modal-header"><h5 class="modal-title" id="storeModalTitle">Create Store</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
-        <input type="hidden" id="edit_store_id" value="">
+        <input type="hidden" id="edit_store_id">
         <div class="row g-3">
-          <div class="col-md-6">
-            <label>Select Merchant *</label>
-            <select id="store_merchant" class="form-select"></select>
-          </div>
-          <div class="col-md-6">
-            <label>Store Name *</label>
-            <input id="store_name" class="form-control" placeholder="e.g. Fresh Mart">
-          </div>
-          <div class="col-md-6">
-            <label>Category</label>
-            <select id="store_category" class="form-select">
-              <option value="">Select</option>
-              <option>Grocery</option><option>Restaurant</option><option>Pharmacy</option>
-              <option>Electronics</option><option>Clothing</option><option>Bakery</option>
-              <option>Salon</option><option>Other</option>
-            </select>
-          </div>
-          <div class="col-md-6">
-            <label>City</label><input id="store_city" class="form-control" placeholder="City">
-          </div>
-          <div class="col-md-6">
-            <label>Area</label><input id="store_area" class="form-control" placeholder="Area">
-          </div>
-          <div class="col-md-6">
-            <label>Address</label><input id="store_address" class="form-control" placeholder="Full address">
-          </div>
-          <div class="col-md-6">
-            <label>Phone</label><input id="store_phone" class="form-control" placeholder="Store phone">
-          </div>
-          <div class="col-md-6">
-            <label>Visit Points (0 = disabled)</label>
-            <input id="store_visit_points" class="form-control" type="number" min="0" value="0" placeholder="0">
-          </div>
+          <div class="col-12"><label class="form-label">Merchant *</label>
+            <select id="store_merchant" class="form-select"></select></div>
+          <div class="col-md-6"><label class="form-label">Store Name *</label>
+            <input id="store_name" class="form-control" placeholder="Store name"></div>
+          <div class="col-md-6"><label class="form-label">Category</label>
+            <select id="store_category" class="form-select"></select></div>
+          <div class="col-md-6"><label class="form-label">City</label>
+            <input id="store_city" class="form-control" placeholder="City"></div>
+          <div class="col-md-6"><label class="form-label">Area</label>
+            <input id="store_area" class="form-control" placeholder="Area"></div>
+          <div class="col-12"><label class="form-label">Address</label>
+            <input id="store_address" class="form-control" placeholder="Full address"></div>
+          <div class="col-md-6"><label class="form-label">Phone</label>
+            <input id="store_phone" class="form-control" placeholder="Phone"></div>
+          <div class="col-md-6"><label class="form-label">Visit Points per Scan</label>
+            <input id="store_points" class="form-control" type="number" value="10" min="0"></div>
+          <div class="col-md-6"><label class="form-label">Latitude</label>
+            <input id="store_lat" class="form-control" placeholder="17.3850"></div>
+          <div class="col-md-6"><label class="form-label">Longitude</label>
+            <input id="store_lng" class="form-control" placeholder="78.4867"></div>
+          <div class="col-12"><label class="form-label">Store Image</label>
+            <input id="store_image" class="form-control" type="file" accept="image/*" onchange="previewImage()">
+            <img id="store_image_preview" src="" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
+            <input type="hidden" id="store_image_b64"></div>
           <div class="col-12">
-            <label>Store Image (URL or paste base64)</label>
-            <input id="store_image_url" class="form-control" placeholder="https://... or paste base64 data:image/...">
-            <div id="store_image_preview" class="mt-2"></div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="store_new_in_town">
+              <label class="form-check-label" for="store_new_in_town" style="font-size:13px;font-weight:600;color:var(--primary);">
+                🏷️ Mark as "New In Town"
+              </label>
+            </div>
           </div>
         </div>
-        <p id="store_msg" style="color:#ef4444;font-size:13px;margin-top:10px;"></p>
+        <p id="store_msg" class="mt-3 mb-0" style="color:#c0392b;font-size:12px;"></p>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn btn-sm" style="background:#3E5F55;color:white;" onclick="saveStore()">Save Store</button>
+        <button class="btn-p" id="storeSubmitBtn" onclick="submitStore()">Create Store</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- GIFT VOUCHER MODAL -->
-<div class="modal fade" id="voucherModal" tabindex="-1">
+<!-- MERCHANT EDIT MODAL -->
+<div class="modal fade" id="merchantModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Gift Voucher</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
+      <div class="modal-header"><h5 class="modal-title">Edit Merchant</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
-        <input type="hidden" id="edit_voucher_id" value="">
-        <div class="mb-3">
-          <label>Title (e.g. "₹999 DEALS")</label>
-          <input id="v_title" class="form-control" placeholder="₹999 DEALS">
+        <input type="hidden" id="edit_merchant_id">
+        <div class="mb-3"><label class="form-label">Business Name</label>
+          <input id="edit_merchant_name" class="form-control"></div>
+        <div class="mb-3"><label class="form-label">Phone</label>
+          <input id="edit_merchant_phone" class="form-control"></div>
+        <div class="row g-2">
+          <div class="col-6"><label class="form-label">City</label><input id="edit_merchant_city" class="form-control"></div>
+          <div class="col-6"><label class="form-label">Area</label><input id="edit_merchant_area" class="form-control"></div>
         </div>
-        <div class="mb-3">
-          <label>Offer Text *</label>
-          <input id="v_text" class="form-control" placeholder="FREE Voucher worth ₹150 OFF">
-        </div>
-        <div class="mb-3">
-          <label>Validity</label>
-          <input id="v_validity" class="form-control" placeholder="e.g. 31 May 2026">
-        </div>
-        <div class="mb-3">
-          <label>Logo URL or base64</label>
-          <input id="v_logo" class="form-control" placeholder="https://... or data:image/...">
-        </div>
-        <div class="mb-3">
-          <label>Linked Merchant (optional)</label>
-          <select id="v_merchant" class="form-select">
-            <option value="">None</option>
-          </select>
-        </div>
-        <div class="form-check mb-3">
-          <input class="form-check-input" type="checkbox" id="v_active" checked>
-          <label class="form-check-label" for="v_active">Active (show in app)</label>
-        </div>
-        <p id="v_msg" style="color:#ef4444;font-size:13px;"></p>
+        <p id="merchant_edit_msg" class="mt-2 mb-0" style="color:#c0392b;font-size:12px;"></p>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn btn-sm" style="background:#B8860B;color:white;" onclick="saveVoucher()">Save Voucher</button>
+        <button class="btn-p" onclick="saveMerchant()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- QR MODAL -->
+<div class="modal fade" id="qrModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Store QR Code</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body text-center py-4">
+        <img id="qrImage" src="" alt="QR"><div id="qrStoreName" style="font-size:14px;font-weight:600;color:var(--primary);margin-top:10px;"></div>
+        <a id="qrDownload" download="store_qr.png" style="color:var(--primary);font-size:12px;margin-top:6px;display:inline-block;"><i class="fas fa-download"></i> Download</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- USER HISTORY MODAL -->
+<div class="modal fade" id="userHistoryModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Wallet — <span id="histUserName"></span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="row g-3 mb-3">
+          <div class="col-4"><div class="card-stat"><h3 id="histVisit" style="font-size:22px;">--</h3><p>Visit Pts</p></div></div>
+          <div class="col-4"><div class="card-stat"><h3 id="histPool" style="font-size:22px;">--</h3><p>Pool Pts</p></div></div>
+          <div class="col-4"><div class="card-stat"><h3 id="histTotal" style="font-size:22px;">--</h3><p>Total</p></div></div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Type</th><th>Description</th><th>Points</th><th>Date</th></tr></thead>
+          <tbody id="hist_table"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADJUST POINTS MODAL -->
+<!-- Fulfill Gift Voucher Modal -->
+<div class="modal fade" id="fulfillModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header" style="background:var(--primary);color:white;">
+        <h5 class="modal-title">🎁 Send Gift Voucher</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="fulfill_req_id">
+        <div style="margin-bottom:12px;padding:10px 14px;background:#f0f9f4;border-radius:8px;border:1px solid #cde8d6;">
+          <div style="font-size:12px;color:var(--muted)">User</div>
+          <div style="font-weight:700;color:var(--primary)" id="fulfillUserName"></div>
+          <div style="font-size:12px;margin-top:4px;color:var(--muted)">Redemption: <strong id="fulfillPoints" style="color:var(--primary)"></strong></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Voucher Type</label>
+          <select id="fulfill_voucher_type" class="form-control">
+            <option value="Amazon">Amazon Gift Voucher</option>
+            <option value="Flipkart">Flipkart Gift Voucher</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Voucher Code</label>
+          <input type="text" id="fulfill_voucher_code" class="form-control" placeholder="Enter voucher code" style="text-transform:uppercase;">
+          <small class="text-muted">This code will be stored against the user's account</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-o" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn-p" onclick="submitFulfill()">✅ Mark as Sent</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="adjustModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Points — <span id="adjUserName"></span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="adj_user_id">
+        <div class="mb-3"><label class="form-label">Type</label>
+          <select id="adj_type" class="form-select">
+            <option value="credit">➕ Add (Credit)</option>
+            <option value="debit">➖ Deduct (Debit)</option>
+          </select></div>
+        <div class="mb-3"><label class="form-label">Points</label><input id="adj_points" class="form-control" type="number" min="1"></div>
+        <div class="mb-2"><label class="form-label">Note</label><input id="adj_note" class="form-control" placeholder="e.g. Bonus"></div>
+        <p id="adj_msg" style="color:#c0392b;font-size:12px;min-height:14px;"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn-p" onclick="submitAdjustment()">Apply</button>
       </div>
     </div>
   </div>
@@ -263,352 +615,936 @@ label { color:#94a3b8; font-size:13px; }
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-const BASE = "";
-let merchantsList = [];
-let storeModalInst, voucherModalInst;
+let merchantsList=[], allStores=[], categoriesList=[], allUsers=[];
+let storeModal, merchantModal, qrModal, userHistoryModal, adjustModal_inst;
+let editingStore=false;
 
-window.onload = function() {
-    storeModalInst  = new bootstrap.Modal(document.getElementById("storeModal"));
-    voucherModalInst = new bootstrap.Modal(document.getElementById("voucherModal"));
-    loadStats();
+
+
+// ===== ABOUT US =====
+async function loadAbout() {
+  try {
+    let r = await fetch("/admin/about", {credentials:"include"});
+    if (!r.ok) return;
+    let d = await r.json();
+    document.getElementById("about_content").value = d.content || "";
+  } catch(e) {}
+}
+async function saveAbout() {
+  const content = document.getElementById("about_content").value;
+  const msg = document.getElementById("about_msg");
+  try {
+    let r = await fetch("/admin/about", {method:"PUT",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({content})});
+    if (r.ok) { msg.style.color="var(--primary)"; msg.innerText="✅ Saved!"; }
+    else { msg.style.color="red"; msg.innerText="Error saving"; }
+  } catch(e) { msg.style.color="red"; msg.innerText="Error: "+e.message; }
+}
+
+// ===== DISCOUNTS =====
+let allDiscounts = [];
+async function loadDiscounts() {
+  try {
+    let r = await fetch("/admin/discounts", {credentials:"include"});
+    if (!r.ok) return;
+    allDiscounts = await r.json();
+    document.getElementById("disc_total_count").innerText = allDiscounts.length;
+    document.getElementById("disc_active_count").innerText = allDiscounts.filter(d=>d.active).length;
+    document.getElementById("disc_redeemed_count").innerText = allDiscounts.reduce((a,d)=>a+(d.used_count||0),0);
+    renderDiscounts();
+  } catch(e) { console.error(e); }
+}
+function renderDiscounts() {
+  const q = (document.getElementById("disc_search")?.value||"").toLowerCase();
+  const rows = allDiscounts.filter(d=>(d.code||"").toLowerCase().includes(q));
+  document.getElementById("disc_body").innerHTML = rows.length ? rows.map(d => {
+    const st = d.active ? '<span class="badge-active">Active</span>' : '<span class="badge-inactive">Inactive</span>';
+    const expiry = d.expiry_date ? d.expiry_date.substring(0,10) : '—';
+    const maxU = d.max_uses > 0 ? d.max_uses : '∞';
+    return `<tr>
+      <td><b>${d.code}</b></td>
+      <td>₹${d.value}</td>
+      <td>${d.used_count||0}</td>
+      <td>${maxU}</td>
+      <td>${expiry}</td>
+      <td>${st}</td>
+      <td>
+        <button class="btn-sm-outline" onclick="toggleDiscount('${d._id}',${!d.active})">${d.active?'Disable':'Enable'}</button>
+        <button class="btn-sm-danger" onclick="deleteDiscount('${d._id}')">Delete</button>
+      </td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="7" style="text-align:center;color:var(--muted);">No discount codes</td></tr>';
+}
+async function addDiscount() {
+  const code = document.getElementById("disc_code").value.trim().toUpperCase();
+  const value = parseFloat(document.getElementById("disc_value").value);
+  const max_uses = parseInt(document.getElementById("disc_max_uses").value)||0;
+  const expiry = document.getElementById("disc_expiry").value;
+  const msg = document.getElementById("disc_msg");
+  if (!code) { msg.style.color="red"; msg.innerText="Code is required"; return; }
+  if (!value||value<1) { msg.style.color="red"; msg.innerText="Value must be ≥ ₹1"; return; }
+  try {
+    let r = await fetch("/admin/discounts", {method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({code,value,max_uses,expiry_date:expiry||null})});
+    let d = await r.json();
+    if (!r.ok) { msg.style.color="red"; msg.innerText=d.detail||"Error"; return; }
+    msg.style.color="var(--primary)"; msg.innerText="✅ Code added!";
+    document.getElementById("disc_code").value="";
+    document.getElementById("disc_value").value="";
+    document.getElementById("disc_max_uses").value="0";
+    document.getElementById("disc_expiry").value="";
+    loadDiscounts();
+  } catch(e) { msg.style.color="red"; msg.innerText="Error: "+e.message; }
+}
+async function toggleDiscount(id, active) {
+  try {
+    await fetch(`/admin/discounts/${id}`, {method:"PUT",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({active})});
+    loadDiscounts();
+  } catch(e) { alert("Error: "+e.message); }
+}
+async function deleteDiscount(id) {
+  if (!confirm("Delete this discount code?")) return;
+  try {
+    await fetch(`/admin/discounts/${id}`, {method:"DELETE",credentials:"include"});
+    loadDiscounts();
+  } catch(e) { alert("Error: "+e.message); }
+}
+
+window.onload=()=>{
+  storeModal=new bootstrap.Modal(document.getElementById("storeModal"));
+  merchantModal=new bootstrap.Modal(document.getElementById("merchantModal"));
+  qrModal=new bootstrap.Modal(document.getElementById("qrModal"));
+  userHistoryModal=new bootstrap.Modal(document.getElementById("userHistoryModal"));
+  adjustModal_inst=new bootstrap.Modal(document.getElementById("adjustModal"));
+  fulfillModal_inst=new bootstrap.Modal(document.getElementById("fulfillModal"));
+  loadStats();
+  loadCategories();
 };
 
-// ── Sidebar ──
-function openSidebar()  { document.getElementById("sidebar").classList.add("open"); }
-function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); }
-
-function showSection(name, el) {
-    document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
-    document.querySelectorAll(".sidebar a").forEach(a => a.classList.remove("active"));
-    document.getElementById("section-" + name).classList.add("active");
-    if (el) el.classList.add("active");
-    closeSidebar();
-    if (name === "merchants") loadMerchants();
-    if (name === "stores")    loadStores();
-    if (name === "ratings")   loadRatings();
-    if (name === "vouchers")  loadVouchers();
+// ─── GIFT VOUCHERS ───
+async function loadVouchers(){
+  document.getElementById("vouchers_table").innerHTML=`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>`;
+  let r=await fetch("/admin/withdraw-requests",{credentials:"include"});
+  let data=await r.json();
+  if(!data.length){document.getElementById("vouchers_table").innerHTML=`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">No voucher requests yet</td></tr>`;return;}
+  let html="";
+  data.forEach(v=>{
+    let statusBadge=v.status==="fulfilled"
+      ?`<span class="badge-active">✅ Sent</span>`
+      :`<span style="background:#fff3cd;color:#856404;font-size:11px;padding:2px 8px;border-radius:8px;border:1px solid #ffc107;">⏳ Pending</span>`;
+    let action=v.status==="fulfilled"
+      ?`<span style="font-size:11px;color:var(--muted)">${v.voucher_type||"Amazon"}: <strong>${v.voucher_code}</strong></span>`
+      :`<button class="btn-p" onclick="openFulfillModal('${v._id}','${(v.user_name||"").replace(/'/g,"\'")}',${v.points},${v.voucher_value})">Send Voucher</button>`;
+    html+=`<tr>
+      <td><strong>${v.user_name||"-"}</strong></td>
+      <td>${v.phone||"-"}</td>
+      <td><strong>${v.points}</strong> pts</td>
+      <td><strong>₹${v.voucher_value}</strong></td>
+      <td style="font-size:11px;color:var(--muted)">${v.created_at||"-"}</td>
+      <td>${statusBadge}</td>
+      <td>${action}</td>
+    </tr>`;
+  });
+  document.getElementById("vouchers_table").innerHTML=html;
 }
 
-// ── Stats ──
-async function loadStats() {
-    try {
-        let res = await fetch("/admin/stats", { credentials:"include" });
-        if (res.status===401||res.status===403) { window.location.href="/admin"; return; }
-        let d = await res.json();
-        document.getElementById("stat_merchants").innerText = d.total_merchants||0;
-        document.getElementById("stat_active").innerText    = d.active_merchants||0;
-        document.getElementById("stat_stores").innerText    = d.total_stores||0;
-        document.getElementById("stat_deals").innerText     = d.total_deals||0;
-    } catch(e) { console.error(e); }
+function openFulfillModal(reqId, userName, points, value){
+  document.getElementById("fulfill_req_id").value=reqId;
+  document.getElementById("fulfillUserName").innerText=userName;
+  document.getElementById("fulfillPoints").innerText=points+" pts = ₹"+value;
+  document.getElementById("fulfill_voucher_code").value="";
+  document.getElementById("fulfill_voucher_type").value="Amazon";
+  fulfillModal_inst.show();
 }
 
-// ── Merchants ──
-async function loadMerchants() {
-    try {
-        let res = await fetch("/admin/merchants", { credentials:"include" });
-        merchantsList = await res.json();
-        let html = "";
-        merchantsList.forEach(m => {
-            html += `<tr>
-                <td>${m.name||"-"}</td>
-                <td>${m.phone||"-"}</td>
-                <td>${m.city||"-"}</td>
-                <td><span class="badge-${m.status||'inactive'}">${m.status||"inactive"}</span></td>
-                <td>
-                    <button class="btn btn-sm btn-warning me-1" onclick="toggleMerchant('${m._id}')">
-                        ${m.status==="active"?"Deactivate":"Activate"}
-                    </button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteMerchant('${m._id}')">Delete</button>
-                </td>
-            </tr>`;
-        });
-        document.getElementById("merchants_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No merchants</td></tr>";
-    } catch(e) { console.error(e); }
+async function submitFulfill(){
+  let reqId=document.getElementById("fulfill_req_id").value;
+  let code=document.getElementById("fulfill_voucher_code").value.trim();
+  let type=document.getElementById("fulfill_voucher_type").value;
+  if(!code){alert("Please enter the voucher code");return;}
+  let r=await fetch(`/admin/withdraw-requests/${reqId}/fulfill`,{
+    method:"POST",credentials:"include",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({voucher_code:code,voucher_type:type})
+  });
+  let d=await r.json();
+  if(r.ok){fulfillModal_inst.hide();loadVouchers();alert("✅ "+d.message);}
+  else alert("❌ "+(d.detail||"Error"));
 }
 
-async function toggleMerchant(id) {
-    if (!confirm("Toggle merchant status?")) return;
-    await fetch(`/admin/merchants/${id}/status`, { method:"PUT", credentials:"include" });
-    loadMerchants();
-}
-async function deleteMerchant(id) {
-    if (!confirm("Delete this merchant?")) return;
-    await fetch(`/admin/merchants/${id}`, { method:"DELETE", credentials:"include" });
-    loadMerchants();
-}
-
-// ── Stores ──
-// Fix 15: Show store images, accessible in edit form
-function storeImg(s) {
-    const img = s.image || (s.images && s.images[0]) || "";
-    if (!img) return `<div class="store-thumb-ph"><i class="fas fa-store"></i></div>`;
-    return `<img src="${img}" class="store-thumb" onerror="this.outerHTML='<div class=store-thumb-ph><i class=fas fa-store></i></div>'">`;
-}
-
-async function loadStores() {
-    try {
-        let res = await fetch("/admin/stores", { credentials:"include" });
-        let stores = await res.json();
-        let html = "";
-        stores.forEach(s => {
-            html += `<tr>
-                <td>${storeImg(s)}</td>
-                <td>${s.store_name||"-"}</td>
-                <td>${s.merchant_name||"-"}</td>
-                <td>${s.category||"-"}</td>
-                <td>${s.city||"-"}</td>
-                <td><span class="badge-${s.status||'inactive'}">${s.status||"inactive"}</span></td>
-                <td>
-                    <button class="btn btn-sm btn-info me-1" style="font-size:11px;" onclick="editStore(${JSON.stringify(s).replace(/"/g,'&quot;')})">Edit</button>
-                    <button class="btn btn-sm btn-warning me-1" onclick="toggleStore('${s._id}')">
-                        ${s.status==="active"?"Off":"On"}
-                    </button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteStore('${s._id}')">Del</button>
-                </td>
-            </tr>`;
-        });
-        document.getElementById("stores_table").innerHTML = html||"<tr><td colspan='7' style='color:#94a3b8'>No stores</td></tr>";
-    } catch(e) { console.error(e); }
+function showSection(name, el){
+  document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));
+  document.querySelectorAll(".sidebar a").forEach(a=>a.classList.remove("active"));
+  document.getElementById("section-"+name).classList.add("active");
+  if(el) el.classList.add("active");
+  if(name==="merchants") loadMerchants();
+  if(name==="overview") loadStats();
+  if(name==="stores") loadStores();
+  if(name==="users") loadUsers();
+  if(name==="vouchers") loadVouchers();
+  if(name==="categories") renderCategories();
+  if(name==="pricing") loadPricing();
+  if(name==="terms") loadTerms();
+  if(name==="policies") loadPolicies();
+  if(name==="social") loadSocialLinks();
+  if(name==="merchant_txns") loadMerchantTxns();
+  if(name==="discounts") loadDiscounts();
+  if(name==="about") loadAbout();
+  if(name==="ratings") loadRatings();
+  if(name==="gift_cards") loadGiftCards();
 }
 
-// Fix 16: Default visit_points = 0
-async function openCreateStore() {
-    if (merchantsList.length===0) await loadMerchants();
-    document.getElementById("storeModalTitle").innerText = "Create Store";
-    document.getElementById("edit_store_id").value = "";
-    document.getElementById("store_name").value = "";
-    document.getElementById("store_category").value = "";
-    document.getElementById("store_city").value = "";
-    document.getElementById("store_area").value = "";
-    document.getElementById("store_address").value = "";
-    document.getElementById("store_phone").value = "";
-    document.getElementById("store_visit_points").value = "0";  // Fix 16: default 0 not 10
-    document.getElementById("store_image_url").value = "";
-    document.getElementById("store_image_preview").innerHTML = "";
-    document.getElementById("store_msg").innerText = "";
-    _populateMerchantSelect();
-    storeModalInst.show();
+// ===== STATS =====
+async function loadStats(){
+  try{
+    let r=await fetch("/admin/stats",{credentials:"include"});
+    if(r.status===401){window.location.href="/admin";return;}
+    let d=await r.json();
+    document.getElementById("stat_merchants").innerText=d.total_merchants;
+    document.getElementById("stat_active").innerText=d.active_merchants;
+    document.getElementById("stat_stores").innerText=d.total_stores;
+    document.getElementById("stat_waiting").innerText=d.waiting_approval||0;
+    document.getElementById("stat_users").innerText=d.total_users||0;
+  }catch(e){console.error(e);}
 }
 
-function _populateMerchantSelect() {
-    let select = document.getElementById("store_merchant");
-    select.innerHTML = "<option value=''>Select merchant...</option>";
-    merchantsList.forEach(m => {
-        select.innerHTML += `<option value="${m._id}">${m.name} (${m.phone})</option>`;
-    });
-    select.onchange = function() {
-        let m = merchantsList.find(x => x._id===this.value);
-        if (m) {
-            document.getElementById("store_city").value = m.city||"";
-            document.getElementById("store_area").value = m.area||"";
-            document.getElementById("store_phone").value = m.phone||"";
-        }
-    };
+// ===== CATEGORIES =====
+async function loadCategories(){
+  try{let r=await fetch("/admin/categories",{credentials:"include"});if(r.ok)categoriesList=await r.json();}catch{}
+}
+function renderCategories(){
+  let html=categoriesList.length
+    ? categoriesList.map(c=>`<span class="cat-chip">${c}<button onclick="deleteCategory('${c}')" title="Delete">×</button></span>`).join("")
+    : `<span style="color:var(--muted);">No categories yet.</span>`;
+  document.getElementById("categories_list").innerHTML=html;
+}
+async function addCategory(){
+  let val=document.getElementById("new_category").value.trim();if(!val)return;
+  let r=await fetch("/admin/categories",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:val}),credentials:"include"});
+  if(r.ok){let d=await r.json();categoriesList=d.categories;document.getElementById("new_category").value="";renderCategories();}
+}
+async function deleteCategory(name){
+  if(!confirm(`Delete "${name}"?`))return;
+  let r=await fetch("/admin/categories/"+encodeURIComponent(name),{method:"DELETE",credentials:"include"});
+  if(r.ok){let d=await r.json();categoriesList=d.categories;renderCategories();}
+}
+function populateCategoryDropdown(sel){
+  let s=document.getElementById("store_category");
+  s.innerHTML='<option value="">Select category</option>';
+  let cats=categoriesList.length?categoriesList:["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"];
+  cats.forEach(c=>{let o=document.createElement("option");o.value=c;o.innerText=c;if(c===sel)o.selected=true;s.appendChild(o);});
 }
 
-// Fix 15: Edit store with image access
-function editStore(s) {
-    if (merchantsList.length===0) loadMerchants();
-    document.getElementById("storeModalTitle").innerText = "Edit Store";
-    document.getElementById("edit_store_id").value = s._id||"";
-    document.getElementById("store_name").value = s.store_name||"";
-    document.getElementById("store_category").value = s.category||"";
-    document.getElementById("store_city").value = s.city||"";
-    document.getElementById("store_area").value = s.area||"";
-    document.getElementById("store_address").value = s.address||"";
-    document.getElementById("store_phone").value = s.phone||"";
-    document.getElementById("store_visit_points").value = s.visit_points||0;
-    document.getElementById("store_image_url").value = s.image||"";
-    document.getElementById("store_msg").innerText = "";
-    // Show image preview
-    const prev = document.getElementById("store_image_preview");
-    if (s.image) {
-        prev.innerHTML = `<img src="${s.image}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #334155;" onerror="this.style.display='none'">`;
-    } else { prev.innerHTML = ""; }
-    _populateMerchantSelect();
-    // Set merchant
-    setTimeout(() => { document.getElementById("store_merchant").value = s.merchant_id||""; }, 100);
-    storeModalInst.show();
+// ===== PRICING =====
+let currentPlans=[];
+async function loadPricing(){
+  let r=await fetch("/admin/pricing",{credentials:"include"});
+  let d=await r.json();
+  document.getElementById("gst_input").value=d.gst_percent||18;
+  currentPlans=d.plans||[];
+  let rate=d.conversion_rate||0.10;
+  document.getElementById("conversion_rate_input").value=rate;
+  document.getElementById("min_withdraw_input").value=d.min_withdraw_points||200;
+  document.getElementById("rate_example").innerText=(100*rate).toFixed(2);
+  document.getElementById("conversion_rate_input").addEventListener("input",function(){
+    let v=parseFloat(this.value)||0;
+    document.getElementById("rate_example").innerText=(100*v).toFixed(2);
+  });
+  renderPlans();
+}
+function renderPlans(){
+  let html=currentPlans.map((p,i)=>`
+    <div class="plan-row">
+      <label>${p.label}</label>
+      <span style="font-size:12px;color:var(--muted);">₹</span>
+      <input class="form-control" type="number" value="${p.price}" min="1" id="plan_price_${i}" style="max-width:130px;">
+    </div>`).join("");
+  document.getElementById("plans_editor").innerHTML=html;
+}
+async function savePricing(){
+  let gst=parseFloat(document.getElementById("gst_input").value)||18;
+  let rate=parseFloat(document.getElementById("conversion_rate_input").value)||0.10;
+  let minW=parseInt(document.getElementById("min_withdraw_input").value)||200;
+  let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
+  let r=await fetch("/admin/pricing",{method:"PUT",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({gst_percent:gst,plans,conversion_rate:rate,min_withdraw_points:minW}),credentials:"include"});
+  document.getElementById("pricing_msg").innerText=r.ok?"✅ All settings saved!":"❌ Error saving";
+  setTimeout(()=>document.getElementById("pricing_msg").innerText="",2500);
 }
 
-// Image URL → preview
-document.addEventListener("input", function(e) {
-    if (e.target.id === "store_image_url") {
-        const url = e.target.value.trim();
-        const prev = document.getElementById("store_image_preview");
-        if (url) {
-            prev.innerHTML = `<img src="${url}" style="max-width:120px;max-height:80px;border-radius:8px;margin-top:6px;" onerror="this.style.display='none'">`;
-        } else { prev.innerHTML = ""; }
+
+
+
+
+// ===== SOCIAL MEDIA =====
+async function loadSocialLinks(){
+  let r=await fetch("/admin/social",{credentials:"include"});
+  if(!r.ok) return;
+  let d=await r.json();
+  document.getElementById("sm_whatsapp").value=d.whatsapp||"";
+  document.getElementById("sm_facebook").value=d.facebook||"";
+  document.getElementById("sm_instagram").value=d.instagram||"";
+  document.getElementById("sm_youtube").value=d.youtube||"";
+}
+async function saveSocialLinks(){
+  let data={
+    whatsapp:document.getElementById("sm_whatsapp").value.trim(),
+    facebook:document.getElementById("sm_facebook").value.trim(),
+    instagram:document.getElementById("sm_instagram").value.trim(),
+    youtube:document.getElementById("sm_youtube").value.trim(),
+  };
+  let r=await fetch("/admin/social",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),credentials:"include"});
+  let el=document.getElementById("social_msg");
+  el.innerText=r.ok?"✅ Saved!":"❌ Error saving";
+  setTimeout(()=>el.innerText="",3000);
+}
+
+// ===== POLICIES =====
+async function loadPolicies(){
+  for(let t of ["privacy","refund","kyc"]){
+    let r=await fetch("/policy/"+t);
+    if(r.ok){let d=await r.json();document.getElementById(t+"_policy").value=d.content||"";}
+  }
+}
+async function savePolicy(type){
+  let content=document.getElementById(type+"_policy").value;
+  let r=await fetch("/admin/policy/"+type,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content}),credentials:"include"});
+  let el=document.getElementById(type+"_policy_msg");
+  el.innerText=r.ok?"✅ Saved!":"❌ Error saving";
+  setTimeout(()=>el.innerText="",3000);
+}
+
+// ===== TERMS =====
+async function loadTerms(){
+  for(let t of ["merchant","user"]){
+    let r=await fetch("/admin/terms/"+t,{credentials:"include"});
+    if(r.ok){let d=await r.json();document.getElementById(t+"_terms").value=d.content||"";}
+  }
+}
+async function saveTerms(type){
+  let content=document.getElementById(type+"_terms").value;
+  let r=await fetch("/admin/terms/"+type,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content}),credentials:"include"});
+  let el=document.getElementById(type+"_terms_msg");
+  el.innerText=r.ok?"✅ Saved!":"❌ Error";
+  setTimeout(()=>el.innerText="",2500);
+}
+
+// ===== MERCHANTS =====
+async function loadMerchants(){
+  let r=await fetch("/admin/merchants",{credentials:"include"});
+  if(!r.ok){window.location.href="/admin";return;}
+  merchantsList=await r.json();
+  populateCityFilter("merchant_city_filter",merchantsList,"city");
+  filterMerchants();
+}
+function filterMerchants(){
+  let city=document.getElementById("merchant_city_filter").value;
+  let search=(document.getElementById("merchant_search")?.value||"").toLowerCase();
+  let f=merchantsList.filter(m=>{
+    let cm=!city||(m.city||"").toLowerCase()===city.toLowerCase();
+    let sm=!search||(m.name||"").toLowerCase().includes(search)||(m.phone||"").includes(search);
+    return cm&&sm;
+  });
+  let html="";
+  f.forEach(m=>{
+    html+=`<tr>
+      <td><strong>${m.name||"-"}</strong></td><td>${m.phone||"-"}</td>
+      <td>${m.city||"-"}</td><td>${m.area||"-"}</td>
+      <td><span class="badge-active">${m.store_count||0}</span></td>
+      <td><span class="badge-${m.status}">${m.status}</span></td>
+      <td style="white-space:nowrap;">
+        <button class="btn-o me-1" onclick="openEditMerchant('${m._id}')"><i class="fas fa-edit"></i> Edit</button>
+        <button class="btn-w me-1" onclick="toggleMerchant('${m._id}')">${m.status==="active"?"Off":"On"}</button>
+        <button class="btn-d" onclick="deleteMerchant('${m._id}')">Del</button>
+      </td></tr>`;
+  });
+  document.getElementById("merchants_table").innerHTML=html||`<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">No merchants</td></tr>`;
+}
+function openEditMerchant(id){
+  let m=merchantsList.find(x=>x._id===id);if(!m)return;
+  document.getElementById("edit_merchant_id").value=id;
+  document.getElementById("edit_merchant_name").value=m.name||"";
+  document.getElementById("edit_merchant_phone").value=m.phone||"";
+  document.getElementById("edit_merchant_city").value=m.city||"";
+  document.getElementById("edit_merchant_area").value=m.area||"";
+  document.getElementById("merchant_edit_msg").innerText="";
+  merchantModal.show();
+}
+async function saveMerchant(){
+  let id=document.getElementById("edit_merchant_id").value;
+  let payload={name:document.getElementById("edit_merchant_name").value.trim(),phone:document.getElementById("edit_merchant_phone").value.trim(),city:document.getElementById("edit_merchant_city").value.trim(),area:document.getElementById("edit_merchant_area").value.trim()};
+  let r=await fetch(`/admin/merchants/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),credentials:"include"});
+  if(!r.ok){let d=await r.json();document.getElementById("merchant_edit_msg").innerText=d.detail;return;}
+  merchantModal.hide(); await loadMerchants(); await loadStats();
+}
+async function toggleMerchant(id){if(!confirm("Toggle status?"))return;await fetch(`/admin/merchants/${id}/status`,{method:"PUT",credentials:"include"});loadMerchants();loadStats();}
+async function deleteMerchant(id){if(!confirm("Delete merchant and all stores?"))return;await fetch(`/admin/merchants/${id}`,{method:"DELETE",credentials:"include"});loadMerchants();loadStats();}
+
+// ===== STORES =====
+async function loadStores(){
+  document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--muted)"><div class="spinner-border spinner-border-sm text-success me-2"></div>Loading stores...</td></tr>`;
+  try {
+    let r=await fetch("/admin/stores",{credentials:"include"});
+    allStores=await r.json();
+    populateCityFilter("store_city_filter",allStores,"city");
+    filterStores();
+  } catch(e) {
+    document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:24px;color:red">Error loading stores: ${e.message}</td></tr>`;
+  }
+}
+function filterStores(){
+  let city=document.getElementById("store_city_filter").value;
+  let search=(document.getElementById("store_search")?.value||"").toLowerCase();
+  let status=document.getElementById("store_status_filter").value;
+  let f=allStores.filter(s=>{
+    let cm=!city||(s.city||"").toLowerCase()===city.toLowerCase();
+    let sm=!search||(s.store_name||"").toLowerCase().includes(search)||(s.merchant_name||"").toLowerCase().includes(search)||(s.category||"").toLowerCase().includes(search);
+    // Fix: exact status match (was broken for inactive/waiting_approval)
+    let stm=!status||(s.status||"")===(status);
+    return cm&&sm&&stm;
+  });
+  let html="";
+  f.forEach(s=>{
+    let img=s.image?`<img src="${s.image}" style="width:32px;height:32px;border-radius:5px;object-fit:cover;margin-right:6px;">`:"";
+    let newBadge=s.is_new_in_town?`<span class="badge-new">New</span>`:`<span style="color:var(--muted);font-size:11px;">—</span>`;
+    let dealBadge=s.deal_status==='active'
+      ?`<span class="badge-deal-active" title="${s.deal_text||''}">${s.deal_text?s.deal_text:"active"}</span>`
+      :s.deal_status==='expired'
+      ?`<span class="badge-deal-expired">expired</span>`
+      :`<span style="color:var(--muted);font-size:11px;">—</span>`;
+    let statusBadge=s.status==="waiting_approval"?`<span class="badge-waiting">⏳ Waiting</span>`:`<span class="badge-${s.status}">${s.status}</span>`;
+    let approveBtn=s.status==="waiting_approval"?`<button class="btn-approve me-1" onclick="approveStore('${s._id}')">✓ Approve</button>`:"";
+    html+=`<tr>
+      <td>${img}<strong>${s.store_name||"-"}</strong></td>
+      <td>${s.merchant_name||"-"}</td><td>${s.category||"-"}</td>
+      <td>${s.city||"-"}/${s.area||"-"}</td>
+      <td><span class="badge-active">${s.points_per_scan!=null?s.points_per_scan:10}</span></td>
+      <td>${newBadge}</td><td>${statusBadge}</td><td>${dealBadge}</td>
+      <td style="white-space:nowrap;font-size:11px;">
+        ${s.sub_from ? `<span style="color:var(--primary);font-weight:600;">${s.sub_from}</span><br><span style="color:var(--muted)">→ ${s.sub_to}</span><br>` : ''}
+        <span class="badge-${s.paid_status==='paid'?'active':s.paid_status==='expired'?'inactive':'warn'}" style="font-size:10px;">
+          ${s.paid_status==='paid'?'✓ paid':s.paid_status==='expired'?'expired':'unpaid'}
+        </span>
+      </td>
+      <td style="white-space:nowrap;">
+        <button class="btn-o me-1" onclick="showQR('${s._id}',\`${s.store_name}\`,\`${s.qr_code||""}\`)"><i class="fas fa-qrcode"></i></button>
+        ${approveBtn}
+        <button class="btn-o me-1" onclick="openEditStore('${s._id}')"><i class="fas fa-edit"></i></button>
+        <button class="btn-w me-1" onclick="toggleStore('${s._id}')">${s.status==="active"?"Off":"On"}</button>
+        <button class="btn-d" onclick="deleteStore('${s._id}')">Del</button>
+      </td></tr>`;
+  });
+  document.getElementById("stores_table").innerHTML=html||`<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No stores found</td></tr>`;
+}
+function populateCityFilter(elId,data,field){
+  let sel=document.getElementById(elId);let cur=sel.value;
+  let cities=[...new Set(data.map(x=>x[field]).filter(Boolean))].sort();
+  sel.innerHTML='<option value="">All Cities</option>';
+  cities.forEach(c=>{let o=document.createElement("option");o.value=c;o.innerText=c;if(c===cur)o.selected=true;sel.appendChild(o);});
+}
+async function openCreateStore(){
+  editingStore=false;
+  document.getElementById("storeModalTitle").innerText="Create New Store";
+  document.getElementById("storeSubmitBtn").innerText="Create Store";
+  document.getElementById("edit_store_id").value="";
+  try{let r=await fetch("/admin/merchants",{credentials:"include"});merchantsList=await r.json();}catch{}
+  let sel=document.getElementById("store_merchant");
+  sel.innerHTML='<option value="">-- Select Merchant --</option>';
+  merchantsList.forEach(m=>{sel.innerHTML+=`<option value="${m._id}">${m.name} (${m.phone})</option>`;});
+  sel.onchange=function(){let m=merchantsList.find(x=>x._id===this.value);if(m){document.getElementById("store_city").value=m.city||"";document.getElementById("store_area").value=m.area||"";document.getElementById("store_phone").value=m.phone||"";}};
+  ["store_name","store_city","store_area","store_address","store_phone","store_lat","store_lng"].forEach(id=>document.getElementById(id).value="");
+  document.getElementById("store_points").value="10";
+  document.getElementById("store_image_b64").value="";
+  document.getElementById("store_image_preview").style.display="none";
+  document.getElementById("store_new_in_town").checked=false;
+  document.getElementById("store_msg").innerText="";
+  populateCategoryDropdown("");
+  storeModal.show();
+}
+async function openEditStore(id){
+  let s=allStores.find(x=>x._id===id);if(!s)return;
+  editingStore=true;
+  document.getElementById("storeModalTitle").innerText="Edit Store";
+  document.getElementById("storeSubmitBtn").innerText="Save Changes";
+  document.getElementById("edit_store_id").value=id;
+  // Always fetch fresh merchant list so dropdown is populated correctly
+  try{let r=await fetch("/admin/merchants",{credentials:"include"});if(r.ok)merchantsList=await r.json();}catch{}
+  let sel=document.getElementById("store_merchant");
+  sel.innerHTML='<option value="">-- Select Merchant --</option>';
+  merchantsList.forEach(m=>{
+    let o=document.createElement("option");
+    o.value=m._id;
+    o.innerText=`${m.name} (${m.phone})`;
+    if(m._id===s.merchant_id || m._id===String(s.merchant_id)) o.selected=true;
+    sel.appendChild(o);
+  });
+  sel.onchange=null;
+  document.getElementById("store_name").value=s.store_name||"";
+  document.getElementById("store_city").value=s.city||"";
+  document.getElementById("store_area").value=s.area||"";
+  document.getElementById("store_address").value=s.address||"";
+  document.getElementById("store_phone").value=s.phone||"";
+  document.getElementById("store_points").value=(s.points_per_scan!=null&&s.points_per_scan!==undefined)?s.points_per_scan:10;
+  document.getElementById("store_lat").value=s.lat||"";
+  document.getElementById("store_lng").value=s.lng||"";
+  document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
+  document.getElementById("store_image_b64").value="";
+  if(s.image){let p=document.getElementById("store_image_preview");p.src=s.image;p.style.display="block";}
+  else document.getElementById("store_image_preview").style.display="none";
+  document.getElementById("store_msg").innerText="";
+  populateCategoryDropdown(s.category||"");
+  storeModal.show();
+}
+function previewImage(){
+  let file=document.getElementById("store_image").files[0];if(!file)return;
+  let reader=new FileReader();
+  reader.onload=function(e){let p=document.getElementById("store_image_preview");p.src=e.target.result;p.style.display="block";document.getElementById("store_image_b64").value=e.target.result;};
+  reader.readAsDataURL(file);
+}
+async function submitStore(){
+  let name=document.getElementById("store_name").value.trim();
+  let mid=document.getElementById("store_merchant").value;
+  if(!name){document.getElementById("store_msg").innerText="Store name required";return;}
+  if(!editingStore&&!mid){document.getElementById("store_msg").innerText="Select a merchant";return;}
+  document.getElementById("store_msg").style.color="var(--muted)";
+  document.getElementById("store_msg").innerText="Saving...";
+  // When editing, only include merchant_id if a merchant was explicitly selected
+  let payloadBase={store_name:name,category:document.getElementById("store_category").value,
+    city:document.getElementById("store_city").value,area:document.getElementById("store_area").value,
+    address:document.getElementById("store_address").value,phone:document.getElementById("store_phone").value,
+    points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
+    lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
+    image:document.getElementById("store_image_b64").value||null,
+    is_new_in_town:document.getElementById("store_new_in_town").checked};
+  // Only send merchant_id if selected (prevents overwriting with empty on edit)
+  if(mid) payloadBase.merchant_id=mid;
+  let payload=payloadBase;
+  let sid=document.getElementById("edit_store_id").value;
+  let url=editingStore?`/admin/stores/${sid}`:"/admin/stores";
+  let method=editingStore?"PUT":"POST";
+  try{
+    let r=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),credentials:"include"});
+    let result=await r.json();
+    if(!r.ok){document.getElementById("store_msg").style.color="#c0392b";document.getElementById("store_msg").innerText=result.detail||"Failed";return;}
+    storeModal.hide(); await loadStores(); await loadStats();
+    if(!editingStore&&result.qr_code)setTimeout(()=>showQR(result.store_id,name,result.qr_code),400);
+  }catch(e){document.getElementById("store_msg").style.color="#c0392b";document.getElementById("store_msg").innerText="Server error";}
+}
+async function approveStore(id){
+  if(!confirm("Approve and set store to Active?"))return;
+  await fetch(`/admin/stores/${id}/approve`,{method:"PUT",credentials:"include"});
+  await loadStores(); await loadStats();
+}
+function showQR(sid,name,qr){
+  if(!qr||qr==="undefined"){alert("QR not available");return;}
+  document.getElementById("qrImage").src=qr;
+  document.getElementById("qrStoreName").innerText=name;
+  document.getElementById("qrDownload").href=qr;
+  document.getElementById("qrDownload").download=`qr_${name.replace(/\s+/g,"_")}.png`;
+  qrModal.show();
+}
+async function toggleStore(id){if(!confirm("Toggle store status?"))return;await fetch(`/admin/stores/${id}/status`,{method:"PUT",credentials:"include"});await loadStores();}
+async function deleteStore(id){if(!confirm("Delete this store?"))return;await fetch(`/admin/stores/${id}`,{method:"DELETE",credentials:"include"});await loadStores();await loadStats();}
+
+// ===== USERS =====
+async function loadUsers(){
+  let r=await fetch("/admin/users",{credentials:"include"});
+  if(!r.ok){window.location.href="/admin";return;}
+  allUsers=await r.json();filterUsers();
+}
+function filterUsers(){
+  let search=(document.getElementById("user_search")?.value||"").toLowerCase();
+  let f=allUsers.filter(u=>!search||(u.name||"").toLowerCase().includes(search)||(u.phone||"").includes(search));
+  let html="";
+  f.forEach(u=>{
+    let totalColor=u.total_points>0?"color:#1a6640;font-weight:700;":"";
+    html+=`<tr>
+      <td><strong>${u.name||"-"}</strong>${u.pending_withdraw?` <span onclick="showSection('vouchers',document.querySelector('[onclick*=vouchers]'))" title="Has pending gift voucher request — click to view" style="background:#fff3cd;color:#856404;font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid #ffc107;vertical-align:middle;cursor:pointer;">🎁 Voucher Pending</span>`:""}</td><td>${u.phone||"-"}</td><td>${u.city||"-"}</td>
+      <td>${u.visit_points||0}</td><td>${u.pool_points||0}</td>
+      <td style="${totalColor}">${u.total_points||0}</td>
+      <td><span class="badge-active">${u.redemption_count||0}</span></td>
+      <td style="font-size:11px;color:var(--muted)">${u.registered_on||"-"}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn-o me-1" onclick="viewHistory('${u._id}','${(u.name||"").replace(/'/g,"\\'")}')"><i class="fas fa-history"></i></button>
+        <button class="btn-p" onclick="openAdjust('${u._id}','${(u.name||"").replace(/'/g,"\\'")}')"><i class="fas fa-coins"></i></button>
+      </td></tr>`;
+  });
+  document.getElementById("users_table").innerHTML=html||`<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No users yet</td></tr>`;
+}
+async function viewHistory(uid,uname){
+  document.getElementById("histUserName").innerText=uname;
+  document.getElementById("hist_table").innerHTML=`<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--muted)">Loading...</td></tr>`;
+  ["histVisit","histPool","histTotal"].forEach(id=>document.getElementById(id).innerText="--");
+  userHistoryModal.show();
+  let r=await fetch(`/admin/users/${uid}/history`,{credentials:"include"});
+  let data=await r.json();let u=data.user;
+  document.getElementById("histVisit").innerText=u.visit_points;
+  document.getElementById("histPool").innerText=u.pool_points;
+  document.getElementById("histTotal").innerText=u.total_points;
+  let html=data.history.length?data.history.map(h=>{
+    let b=h.type==="credit"?`<span class="badge-active">+${h.points}</span>`:`<span class="badge-inactive">−${h.points}</span>`;
+    return`<tr><td style="color:${h.type==='credit'?'#1a6640':'#b33a2d'};font-weight:600;">${h.type.toUpperCase()}</td><td>${h.description}</td><td>${b}</td><td style="font-size:11px;color:var(--muted)">${h.date}</td></tr>`;
+  }).join(""):`<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted)">No transactions yet</td></tr>`;
+  document.getElementById("hist_table").innerHTML=html;
+}
+function openAdjust(uid,uname){
+  document.getElementById("adj_user_id").value=uid;
+  document.getElementById("adjUserName").innerText=uname;
+  document.getElementById("adj_points").value="";
+  document.getElementById("adj_note").value="";
+  document.getElementById("adj_type").value="credit";
+  document.getElementById("adj_msg").innerText="";
+  adjustModal_inst.show();
+}
+async function submitAdjustment(){
+  let uid=document.getElementById("adj_user_id").value;
+  let type=document.getElementById("adj_type").value;
+  let points=parseInt(document.getElementById("adj_points").value);
+  let note=document.getElementById("adj_note").value.trim();
+  if(!points||points<=0){document.getElementById("adj_msg").innerText="Enter valid points";return;}
+  let r=await fetch(`/admin/users/${uid}/adjust-points`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type,points,note}),credentials:"include"});
+  let data=await r.json();
+  if(!r.ok){document.getElementById("adj_msg").innerText=data.detail;return;}
+  adjustModal_inst.hide();loadUsers();loadStats();
+  alert(`✅ ${data.message}\nNew total: ${data.new_total} pts`);
+}
+
+
+// ===== MERCHANT TRANSACTIONS =====
+let allTxns = [];
+
+async function loadMerchantTxns() {
+  try {
+    // Get all merchants for count
+    if (!merchantsList.length) {
+      let r = await fetch("/admin/merchants", {credentials:"include"});
+      if (r.ok) merchantsList = await r.json();
     }
+    // Get paid invoices
+    let ir = await fetch("/admin/merchant-transactions", {credentials:"include"});
+    let invoices = ir.ok ? await ir.json() : [];
+
+    // Also get pending subscriptions for pending count
+    let sr = await fetch("/admin/subscriptions", {credentials:"include"});
+    let subs = sr.ok ? await sr.json() : [];
+    // De-duplicate pending: count stores with pending subscription (latest record per store)
+    let pendingStores = new Map();
+    subs.forEach(s => {
+      if (!pendingStores.has(s.store_name) || (s.created_at > (pendingStores.get(s.store_name)||{}).created_at)) {
+        pendingStores.set(s.store_name, s);
+      }
+    });
+    let pending = [...pendingStores.values()].filter(s => s.status === "pending");
+
+    allTxns = invoices;
+
+    // Stats
+    document.getElementById("txn_total_merchants").innerText = merchantsList.length;
+    document.getElementById("txn_total_subs").innerText = invoices.length;
+    document.getElementById("txn_pending_subs").innerText = pending.length + " stores";
+    let revenue = invoices.reduce((sum, t) => sum + (t.total||0), 0);
+    document.getElementById("txn_total_revenue").innerText = "₹" + revenue.toFixed(2);
+    document.getElementById("txn_total").innerText = invoices.length + " records";
+
+    filterTxns();
+  } catch(e) { console.error("loadMerchantTxns error:", e); }
+}
+
+function filterTxns() {
+  let search = (document.getElementById("txn_search")?.value || "").toLowerCase();
+  let f = allTxns.filter(t => {
+    return !search || (t.merchant_name||"").toLowerCase().includes(search) ||
+           (t.merchant_phone||"").includes(search) || (t.store_name||"").toLowerCase().includes(search) ||
+           (t.invoice_no||"").toLowerCase().includes(search);
+  });
+  let html = "";
+  f.forEach(t => {
+    let rzpId = t.razorpay_payment_id
+      ? `<br><small style="color:var(--muted);font-size:10px">${t.razorpay_payment_id}</small>` : "";
+    html += `<tr>
+      <td style="font-size:12px;color:var(--muted)">${t.created_at||"-"}</td>
+      <td style="font-size:11px"><strong>${t.invoice_no||"-"}</strong>${rzpId}</td>
+      <td><strong>${t.merchant_name||"-"}</strong></td>
+      <td style="font-size:12px">${t.merchant_phone||"-"}</td>
+      <td style="font-size:12px">${t.store_name||"-"}</td>
+      <td><span class="badge-active" style="font-size:11px">${t.plan||"-"}</span></td>
+      <td style="font-size:12px">₹${(t.base_price||0).toFixed(2)}</td>
+      <td style="font-size:12px">₹${(t.gst||0).toFixed(2)}</td>
+      <td style="color:#198754;font-weight:700">₹${(t.total||0).toFixed(2)}</td>
+      <td style="font-size:11px;color:var(--muted)">${t.razorpay_payment_id||"manual"}</td>
+    </tr>`;
+  });
+  document.getElementById("txn_body").innerHTML = html ||
+    `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No payment records found</td></tr>`;
+}
+
+
+// ===== EXPORT PAYMENTS PDF =====
+function exportPaymentsPDF() {
+  const { jsPDF } = window.jspdf;
+  if (!jsPDF) { alert("PDF library not loaded, please refresh"); return; }
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  
+  // Header
+  doc.setFillColor(62, 95, 85);
+  doc.rect(0, 0, 297, 18, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.text("OffrO — Payment Transactions Report", 14, 12);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text(new Date().toLocaleDateString("en-IN", {day:"2-digit",month:"short",year:"numeric"}), 260, 12);
+  
+  const rows = allTxns.map(t => [
+    t.created_at || "-",
+    t.invoice_no || "-",
+    t.merchant_name || "-",
+    t.merchant_phone || "-",
+    t.store_name || "-",
+    t.plan || "-",
+    "₹" + (t.base_price||0).toFixed(2),
+    "₹" + (t.gst||0).toFixed(2),
+    "₹" + (t.total||0).toFixed(2),
+    t.razorpay_payment_id || "manual"
+  ]);
+  
+  doc.autoTable({
+    startY: 22,
+    head: [["Date","Invoice No","Merchant","Phone","Store","Plan","Base","GST","Total","Payment ID"]],
+    body: rows,
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [62, 95, 85], textColor: 255, fontStyle: "bold", fontSize: 8 },
+    alternateRowStyles: { fillColor: [240, 249, 244] },
+    columnStyles: {
+      0: { cellWidth: 22 }, 1: { cellWidth: 28 }, 2: { cellWidth: 30 },
+      3: { cellWidth: 24 }, 4: { cellWidth: 30 }, 5: { cellWidth: 18 },
+      6: { cellWidth: 18 }, 7: { cellWidth: 15 }, 8: { cellWidth: 18 }, 9: { cellWidth: 38 }
+    },
+    didDrawPage: (data) => {
+      doc.setFontSize(8); doc.setTextColor(150);
+      doc.text("Generated by OffrO Admin Dashboard", 14, doc.internal.pageSize.height - 8);
+      doc.text(`Page ${data.pageNumber}`, 270, doc.internal.pageSize.height - 8);
+    }
+  });
+  
+  // Summary footer
+  const total = allTxns.reduce((s,t)=>s+(t.total||0),0);
+  const gstTotal = allTxns.reduce((s,t)=>s+(t.gst||0),0);
+  const finalY = doc.lastAutoTable.finalY + 6;
+  doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(62,95,85);
+  doc.text(`Total Records: ${allTxns.length}   |   Total GST: ₹${gstTotal.toFixed(2)}   |   Total Revenue: ₹${total.toFixed(2)}`, 14, finalY);
+  
+  doc.save(`OffrO_Payments_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+
+// ===== EXPORT PAYMENTS CSV =====
+function exportPaymentsCSV() {
+  const headers = ["Date","Invoice No","Merchant","Phone","Store","Plan","Base Price","GST","Total","Payment ID"];
+  const rows = allTxns.map(t => [
+    t.created_at||"",
+    t.invoice_no||"",
+    t.merchant_name||"",
+    t.merchant_phone||"",
+    t.store_name||"",
+    t.plan||"",
+    (t.base_price||0).toFixed(2),
+    (t.gst||0).toFixed(2),
+    (t.total||0).toFixed(2),
+    t.razorpay_payment_id||"manual"
+  ]);
+  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], {type:"text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `OffrO_Payments_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"include"});window.location.href="/admin";}
+
+
+// ═══════════ RATINGS ═══════════
+async function loadRatings() {
+  try {
+    let r = await fetch("/admin/stores", {credentials:"include"});
+    let stores = await r.json();
+    let html = "";
+    stores.forEach(s => {
+      const ur = parseFloat(s.rating||0).toFixed(1);
+      const ar = parseFloat(s.admin_rating||0).toFixed(1);
+      html += `<tr>
+        <td><strong>${s.store_name||"-"}</strong></td>
+        <td>${s.category||"-"}</td>
+        <td>${parseFloat(ur)>0?`<span style="color:#f59e0b">★ ${ur}</span>`:"—"}</td>
+        <td>${parseFloat(ar)>0?`<span style="color:var(--primary)">★ ${ar}</span>`:"—"}</td>
+        <td>
+          <div class="star-row d-flex gap-1" data-id="${s._id}">
+            ${[1,2,3,4,5].map(n=>`<i class="fas fa-star ${parseFloat(ar)>=n?'on':''}" onclick="setStoreRating('${s._id}',${n},this)"></i>`).join("")}
+          </div>
+        </td>
+      </tr>`;
+    });
+    document.getElementById("ratings_table").innerHTML = html || "<tr><td colspan='5' style='text-align:center;color:var(--muted)'>No stores found</td></tr>";
+  } catch(e) { console.error(e); }
+}
+
+async function setStoreRating(storeId, val, el) {
+  const row = el.closest(".star-row");
+  row.querySelectorAll(".fa-star").forEach((s,i) => s.classList.toggle("on", i < val));
+  try {
+    await fetch(`/admin/stores/${storeId}/rating`, {
+      method:"PUT", credentials:"include",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({admin_rating: val})
+    });
+  } catch(e) { console.error(e); }
+}
+
+// ═══════════ GIFT CARDS (App Display) ═══════════
+let gcModalInst;
+window.addEventListener("DOMContentLoaded", function() {
+  if (document.getElementById("giftCardModal"))
+    gcModalInst = new bootstrap.Modal(document.getElementById("giftCardModal"));
 });
 
-async function saveStore() {
-    const editId = document.getElementById("edit_store_id").value;
-    const merchant_id = document.getElementById("store_merchant").value;
-    const store_name  = document.getElementById("store_name").value.trim();
-    if (!merchant_id||!store_name) { document.getElementById("store_msg").innerText="Merchant and Store Name required"; return; }
-    const data = {
-        merchant_id,
-        store_name,
-        category:     document.getElementById("store_category").value,
-        city:         document.getElementById("store_city").value,
-        area:         document.getElementById("store_area").value,
-        address:      document.getElementById("store_address").value,
-        phone:        document.getElementById("store_phone").value,
-        visit_points: parseInt(document.getElementById("store_visit_points").value)||0,
-        image:        document.getElementById("store_image_url").value.trim(),
-    };
-    try {
-        let url  = editId ? `/admin/stores/${editId}` : "/admin/stores";
-        let meth = editId ? "PUT" : "POST";
-        let res  = await fetch(url, { method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data) });
-        let result = await res.json();
-        if (!res.ok) { document.getElementById("store_msg").innerText=result.detail||"Error"; return; }
-        storeModalInst.hide();
-        loadStores(); loadStats();
-    } catch { document.getElementById("store_msg").innerText="Server error"; }
+async function loadGiftCards() {
+  try {
+    let r = await fetch("/admin/gift-vouchers", {credentials:"include"});
+    let cards = await r.json();
+    const el = document.getElementById("gift_cards_list");
+    if (!cards.length) { el.innerHTML = "<p style='color:var(--muted)'>No gift cards yet. Click + Add Card to create one.</p>"; return; }
+    el.innerHTML = cards.map(v => `
+      <div class="col-md-6 col-lg-4">
+        <div class="card border-0 shadow-sm p-3 position-relative" style="background:linear-gradient(135deg,#3E5F55 0%,#A9CDBA 100%);color:white;border-radius:14px;">
+          <div class="d-flex align-items-center gap-3">
+            ${v.logo ? `<img src="${v.logo}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;background:white;" onerror="this.style.display='none'">` 
+                     : `<div style="width:48px;height:48px;background:rgba(255,255,255,0.2);border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift fa-lg"></i></div>`}
+            <div>
+              ${v.title ? `<div style="font-size:11px;opacity:.8;">${v.title}</div>` : ""}
+              <div class="fw-bold">${v.text||""}</div>
+              ${v.validity ? `<div style="font-size:11px;opacity:.7;">Valid: ${v.validity}</div>` : ""}
+            </div>
+          </div>
+          <div class="mt-2 d-flex gap-2 justify-content-end">
+            <span style="font-size:10px;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:8px;">${v.is_active?"● Active":"○ Hidden"}</span>
+            <button class="btn btn-sm" style="background:rgba(255,255,255,0.9);color:#3E5F55;font-size:11px;padding:1px 10px;" 
+              onclick='editGiftCard(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
+            <button class="btn btn-sm btn-danger" style="font-size:11px;padding:1px 8px;" 
+              onclick="deleteGiftCard('${v.id||v._id}')">Del</button>
+          </div>
+        </div>
+      </div>`).join("");
+  } catch(e) { console.error(e); }
 }
 
-async function toggleStore(id) {
-    if (!confirm("Toggle store status?")) return;
-    await fetch(`/admin/stores/${id}/status`, { method:"PUT", credentials:"include" });
-    loadStores();
-}
-async function deleteStore(id) {
-    if (!confirm("Delete this store?")) return;
-    await fetch(`/admin/stores/${id}`, { method:"DELETE", credentials:"include" });
-    loadStores(); loadStats();
-}
-
-// ── Ratings ──
-async function loadRatings() {
-    try {
-        let res = await fetch("/admin/stores", { credentials:"include" });
-        let stores = await res.json();
-        let html = "";
-        stores.forEach(s => {
-            const ur = (s.rating||0).toFixed(1);
-            const ar = (s.admin_rating||0).toFixed(1);
-            html += `<tr>
-                <td>${s.store_name||"-"}</td>
-                <td>${s.category||"-"}</td>
-                <td>${ur>0?`<span style="color:#f59e0b">★ ${ur}</span>`:"—"}</td>
-                <td>${ar>0?`<span style="color:#3E5F55">★ ${ar}</span>`:"—"}</td>
-                <td>
-                    <div class="star-row d-flex gap-1" data-id="${s._id}" data-rating="${ar}">
-                        ${[1,2,3,4,5].map(n=>`<i class="fas fa-star ${parseFloat(ar)>=n?'on':''}" data-val="${n}" onclick="setRating('${s._id}',${n},this)"></i>`).join("")}
-                    </div>
-                </td>
-            </tr>`;
-        });
-        document.getElementById("ratings_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No stores</td></tr>";
-    } catch(e) { console.error(e); }
+async function openGiftCardModal() {
+  if (merchantsList.length === 0) await loadMerchants();
+  document.getElementById("gc_id").value = "";
+  document.getElementById("gc_title").value = "";
+  document.getElementById("gc_text").value = "";
+  document.getElementById("gc_validity").value = "";
+  document.getElementById("gc_logo").value = "";
+  document.getElementById("gc_active").checked = true;
+  document.getElementById("gc_msg").innerText = "";
+  _populateGcMerchants("");
+  gcModalInst.show();
 }
 
-async function setRating(storeId, val, el) {
-    // Highlight stars
-    const row = el.closest(".star-row");
-    row.querySelectorAll(".fa-star").forEach((s,i) => { s.classList.toggle("on", i<val); });
-    try {
-        await fetch(`/admin/stores/${storeId}/rating`, {
-            method:"PUT", credentials:"include",
-            headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({admin_rating:val})
-        });
-    } catch(e) { console.error(e); }
+function editGiftCard(v) {
+  document.getElementById("gc_id").value       = v.id||v._id||"";
+  document.getElementById("gc_title").value    = v.title||"";
+  document.getElementById("gc_text").value     = v.text||"";
+  document.getElementById("gc_validity").value = v.validity||"";
+  document.getElementById("gc_logo").value     = v.logo||"";
+  document.getElementById("gc_active").checked = v.is_active !== false;
+  document.getElementById("gc_msg").innerText  = "";
+  _populateGcMerchants(v.merchant_id||"");
+  gcModalInst.show();
 }
 
-// ── Gift Vouchers ──
-async function loadVouchers() {
-    try {
-        let res = await fetch("/admin/gift-vouchers", { credentials:"include" });
-        let vouchers = await res.json();
-        const el = document.getElementById("vouchers_list");
-        if (!vouchers.length) { el.innerHTML="<p style='color:#94a3b8'>No vouchers yet.</p>"; return; }
-        el.innerHTML = vouchers.map(v => `
-            <div class="col-md-6">
-                <div class="voucher-preview d-flex align-items-center gap-3 position-relative">
-                    ${v.logo ? `<img src="${v.logo}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:white;" onerror="this.style.display='none'">` : `<div style="width:52px;height:52px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:#B8860B;font-size:22px;"></i></div>`}
-                    <div class="flex-grow-1">
-                        ${v.title?`<small style="color:#B8860B;font-weight:700;">${v.title}</small><br>`:""}
-                        <strong>${v.text||""}</strong>
-                        ${v.validity?`<br><small>Valid: ${v.validity}</small>`:""}
-                    </div>
-                    <div class="d-flex gap-1 position-absolute" style="top:8px;right:8px;">
-                        <button class="btn btn-sm" style="background:#3E5F55;color:white;font-size:10px;padding:2px 7px;" onclick='editVoucher(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
-                        <button class="btn btn-sm btn-danger" style="font-size:10px;padding:2px 7px;" onclick="deleteVoucher('${v.id||v._id}')">Del</button>
-                    </div>
-                    <span style="position:absolute;bottom:8px;right:8px;font-size:10px;color:${v.is_active?'#16a34a':'#dc2626'}">${v.is_active?"● Active":"○ Hidden"}</span>
-                </div>
-            </div>`).join("");
-    } catch(e) { console.error(e); }
+function _populateGcMerchants(selectedId) {
+  let sel = document.getElementById("gc_merchant");
+  sel.innerHTML = "<option value=''>None</option>";
+  (merchantsList||[]).forEach(m => {
+    sel.innerHTML += `<option value="${m._id}" ${m._id===selectedId?"selected":""}>${m.name}</option>`;
+  });
 }
 
-async function openVoucherModal() {
-    if (merchantsList.length===0) await loadMerchants();
-    document.getElementById("edit_voucher_id").value = "";
-    document.getElementById("v_title").value = "";
-    document.getElementById("v_text").value  = "";
-    document.getElementById("v_validity").value = "";
-    document.getElementById("v_logo").value  = "";
-    document.getElementById("v_active").checked = true;
-    document.getElementById("v_msg").innerText = "";
-    _populateVoucherMerchants("");
-    voucherModalInst.show();
+async function saveGiftCard() {
+  const vid  = document.getElementById("gc_id").value;
+  const text = document.getElementById("gc_text").value.trim();
+  if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
+  const data = {
+    title:       document.getElementById("gc_title").value.trim(),
+    text,
+    validity:    document.getElementById("gc_validity").value.trim(),
+    logo:        document.getElementById("gc_logo").value.trim(),
+    merchant_id: document.getElementById("gc_merchant").value,
+    is_active:   document.getElementById("gc_active").checked,
+  };
+  try {
+    let url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
+    let meth = vid ? "PUT" : "POST";
+    let res  = await fetch(url, {method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
+    if (!res.ok) { const d = await res.json(); document.getElementById("gc_msg").innerText = d.detail||"Error"; return; }
+    gcModalInst.hide();
+    loadGiftCards();
+  } catch { document.getElementById("gc_msg").innerText = "Server error"; }
 }
 
-function editVoucher(v) {
-    document.getElementById("edit_voucher_id").value = v.id||v._id||"";
-    document.getElementById("v_title").value    = v.title||"";
-    document.getElementById("v_text").value     = v.text||"";
-    document.getElementById("v_validity").value = v.validity||"";
-    document.getElementById("v_logo").value     = v.logo||"";
-    document.getElementById("v_active").checked = v.is_active!==false;
-    document.getElementById("v_msg").innerText  = "";
-    _populateVoucherMerchants(v.merchant_id||"");
-    voucherModalInst.show();
+async function deleteGiftCard(id) {
+  if (!confirm("Delete this gift card?")) return;
+  await fetch(`/admin/gift-vouchers/${id}`, {method:"DELETE", credentials:"include"});
+  loadGiftCards();
 }
 
-function _populateVoucherMerchants(selectedId) {
-    let sel = document.getElementById("v_merchant");
-    sel.innerHTML = "<option value=''>None</option>";
-    merchantsList.forEach(m => {
-        sel.innerHTML += `<option value="${m._id}" ${m._id===selectedId?"selected":""}>${m.name}</option>`;
-    });
-}
-
-async function saveVoucher() {
-    const vid  = document.getElementById("edit_voucher_id").value;
-    const text = document.getElementById("v_text").value.trim();
-    if (!text) { document.getElementById("v_msg").innerText="Offer text required"; return; }
-    const data = {
-        title:       document.getElementById("v_title").value.trim(),
-        text,
-        validity:    document.getElementById("v_validity").value.trim(),
-        logo:        document.getElementById("v_logo").value.trim(),
-        merchant_id: document.getElementById("v_merchant").value,
-        is_active:   document.getElementById("v_active").checked,
-    };
-    try {
-        let url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
-        let meth = vid ? "PUT" : "POST";
-        let res  = await fetch(url, { method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data) });
-        if (!res.ok) { const d=await res.json(); document.getElementById("v_msg").innerText=d.detail||"Error"; return; }
-        voucherModalInst.hide();
-        loadVouchers();
-    } catch { document.getElementById("v_msg").innerText="Server error"; }
-}
-
-async function deleteVoucher(id) {
-    if (!confirm("Delete voucher?")) return;
-    await fetch(`/admin/gift-vouchers/${id}`, { method:"DELETE", credentials:"include" });
-    loadVouchers();
-}
-
-async function logout() {
-    await fetch("/admin/logout", { method:"POST", credentials:"include" });
-    window.location.href = "/admin";
-}
 </script>
+
+<!-- Gift Card Modal -->
+<div class="modal fade" id="giftCardModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">🎁 Gift Card</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="gc_id" value="">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Title (e.g. "₹999 DEALS")</label>
+          <input id="gc_title" class="form-control" placeholder="₹999 DEALS">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Offer Text *</label>
+          <input id="gc_text" class="form-control" placeholder="FREE Voucher worth ₹150 OFF">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Validity</label>
+          <input id="gc_validity" class="form-control" placeholder="e.g. 31 May 2026">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Logo URL</label>
+          <input id="gc_logo" class="form-control" placeholder="https://... or data:image/...">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Linked Merchant (optional)</label>
+          <select id="gc_merchant" class="form-select">
+            <option value="">None</option>
+          </select>
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="gc_active" checked>
+          <label class="form-check-label" for="gc_active">Active (show in app)</label>
+        </div>
+        <p id="gc_msg" style="color:var(--danger);font-size:13px;"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn-p btn-sm" onclick="saveGiftCard()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
