@@ -80,10 +80,24 @@ def get_store(store_id: str):
         "address": store.get("address", ""),
         "phone": store.get("phone", ""),
         "image": store.get("image") or None,
+        "image2": store.get("image2") or None,
         "image_thumb": store.get("image_thumb") or store.get("image") or None,
+        "images": store.get("images", []),
         "latitude": store.get("lat") or None,
         "longitude": store.get("lng") or None,
         "visit_points": store.get("points_per_scan", 10),
+        "points_per_scan": store.get("points_per_scan", 10),
+        "about": store.get("about") or store.get("description") or "",
+        "description": store.get("description") or "",
+        "open_time": store.get("open_time", ""),
+        "close_time": store.get("close_time", ""),
+        "cost_for_two": store.get("cost_for_two", ""),
+        "dine_in": store.get("dine_in", False),
+        "tags": store.get("tags", []),
+        "rating": store.get("rating", 0.0),
+        "rating_count": store.get("rating_count", 0),
+        "is_new_in_town": store.get("is_new_in_town", False),
+        "merchant_id": store.get("merchant_id", ""),
         "deals": deals_list
     }
 
@@ -297,6 +311,72 @@ kyc@localsaver.in"""
 
 
 # =================== DISCOUNT VALIDATION (public) ===================
+# =================== STORE RATING ===================
+@router.post("/stores/{store_id}/rate")
+def rate_store(store_id: str, data: dict, request: Request):
+    """User rates a store (1-5 stars). Requires user token in Authorization header."""
+    from fastapi import Request as Req
+    from datetime import datetime
+    # Authenticate user
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = db.users.find_one({"token": token})
+    if not user:
+        raise HTTPException(status_code=403, detail="Invalid session")
+
+    rating = float(data.get("rating", 0))
+    if not (1 <= rating <= 5):
+        raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+    try:
+        sid = ObjectId(store_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid store_id")
+
+    store = db.stores.find_one({"_id": sid})
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    user_id = str(user["_id"])
+    # One rating per user per store
+    existing = db.ratings.find_one({"store_id": store_id, "user_id": user_id})
+    if existing:
+        raise HTTPException(status_code=400, detail="You have already rated this store")
+
+    db.ratings.insert_one({
+        "store_id": store_id,
+        "user_id": user_id,
+        "rating": rating,
+        "created_at": datetime.utcnow()
+    })
+
+    # Recalculate average rating for store
+    agg = list(db.ratings.aggregate([
+        {"$match": {"store_id": store_id}},
+        {"$group": {"_id": None, "avg": {"$avg": "$rating"}, "count": {"$sum": 1}}}
+    ]))
+    avg_rating = round(agg[0]["avg"], 1) if agg else rating
+    count = agg[0]["count"] if agg else 1
+
+    db.stores.update_one({"_id": sid}, {"$set": {"rating": avg_rating, "rating_count": count}})
+    return {"ok": True, "your_rating": rating, "store_rating": avg_rating, "total_ratings": count}
+
+
+@router.get("/stores/{store_id}/my-rating")
+def get_my_rating(store_id: str, request: Request):
+    """Get current user's rating for a store."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not token:
+        return {"rated": False, "rating": None}
+    user = db.users.find_one({"token": token})
+    if not user:
+        return {"rated": False, "rating": None}
+    user_id = str(user["_id"])
+    existing = db.ratings.find_one({"store_id": store_id, "user_id": user_id})
+    if not existing:
+        return {"rated": False, "rating": None}
+    return {"rated": True, "rating": existing.get("rating")}
+
 @router.post("/discount/validate")
 def validate_discount(body: dict):
     from fastapi import HTTPException

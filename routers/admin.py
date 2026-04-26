@@ -720,3 +720,38 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
         }}
     )
     return {"ok": True, "message": f"{voucher_type} voucher sent successfully"}
+
+# =================== STORE RATING (Admin) ===================
+@router.put("/stores/{store_id}/rating")
+def set_store_rating(store_id: str, data: dict, a=Depends(get_current_admin)):
+    """Admin can set/override a store's admin_rating."""
+    try:
+        sid = ObjectId(store_id)
+    except Exception:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Invalid store_id")
+    admin_rating = float(data.get("admin_rating", 0))
+    db.stores.update_one({"_id": sid}, {"$set": {"admin_rating": admin_rating}})
+    return {"ok": True, "admin_rating": admin_rating}
+
+
+# =================== ALL RATINGS LIST ===================
+@router.get("/ratings")
+def list_all_ratings(a=Depends(get_current_admin)):
+    """Return all user ratings with store and user info."""
+    ratings = list(db.ratings.find().sort("created_at", -1).limit(500))
+    result = []
+    for r in ratings:
+        store = db.stores.find_one({"_id": ObjectId(r["store_id"])}) if r.get("store_id") else None
+        user  = db.users.find_one({"_id": ObjectId(r["user_id"])}) if r.get("user_id") else None
+        result.append({
+            "_id":        str(r["_id"]),
+            "store_id":   r.get("store_id"),
+            "store_name": store.get("store_name") if store else "—",
+            "user_id":    r.get("user_id"),
+            "user_name":  user.get("name") if user else "—",
+            "user_phone": user.get("phone") if user else "—",
+            "rating":     r.get("rating"),
+            "created_at": r["created_at"].strftime("%d %b %Y %H:%M") if r.get("created_at") else "",
+        })
+    return result
