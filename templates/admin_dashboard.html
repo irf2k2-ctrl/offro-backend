@@ -1542,7 +1542,7 @@ function _renderRatings(stores) {
     document.getElementById("ratings_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No stores</td></tr>";
 }
 
-function clearRating(storeId) {
+async function clearRating(storeId) {
     try {
         await fetch(`/admin/stores/${storeId}/rating`, {
             method:"PUT", credentials:"include",
@@ -1557,7 +1557,7 @@ function closeSidebar() { document.getElementById("sidebar").classList.remove("o
 
 function openSidebar()  { document.getElementById("sidebar").classList.add("open"); }
 
-function deleteVoucher(id) {
+async function deleteVoucher(id) {
     if (!confirm("Delete voucher?")) return;
     await fetch(`/admin/gift-vouchers/${id}`, { method:"DELETE", credentials:"include" });
     loadVouchers();
@@ -1590,7 +1590,7 @@ function onVoucherStoreChange(storeId) {
     }
 }
 
-function openVoucherModal() {
+async function openVoucherModal() {
     // Load stores for the dropdown
     if (!window.allStoresList) {
         try { const r = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = await r.json(); } catch(e) { window.allStoresList = []; }
@@ -1609,7 +1609,7 @@ function openVoucherModal() {
     voucherModalInst.show();
 }
 
-function saveVoucher() {
+async function saveVoucher() {
     const vid  = document.getElementById("edit_voucher_id").value;
     const text = document.getElementById("v_text").value.trim();
     if (!text) { document.getElementById("v_msg").innerText="Offer text required"; return; }
@@ -1631,7 +1631,7 @@ function saveVoucher() {
     } catch { document.getElementById("v_msg").innerText="Server error"; }
 }
 
-function setRating(storeId, val, el) {
+async function setRating(storeId, val, el) {
     // Highlight stars
     const row = el.closest(".star-row");
     row.querySelectorAll(".fa-star").forEach((s,i) => { s.classList.toggle("on", i<val); });
@@ -1704,7 +1704,7 @@ function editStore(s) {
     storeModalInst.show();
 }
 
-function saveStore() {
+async function saveStore() {
     const editId = document.getElementById("edit_store_id").value;
     const merchant_id = document.getElementById("store_merchant").value;
     const store_name  = document.getElementById("store_name").value.trim();
