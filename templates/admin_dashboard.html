@@ -94,11 +94,11 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('merchants',this)"><i class="fas fa-user-tie fa-fw"></i> Merchants</a>
   <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
   <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
+  <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
   <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <a href="#" onclick="showSection('gift_cards',this)"><i class="fas fa-id-card fa-fw"></i> Gift Cards (App)</a>
   <div class="sep"></div>
-  <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
   <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
   <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
@@ -420,15 +420,17 @@ tr:hover td{background:#f7faf8;}
           <span class="input-group-text" style="background:#25D366;color:white;border:none;">+</span>
           <input id="sm_whatsapp" class="form-control" placeholder="919876543210 (with country code, no +)">
         </div>
-        <small class="text-muted">Users will tap to open WhatsApp chat directly</small>
+        <small class="text-muted">Enter number with country code (e.g. 919876543210). Will auto-generate wa.me link.</small>
       </div>
       <div class="mb-3">
         <label class="form-label"><i class="fab fa-facebook" style="color:#1877F2;"></i> Facebook URL</label>
         <input id="sm_facebook" class="form-control" placeholder="https://facebook.com/yourpage">
+        <small class="text-muted">Enter full URL starting with https://</small>
       </div>
       <div class="mb-3">
         <label class="form-label"><i class="fab fa-instagram" style="color:#E1306C;"></i> Instagram URL</label>
         <input id="sm_instagram" class="form-control" placeholder="https://instagram.com/yourhandle">
+        <small class="text-muted">Enter full URL starting with https://</small>
       </div>
       <div class="mb-3">
         <label class="form-label"><i class="fab fa-youtube" style="color:#FF0000;"></i> YouTube URL</label>
@@ -888,22 +890,40 @@ async function loadSocialLinks(){
   let r=await fetch("/admin/social",{credentials:"include"});
   if(!r.ok) return;
   let d=await r.json();
-  document.getElementById("sm_whatsapp").value=d.whatsapp||"";
+  // Show raw number for whatsapp (not the full wa.me URL)
+  document.getElementById("sm_whatsapp").value=d.whatsapp_number||d.whatsapp||"";
   document.getElementById("sm_facebook").value=d.facebook||"";
   document.getElementById("sm_instagram").value=d.instagram||"";
   document.getElementById("sm_youtube").value=d.youtube||"";
 }
 async function saveSocialLinks(){
+  // Auto-format URLs before saving
+  function fmtUrl(url) {
+    url = url.trim();
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+    return "https://" + url;
+  }
+  let wa = document.getElementById("sm_whatsapp").value.trim().replace(/[^0-9]/g,"");
+  // Build proper wa.me link
+  let waUrl = wa ? `https://wa.me/${wa}` : "";
   let data={
-    whatsapp:document.getElementById("sm_whatsapp").value.trim(),
-    facebook:document.getElementById("sm_facebook").value.trim(),
-    instagram:document.getElementById("sm_instagram").value.trim(),
-    youtube:document.getElementById("sm_youtube").value.trim(),
+    whatsapp: waUrl,
+    whatsapp_number: wa,
+    facebook:  fmtUrl(document.getElementById("sm_facebook").value),
+    instagram: fmtUrl(document.getElementById("sm_instagram").value),
+    youtube:   fmtUrl(document.getElementById("sm_youtube").value),
   };
   let r=await fetch("/admin/social",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),credentials:"include"});
   let el=document.getElementById("social_msg");
-  el.innerText=r.ok?"✅ Saved!":"❌ Error saving";
-  setTimeout(()=>el.innerText="",3000);
+  if (r.ok) {
+    el.style.color="green";
+    el.innerText="✅ Saved! Links are now active in the app.";
+  } else {
+    el.style.color="var(--danger)";
+    el.innerText="❌ Error saving";
+  }
+  setTimeout(()=>{el.innerText="";el.style.color="";},3000);
 }
 
 // ===== POLICIES =====
@@ -1392,14 +1412,15 @@ function _renderRatings(stores) {
   document.getElementById("ratings_table").innerHTML = filtered.map(s => {
     const ur = parseFloat(s.rating||0).toFixed(1);
     const ar = parseFloat(s.admin_rating||0).toFixed(1);
+    const cnt = s.rating_count || s.review_count || 0;
     return `<tr>
       <td><strong>${s.store_name||"-"}</strong><br><small style="color:var(--muted)">${s.city||""}</small></td>
       <td>${s.category||"-"}</td>
-      <td>${parseFloat(ur)>0?`<span style="color:#f59e0b">★ ${ur}</span>`:"—"}</td>
+      <td>${parseFloat(ur)>0?`<span style="color:#f59e0b">★ ${ur}</span><br><small style="color:var(--muted)">${cnt} review${cnt!==1?'s':''}</small>`:"—"}</td>
       <td>${parseFloat(ar)>0?`<span style="color:var(--primary)">★ ${ar}</span>`:"—"}</td>
       <td>
         <div class="d-flex gap-1 align-items-center star-row" data-id="${s._id}">
-          ${[1,2,3,4,5].map(n=>`<i class="fas fa-star ${parseFloat(ar)>=n?'on':''}" style="cursor:pointer;font-size:18px;" onclick="setStoreRating('${s._id}',${n},this)"></i>`).join("")}
+          ${[1,2,3,4,5].map(n=>`<i class="fas fa-star ${parseFloat(ar)>=n?'on':''}" style="cursor:pointer;font-size:18px;color:${parseFloat(ar)>=n?'#f59e0b':'#ccc'};" onclick="setStoreRating('${s._id}',${n},this)"></i>`).join("")}
           <button onclick="clearStoreRating('${s._id}')" class="btn btn-sm ms-2" style="font-size:10px;padding:2px 8px;background:var(--border);color:var(--text);">Clear</button>
         </div>
       </td>
@@ -1410,9 +1431,27 @@ async function loadRatings(forceRefresh=false) {
   document.getElementById("ratings_table").innerHTML = "<tr><td colspan='5' style='text-align:center;color:var(--muted)'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>";
   try {
     if (!_ratingsCache || forceRefresh) {
+      // Fetch stores (has admin_rating + avg rating)
       let r = await fetch("/admin/stores", {credentials:"include"});
       _ratingsCache = await r.json();
     }
+    // Also fetch live user ratings from /admin/ratings endpoint
+    try {
+      let rr = await fetch("/admin/ratings", {credentials:"include"});
+      if (rr.ok) {
+        let userRatings = await rr.json();
+        // userRatings: [{store_id, avg_rating, count}] or [{store_id, rating}]
+        // Merge into _ratingsCache
+        _ratingsCache = _ratingsCache.map(s => {
+          let found = userRatings.find(u => u.store_id === (s._id||s.id) || u._id === (s._id||s.id));
+          if (found) {
+            s.rating = found.avg_rating || found.rating || s.rating;
+            s.rating_count = found.count || found.rating_count || s.rating_count || 0;
+          }
+          return s;
+        });
+      }
+    } catch(e2) { /* /admin/ratings may not exist, fallback to store data */ }
     _renderRatings(_ratingsCache);
   } catch(e) { document.getElementById("ratings_table").innerHTML="<tr><td colspan='5' style='color:var(--danger)'>Error loading ratings</td></tr>"; }
 }
@@ -1529,10 +1568,33 @@ function _setGcStoreDropdown(selectedStoreId) {
   onGcStoreChange(selectedStoreId);
 }
 
+function previewGcImage(input) {
+  const preview = document.getElementById("gc_image2_preview");
+  if (!input.files || !input.files[0]) { preview.innerHTML = ""; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById("gc_image2_url").value = e.target.result;
+    preview.innerHTML = `<img src="${e.target.result}" style="max-width:180px;max-height:90px;border-radius:8px;border:1px solid var(--border);margin-top:6px;">`;
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+
 async function saveGiftCard() {
   const vid  = document.getElementById("gc_id").value;
   const text = document.getElementById("gc_text").value.trim();
   if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
+  // Check for custom image override
+  const imgFile = document.getElementById("gc_image2_file").files[0];
+  let image2Url = document.getElementById("gc_image2_url").value || "";
+  // If image file selected, upload it first
+  if (imgFile) {
+    try {
+      const fd = new FormData();
+      fd.append("file", imgFile);
+      const up = await fetch("/admin/upload-image", {method:"POST", credentials:"include", body:fd});
+      if (up.ok) { const ud = await up.json(); image2Url = ud.url || image2Url; }
+    } catch(e) { /* fallback to base64 */ }
+  }
   const data = {
     title:       document.getElementById("gc_title").value.trim(),
     text,
@@ -1540,6 +1602,7 @@ async function saveGiftCard() {
     store_id:    document.getElementById("gc_store").value,
     is_active:   document.getElementById("gc_active").checked,
   };
+  if (image2Url) data.logo = image2Url;
   try {
     let url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
     let meth = vid ? "PUT" : "POST";
@@ -1586,6 +1649,12 @@ async function deleteGiftCard(id) {
             <option value="">None</option>
           </select>
           <div id="gc_store_preview" class="mt-2"></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Override Banner Image <small style="color:var(--muted)">(optional – overrides store Image 2)</small></label>
+          <input type="file" id="gc_image2_file" class="form-control" accept="image/*" onchange="previewGcImage(this)">
+          <div id="gc_image2_preview" class="mt-2"></div>
+          <input type="hidden" id="gc_image2_url" value="">
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="gc_active" checked>
