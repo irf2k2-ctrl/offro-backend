@@ -102,16 +102,8 @@ def get_terms_public(type: str):
 
 
 # =================== TERMS ===================
-@router.get("/terms/{doc_type}")
-def get_terms(doc_type: str):
-    doc = db.terms.find_one({"type": doc_type}) or {}
-    content = doc.get("content", "")
-    if not content:
-        defaults = {"user": _default_user_terms(), "merchant": _default_merchant_terms()}
-        content = defaults.get(doc_type, "")
-    return {"content": content}
+# /terms/{type} handled above
 
-# =================== POLICIES ===================
 @router.get("/policy/{policy_type}")
 def get_policy(policy_type: str):
     doc = db.policies.find_one({"type": policy_type}) or {}
@@ -133,10 +125,7 @@ def get_social_public():
     }
 
 # =================== CATEGORIES ===================
-@router.get("/categories")
-def get_categories():
-    cats = db.stores.distinct("category", {"status": "active"})
-    return [c for c in cats if c]
+# /categories handled above
 
 def _default_user_terms():
     return """# Terms & Conditions
