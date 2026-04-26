@@ -944,7 +944,7 @@ async function saveTerms(type){
 }
 
 // ===== MERCHANTS =====
-async async function loadMerchants() {
+async function loadMerchants() {
     try {
         let res = await fetch("/admin/merchants", { credentials:"include" });
         merchantsList = await res.json();
@@ -1518,7 +1518,7 @@ async function deleteGiftCard(id) {
 }
 
 
-function _renderRatings(stores) {
+async function _renderRatings(stores) {
     const q = _ratingsSearch.toLowerCase();
     const filtered = q ? stores.filter(s=>(s.store_name||"").toLowerCase().includes(q)||(s.category||"").toLowerCase().includes(q)) : stores;
     let html = "";
@@ -1553,9 +1553,9 @@ async function clearRating(storeId) {
     } catch(e) { console.error(e); }
 }
 
-function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); }
+async function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); }
 
-function openSidebar()  { document.getElementById("sidebar").classList.add("open"); }
+async function openSidebar()  { document.getElementById("sidebar").classList.add("open"); }
 
 async function deleteVoucher(id) {
     if (!confirm("Delete voucher?")) return;
@@ -1644,7 +1644,7 @@ async function setRating(storeId, val, el) {
     } catch(e) { console.error(e); }
 }
 
-function storeImg(s) {
+async function storeImg(s) {
     const img = s.image || (s.images && s.images[0]) || "";
     if (!img) return `<div class="store-thumb-ph"><i class="fas fa-store"></i></div>`;
     return `<img src="${img}" class="store-thumb" onerror="this.outerHTML='<div class=store-thumb-ph><i class=fas fa-store></i></div>'">`;
@@ -1674,7 +1674,7 @@ function _populateVoucherMerchants(selectedId) {
     });
 }
 
-function editStore(s) {
+async function editStore(s) {
     if (merchantsList.length===0) loadMerchants();
     document.getElementById("storeModalTitle").innerText = "Edit Store";
     document.getElementById("edit_store_id").value = s._id||"";
