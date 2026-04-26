@@ -71,11 +71,6 @@ tr:hover td{background:#f7faf8;}
 .plan-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;background:var(--bg);padding:10px 14px;border-radius:8px;border:1px solid var(--border);}
 .plan-row label{font-size:13px;font-weight:600;min-width:90px;color:var(--text);}
 .plan-row input{flex:1;max-width:140px;}
-
-/* ── Star Ratings ── */
-.star-row .fa-star{cursor:pointer;color:#ccc;font-size:18px;transition:color 0.15s;}
-.star-row .fa-star.on{color:#f59e0b;}
-.star-row .fa-star:hover{color:#fbbf24;}
 </style>
 </head>
 <body>
@@ -93,12 +88,10 @@ tr:hover td{background:#f7faf8;}
   <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
   <a href="#" onclick="showSection('merchants',this)"><i class="fas fa-user-tie fa-fw"></i> Merchants</a>
   <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
-  <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
-  <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
   <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
-  <a href="#" onclick="showSection('gift_cards',this)"><i class="fas fa-id-card fa-fw"></i> Gift Cards (App)</a>
   <div class="sep"></div>
+  <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
   <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
   <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
@@ -138,30 +131,6 @@ tr:hover td{background:#f7faf8;}
     <thead><tr><th>User</th><th>Phone</th><th>Points</th><th>Value</th><th>Requested</th><th>Status</th><th>Action</th></tr></thead>
     <tbody id="vouchers_table"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
   </table></div>
-</div>
-
-
-<div id="section-ratings" class="section">
-  <div class="section-header">
-    <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)">⭐ Store Ratings</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Set the admin-controlled rating displayed to users in the app</div>
-    </div>
-    <div class="d-flex gap-2 align-items-center flex-wrap">
-      <input id="ratings_search" class="form-control form-control-sm" placeholder="🔍 Search store or category..." style="max-width:260px;" oninput="filterRatings()">
-      <button class="btn-p" onclick="loadRatings(true)"><i class="fas fa-sync me-1"></i> Refresh</button>
-    </div>
-  </div>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th>Store</th><th>Category</th><th>User Avg</th><th>Admin Set</th><th>Set Rating</th></tr>
-      </thead>
-      <tbody id="ratings_table">
-        <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
-      </tbody>
-    </table>
-  </div>
 </div>
 
 <div id="section-merchants" class="section">
@@ -216,19 +185,7 @@ tr:hover td{background:#f7faf8;}
 
 
   <!-- CATEGORIES -->
-  
-<div id="section-gift_cards" class="section">
-  <div class="section-header">
-    <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🎁 Gift Cards (App Display)</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage the voucher cards shown on the app home screen</div>
-    </div>
-    <button class="btn-p" onclick="openGiftCardModal()"><i class="fas fa-plus me-1"></i> Add Card</button>
-  </div>
-  <div id="gift_cards_list" class="row g-3 mt-1"></div>
-</div>
-
-<div id="section-categories" class="section">
+  <div id="section-categories" class="section">
     <div class="page-title">Categories</div>
     <div class="table-wrap" style="padding:22px;">
       <div class="d-flex gap-2 mb-4">
@@ -420,17 +377,15 @@ tr:hover td{background:#f7faf8;}
           <span class="input-group-text" style="background:#25D366;color:white;border:none;">+</span>
           <input id="sm_whatsapp" class="form-control" placeholder="919876543210 (with country code, no +)">
         </div>
-        <small class="text-muted">Enter number with country code (e.g. 919876543210). Will auto-generate wa.me link.</small>
+        <small class="text-muted">Users will tap to open WhatsApp chat directly</small>
       </div>
       <div class="mb-3">
         <label class="form-label"><i class="fab fa-facebook" style="color:#1877F2;"></i> Facebook URL</label>
         <input id="sm_facebook" class="form-control" placeholder="https://facebook.com/yourpage">
-        <small class="text-muted">Enter full URL starting with https://</small>
       </div>
       <div class="mb-3">
         <label class="form-label"><i class="fab fa-instagram" style="color:#E1306C;"></i> Instagram URL</label>
         <input id="sm_instagram" class="form-control" placeholder="https://instagram.com/yourhandle">
-        <small class="text-muted">Enter full URL starting with https://</small>
       </div>
       <div class="mb-3">
         <label class="form-label"><i class="fab fa-youtube" style="color:#FF0000;"></i> YouTube URL</label>
@@ -473,15 +428,10 @@ tr:hover td{background:#f7faf8;}
             <input id="store_lat" class="form-control" placeholder="17.3850"></div>
           <div class="col-md-6"><label class="form-label">Longitude</label>
             <input id="store_lng" class="form-control" placeholder="78.4867"></div>
-          <div class="col-12"><label class="form-label">Image 1 — Main Card Photo</label>
-            <input id="store_image" class="form-control" type="file" accept="image/*" onchange="previewImage(1)">
+          <div class="col-12"><label class="form-label">Store Image</label>
+            <input id="store_image" class="form-control" type="file" accept="image/*" onchange="previewImage()">
             <img id="store_image_preview" src="" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
             <input type="hidden" id="store_image_b64"></div>
-          <div class="col-12"><label class="form-label">Image 2 — Gift Voucher / Gallery</label>
-            <small class="text-muted d-block mb-1">Used as secondary image and as Gift Voucher banner in the app.</small>
-            <input id="store_image2" class="form-control" type="file" accept="image/*" onchange="previewImage(2)">
-            <img id="store_image2_preview" src="" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
-            <input type="hidden" id="store_image2_b64"></div>
           <div class="col-12">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="store_new_in_town">
@@ -799,8 +749,6 @@ function showSection(name, el){
   if(name==="merchant_txns") loadMerchantTxns();
   if(name==="discounts") loadDiscounts();
   if(name==="about") loadAbout();
-  if(name==="ratings") loadRatings();
-  if(name==="gift_cards") loadGiftCards();
 }
 
 // ===== STATS =====
@@ -890,40 +838,22 @@ async function loadSocialLinks(){
   let r=await fetch("/admin/social",{credentials:"include"});
   if(!r.ok) return;
   let d=await r.json();
-  // Show raw number for whatsapp (not the full wa.me URL)
-  document.getElementById("sm_whatsapp").value=d.whatsapp_number||d.whatsapp||"";
+  document.getElementById("sm_whatsapp").value=d.whatsapp||"";
   document.getElementById("sm_facebook").value=d.facebook||"";
   document.getElementById("sm_instagram").value=d.instagram||"";
   document.getElementById("sm_youtube").value=d.youtube||"";
 }
 async function saveSocialLinks(){
-  // Auto-format URLs before saving
-  function fmtUrl(url) {
-    url = url.trim();
-    if (!url) return "";
-    if (url.startsWith("http://") || url.startsWith("https://")) return url;
-    return "https://" + url;
-  }
-  let wa = document.getElementById("sm_whatsapp").value.trim().replace(/[^0-9]/g,"");
-  // Build proper wa.me link
-  let waUrl = wa ? `https://wa.me/${wa}` : "";
   let data={
-    whatsapp: waUrl,
-    whatsapp_number: wa,
-    facebook:  fmtUrl(document.getElementById("sm_facebook").value),
-    instagram: fmtUrl(document.getElementById("sm_instagram").value),
-    youtube:   fmtUrl(document.getElementById("sm_youtube").value),
+    whatsapp:document.getElementById("sm_whatsapp").value.trim(),
+    facebook:document.getElementById("sm_facebook").value.trim(),
+    instagram:document.getElementById("sm_instagram").value.trim(),
+    youtube:document.getElementById("sm_youtube").value.trim(),
   };
   let r=await fetch("/admin/social",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),credentials:"include"});
   let el=document.getElementById("social_msg");
-  if (r.ok) {
-    el.style.color="green";
-    el.innerText="✅ Saved! Links are now active in the app.";
-  } else {
-    el.style.color="var(--danger)";
-    el.innerText="❌ Error saving";
-  }
-  setTimeout(()=>{el.innerText="";el.style.color="";},3000);
+  el.innerText=r.ok?"✅ Saved!":"❌ Error saving";
+  setTimeout(()=>el.innerText="",3000);
 }
 
 // ===== POLICIES =====
@@ -1082,9 +1012,7 @@ async function openCreateStore(){
   ["store_name","store_city","store_area","store_address","store_phone","store_lat","store_lng"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("store_points").value="10";
   document.getElementById("store_image_b64").value="";
-  document.getElementById("store_image2_b64").value="";
   document.getElementById("store_image_preview").style.display="none";
-  document.getElementById("store_image2_preview").style.display="none";
   document.getElementById("store_new_in_town").checked=false;
   document.getElementById("store_msg").innerText="";
   populateCategoryDropdown("");
@@ -1118,22 +1046,16 @@ async function openEditStore(id){
   document.getElementById("store_lng").value=s.lng||"";
   document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
   document.getElementById("store_image_b64").value="";
-  document.getElementById("store_image2_b64").value="";
   if(s.image){let p=document.getElementById("store_image_preview");p.src=s.image;p.style.display="block";}
   else document.getElementById("store_image_preview").style.display="none";
-  if(s.image2){let p2=document.getElementById("store_image2_preview");p2.src=s.image2;p2.style.display="block";}
-  else document.getElementById("store_image2_preview").style.display="none";
   document.getElementById("store_msg").innerText="";
   populateCategoryDropdown(s.category||"");
   storeModal.show();
 }
-function previewImage(n){
-  const inputId = n===2 ? "store_image2" : "store_image";
-  const prevId  = n===2 ? "store_image2_preview" : "store_image_preview";
-  const b64Id   = n===2 ? "store_image2_b64" : "store_image_b64";
-  let file=document.getElementById(inputId).files[0];if(!file)return;
+function previewImage(){
+  let file=document.getElementById("store_image").files[0];if(!file)return;
   let reader=new FileReader();
-  reader.onload=function(e){let p=document.getElementById(prevId);p.src=e.target.result;p.style.display="block";document.getElementById(b64Id).value=e.target.result;};
+  reader.onload=function(e){let p=document.getElementById("store_image_preview");p.src=e.target.result;p.style.display="block";document.getElementById("store_image_b64").value=e.target.result;};
   reader.readAsDataURL(file);
 }
 async function submitStore(){
@@ -1150,7 +1072,6 @@ async function submitStore(){
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
-    image2:document.getElementById("store_image2_b64").value||null,
     is_new_in_town:document.getElementById("store_new_in_town").checked};
   // Only send merchant_id if selected (prevents overwriting with empty on edit)
   if(mid) payloadBase.merchant_id=mid;
@@ -1399,276 +1320,6 @@ function exportPaymentsCSV() {
 
 async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"include"});window.location.href="/admin";}
 
-
-// ═══════════ RATINGS ═══════════
-let _ratingsCache = null;
-function filterRatings() {
-  if (_ratingsCache) _renderRatings(_ratingsCache);
-}
-function _renderRatings(stores) {
-  const q = (document.getElementById("ratings_search")||{value:""}).value.toLowerCase();
-  const filtered = q ? stores.filter(s=>(s.store_name||"").toLowerCase().includes(q)||(s.category||"").toLowerCase().includes(q)) : stores;
-  if (!filtered.length) { document.getElementById("ratings_table").innerHTML="<tr><td colspan='5' style='text-align:center;color:var(--muted)'>No stores found</td></tr>"; return; }
-  document.getElementById("ratings_table").innerHTML = filtered.map(s => {
-    const ur = parseFloat(s.rating||0).toFixed(1);
-    const ar = parseFloat(s.admin_rating||0).toFixed(1);
-    const cnt = s.rating_count || s.review_count || 0;
-    return `<tr>
-      <td><strong>${s.store_name||"-"}</strong><br><small style="color:var(--muted)">${s.city||""}</small></td>
-      <td>${s.category||"-"}</td>
-      <td>${parseFloat(ur)>0?`<span style="color:#f59e0b">★ ${ur}</span><br><small style="color:var(--muted)">${cnt} review${cnt!==1?'s':''}</small>`:"—"}</td>
-      <td>${parseFloat(ar)>0?`<span style="color:var(--primary)">★ ${ar}</span>`:"—"}</td>
-      <td>
-        <div class="d-flex gap-1 align-items-center star-row" data-id="${s._id}">
-          ${[1,2,3,4,5].map(n=>`<i class="fas fa-star ${parseFloat(ar)>=n?'on':''}" style="cursor:pointer;font-size:18px;color:${parseFloat(ar)>=n?'#f59e0b':'#ccc'};" onclick="setStoreRating('${s._id}',${n},this)"></i>`).join("")}
-          <button onclick="clearStoreRating('${s._id}')" class="btn btn-sm ms-2" style="font-size:10px;padding:2px 8px;background:var(--border);color:var(--text);">Clear</button>
-        </div>
-      </td>
-    </tr>`;
-  }).join("");
-}
-async function loadRatings(forceRefresh=false) {
-  document.getElementById("ratings_table").innerHTML = "<tr><td colspan='5' style='text-align:center;color:var(--muted)'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>";
-  try {
-    if (!_ratingsCache || forceRefresh) {
-      // Fetch stores (has admin_rating + avg rating)
-      let r = await fetch("/admin/stores", {credentials:"include"});
-      _ratingsCache = await r.json();
-    }
-    // Also fetch live user ratings from /admin/ratings endpoint
-    try {
-      let rr = await fetch("/admin/ratings", {credentials:"include"});
-      if (rr.ok) {
-        let userRatings = await rr.json();
-        // userRatings: [{store_id, avg_rating, count}] or [{store_id, rating}]
-        // Merge into _ratingsCache
-        _ratingsCache = _ratingsCache.map(s => {
-          let found = userRatings.find(u => u.store_id === (s._id||s.id) || u._id === (s._id||s.id));
-          if (found) {
-            s.rating = found.avg_rating || found.rating || s.rating;
-            s.rating_count = found.count || found.rating_count || s.rating_count || 0;
-          }
-          return s;
-        });
-      }
-    } catch(e2) { /* /admin/ratings may not exist, fallback to store data */ }
-    _renderRatings(_ratingsCache);
-  } catch(e) { document.getElementById("ratings_table").innerHTML="<tr><td colspan='5' style='color:var(--danger)'>Error loading ratings</td></tr>"; }
-}
-
-async function setStoreRating(storeId, val, el) {
-  const row = el.closest(".star-row");
-  row.querySelectorAll(".fa-star").forEach((s,i) => s.classList.toggle("on", i < val));
-  try {
-    await fetch(`/admin/stores/${storeId}/rating`, {
-      method:"PUT", credentials:"include",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({admin_rating: val})
-    });
-    if (_ratingsCache) { const s=_ratingsCache.find(x=>x._id===storeId); if(s) s.admin_rating=val; }
-  } catch(e) { console.error(e); }
-}
-
-async function clearStoreRating(storeId) {
-  if (!confirm("Clear admin rating for this store?")) return;
-  try {
-    await fetch(`/admin/stores/${storeId}/rating`, {
-      method:"PUT", credentials:"include",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({admin_rating: 0})
-    });
-    if (_ratingsCache) { const s=_ratingsCache.find(x=>x._id===storeId); if(s) s.admin_rating=0; _renderRatings(_ratingsCache); }
-  } catch(e) { console.error(e); }
-}
-
-// ═══════════ GIFT CARDS (App Display) ═══════════
-let gcModalInst;
-window.addEventListener("DOMContentLoaded", function() {
-  if (document.getElementById("giftCardModal"))
-    gcModalInst = new bootstrap.Modal(document.getElementById("giftCardModal"));
-});
-
-async function loadGiftCards() {
-  try {
-    let r = await fetch("/admin/gift-vouchers", {credentials:"include"});
-    let cards = await r.json();
-    const el = document.getElementById("gift_cards_list");
-    if (!cards.length) { el.innerHTML = "<p style='color:var(--muted)'>No gift cards yet. Click + Add Card to create one.</p>"; return; }
-    el.innerHTML = cards.map(v => `
-      <div class="col-md-6 col-lg-4">
-        <div class="card border-0 shadow-sm p-3 position-relative" style="background:linear-gradient(135deg,#3E5F55 0%,#A9CDBA 100%);color:white;border-radius:14px;">
-          <div class="d-flex align-items-center gap-3">
-            ${v.logo ? `<img src="${v.logo}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;background:white;" onerror="this.style.display='none'">` 
-                     : `<div style="width:48px;height:48px;background:rgba(255,255,255,0.2);border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift fa-lg"></i></div>`}
-            <div>
-              ${v.title ? `<div style="font-size:11px;opacity:.8;">${v.title}</div>` : ""}
-              <div class="fw-bold">${v.text||""}</div>
-              ${v.validity ? `<div style="font-size:11px;opacity:.7;">Valid: ${v.validity}</div>` : ""}
-            </div>
-          </div>
-          <div class="mt-2 d-flex gap-2 justify-content-end">
-            <span style="font-size:10px;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:8px;">${v.is_active?"● Active":"○ Hidden"}</span>
-            <button class="btn btn-sm" style="background:rgba(255,255,255,0.9);color:#3E5F55;font-size:11px;padding:1px 10px;" 
-              onclick='editGiftCard(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
-            <button class="btn btn-sm btn-danger" style="font-size:11px;padding:1px 8px;" 
-              onclick="deleteGiftCard('${v.id||v._id}')">Del</button>
-          </div>
-        </div>
-      </div>`).join("");
-  } catch(e) { console.error(e); }
-}
-
-async function onGcStoreChange(storeId) {
-  const preview = document.getElementById("gc_store_preview");
-  if (!storeId) { preview.innerHTML = ""; return; }
-  const store = (window.allStoresForVoucher||[]).find(s => s._id === storeId);
-  if (store && store.image2) {
-    preview.innerHTML = `<img src="${store.image2}" style="max-width:160px;max-height:80px;border-radius:8px;border:1px solid var(--border);">
-      <small class="text-muted d-block mt-1">This image will appear on the voucher card</small>`;
-  } else {
-    preview.innerHTML = `<small style="color:var(--warning)">No Image 2 found for this store. Add it in Store settings.</small>`;
-  }
-}
-
-async function openGiftCardModal() {
-  // Load stores for store selector
-  if (!window.allStoresForVoucher) {
-    try { const r = await fetch("/admin/stores",{credentials:"include"}); window.allStoresForVoucher = await r.json(); } catch(e) { window.allStoresForVoucher = []; }
-  }
-  const storeSel = document.getElementById("gc_store");
-  storeSel.innerHTML = `<option value="">None</option>` + (window.allStoresForVoucher||[]).map(s=>`<option value="${s._id}">${s.store_name||s._id}</option>`).join("");
-  
-  document.getElementById("gc_id").value = "";
-  document.getElementById("gc_title").value = "";
-  document.getElementById("gc_text").value = "";
-  document.getElementById("gc_validity").value = "";
-  document.getElementById("gc_active").checked = true;
-  document.getElementById("gc_msg").innerText = "";
-  document.getElementById("gc_store_preview").innerHTML = "";
-  gcModalInst.show();
-}
-
-function editGiftCard(v) {
-  document.getElementById("gc_id").value       = v.id||v._id||"";
-  document.getElementById("gc_title").value    = v.title||"";
-  document.getElementById("gc_text").value     = v.text||"";
-  document.getElementById("gc_validity").value = v.validity||"";
-  document.getElementById("gc_active").checked = v.is_active !== false;
-  document.getElementById("gc_msg").innerText  = "";
-  // Populate store selector and trigger preview
-  if (!window.allStoresForVoucher) {
-    fetch("/admin/stores",{credentials:"include"}).then(r=>r.json()).then(d=>{window.allStoresForVoucher=d;_setGcStoreDropdown(v.store_id||"");}).catch(()=>{});
-  } else { _setGcStoreDropdown(v.store_id||""); }
-  gcModalInst.show();
-}
-
-function _setGcStoreDropdown(selectedStoreId) {
-  const storeSel = document.getElementById("gc_store");
-  storeSel.innerHTML = `<option value="">None</option>` + (window.allStoresForVoucher||[]).map(s=>`<option value="${s._id}" ${s._id===selectedStoreId?"selected":""}>${s.store_name||s._id}</option>`).join("");
-  onGcStoreChange(selectedStoreId);
-}
-
-function previewGcImage(input) {
-  const preview = document.getElementById("gc_image2_preview");
-  if (!input.files || !input.files[0]) { preview.innerHTML = ""; return; }
-  const reader = new FileReader();
-  reader.onload = e => {
-    document.getElementById("gc_image2_url").value = e.target.result;
-    preview.innerHTML = `<img src="${e.target.result}" style="max-width:180px;max-height:90px;border-radius:8px;border:1px solid var(--border);margin-top:6px;">`;
-  };
-  reader.readAsDataURL(input.files[0]);
-}
-
-async function saveGiftCard() {
-  const vid  = document.getElementById("gc_id").value;
-  const text = document.getElementById("gc_text").value.trim();
-  if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
-  // Check for custom image override
-  const imgFile = document.getElementById("gc_image2_file").files[0];
-  let image2Url = document.getElementById("gc_image2_url").value || "";
-  // If image file selected, upload it first
-  if (imgFile) {
-    try {
-      const fd = new FormData();
-      fd.append("file", imgFile);
-      const up = await fetch("/admin/upload-image", {method:"POST", credentials:"include", body:fd});
-      if (up.ok) { const ud = await up.json(); image2Url = ud.url || image2Url; }
-    } catch(e) { /* fallback to base64 */ }
-  }
-  const data = {
-    title:       document.getElementById("gc_title").value.trim(),
-    text,
-    validity:    document.getElementById("gc_validity").value.trim(),
-    store_id:    document.getElementById("gc_store").value,
-    is_active:   document.getElementById("gc_active").checked,
-  };
-  if (image2Url) data.logo = image2Url;
-  try {
-    let url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
-    let meth = vid ? "PUT" : "POST";
-    let res  = await fetch(url, {method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
-    if (!res.ok) { const d = await res.json(); document.getElementById("gc_msg").innerText = d.detail||"Error"; return; }
-    gcModalInst.hide();
-    loadGiftCards();
-  } catch { document.getElementById("gc_msg").innerText = "Server error"; }
-}
-
-async function deleteGiftCard(id) {
-  if (!confirm("Delete this gift card?")) return;
-  await fetch(`/admin/gift-vouchers/${id}`, {method:"DELETE", credentials:"include"});
-  loadGiftCards();
-}
-
 </script>
-
-<!-- Gift Card Modal -->
-<div class="modal fade" id="giftCardModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">🎁 Gift Card</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="gc_id" value="">
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Title (e.g. "₹999 DEALS")</label>
-          <input id="gc_title" class="form-control" placeholder="₹999 DEALS">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Offer Text *</label>
-          <input id="gc_text" class="form-control" placeholder="FREE Voucher worth ₹150 OFF">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Validity</label>
-          <input id="gc_validity" class="form-control" placeholder="e.g. 31 May 2026">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Linked Store <small style="color:var(--muted)">(Image 2 from store used as voucher banner)</small></label>
-          <select id="gc_store" class="form-select" onchange="onGcStoreChange(this.value)">
-            <option value="">None</option>
-          </select>
-          <div id="gc_store_preview" class="mt-2"></div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Override Banner Image <small style="color:var(--muted)">(optional – overrides store Image 2)</small></label>
-          <input type="file" id="gc_image2_file" class="form-control" accept="image/*" onchange="previewGcImage(this)">
-          <div id="gc_image2_preview" class="mt-2"></div>
-          <input type="hidden" id="gc_image2_url" value="">
-        </div>
-        <div class="form-check mb-3">
-          <input class="form-check-input" type="checkbox" id="gc_active" checked>
-          <label class="form-check-label" for="gc_active">Active (show in app)</label>
-        </div>
-        <p id="gc_msg" style="color:var(--danger);font-size:13px;"></p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn-p btn-sm" onclick="saveGiftCard()">Save</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 </body>
 </html>

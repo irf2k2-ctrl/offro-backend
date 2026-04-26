@@ -1,7 +1,6 @@
 """
 Merchant App Router — self-service portal
 """
-from utils.image_utils import process_store_image
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
@@ -103,14 +102,7 @@ def merchant_register(data: dict):
     area  = data.get("area", "").strip()
     if not name or not phone:
         raise HTTPException(400, "Name and phone are required")
-    # Normalize phone — strip leading + to store consistently
-    phone_digits = phone.lstrip("+")
-    # Check for existing phone in any format
-    existing = (db.merchants.find_one({"phone": phone}) or
-                db.merchants.find_one({"phone": "+" + phone_digits}) or
-                db.merchants.find_one({"phone": phone_digits}) or
-                db.merchants.find_one({"phone": {"$regex": phone_digits[-10:] + "$"}}))
-    if existing:
+    if db.merchants.find_one({"phone": phone}):
         raise HTTPException(400, "Phone already registered. Please login.")
     merchant = {
         "name": name, "phone": phone,
@@ -125,15 +117,7 @@ def merchant_register(data: dict):
 @router.post("/login")
 def merchant_login(data: dict):
     phone = str(data.get("phone", "")).strip()
-    # Normalize phone: strip leading + and spaces, try multiple formats
-    def normalize(p):
-        return p.strip().lstrip("+").lstrip("0")
-    phone_norm = normalize(phone)
-    # Try exact match first, then normalized variants
-    m = (db.merchants.find_one({"phone": phone}) or
-         db.merchants.find_one({"phone": "+" + phone_norm}) or
-         db.merchants.find_one({"phone": phone_norm}) or
-         db.merchants.find_one({"phone": {"$regex": phone_norm[-10:] + "$"}}) )
+    m = db.merchants.find_one({"phone": phone})
     if not m: raise HTTPException(401, "Phone not registered. Please register first.")
     token = str(uuid.uuid4())
     db.merchants.update_one({"_id": m["_id"]}, {"$set": {"token": token}})
@@ -216,14 +200,9 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "points_per_scan": 10,
         "lat":  data.get("lat", ""),   "lng": data.get("lng", ""),
         "image":        data.get("image") or None,
-        "image_thumb":  None,
         "is_new_in_town": False,
         "created_at":   datetime.utcnow(),
     }
-    # ── compress & thumbnail ──
-    if store.get("image"):
-        imgs = process_store_image(store["image"])
-        store.update(imgs)
     result = db.stores.insert_one(store)
     sid = str(result.inserted_id)
     qr_b64 = _qr(sid)
@@ -236,9 +215,7 @@ def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
     if not store: raise HTTPException(404, "Store not found")
     upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng"] if data.get(f) is not None}
-    if data.get("image"):
-        imgs = process_store_image(data["image"])
-        upd.update(imgs)  # sets image + image_thumb
+    if data.get("image"): upd["image"] = data["image"]
     if upd: db.stores.update_one({"_id": ObjectId(sid)}, {"$set": upd})
     return {"message": "Store updated"}
 
@@ -313,67 +290,6 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
 
     from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
     end_date  = from_date + timedelta(days=plan_days(plan))
-
-    # ── 100% discount / ₹0 payment — auto-approve without Razorpay ──
-    if total == 0:
-        sub_doc = {
-            "store_id":       store_id,
-            "merchant_id":    str(m["_id"]),
-            "plan":           plan,
-            "from_date":      from_date,
-            "end_date":       end_date,
-            "price":          price,
-            "gst":            gst_amt,
-            "gst_percent":    gst,
-            "total":          0,
-            "status":         "active",
-            "pay_mode":       "free",
-            "discount_code":  discount_code,
-            "discount_value": discount_value,
-            "created_at":     datetime.utcnow(),
-            "activated_at":   datetime.utcnow(),
-        }
-        sub_result = db.subscriptions.insert_one(sub_doc)
-        # Activate store immediately
-        db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {
-            "status": "active",
-            "subscription_id": str(sub_result.inserted_id),
-            "subscription_end": end_date,
-        }})
-        # Generate ₹0 invoice
-        invoice_num = f"INV-FREE-{str(sub_result.inserted_id)[-6:].upper()}"
-        db.invoices.insert_one({
-            "invoice_number":  invoice_num,
-            "subscription_id": str(sub_result.inserted_id),
-            "merchant_id":     str(m["_id"]),
-            "store_id":        store_id,
-            "plan":            plans_map[plan]["label"],
-            "base_price":      price,
-            "discount_value":  discount_value,
-            "gst_amount":      gst_amt,
-            "total":           0,
-            "status":          "paid",
-            "pay_mode":        "free",
-            "created_at":      datetime.utcnow(),
-        })
-        return {
-            "ok":              True,
-            "pay_mode":        "free",
-            "subscription_id": str(sub_result.inserted_id),
-            "razorpay_order_id": None,
-            "razorpay_key":    None,
-            "amount":          0,
-            "amount_display":  0,
-            "plan_label":      plans_map[plan]["label"],
-            "from_date":       from_date_str,
-            "end_date":        end_date.strftime("%Y-%m-%d"),
-            "gst_percent":     gst,
-            "gst_amount":      gst_amt,
-            "base_price":      price,
-            "merchant_name":   m.get("name"),
-            "merchant_phone":  m.get("phone"),
-            "store_name":      store.get("store_name"),
-        }
 
     # ── Razorpay integration ──
     rp_configured = (

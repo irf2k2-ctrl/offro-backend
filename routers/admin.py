@@ -1,4 +1,3 @@
-from utils.image_utils import process_store_image
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
@@ -345,13 +344,9 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "points_per_scan": int(data.get("points_per_scan", 10)),
         "lat": data.get("lat",""), "lng": data.get("lng",""),
         "image": data.get("image") or None,
-        "image_thumb": None,
         "is_new_in_town": bool(data.get("is_new_in_town", False)),
         "created_at": datetime.utcnow()
     }
-    if store.get("image"):
-        imgs = process_store_image(store["image"])
-        store.update(imgs)
     result = db.stores.insert_one(store)
     sid = str(result.inserted_id)
     qr = generate_qr_base64(sid)
@@ -367,9 +362,7 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
         upd["points_per_scan"] = int(data["points_per_scan"])
     if "merchant_id" in data and data["merchant_id"] and data["merchant_id"].strip():
         upd["merchant_id"] = data["merchant_id"].strip()
-    if "image" in data and data["image"]:
-        imgs = process_store_image(data["image"])
-        upd.update(imgs)
+    if "image" in data and data["image"]: upd["image"] = data["image"]
     if "image2" in data and data.get("image2") is not None: upd["image2"] = data["image2"]
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])
     if "status" in data: upd["status"] = data["status"]
@@ -720,37 +713,3 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
         }}
     )
     return {"ok": True, "message": f"{voucher_type} voucher sent successfully"}
-
-# =================== STORE RATING (Admin) ===================
-@router.put("/stores/{store_id}/rating")
-def set_store_rating(store_id: str, data: dict, a=Depends(get_current_admin)):
-    """Admin can set/override a store's admin_rating."""
-    try:
-        sid = ObjectId(store_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid store_id")
-    admin_rating = float(data.get("admin_rating", 0))
-    db.stores.update_one({"_id": sid}, {"$set": {"admin_rating": admin_rating}})
-    return {"ok": True, "admin_rating": admin_rating}
-
-
-# =================== ALL RATINGS LIST ===================
-@router.get("/ratings")
-def list_all_ratings(a=Depends(get_current_admin)):
-    """Return all user ratings with store and user info."""
-    ratings = list(db.ratings.find().sort("created_at", -1).limit(500))
-    result = []
-    for r in ratings:
-        store = db.stores.find_one({"_id": ObjectId(r["store_id"])}) if r.get("store_id") else None
-        user  = db.users.find_one({"_id": ObjectId(r["user_id"])}) if r.get("user_id") else None
-        result.append({
-            "_id":        str(r["_id"]),
-            "store_id":   r.get("store_id"),
-            "store_name": store.get("store_name") if store else "—",
-            "user_id":    r.get("user_id"),
-            "user_name":  user.get("name") if user else "—",
-            "user_phone": user.get("phone") if user else "—",
-            "rating":     r.get("rating"),
-            "created_at": r["created_at"].strftime("%d %b %Y %H:%M") if r.get("created_at") else "",
-        })
-    return result
