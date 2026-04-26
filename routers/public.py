@@ -1,6 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 from database import db
 from bson import ObjectId
+from datetime import datetime
 
 router = APIRouter(tags=["Public"])
 
@@ -56,10 +57,8 @@ def get_store(store_id: str):
     try:
         store = db.stores.find_one({"_id": ObjectId(store_id)})
     except Exception:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Invalid store_id")
     if not store:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Store not found")
     deals = list(db.deals.find({"store_id": store_id, "status": "active"})) \
         if "deals" in db.list_collection_names() else []
@@ -111,7 +110,6 @@ def get_categories():
 @router.get("/terms/{type}")
 def get_terms_public(type: str):
     if type not in ("merchant", "user"):
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="type must be merchant or user")
     doc = db.terms.find_one({"type": type}) or {}
     return {"type": type, "content": doc.get("content", "")}
@@ -315,8 +313,6 @@ kyc@localsaver.in"""
 @router.post("/stores/{store_id}/rate")
 def rate_store(store_id: str, data: dict, request: Request):
     """User rates a store (1-5 stars). Requires user token in Authorization header."""
-    from fastapi import Request as Req
-    from datetime import datetime
     # Authenticate user
     token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
     if not token:
@@ -379,7 +375,6 @@ def get_my_rating(store_id: str, request: Request):
 
 @router.post("/discount/validate")
 def validate_discount(body: dict):
-    from fastapi import HTTPException
     from datetime import datetime
     code = (body.get("code","")).strip().upper()
     if not code:

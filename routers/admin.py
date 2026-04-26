@@ -728,7 +728,6 @@ def set_store_rating(store_id: str, data: dict, a=Depends(get_current_admin)):
     try:
         sid = ObjectId(store_id)
     except Exception:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Invalid store_id")
     admin_rating = float(data.get("admin_rating", 0))
     db.stores.update_one({"_id": sid}, {"$set": {"admin_rating": admin_rating}})
