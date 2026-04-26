@@ -11,52 +11,6 @@ import uuid, qrcode, io, base64, hmac, hashlib
 router = APIRouter(tags=["MerchantApp"])
 
 import os as _os
-import socket as _socket
-import requests as _req_module
-import urllib3
-
-# ── Force IPv4 + bypass DNS for Razorpay (Railway blocks IPv6 / has DNS issues) ──
-_RZP_HOST = "api.razorpay.com"
-_RZP_IPS  = ["13.235.137.113", "15.206.107.5"]   # Razorpay AWS ap-south-1 IPs
-
-_orig_getaddrinfo = _socket.getaddrinfo
-def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    """Force IPv4 for all DNS lookups — Railway doesn't support outbound IPv6."""
-    return _orig_getaddrinfo(host, port, _socket.AF_INET, type, proto, flags)
-_socket.getaddrinfo = _ipv4_only_getaddrinfo
-
-def _razorpay_request(method: str, path: str, auth: tuple, json_data: dict, timeout: int = 8):
-    """
-    Make a request to Razorpay, trying each known IP directly if DNS fails.
-    Uses Host header to satisfy SNI/TLS verification.
-    """
-    last_err = None
-    urls_to_try = [
-        f"https://{_RZP_HOST}{path}",          # normal DNS first
-        f"https://{_RZP_IPS[0]}{path}",        # fallback: direct IP 1
-        f"https://{_RZP_IPS[1]}{path}",        # fallback: direct IP 2
-    ]
-    for url in urls_to_try:
-        try:
-            headers = {}
-            # When using IP directly, set Host header for SNI
-            if url.startswith(f"https://{_RZP_IPS[0]}") or url.startswith(f"https://{_RZP_IPS[1]}"):
-                headers["Host"] = _RZP_HOST
-                resp = _req_module.request(
-                    method, url, auth=auth, json=json_data,
-                    headers=headers, timeout=timeout, verify=False
-                )
-            else:
-                resp = _req_module.request(
-                    method, url, auth=auth, json=json_data, timeout=timeout
-                )
-            resp.raise_for_status()
-            return resp
-        except Exception as e:
-            last_err = e
-            continue
-    raise last_err
-
 RAZORPAY_KEY_ID     = _os.getenv("RAZORPAY_KEY_ID",     "rzp_live_SdiI6kcuZzZjsl")
 RAZORPAY_KEY_SECRET = _os.getenv("RAZORPAY_KEY_SECRET", "3JzhKnKuGkhCrelaUgCaFfQr")
 
@@ -102,14 +56,7 @@ def merchant_register(data: dict):
     area  = data.get("area", "").strip()
     if not name or not phone:
         raise HTTPException(400, "Name and phone are required")
-    # Normalize phone — strip leading + to store consistently
-    phone_digits = phone.lstrip("+")
-    # Check for existing phone in any format
-    existing = (db.merchants.find_one({"phone": phone}) or
-                db.merchants.find_one({"phone": "+" + phone_digits}) or
-                db.merchants.find_one({"phone": phone_digits}) or
-                db.merchants.find_one({"phone": {"$regex": phone_digits[-10:] + "$"}}))
-    if existing:
+    if db.merchants.find_one({"phone": phone}):
         raise HTTPException(400, "Phone already registered. Please login.")
     merchant = {
         "name": name, "phone": phone,
@@ -124,15 +71,7 @@ def merchant_register(data: dict):
 @router.post("/login")
 def merchant_login(data: dict):
     phone = str(data.get("phone", "")).strip()
-    # Normalize phone: strip leading + and spaces, try multiple formats
-    def normalize(p):
-        return p.strip().lstrip("+").lstrip("0")
-    phone_norm = normalize(phone)
-    # Try exact match first, then normalized variants
-    m = (db.merchants.find_one({"phone": phone}) or
-         db.merchants.find_one({"phone": "+" + phone_norm}) or
-         db.merchants.find_one({"phone": phone_norm}) or
-         db.merchants.find_one({"phone": {"$regex": phone_norm[-10:] + "$"}}) )
+    m = db.merchants.find_one({"phone": phone})
     if not m: raise HTTPException(401, "Phone not registered. Please register first.")
     token = str(uuid.uuid4())
     db.merchants.update_one({"_id": m["_id"]}, {"$set": {"token": token}})
@@ -171,15 +110,8 @@ def my_stores(m=Depends(get_merchant)):
                 sub_end_str = sub_end.strftime("%d %b %Y")
             else:
                 sub_end_str = str(sub_end)
-        # Count active deals for this store
-        sid = str(s["_id"])
-        deal_count = db.deals.count_documents({"store_id": sid, "status": "active"})             if "deals" in db.list_collection_names() else 0
-        # Check if store has a paid subscription (to prevent re-subscribe when inactive)
-        paid_sub = db.subscriptions.find_one(
-            {"store_id": sid, "status": {"$in": ["paid", "active"]}})
-        has_paid_sub = paid_sub is not None
         result.append({
-            "_id": sid,
+            "_id": str(s["_id"]),
             "store_name":      s.get("store_name"),
             "category":        s.get("category", ""),
             "city":            s.get("city", ""),
@@ -193,8 +125,12 @@ def my_stores(m=Depends(get_merchant)):
             "is_new_in_town":  s.get("is_new_in_town", False),
             "qr_code":         s.get("qr_code", ""),
             "image":           s.get("image") or "",
-            "deal_count":      deal_count,
-            "has_paid_sub":    has_paid_sub,
+            "image2":          s.get("image2") or "",
+            "logo":            s.get("logo") or "",
+            "about":           s.get("about", ""),
+            "state":           s.get("state", ""),
+            "lat":             s.get("lat", ""),
+            "lng":             s.get("lng", ""),
         })
     return result
 
@@ -215,6 +151,10 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "points_per_scan": 10,
         "lat":  data.get("lat", ""),   "lng": data.get("lng", ""),
         "image":        data.get("image") or None,
+        "image2":       data.get("image2") or None,
+        "logo":         data.get("logo") or None,
+        "about":        data.get("about", ""),
+        "state":        data.get("state", ""),
         "is_new_in_town": False,
         "created_at":   datetime.utcnow(),
     }
@@ -229,8 +169,10 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
 def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
     if not store: raise HTTPException(404, "Store not found")
-    upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng"] if data.get(f) is not None}
+    upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng","about","state"] if data.get(f) is not None}
     if data.get("image"): upd["image"] = data["image"]
+    if data.get("image2"): upd["image2"] = data["image2"]
+    if data.get("logo"): upd["logo"] = data["logo"]
     if upd: db.stores.update_one({"_id": ObjectId(sid)}, {"$set": upd})
     return {"message": "Store updated"}
 
@@ -318,28 +260,29 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     pay_mode    = "manual"   # fallback: admin confirms payment manually
 
     if rp_configured:
+        import requests as req
         try:
-            rp_res = _razorpay_request(
-                "POST", "/v1/orders",
+            rp_res = req.post(
+                "https://api.razorpay.com/v1/orders",
                 auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
-                json_data={"amount": total_paise, "currency": "INR",
-                           "receipt": f"OF_{store_id[:8]}_{plan}",
-                           "notes":   {"store_id": store_id, "plan": plan}},
-                timeout=8,
+                json={"amount": total_paise, "currency": "INR",
+                      "receipt": f"OF_{store_id[:8]}_{plan}",
+                      "notes":   {"store_id": store_id, "plan": plan}},
+                timeout=10,
             )
             try:
                 rp_data = rp_res.json()
             except Exception:
-                rp_data = {}
-            if "id" in rp_data:
-                rp_order_id = rp_data["id"]
-                pay_mode    = "razorpay"
-            else:
-                # Razorpay returned error — fall back to manual
-                pay_mode = "manual"
-        except Exception:
-            # All connection attempts failed — fall back to manual silently
-            pay_mode = "manual"
+                raise HTTPException(502, "Payment gateway returned invalid response")
+            if "id" not in rp_data:
+                err_desc = rp_data.get("error", {}).get("description", "Razorpay order creation failed")
+                raise HTTPException(502, err_desc)
+            rp_order_id = rp_data["id"]
+            pay_mode    = "razorpay"
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(502, f"Payment gateway error: {str(e)}")
 
     # Insert subscription record
     sub_doc = {
