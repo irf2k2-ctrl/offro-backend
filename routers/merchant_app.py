@@ -1,6 +1,7 @@
 """
 Merchant App Router — self-service portal
 """
+from utils.image_utils import process_store_image
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
@@ -215,9 +216,14 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "points_per_scan": 10,
         "lat":  data.get("lat", ""),   "lng": data.get("lng", ""),
         "image":        data.get("image") or None,
+        "image_thumb":  None,
         "is_new_in_town": False,
         "created_at":   datetime.utcnow(),
     }
+    # ── compress & thumbnail ──
+    if store.get("image"):
+        imgs = process_store_image(store["image"])
+        store.update(imgs)
     result = db.stores.insert_one(store)
     sid = str(result.inserted_id)
     qr_b64 = _qr(sid)
@@ -230,7 +236,9 @@ def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
     if not store: raise HTTPException(404, "Store not found")
     upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng"] if data.get(f) is not None}
-    if data.get("image"): upd["image"] = data["image"]
+    if data.get("image"):
+        imgs = process_store_image(data["image"])
+        upd.update(imgs)  # sets image + image_thumb
     if upd: db.stores.update_one({"_id": ObjectId(sid)}, {"$set": upd})
     return {"message": "Store updated"}
 

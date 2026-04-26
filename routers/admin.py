@@ -1,3 +1,4 @@
+from utils.image_utils import process_store_image
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
@@ -344,9 +345,13 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "points_per_scan": int(data.get("points_per_scan", 10)),
         "lat": data.get("lat",""), "lng": data.get("lng",""),
         "image": data.get("image") or None,
+        "image_thumb": None,
         "is_new_in_town": bool(data.get("is_new_in_town", False)),
         "created_at": datetime.utcnow()
     }
+    if store.get("image"):
+        imgs = process_store_image(store["image"])
+        store.update(imgs)
     result = db.stores.insert_one(store)
     sid = str(result.inserted_id)
     qr = generate_qr_base64(sid)
@@ -362,7 +367,9 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
         upd["points_per_scan"] = int(data["points_per_scan"])
     if "merchant_id" in data and data["merchant_id"] and data["merchant_id"].strip():
         upd["merchant_id"] = data["merchant_id"].strip()
-    if "image" in data and data["image"]: upd["image"] = data["image"]
+    if "image" in data and data["image"]:
+        imgs = process_store_image(data["image"])
+        upd.update(imgs)
     if "image2" in data and data.get("image2") is not None: upd["image2"] = data["image2"]
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])
     if "status" in data: upd["status"] = data["status"]
