@@ -819,12 +819,29 @@ async function loadStats(){
 
 // ===== CATEGORIES =====
 async function loadCategories(){
-  try{let r=await fetch("/admin/categories",{credentials:"include"});if(r.ok)categoriesList=await r.json();}catch{}
+  try{
+    let r=await fetch("/admin/categories",{credentials:"include"});
+    if(r.ok){
+      categoriesList=await r.json();
+      // If empty, auto-seed defaults silently
+      if(categoriesList.length===0) await seedDefaultCategories(true);
+    }
+  }catch{}
+}
+async function seedDefaultCategories(silent=false){
+  const defaults=["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Spa","Fashion","Other"];
+  for(const name of defaults){
+    await fetch("/admin/categories",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name}),credentials:"include"});
+  }
+  let r=await fetch("/admin/categories",{credentials:"include"});
+  if(r.ok){categoriesList=await r.json();renderCategories();}
+  if(!silent) alert("Default categories restored!");
+});if(r.ok)categoriesList=await r.json();}catch{}
 }
 function renderCategories(){
   let html=categoriesList.length
     ? categoriesList.map(c=>`<span class="cat-chip">${c}<button onclick="deleteCategory('${c}')" title="Delete">×</button></span>`).join("")
-    : `<span style="color:var(--muted);">No categories yet.</span>`;
+    : `<span style="color:var(--muted);">No categories yet. Add one above or <a href="#" onclick="seedDefaultCategories()">restore defaults</a>.</span>`;
   document.getElementById("categories_list").innerHTML=html;
 }
 async function addCategory(){
@@ -871,7 +888,7 @@ function renderPlans(){
   document.getElementById("plans_editor").innerHTML=html;
 }
 async function savePricing(){
-  let gst=parseFloat(document.getElementById("gst_input").value)||18;
+  let gst_raw=document.getElementById("gst_input").value; let gst=(gst_raw===""||gst_raw===null)?18:parseFloat(gst_raw);
   let rate=parseFloat(document.getElementById("conversion_rate_input").value)||0.10;
   let minW=parseInt(document.getElementById("min_withdraw_input").value)||200;
   let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
