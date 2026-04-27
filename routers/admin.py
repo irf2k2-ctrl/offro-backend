@@ -241,6 +241,7 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "merchant_id":    mid,
         "about":          s.get("about", ""),
         "logo":           s.get("logo") or "",
+        "image2":         s.get("store_image2") or s.get("image2") or "",
     }
 
 def _fmt_store(s):
@@ -352,6 +353,55 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     db.stores.update_one({"_id": result.inserted_id}, {"$set": {"qr_code": qr}})
     return {"message": "Store created", "store_id": sid, "qr_code": qr}
 
+@router.get("/stores/slim")
+def get_stores_slim(a=Depends(get_current_admin)):
+    """Lightweight store list for ratings — no images, no heavy data."""
+    stores = list(db.stores.find({}, {
+        "_id":1,"store_name":1,"category":1,"city":1,"area":1,
+        "rating":1,"admin_rating":1,"user_rating":1,"rating_count":1,"status":1
+    }))
+    return [{
+        "_id": str(s["_id"]),
+        "store_name": s.get("store_name",""),
+        "category": s.get("category",""),
+        "city": s.get("city",""),
+        "area": s.get("area",""),
+        "rating": s.get("admin_rating") or s.get("rating") or 0,
+        "admin_rating": s.get("admin_rating",0),
+        "user_rating": s.get("user_rating",0),
+        "rating_count": s.get("rating_count",0),
+        "status": s.get("status","active"),
+    } for s in stores]
+
+@router.get("/stores/{id}")
+def get_store_detail(id: str, a=Depends(get_current_admin)):
+    """Get full store detail including image2 — used by edit form."""
+    try:
+        s = db.stores.find_one({"_id": ObjectId(id)})
+    except Exception:
+        raise HTTPException(404, "Not found")
+    if not s: raise HTTPException(404, "Not found")
+    return {
+        "_id":            str(s["_id"]),
+        "store_name":     s.get("store_name", ""),
+        "category":       s.get("category", ""),
+        "city":           s.get("city", ""),
+        "state":          s.get("state", ""),
+        "area":           s.get("area", ""),
+        "address":        s.get("address", ""),
+        "phone":          s.get("phone", ""),
+        "lat":            s.get("lat", ""),
+        "lng":            s.get("lng", ""),
+        "about":          s.get("about", ""),
+        "points_per_scan":s.get("points_per_scan", 0),
+        "visit_points":   s.get("visit_points", 0),
+        "image":          s.get("image") or "",
+        "image2":         s.get("store_image2") or s.get("image2") or "",
+        "is_new_in_town": s.get("is_new_in_town", False),
+        "status":         s.get("status", "active"),
+        "merchant_id":    s.get("merchant_id", ""),
+    }
+
 @router.put("/stores/{id}")
 def update_store(id: str, data: dict, a=Depends(get_current_admin)):
     """Update any store field — used by admin dashboard Edit Store form."""
@@ -364,9 +414,11 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
         upd["visit_points"] = int(data["visit_points"])
     if "merchant_id" in data and data["merchant_id"] and data["merchant_id"].strip():
         upd["merchant_id"] = data["merchant_id"].strip()
-    # Accept image — can be a URL or base64 data URI
-    if "image" in data:
-        upd["image"] = data["image"] or ""
+    # Accept image — only update if a new value is explicitly provided (not null/empty)
+    if data.get("image"):          # only overwrite if new image sent
+        upd["image"] = data["image"]
+    if data.get("image2"):         # save image2 as store_image2 (matches public.py field name)
+        upd["store_image2"] = data["image2"]
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])
     if "status" in data: upd["status"] = data["status"]
     if upd: db.stores.update_one({"_id": ObjectId(id)}, {"$set": upd})
@@ -532,7 +584,7 @@ def list_merchant_transactions(a=Depends(get_current_admin)):
             "razorpay_payment_id": inv.get("razorpay_payment_id", ""),
             "from_date":     fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
             "end_date":      ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
-            "created_at":    inv["created_at"].strftime("%d %b %Y %H:%M") if inv.get("created_at") else "",
+            "created_at":    (inv["created_at"] + timedelta(hours=5,minutes=30)).strftime("%d %b %Y %H:%M IST") if inv.get("created_at") else "",
         })
     return result
 

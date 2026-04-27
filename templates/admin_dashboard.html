@@ -291,7 +291,7 @@ tr:hover td{background:#f7faf8;}
       <div style="overflow-x:auto;">
       <table class="table table-hover" style="min-width:900px;">
         <thead><tr>
-          <th>Date</th><th>Invoice No</th><th>Merchant</th><th>Phone</th>
+          <th>Date (IST)</th><th>Invoice No</th><th>Merchant</th><th>Phone</th>
           <th>Store</th><th>Plan</th><th>Base</th><th>GST</th><th>Total</th><th>Payment ID</th>
         </tr></thead>
         <tbody id="txn_body"></tbody>
@@ -475,12 +475,12 @@ tr:hover td{background:#f7faf8;}
             <input id="store_lng" class="form-control" placeholder="78.4867"></div>
           <div class="col-12"><label class="form-label">Image 1 — Main Card Photo</label>
             <input id="store_image" class="form-control" type="file" accept="image/*" onchange="previewImage(1)">
-            <img id="store_image_preview" src="" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
+            <img id="store_image_preview" src="" style="width:100%;height:120px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
             <input type="hidden" id="store_image_b64"></div>
           <div class="col-12"><label class="form-label">Image 2 — Gift Voucher / Gallery</label>
             <small class="text-muted d-block mb-1">Used as secondary image and as Gift Voucher banner in the app.</small>
             <input id="store_image2" class="form-control" type="file" accept="image/*" onchange="previewImage(2)">
-            <img id="store_image2_preview" src="" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
+            <img id="store_image2_preview" src="" style="width:100%;height:120px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
             <input type="hidden" id="store_image2_b64"></div>
           <div class="col-12">
             <div class="form-check">
@@ -1109,6 +1109,11 @@ async function openCreateStore(){
 }
 async function openEditStore(id){
   let s=allStores.find(x=>x._id===id);if(!s)return;
+  // Fetch full store detail to get image2 and all fields
+  try{
+    let dr=await fetch(`/admin/stores/${id}`,{credentials:"include"});
+    if(dr.ok){ let detail=await dr.json(); s=Object.assign({},s,detail); }
+  }catch(e){}
   editingStore=true;
   document.getElementById("storeModalTitle").innerText="Edit Store";
   document.getElementById("storeSubmitBtn").innerText="Save Changes";
@@ -1449,26 +1454,10 @@ async function loadRatings(forceRefresh=false) {
   try {
     if (!_ratingsCache || forceRefresh) {
       // Fetch stores (has admin_rating + avg rating)
-      let r = await fetch("/admin/stores", {credentials:"include"});
+      let r = await fetch("/admin/stores/slim", {credentials:"include"});
       _ratingsCache = await r.json();
     }
-    // Also fetch live user ratings from /admin/ratings endpoint
-    try {
-      let rr = await fetch("/admin/ratings", {credentials:"include"});
-      if (rr.ok) {
-        let userRatings = await rr.json();
-        // userRatings: [{store_id, avg_rating, count}] or [{store_id, rating}]
-        // Merge into _ratingsCache
-        _ratingsCache = _ratingsCache.map(s => {
-          let found = userRatings.find(u => u.store_id === (s._id||s.id) || u._id === (s._id||s.id));
-          if (found) {
-            s.rating = found.avg_rating || found.rating || s.rating;
-            s.rating_count = found.count || found.rating_count || s.rating_count || 0;
-          }
-          return s;
-        });
-      }
-    } catch(e2) { /* /admin/ratings may not exist, fallback to store data */ }
+    // Ratings already included in slim store data — no secondary fetch needed
     _renderRatings(_ratingsCache);
   } catch(e) { document.getElementById("ratings_table").innerHTML="<tr><td colspan='5' style='color:var(--danger)'>Error loading ratings</td></tr>"; }
 }

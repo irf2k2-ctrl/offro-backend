@@ -26,7 +26,15 @@ def get_stores(city: str = None, category: str = None):
         deal_summary = None
         if deals:
             d = deals[0]
-            deal_summary = f"{d.get('discount','')}% off — {d.get('title','')}"
+            disc = d.get("discount") or d.get("discount_percent")
+            try:
+                disc_val = int(float(str(disc))) if disc not in (None, "", "null") else None
+            except (ValueError, TypeError):
+                disc_val = None
+            if disc_val and disc_val > 0:
+                deal_summary = f"{disc_val}% off — {d.get('title','')}"
+            elif d.get("title"):
+                deal_summary = d.get("title","")
 
         # Use admin_rating if set, else raw rating
         admin_rating = s.get("admin_rating")
