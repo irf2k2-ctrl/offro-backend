@@ -28,6 +28,10 @@ def get_stores(city: str = None, category: str = None):
             d = deals[0]
             deal_summary = f"{d.get('discount','')}% off — {d.get('title','')}"
 
+        # Use admin_rating if set, else raw rating
+        admin_rating = s.get("admin_rating")
+        raw_rating   = s.get("rating", 0) or 0
+        display_rating = float(admin_rating) if admin_rating else float(raw_rating)
         result.append({
             "_id": store_id,
             "store_name": s.get("store_name"),
@@ -37,11 +41,14 @@ def get_stores(city: str = None, category: str = None):
             "address": s.get("address", ""),
             "phone": s.get("phone", ""),
             "image": s.get("image") or None,
+            "image2": s.get("store_image2") or None,
+            "images": s.get("images", []),
             "status": s.get("status", "active"),
             "visit_points": s.get("points_per_scan", 10),
             "points_per_scan": s.get("points_per_scan", 10),
             "latitude": s.get("lat") or None,
             "longitude": s.get("lng") or None,
+            "rating": display_rating,
             "offer":      deal_summary,
             "deal_count":    deal_count,
             "is_new_in_town": s.get("is_new_in_town", False),
@@ -79,9 +86,12 @@ def get_store(store_id: str):
         "address": store.get("address", ""),
         "phone": store.get("phone", ""),
         "image": store.get("image") or None,
+        "image2": store.get("store_image2") or None,
+        "images": store.get("images", []),
         "latitude": store.get("lat") or None,
         "longitude": store.get("lng") or None,
         "visit_points": store.get("points_per_scan", 10),
+        "rating": float(store.get("admin_rating") or store.get("rating") or 0),
         "deals": deals_list
     }
 
@@ -284,6 +294,72 @@ kyc@localsaver.in"""
 
 
 # =================== DISCOUNT VALIDATION (public) ===================
+
+# =================== USER RATINGS ===================
+from fastapi import Request as _Req
+
+def _get_user_optional(request: _Req):
+    token = request.cookies.get("user_token") or request.headers.get("Authorization","").replace("Bearer ","").strip()
+    if not token: return None
+    return db.users.find_one({"token": token})
+
+@router.post("/stores/{store_id}/rate")
+def rate_store(store_id: str, data: dict, request: _Req):
+    """User submits a rating (1-5) for a store. Computes running average."""
+    try:
+        from bson import ObjectId as ObjId
+        store = db.stores.find_one({"_id": ObjId(store_id)})
+    except Exception:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Invalid store id")
+    if not store:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    user = _get_user_optional(request)
+    user_id = str(user["_id"]) if user else None
+    new_r = float(data.get("rating", 0))
+    if not (1 <= new_r <= 5):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Rating must be 1-5")
+
+    # Store individual rating in ratings collection
+    if user_id:
+        db.ratings.update_one(
+            {"store_id": store_id, "user_id": user_id},
+            {"$set": {"store_id": store_id, "user_id": user_id, "rating": new_r}},
+            upsert=True
+        )
+
+    # Recompute average from ratings collection (skip if no documents)
+    all_ratings = list(db.ratings.find({"store_id": store_id}, {"rating": 1}))
+    if all_ratings:
+        avg = sum(r["rating"] for r in all_ratings) / len(all_ratings)
+        avg = round(avg, 1)
+    else:
+        avg = new_r
+
+    # Only update store rating if no admin_rating override
+    if not store.get("admin_rating"):
+        try:
+            from bson import ObjectId as ObjId2
+            db.stores.update_one({"_id": ObjId2(store_id)}, {"$set": {"rating": avg, "user_rating": avg}})
+        except Exception:
+            pass
+
+    return {"message": "Rating submitted", "avg_rating": avg, "rating": avg}
+
+
+@router.get("/stores/{store_id}/my-rating")
+def my_rating(store_id: str, request: _Req):
+    """Get the logged-in user's own rating for a store."""
+    user = _get_user_optional(request)
+    if not user:
+        return {"rating": None}
+    user_id = str(user["_id"])
+    doc = db.ratings.find_one({"store_id": store_id, "user_id": user_id})
+    return {"rating": doc["rating"] if doc else None}
+
 @router.post("/discount/validate")
 def validate_discount(body: dict):
     from fastapi import HTTPException
