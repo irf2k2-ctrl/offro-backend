@@ -836,7 +836,6 @@ async function seedDefaultCategories(silent=false){
   let r=await fetch("/admin/categories",{credentials:"include"});
   if(r.ok){categoriesList=await r.json();renderCategories();}
   if(!silent) alert("Default categories restored!");
-});if(r.ok)categoriesList=await r.json();}catch{}
 }
 function renderCategories(){
   let html=categoriesList.length
