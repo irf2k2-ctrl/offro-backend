@@ -178,6 +178,7 @@ def my_stores(m=Depends(get_merchant)):
             "is_new_in_town":  s.get("is_new_in_town", False),
             "qr_code":         s.get("qr_code", ""),
             "image":           s.get("image") or "",
+            "image2":          s.get("image2") or "",
             "deal_count":      deal_count,
             "has_paid_sub":    has_paid_sub,
         })
@@ -210,12 +211,45 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
     _log_tx(str(m["_id"]), "store_created", f"Store '{store_name}' created", meta={"store_id": sid})
     return {"store_id": sid, "qr_code": qr_b64, "message": "Store created. Subscribe to go live."}
 
+@router.get("/stores/{sid}")
+def get_merchant_store(sid: str, m=Depends(get_merchant)):
+    """Return full store detail including image2 — used by edit store screen."""
+    store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
+    if not store: raise HTTPException(404, "Store not found")
+    sub_end = store.get("subscription_end")
+    sub_end_str = sub_end.strftime("%d %b %Y") if isinstance(sub_end, datetime) else (str(sub_end) if sub_end else "")
+    deal_count = db.deals.count_documents({"store_id": sid, "status": "active"}) \
+        if "deals" in db.list_collection_names() else 0
+    paid_sub = db.subscriptions.find_one({"store_id": sid, "status": {"$in": ["paid", "active"]}})
+    return {
+        "_id":              sid,
+        "store_name":       store.get("store_name", ""),
+        "category":         store.get("category", ""),
+        "city":             store.get("city", ""),
+        "area":             store.get("area", ""),
+        "address":          store.get("address", ""),
+        "phone":            store.get("phone", ""),
+        "lat":              store.get("lat", ""),
+        "lng":              store.get("lng", ""),
+        "status":           store.get("status", "draft"),
+        "subscription_end": sub_end_str,
+        "subscription_plan": store.get("subscription_plan", ""),
+        "visit_points":     store.get("points_per_scan", 10),
+        "is_new_in_town":   store.get("is_new_in_town", False),
+        "qr_code":          store.get("qr_code", ""),
+        "image":            store.get("image") or "",
+        "image2":           store.get("image2") or "",
+        "deal_count":       deal_count,
+        "has_paid_sub":     paid_sub is not None,
+    }
+
 @router.put("/stores/{sid}")
 def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
     if not store: raise HTTPException(404, "Store not found")
     upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng"] if data.get(f) is not None}
     if data.get("image"): upd["image"] = data["image"]
+    if data.get("image2") is not None: upd["image2"] = data["image2"]  # image2 save support
     if upd: db.stores.update_one({"_id": ObjectId(sid)}, {"$set": upd})
     return {"message": "Store updated"}
 
