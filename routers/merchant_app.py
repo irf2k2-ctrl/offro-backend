@@ -460,6 +460,59 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
         "store_status":  "waiting_approval",
     }
 
+@router.post("/subscribe/free")
+def activate_free_subscription(data: dict, m=Depends(get_merchant)):
+    """Activate a 0-price subscription immediately (no payment gateway needed)."""
+    store_id       = data.get("store_id")
+    subscription_id = data.get("subscription_id")
+    if not store_id or not subscription_id:
+        raise HTTPException(400, "store_id and subscription_id required")
+
+    sub = db.subscriptions.find_one({"_id": ObjectId(subscription_id), "status": "pending"})
+    if not sub:
+        raise HTTPException(404, "Subscription not found")
+
+    now = datetime.utcnow()
+    db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {
+        "status": "paid",
+        "paid_at": now,
+        "free_activation": True,
+    }})
+    db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {
+        "status":             "waiting_approval",
+        "subscription_plan":  sub["plan"],
+        "subscription_start": sub["from_date"],
+        "subscription_end":   sub["end_date"],
+    }})
+
+    invoice_no = f"LS-FREE-{now.strftime('%Y%m%d')}-{str(sub['_id'])[-6:].upper()}"
+    store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
+    db.invoices.insert_one({
+        "invoice_no":    invoice_no,
+        "merchant_id":   str(m["_id"]),
+        "merchant_name": m.get("name"),
+        "merchant_phone": m.get("phone"),
+        "store_id":      store_id,
+        "store_name":    store_doc.get("store_name", ""),
+        "plan":          sub["plan"],
+        "base_price":    0,
+        "gst":           0,
+        "total":         0,
+        "from_date":     sub["from_date"],
+        "end_date":      sub["end_date"],
+        "created_at":    now,
+    })
+    _log_tx(str(m["_id"]), "subscription",
+            f"Free plan activated for '{store_doc.get('store_name','')}' — {sub['plan']}",
+            amount=0,
+            meta={"store_id": store_id, "plan": sub["plan"]})
+
+    return {
+        "message":       "✅ Free subscription activated! Store pending admin approval.",
+        "invoice_no":    invoice_no,
+        "store_status":  "waiting_approval",
+    }
+
 # ───────────── invoices ─────────────
 
 @router.get("/invoices")

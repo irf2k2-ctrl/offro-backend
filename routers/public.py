@@ -100,6 +100,7 @@ def get_store(store_id: str):
         "longitude": store.get("lng") or None,
         "visit_points": store.get("points_per_scan", 10),
         "rating": float(store.get("admin_rating") or store.get("rating") or 0),
+        "about":       store.get("about") or store.get("description") or "",
         "deals": deals_list
     }
 
