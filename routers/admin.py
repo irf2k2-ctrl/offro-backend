@@ -282,8 +282,18 @@ def _fmt_store(s):
 
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
-    # Exclude large base64 image fields from list for performance
-    stores = list(db.stores.find({}))
+    global _store_cache
+    now_ts = _time.time()
+    if _store_cache["data"] is not None and (now_ts - _store_cache["ts"]) < _STORE_CACHE_TTL:
+        return _store_cache["data"]
+
+    # Exclude large base64 image fields from list view — fetch them only on edit (GET /stores/{id})
+    stores = list(db.stores.find({}, {
+        "image": 0,      # base64 can be 100-500KB per store
+        "store_image2": 0,
+        "image2": 0,
+        "qr_code": 0,    # also large base64
+    }))
     if not stores:
         return []
     
@@ -321,10 +331,14 @@ def list_stores(a=Depends(get_current_admin)):
     for m in db.merchants.find({"_id": {"$in": merch_obj_ids}}, {"name": 1, "phone": 1}):
         merchants[str(m["_id"])] = m
     
-    return [_fmt_store_fast(s, sub_map, deal_map, merchants) for s in stores]
+    result = [_fmt_store_fast(s, sub_map, deal_map, merchants) for s in stores]
+    _store_cache["data"] = result
+    _store_cache["ts"] = _time.time()
+    return result
 
 @router.post("/stores")
 def create_store(data: dict, a=Depends(get_current_admin)):
+    global _store_cache; _store_cache["data"] = None
     mid = data.get("merchant_id","").strip()
     name = data.get("store_name","").strip()
     if not mid: raise HTTPException(400, "merchant_id required")
@@ -441,11 +455,13 @@ def set_store_rating(id: str, data: dict, a=Depends(get_current_admin)):
 
 @router.put("/stores/{id}/approve")
 def approve_store(id: str, a=Depends(get_current_admin)):
+    global _store_cache; _store_cache["data"] = None
     db.stores.update_one({"_id": ObjectId(id)}, {"$set": {"status": "active"}})
     return {"message": "Store approved and live"}
 
 @router.put("/stores/{id}/status")
 def toggle_store(id: str, a=Depends(get_current_admin)):
+    global _store_cache; _store_cache["data"] = None
     s = db.stores.find_one({"_id": ObjectId(id)})
     if not s: raise HTTPException(404, "Not found")
     ns = "inactive" if s.get("status") == "active" else "active"
@@ -454,6 +470,7 @@ def toggle_store(id: str, a=Depends(get_current_admin)):
 
 @router.delete("/stores/{id}")
 def delete_store(id: str, a=Depends(get_current_admin)):
+    global _store_cache; _store_cache["data"] = None
     db.stores.delete_one({"_id": ObjectId(id)})
     return {"message": "Deleted"}
 
