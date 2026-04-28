@@ -4,6 +4,11 @@ from database import db
 from bson import ObjectId
 from datetime import datetime
 import uuid, qrcode, io, base64
+import time as _time
+
+# In-memory cache for /stores list (15-second TTL)
+_store_cache = {"data": None, "ts": 0.0}
+_STORE_CACHE_TTL = 15
 
 router = APIRouter(tags=["Admin"])
 
@@ -286,13 +291,12 @@ def list_stores(a=Depends(get_current_admin)):
     now_ts = _time.time()
     if _store_cache["data"] is not None and (now_ts - _store_cache["ts"]) < _STORE_CACHE_TTL:
         return _store_cache["data"]
-
-    # Exclude large base64 image fields from list view — fetch them only on edit (GET /stores/{id})
+    # Exclude large base64 image fields from list for performance
     stores = list(db.stores.find({}, {
-        "image": 0,      # base64 can be 100-500KB per store
+        "image": 0,
         "store_image2": 0,
         "image2": 0,
-        "qr_code": 0,    # also large base64
+        "qr_code": 0,
     }))
     if not stores:
         return []
@@ -418,6 +422,7 @@ def get_store_detail(id: str, a=Depends(get_current_admin)):
 
 @router.put("/stores/{id}")
 def update_store(id: str, data: dict, a=Depends(get_current_admin)):
+    global _store_cache; _store_cache["data"] = None
     """Update any store field — used by admin dashboard Edit Store form."""
     store = db.stores.find_one({"_id": ObjectId(id)})
     if not store: raise HTTPException(404, "Not found")
@@ -816,6 +821,7 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             "text":        v.get("text", ""),
             "validity":    v.get("validity", ""),
             "logo":        v.get("logo", ""),
+            "store_id":    v.get("store_id", ""),
             "merchant_id": v.get("merchant_id", ""),
             "is_active":   v.get("is_active", True),
             "created_at":  str(v.get("created_at", ""))[:10],
@@ -828,12 +834,22 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
     text = (data.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "Offer text is required")
+    store_id    = (data.get("store_id") or "").strip()
+    merchant_id = (data.get("merchant_id") or "").strip()
+    logo = (data.get("logo") or "").strip()
+    if not logo and store_id:
+        try:
+            s = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_image2":1,"image2":1})
+            if s:
+                logo = s.get("store_image2") or s.get("image2") or ""
+        except: pass
     doc = {
         "title":       (data.get("title") or "").strip(),
         "text":        text,
         "validity":    (data.get("validity") or "").strip(),
-        "logo":        (data.get("logo") or "").strip(),
-        "merchant_id": (data.get("merchant_id") or "").strip(),
+        "logo":        logo,
+        "store_id":    store_id,
+        "merchant_id": merchant_id,
         "is_active":   bool(data.get("is_active", True)),
         "created_at":  datetime.utcnow(),
     }
@@ -844,9 +860,15 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
 def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
     """Update an existing gift voucher."""
     upd = {}
-    for field in ["title", "text", "validity", "logo", "merchant_id"]:
+    for field in ["title", "text", "validity", "logo", "merchant_id", "store_id"]:
         if field in data:
             upd[field] = (data[field] or "").strip()
+    if "store_id" in upd and upd["store_id"] and "logo" not in upd:
+        try:
+            s = db.stores.find_one({"_id": ObjectId(upd["store_id"])}, {"store_image2":1,"image2":1})
+            if s:
+                upd["logo"] = s.get("store_image2") or s.get("image2") or ""
+        except: pass
     if "is_active" in data:
         upd["is_active"] = bool(data["is_active"])
     if not upd:
