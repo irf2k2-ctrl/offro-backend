@@ -887,7 +887,7 @@ function renderPlans(){
   document.getElementById("plans_editor").innerHTML=html;
 }
 async function savePricing(){
-  let gst_raw=document.getElementById("gst_input").value; let gst=(gst_raw===""||gst_raw===null)?18:parseFloat(gst_raw);
+  let gst_raw=document.getElementById("gst_input").value; let gst=(gst_raw===""||gst_raw===null)?0:parseFloat(gst_raw);
   let rate=parseFloat(document.getElementById("conversion_rate_input").value)||0.10;
   let minW=parseInt(document.getElementById("min_withdraw_input").value)||200;
   let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
