@@ -197,6 +197,7 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "area":          data.get("area") or m.get("area", ""),
         "address":       data.get("address", ""),
         "phone":         data.get("phone") or m.get("phone", ""),
+        "about":         data.get("about", ""),
         "status":        "draft",
         "points_per_scan": 10,
         "lat":  data.get("lat", ""),   "lng": data.get("lng", ""),
@@ -239,6 +240,7 @@ def get_merchant_store(sid: str, m=Depends(get_merchant)):
         "qr_code":          store.get("qr_code", ""),
         "image":            store.get("image") or "",
         "image2":           store.get("image2") or "",
+        "about":            store.get("about") or "",
         "deal_count":       deal_count,
         "has_paid_sub":     paid_sub is not None,
     }
@@ -247,7 +249,7 @@ def get_merchant_store(sid: str, m=Depends(get_merchant)):
 def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
     if not store: raise HTTPException(404, "Store not found")
-    upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng"] if data.get(f) is not None}
+    upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng","about"] if data.get(f) is not None}
     if data.get("image"): upd["image"] = data["image"]
     if data.get("image2") is not None: upd["image2"] = data["image2"]  # image2 save support
     if upd: db.stores.update_one({"_id": ObjectId(sid)}, {"$set": upd})

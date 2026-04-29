@@ -293,10 +293,8 @@ def list_stores(a=Depends(get_current_admin)):
         return _store_cache["data"]
     # Exclude large base64 image fields from list for performance
     stores = list(db.stores.find({}, {
-        "image": 0,
-        "store_image2": 0,
-        "image2": 0,
-        "qr_code": 0,
+        "store_image2": 0,  # heavy base64 — loaded separately in edit form
+        "qr_code": 0,       # always base64 — loaded separately in detail view
     }))
     if not stores:
         return []
