@@ -1070,7 +1070,7 @@ function filterStores(){
         </span>
       </td>
       <td style="white-space:nowrap;">
-        <button class="btn-o me-1" onclick="fetchAndShowQR('${s._id}',\`${s.store_name}\`)"><i class="fas fa-qrcode"></i></button>
+        <button class="btn-o me-1" onclick="showQR('${s._id}',\`${s.store_name}\`,\`${s.qr_code||""}\`)"><i class="fas fa-qrcode"></i></button>
         ${approveBtn}
         <button class="btn-o me-1" onclick="openEditStore('${s._id}')"><i class="fas fa-edit"></i></button>
         <button class="btn-w me-1" onclick="toggleStore('${s._id}')">${s.status==="active"?"Off":"On"}</button>
@@ -1192,22 +1192,8 @@ async function approveStore(id){
   await fetch(`/admin/stores/${id}/approve`,{method:"PUT",credentials:"include"});
   await loadStores(); await loadStats();
 }
-function async function fetchAndShowQR(sid,name){
-  showQR(sid,name,"loading");
-  try{
-    let r=await fetch(`/admin/stores/${sid}/qr`,{credentials:"include"});
-    let data=await r.json();
-    if(!data.qr_code){alert("QR not available for this store");qrModal.hide();return;}
-    showQR(sid,name,data.qr_code);
-  }catch(e){alert("Failed to load QR");qrModal.hide();}
-}
-showQR(sid,name,qr){
-  if(!qr||qr==="undefined"||qr===""){alert("QR not available");return;}
-  if(qr==="loading"){
-    document.getElementById("qrImage").src="";
-    document.getElementById("qrStoreName").innerText=name+" — loading...";
-    qrModal.show();return;
-  }
+function showQR(sid,name,qr){
+  if(!qr||qr==="undefined"){alert("QR not available");return;}
   document.getElementById("qrImage").src=qr;
   document.getElementById("qrStoreName").innerText=name;
   document.getElementById("qrDownload").href=qr;

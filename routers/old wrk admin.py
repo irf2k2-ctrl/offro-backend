@@ -338,18 +338,6 @@ def list_stores(a=Depends(get_current_admin)):
     _store_cache["ts"] = _time.time()
     return result
 
-
-@router.get("/stores/{store_id}/qr")
-def get_store_qr(store_id: str, a=Depends(get_current_admin)):
-    """Return qr_code for a store (excluded from slim list for performance)."""
-    try:
-        store = db.stores.find_one({"_id": ObjectId(store_id)}, {"qr_code": 1, "store_name": 1})
-    except Exception:
-        raise HTTPException(400, "Invalid store ID")
-    if not store:
-        raise HTTPException(404, "Store not found")
-    return {"store_id": store_id, "store_name": store.get("store_name",""), "qr_code": store.get("qr_code","")}
-
 @router.post("/stores")
 def create_store(data: dict, a=Depends(get_current_admin)):
     global _store_cache; _store_cache["data"] = None
@@ -522,16 +510,11 @@ def user_history(id: str, a=Depends(get_current_admin)):
     if "withdraw_requests" in cols:
         for w in db.withdraw_requests.find({"user_id": id}).sort("_id",-1):
             ts = w["_id"].generation_time.strftime("%d %b %Y %H:%M") if hasattr(w["_id"],"generation_time") else ""
-            history.append({"type":"debit","description":f"Withdrawal — {w.get('status','')}","points":w.get("points", w.get("amount",0)),"date":ts})
+            history.append({"type":"debit","description":f"Withdrawal — {w.get('status','')}","points":w.get("amount",0),"date":ts})
     if "point_adjustments" in cols:
         for adj in db.point_adjustments.find({"user_id": id}).sort("_id",-1):
             ts = adj["_id"].generation_time.strftime("%d %b %Y %H:%M") if hasattr(adj["_id"],"generation_time") else ""
             history.append({"type":adj.get("type","credit"),"description":f"Admin — {adj.get('note','')}","points":adj.get("points",0),"date":ts})
-    if "point_transactions" in cols:
-        for pt in db.point_transactions.find({"user_id": id}).sort("_id",-1):
-            ts = pt["_id"].generation_time.strftime("%d %b %Y %H:%M") if hasattr(pt["_id"],"generation_time") else ""
-            if "Gift Voucher" in pt.get("description",""):
-                history.append({"type":pt.get("type","debit"),"description":pt.get("description",""),"points":pt.get("points",0),"date":ts})
     history.sort(key=lambda x: x["date"], reverse=True)
     return {"user":{"name":u.get("name"),"phone":u.get("phone"),
         "visit_points":u.get("visit_points",0),"pool_points":u.get("pool_points",0),
