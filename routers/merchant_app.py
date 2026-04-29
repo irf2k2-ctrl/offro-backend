@@ -245,6 +245,17 @@ def get_merchant_store(sid: str, m=Depends(get_merchant)):
         "has_paid_sub":     paid_sub is not None,
     }
 
+@router.post("/stores/{sid}/reset-qr")
+def reset_store_qr(sid: str, m=Depends(get_merchant)):
+    """Regenerate QR code for a merchant store. Resets on every scan so stores always have a valid QR."""
+    store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
+    if not store:
+        raise HTTPException(404, "Store not found")
+    qr_b64 = _qr(sid)
+    db.stores.update_one({"_id": ObjectId(sid)}, {"$set": {"qr_code": qr_b64}})
+    return {"qr_code": qr_b64, "message": "QR code regenerated"}
+
+
 @router.put("/stores/{sid}")
 def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})

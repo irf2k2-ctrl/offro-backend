@@ -199,7 +199,7 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "phone":         data.get("phone") or m.get("phone", ""),
         "about":         data.get("about", ""),
         "status":        "draft",
-        "points_per_scan": 10,
+        "points_per_scan": 0,
         "lat":  data.get("lat", ""),   "lng": data.get("lng", ""),
         "image":        data.get("image") or None,
         "is_new_in_town": False,
