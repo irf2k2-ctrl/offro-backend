@@ -1192,22 +1192,18 @@ async function approveStore(id){
   await fetch(`/admin/stores/${id}/approve`,{method:"PUT",credentials:"include"});
   await loadStores(); await loadStats();
 }
-function async function fetchAndShowQR(sid,name){
-  showQR(sid,name,"loading");
+async function fetchAndShowQR(sid,name){
+  const btn=event&&event.target?event.target:null;
   try{
     let r=await fetch(`/admin/stores/${sid}/qr`,{credentials:"include"});
+    if(!r.ok){alert("QR not available");return;}
     let data=await r.json();
-    if(!data.qr_code){alert("QR not available for this store");qrModal.hide();return;}
+    if(!data.qr_code){alert("QR not generated for this store yet");return;}
     showQR(sid,name,data.qr_code);
-  }catch(e){alert("Failed to load QR");qrModal.hide();}
+  }catch(e){alert("Failed to load QR: "+e.message);}
 }
-showQR(sid,name,qr){
-  if(!qr||qr==="undefined"||qr===""){alert("QR not available");return;}
-  if(qr==="loading"){
-    document.getElementById("qrImage").src="";
-    document.getElementById("qrStoreName").innerText=name+" — loading...";
-    qrModal.show();return;
-  }
+function showQR(sid,name,qr){
+  if(!qr||qr==="undefined"){alert("QR not available");return;}
   document.getElementById("qrImage").src=qr;
   document.getElementById("qrStoreName").innerText=name;
   document.getElementById("qrDownload").href=qr;
