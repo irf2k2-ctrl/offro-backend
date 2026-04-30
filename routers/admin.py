@@ -338,18 +338,6 @@ def list_stores(a=Depends(get_current_admin)):
     _store_cache["ts"] = _time.time()
     return result
 
-
-@router.get("/stores/{store_id}/qr")
-def get_store_qr(store_id: str, a=Depends(get_current_admin)):
-    """Return qr_code for a store (excluded from slim list for performance)."""
-    try:
-        store = db.stores.find_one({"_id": ObjectId(store_id)}, {"qr_code": 1, "store_name": 1})
-    except Exception:
-        raise HTTPException(400, "Invalid store ID")
-    if not store:
-        raise HTTPException(404, "Store not found")
-    return {"store_id": store_id, "store_name": store.get("store_name",""), "qr_code": store.get("qr_code","")}
-
 @router.post("/stores")
 def create_store(data: dict, a=Depends(get_current_admin)):
     global _store_cache; _store_cache["data"] = None
@@ -522,16 +510,11 @@ def user_history(id: str, a=Depends(get_current_admin)):
     if "withdraw_requests" in cols:
         for w in db.withdraw_requests.find({"user_id": id}).sort("_id",-1):
             ts = w["_id"].generation_time.strftime("%d %b %Y %H:%M") if hasattr(w["_id"],"generation_time") else ""
-            history.append({"type":"debit","description":f"Withdrawal — {w.get('status','')}","points":w.get("points", w.get("amount",0)),"date":ts})
+            history.append({"type":"debit","description":f"Withdrawal — {w.get('status','')}","points":w.get("amount",0),"date":ts})
     if "point_adjustments" in cols:
         for adj in db.point_adjustments.find({"user_id": id}).sort("_id",-1):
             ts = adj["_id"].generation_time.strftime("%d %b %Y %H:%M") if hasattr(adj["_id"],"generation_time") else ""
             history.append({"type":adj.get("type","credit"),"description":f"Admin — {adj.get('note','')}","points":adj.get("points",0),"date":ts})
-    if "point_transactions" in cols:
-        for pt in db.point_transactions.find({"user_id": id}).sort("_id",-1):
-            ts = pt["_id"].generation_time.strftime("%d %b %Y %H:%M") if hasattr(pt["_id"],"generation_time") else ""
-            if "Gift Voucher" in pt.get("description",""):
-                history.append({"type":pt.get("type","debit"),"description":pt.get("description",""),"points":pt.get("points",0),"date":ts})
     history.sort(key=lambda x: x["date"], reverse=True)
     return {"user":{"name":u.get("name"),"phone":u.get("phone"),
         "visit_points":u.get("visit_points",0),"pool_points":u.get("pool_points",0),
@@ -607,8 +590,11 @@ def list_subscriptions(a=Depends(get_current_admin)):
 def list_merchant_transactions(a=Depends(get_current_admin)):
     """All payment transactions made by merchants (subscriptions + invoices)."""
     result = []
+    invoice_order_ids = set()
     for inv in db.invoices.find().sort("created_at", -1):
         fd = inv.get("from_date"); ed = inv.get("end_date")
+        rzp_order = inv.get("razorpay_order_id", "")
+        if rzp_order: invoice_order_ids.add(rzp_order)
         result.append({
             "invoice_no":    inv.get("invoice_no", ""),
             "merchant_name": inv.get("merchant_name", ""),
@@ -623,6 +609,32 @@ def list_merchant_transactions(a=Depends(get_current_admin)):
             "end_date":      ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
             "created_at":    (inv["created_at"] + timedelta(hours=5,minutes=30)).strftime("%d %b %Y %H:%M IST") if inv.get("created_at") else "",
         })
+    # Fallback: include paid subscriptions that have no invoice record (edge case: invoice insert failed)
+    for sub in db.subscriptions.find({"status": "paid"}).sort("paid_at", -1):
+        rzp_order = sub.get("razorpay_order_id", "")
+        if rzp_order and rzp_order in invoice_order_ids:
+            continue  # already covered by invoice record
+        if not sub.get("razorpay_payment_id"):
+            continue  # skip free/manual subs
+        # Look up merchant and store
+        merch = db.merchants.find_one({"_id": ObjectId(sub["merchant_id"])}) if sub.get("merchant_id") else None
+        store = db.stores.find_one({"_id": ObjectId(sub["store_id"])}) if sub.get("store_id") else None
+        paid_at = sub.get("paid_at") or sub.get("created_at")
+        result.append({
+            "invoice_no":    f"SUB-{str(sub['_id'])[-6:].upper()} (no invoice)",
+            "merchant_name": merch.get("name","") if merch else sub.get("merchant_id",""),
+            "merchant_phone":merch.get("phone","") if merch else "",
+            "store_name":    store.get("store_name","") if store else sub.get("store_id",""),
+            "plan":          sub.get("plan",""),
+            "base_price":    sub.get("price", sub.get("total",0)),
+            "gst":           sub.get("gst", 0),
+            "total":         sub.get("total", 0),
+            "razorpay_payment_id": sub.get("razorpay_payment_id",""),
+            "from_date":     sub.get("from_date",""),
+            "end_date":      sub.get("end_date",""),
+            "created_at":    ((paid_at + timedelta(hours=5,minutes=30)).strftime("%d %b %Y %H:%M IST") if isinstance(paid_at, datetime) else str(paid_at or "")),
+        })
+    result.sort(key=lambda x: x["created_at"], reverse=True)
     return result
 
 # ===================== POLICY MANAGEMENT =====================
@@ -778,36 +790,12 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
     user_id = req.get("user_id")
     points = int(req.get("points", req.get("amount", 200)))
     
-    # Deduct points from user now
-    user = db.users.find_one({"_id": ObjectId(user_id)})
-    if user:
-        pool = user.get("pool_points", 0)
-        visit = user.get("visit_points", 0)
-        remaining = points
-        new_pool = pool
-        new_visit = visit
-        if new_pool >= remaining:
-            new_pool -= remaining
-        else:
-            remaining -= new_pool
-            new_pool = 0
-            new_visit = max(0, new_visit - remaining)
-        db.users.update_one(
-            {"_id": ObjectId(user_id)},
-            {"$set": {
-                "visit_points": new_visit,
-                "pool_points": new_pool,
-                "pending_withdraw": False
-            }}
-        )
-        # Log transaction
-        db.point_transactions.insert_one({
-            "user_id": user_id,
-            "type": "debit",
-            "points": points,
-            "description": f"Gift Voucher Redeemed: {voucher_type} ₹{round(points/10,2)}",
-            "date": datetime.utcnow().strftime("%Y-%m-%d")
-        })
+    # Points were already deducted when user submitted withdraw request.
+    # On fulfill: only clear the pending_withdraw flag (no double-deduction).
+    db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"pending_withdraw": False}}
+    )
     
     # Update request as fulfilled
     db.withdraw_requests.update_one(

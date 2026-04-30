@@ -1545,11 +1545,10 @@ async function onGcStoreChange(storeId) {
   }
 }
 
-async function openGiftCardModal() {
+async async function openGiftCardModal() {
   // Load stores for store selector
-  if (!window.allStoresForVoucher) {
-    try { const r = await fetch("/admin/stores",{credentials:"include"}); window.allStoresForVoucher = await r.json(); } catch(e) { window.allStoresForVoucher = []; }
-  }
+  // Always refresh store list when opening modal
+  try { const r = await fetch("/admin/stores",{credentials:"include"}); window.allStoresForVoucher = await r.json(); } catch(e) { window.allStoresForVoucher = window.allStoresForVoucher||[]; }
   const storeSel = document.getElementById("gc_store");
   storeSel.innerHTML = `<option value="">None</option>` + (window.allStoresForVoucher||[]).map(s=>`<option value="${s._id}">${s.store_name||s._id}</option>`).join("");
   
@@ -1595,6 +1594,9 @@ function previewGcImage(input) {
 }
 
 async function saveGiftCard() {
+  const _saveBtn = document.querySelector("#gcModal .btn-p");
+  if (_saveBtn && _saveBtn.disabled) return;
+  if (_saveBtn) _saveBtn.disabled = true;
   const vid  = document.getElementById("gc_id").value;
   const text = document.getElementById("gc_text").value.trim();
   if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
@@ -1625,7 +1627,8 @@ async function saveGiftCard() {
     if (!res.ok) { const d = await res.json(); document.getElementById("gc_msg").innerText = d.detail||"Error"; return; }
     gcModalInst.hide();
     loadGiftCards();
-  } catch { document.getElementById("gc_msg").innerText = "Server error"; }
+  } catch(err) { document.getElementById("gc_msg").innerText = "Server error: "+(err.message||""); }
+  finally { const sb=document.querySelector("#gcModal .btn-p"); if(sb) sb.disabled=false; }
 }
 
 async function deleteGiftCard(id) {
