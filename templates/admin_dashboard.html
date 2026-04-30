@@ -1545,9 +1545,9 @@ async function onGcStoreChange(storeId) {
   }
 }
 
-async async function openGiftCardModal() {
+async function openGiftCardModal() {
   // Load stores for store selector
-  // Always refresh store list when opening modal
+  // Always refresh store list
   try { const r = await fetch("/admin/stores",{credentials:"include"}); window.allStoresForVoucher = await r.json(); } catch(e) { window.allStoresForVoucher = window.allStoresForVoucher||[]; }
   const storeSel = document.getElementById("gc_store");
   storeSel.innerHTML = `<option value="">None</option>` + (window.allStoresForVoucher||[]).map(s=>`<option value="${s._id}">${s.store_name||s._id}</option>`).join("");
