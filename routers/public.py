@@ -16,12 +16,20 @@ def get_stores(city: str = None, category: str = None):
 
     stores = list(db.stores.find(query))
     result = []
+    # Check collections once (not inside the loop — that was very slow)
+    cols = db.list_collection_names()
+    has_deals = "deals" in cols
+    # Pre-fetch ALL active deals for these stores in ONE query
+    store_ids = [str(s["_id"]) for s in stores]
+    all_deals = list(db.deals.find({"store_id": {"$in": store_ids}, "status": "active"})) if has_deals else []
+    deals_by_store: dict = {}
+    for d in all_deals:
+        sid = d.get("store_id","")
+        deals_by_store.setdefault(sid, []).append(d)
     for s in stores:
         # Get active deals for this store
         store_id = str(s["_id"])
-        cols = db.list_collection_names()
-        deals = list(db.deals.find({"store_id": store_id, "status": "active"})) \
-            if "deals" in cols else []
+        deals = deals_by_store.get(store_id, [])
         deal_count = len(deals)
         deal_summary = None
         if deals:
