@@ -98,12 +98,8 @@ tr:hover td{background:#f7faf8;}
 <div class="sidebar">
 <button class="sidebar-close-btn" onclick="closeSidebar()"><i class="fas fa-times"></i></button>
   <div class="sidebar-logo">
-    <svg viewBox="0 0 100 130" fill="none" width="32" height="38">
-      <path d="M50 10C30.1 10 14 26.1 14 46c0 26.5 36 74 36 74s36-47.5 36-74C86 26.1 69.9 10 50 10z" fill="#CDEBD6"/>
-      <circle cx="50" cy="44" r="18" fill="rgba(255,255,255,0.25)"/>
-      <text x="50" y="51" text-anchor="middle" font-size="20" font-weight="900" fill="white" font-family="Arial">%</text>
-    </svg>
-    <div class="sidebar-logo-text">Offr<span style="color:#CDEBD6;">O</span></div>
+    <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/fdde9d36c_442ce6b8e_boldlogowht.png" 
+         style="height:38px;width:auto;object-fit:contain;" alt="OffrO">
   </div>
   <div class="sidebar-sub">Admin Panel</div>
   <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
@@ -113,6 +109,8 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
   <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <a href="#" onclick="showSection('gift_cards',this)"><i class="fas fa-id-card fa-fw"></i> Gift Cards (App)</a>
+  <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Promo Sliders</a>
+  <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
@@ -190,6 +188,7 @@ tr:hover td{background:#f7faf8;}
       <thead><tr><th>Name</th><th>Phone</th><th>City</th><th>Area</th><th>Stores</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody id="merchants_table"></tbody>
     </table></div>
+    <div id="merchants_pagination" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--border);background:white;border-radius:0 0 12px 12px;"></div>
   </div>
 
   <!-- STORES -->
@@ -213,6 +212,7 @@ tr:hover td{background:#f7faf8;}
       <thead><tr><th>Store</th><th>Merchant</th><th>Category</th><th>City/Area</th><th>Pts</th><th>New?</th><th>Status</th><th>Deal</th><th>Subscription</th><th>Actions</th></tr></thead>
       <tbody id="stores_table"></tbody>
     </table></div>
+    <div id="stores_pagination" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--border);background:white;border-radius:0 0 12px 12px;"></div>
   </div>
 
   <!-- USERS -->
@@ -225,6 +225,7 @@ tr:hover td{background:#f7faf8;}
       <thead><tr><th>Name</th><th>Phone</th><th>City</th><th>Visit Pts</th><th>Pool Pts</th><th>Total</th><th>Scans</th><th>Registered</th><th>Actions</th></tr></thead>
       <tbody id="users_table"></tbody>
     </table></div>
+    <div id="users_pagination" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--border);background:white;border-radius:0 0 12px 12px;"></div>
   </div>
 
 
@@ -239,17 +240,104 @@ tr:hover td{background:#f7faf8;}
     </div>
     <button class="btn-p" onclick="openGiftCardModal()"><i class="fas fa-plus me-1"></i> Add Card</button>
   </div>
-  <div id="gift_cards_list" class="row g-3 mt-1"></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Logo</th><th>Title</th><th>Offer Text</th><th>Validity</th><th>Merchant</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="gift_cards_list"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- PROMO SLIDERS -->
+<div id="section-promo_sliders" class="section">
+  <div class="section-header">
+    <div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🖼️ Promo Sliders</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Banner images shown as a slideshow on the app home screen</div>
+    </div>
+    <button class="btn-p" onclick="openSliderModal()"><i class="fas fa-plus me-1"></i> Add Banner</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Preview</th><th>Title</th><th>Link / Action</th><th>Order</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="sliders_table"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- NOTIFICATIONS -->
+<div id="section-notifications" class="section">
+  <div class="section-header">
+    <div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🔔 Push Notifications</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Send notifications to all users or specific users</div>
+    </div>
+  </div>
+  <div class="row g-4">
+    <div class="col-md-5">
+      <div class="table-wrap" style="padding:22px;">
+        <div class="fw-bold mb-3" style="color:var(--primary);font-size:15px;">📤 Send New Notification</div>
+        <div class="mb-3">
+          <label class="form-label">Title *</label>
+          <input id="notif_title" class="form-control" placeholder="e.g. New deals near you!">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Message *</label>
+          <textarea id="notif_body" class="form-control" rows="3" placeholder="e.g. Check out today's exclusive offers from our merchants!"></textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Target</label>
+          <select id="notif_target" class="form-select" onchange="toggleNotifUser()">
+            <option value="all">All Users</option>
+            <option value="specific">Specific User (by phone)</option>
+          </select>
+        </div>
+        <div class="mb-3" id="notif_phone_row" style="display:none;">
+          <label class="form-label">Phone Number</label>
+          <input id="notif_phone" class="form-control" placeholder="e.g. 9876543210">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Image URL (optional)</label>
+          <input id="notif_image" class="form-control" placeholder="https://...">
+        </div>
+        <button class="btn-p" onclick="sendNotification()"><i class="fas fa-paper-plane me-1"></i> Send Notification</button>
+        <p id="notif_msg" class="mt-2" style="font-size:13px;"></p>
+      </div>
+    </div>
+    <div class="col-md-7">
+      <div class="section-header" style="margin-bottom:10px;">
+        <div class="fw-bold" style="color:var(--primary);font-size:15px;">📋 Sent Notifications</div>
+        <button class="btn-o" onclick="loadNotifications()"><i class="fas fa-sync"></i> Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Title</th><th>Message</th><th>Target</th><th>Sent At</th><th>Status</th></tr></thead>
+          <tbody id="notif_history"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="section-categories" class="section">
     <div class="page-title">Categories</div>
     <div class="table-wrap" style="padding:22px;">
-      <div class="d-flex gap-2 mb-4">
-        <input id="new_category" class="form-control" placeholder="Add category..." style="max-width:260px;">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">Add categories with emojis. Example: <strong>🍕 Pizza</strong> or <strong>💇 Salon</strong></p>
+      <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+        <div style="position:relative;">
+          <button type="button" id="emojiPickerBtn" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;cursor:pointer;z-index:2;padding:0;" onclick="toggleEmojiPicker()" title="Pick emoji">😊</button>
+          <input id="new_category" class="form-control" placeholder="e.g. 🍕 Pizza" style="max-width:280px;padding-left:38px;">
+        </div>
         <button class="btn-p" onclick="addCategory()">+ Add</button>
       </div>
-      <div id="categories_list"></div>
+      <!-- Quick emoji picker -->
+      <div id="emoji_picker" style="display:none;background:white;border:1px solid var(--border);border-radius:10px;padding:10px;max-width:360px;margin-bottom:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:600;">COMMON EMOJIS</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+          ${["🛍️","🍕","🍔","☕","💇","💊","👗","📱","🏪","🎁","💄","🥗","🍰","🧴","🍜","🎮","📚","🏋️","🐾","🚗","🏠","✂️","💍","🌸","🎵","🛒","🥩","🍺","🎂","🧹"].map(e=>`<span onclick="insertEmoji('${e}')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">${e}</span>`).join("")}
+        </div>
+      </div>
+      <div id="categories_list" style="margin-top:8px;"></div>
     </div>
   </div>
 
@@ -291,22 +379,27 @@ tr:hover td{background:#f7faf8;}
     <!-- Stats row -->
     <div class="row g-3 mb-3">
       <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_merchants">--</h3><p>Total Merchants</p></div></div>
-      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_subs" style="color:#198754">--</h3><p>Paid Invoices</p></div></div>
-      <div class="col-6 col-md-3"><div class="card-stat warn"><h3 id="txn_pending_subs">--</h3><p>Pending Payments</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_subs" style="color:#198754">--</h3><p>Paid / Free</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat warn"><h3 id="txn_pending_subs">--</h3><p>Truly Pending</p></div></div>
       <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_revenue" style="color:#198754">--</h3><p>Total Revenue</p></div></div>
     </div>
     <div class="table-wrap">
       <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <input id="txn_search" class="form-control" placeholder="Search merchant/store..." style="max-width:280px;" oninput="filterTxns()">
+        <input id="txn_search" class="form-control" placeholder="Search merchant/store..." style="max-width:240px;" oninput="filterTxns()">
+        <select id="txn_status_filter" class="form-select" style="max-width:150px;" onchange="filterTxns()">
+          <option value="">All</option>
+          <option value="paid">Paid / Invoiced</option>
+          <option value="pending">Pending Only</option>
+        </select>
         <span id="txn_total" style="font-size:13px;color:var(--muted);"></span>
         <button class="btn btn-sm" onclick="exportPaymentsPDF()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-pdf me-1"></i>PDF</button>
         <button class="btn btn-sm" onclick="exportPaymentsCSV()" style="background:#6c757d;color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-csv me-1"></i>CSV</button>
       </div>
       <div style="overflow-x:auto;">
-      <table class="table table-hover" style="min-width:900px;">
+      <table class="table table-hover" style="min-width:960px;">
         <thead><tr>
           <th>Date</th><th>Invoice No</th><th>Merchant</th><th>Phone</th>
-          <th>Store</th><th>Plan</th><th>Base</th><th>GST</th><th>Total</th><th>Payment ID</th>
+          <th>Store</th><th>Plan</th><th>Base</th><th>GST</th><th>Total</th><th>Status</th><th>Payment ID</th>
         </tr></thead>
         <tbody id="txn_body"></tbody>
       </table>
@@ -807,6 +900,8 @@ function showSection(name, el){
   if(name==="about") loadAbout();
   if(name==="ratings") loadRatings();
   if(name==="gift_cards") loadGiftCards();
+  if(name==="promo_sliders") loadSliders();
+  if(name==="notifications") loadNotifications();
 }
 
 // ===== STATS =====
@@ -854,7 +949,7 @@ let currentPlans=[];
 async function loadPricing(){
   let r=await fetch("/admin/pricing",{credentials:"include"});
   let d=await r.json();
-  document.getElementById("gst_input").value=d.gst_percent||18;
+  document.getElementById("gst_input").value=(d.gst_percent!=null?d.gst_percent:18);
   currentPlans=d.plans||[];
   let rate=d.conversion_rate||0.10;
   document.getElementById("conversion_rate_input").value=rate;
@@ -876,7 +971,7 @@ function renderPlans(){
   document.getElementById("plans_editor").innerHTML=html;
 }
 async function savePricing(){
-  let gst=parseFloat(document.getElementById("gst_input").value)||18;
+  let gstRaw=document.getElementById("gst_input").value; let gst=gstRaw===''||gstRaw===null?18:parseFloat(gstRaw);
   let rate=parseFloat(document.getElementById("conversion_rate_input").value)||0.10;
   let minW=parseInt(document.getElementById("min_withdraw_input").value)||200;
   let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
@@ -945,37 +1040,29 @@ async function saveTerms(type){
 
 // ===== MERCHANTS =====
 async async function loadMerchants() {
-    try {
-        let res = await fetch("/admin/merchants", { credentials:"include" });
-        merchantsList = await res.json();
-        let html = "";
-        merchantsList.forEach(m => {
-            html += `<tr>
-                <td>${m.name||"-"}</td>
-                <td>${m.phone||"-"}</td>
-                <td>${m.city||"-"}</td>
-                <td><span class="badge-${m.status||'inactive'}">${m.status||"inactive"}</span></td>
-                <td>
-                    <button class="btn btn-sm btn-warning me-1" onclick="toggleMerchant('${m._id}')">
-                        ${m.status==="active"?"Deactivate":"Activate"}
-                    </button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteMerchant('${m._id}')">Delete</button>
-                </td>
-            </tr>`;
-        });
-        document.getElementById("merchants_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No merchants</td></tr>";
-    } catch(e) { console.error(e); }
+  try {
+    let res = await fetch("/admin/merchants", {credentials:"include"});
+    merchantsList = await res.json();
+    populateCityFilter("merchant_city_filter", merchantsList, "city");
+    filterMerchants();
+  } catch(e) { console.error(e); }
 }
 function filterMerchants(){
   let city=document.getElementById("merchant_city_filter").value;
   let search=(document.getElementById("merchant_search")?.value||"").toLowerCase();
-  let f=merchantsList.filter(m=>{
+  _filteredMerchants=merchantsList.filter(m=>{
     let cm=!city||(m.city||"").toLowerCase()===city.toLowerCase();
     let sm=!search||(m.name||"").toLowerCase().includes(search)||(m.phone||"").includes(search);
     return cm&&sm;
   });
+  _merchantsPage=1;
+  renderMerchantsPage();
+}
+function renderMerchantsPage(){
+  let f=_filteredMerchants;
+  let pageData=f.slice((_merchantsPage-1)*PAGE_SIZE, _merchantsPage*PAGE_SIZE);
   let html="";
-  f.forEach(m=>{
+  pageData.forEach(m=>{
     html+=`<tr>
       <td><strong>${m.name||"-"}</strong></td><td>${m.phone||"-"}</td>
       <td>${m.city||"-"}</td><td>${m.area||"-"}</td>
@@ -988,7 +1075,9 @@ function filterMerchants(){
       </td></tr>`;
   });
   document.getElementById("merchants_table").innerHTML=html||`<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">No merchants</td></tr>`;
+  renderPagination("merchants_pagination", f.length, _merchantsPage, "goMerchPage");
 }
+
 function openEditMerchant(id){
   let m=merchantsList.find(x=>x._id===id);if(!m)return;
   document.getElementById("edit_merchant_id").value=id;
@@ -1025,46 +1114,54 @@ function filterStores(){
   let city=document.getElementById("store_city_filter").value;
   let search=(document.getElementById("store_search")?.value||"").toLowerCase();
   let status=document.getElementById("store_status_filter").value;
-  let f=allStores.filter(s=>{
+  _filteredStores=allStores.filter(s=>{
     let cm=!city||(s.city||"").toLowerCase()===city.toLowerCase();
-    let sm=!search||(s.store_name||"").toLowerCase().includes(search)||(s.merchant_name||"").toLowerCase().includes(search)||(s.category||"").toLowerCase().includes(search);
-    // Fix: exact status match (was broken for inactive/waiting_approval)
+    let sm=!search||(s.store_name||"").toLowerCase().includes(search)||(s.merchant_name||"").toLowerCase().includes(search)||(s.city||"").toLowerCase().includes(search);
     let stm=!status||(s.status||"")===(status);
     return cm&&sm&&stm;
   });
+  _storesPage=1;
+  renderStoresPage();
+}
+function renderStoresPage(){
+  let f=_filteredStores;
+  let pageData=f.slice((_storesPage-1)*PAGE_SIZE, _storesPage*PAGE_SIZE);
   let html="";
-  f.forEach(s=>{
+  pageData.forEach(s=>{
     let img=s.image?`<img src="${s.image}" style="width:32px;height:32px;border-radius:5px;object-fit:cover;margin-right:6px;">`:"";
     let newBadge=s.is_new_in_town?`<span class="badge-new">New</span>`:`<span style="color:var(--muted);font-size:11px;">—</span>`;
     let dealBadge=s.deal_status==='active'
-      ?`<span class="badge-deal-active" title="${s.deal_text||''}">${s.deal_text?s.deal_text:"active"}</span>`
+      ?`<span class="badge-deal-active">🔥 Active</span>`
       :s.deal_status==='expired'
-      ?`<span class="badge-deal-expired">expired</span>`
-      :`<span style="color:var(--muted);font-size:11px;">—</span>`;
+        ?`<span class="badge-deal-expired">Expired</span>`
+        :`<span class="badge-deal-none">—</span>`;
     let statusBadge=s.status==="waiting_approval"?`<span class="badge-waiting">⏳ Waiting</span>`:`<span class="badge-${s.status}">${s.status}</span>`;
     let approveBtn=s.status==="waiting_approval"?`<button class="btn-approve me-1" onclick="approveStore('${s._id}')">✓ Approve</button>`:"";
     html+=`<tr>
-      <td>${img}<strong>${s.store_name||"-"}</strong></td>
-      <td>${s.merchant_name||"-"}</td><td>${s.category||"-"}</td>
-      <td>${s.city||"-"}/${s.area||"-"}</td>
-      <td><span class="badge-active">${s.points_per_scan!=null?s.points_per_scan:10}</span></td>
+      <td>${img}<strong>${s.store_name}</strong></td>
+      <td style="font-size:12px">${s.merchant_name||"—"}</td>
+      <td style="font-size:12px">${s.category||"—"}</td>
+      <td style="font-size:12px">${s.city||"—"}${s.area?`<br><small style="color:var(--muted)">${s.area}</small>`:""}  </td>
+      <td style="font-size:12px">${s.visit_points||0}</td>
       <td>${newBadge}</td><td>${statusBadge}</td><td>${dealBadge}</td>
-      <td style="white-space:nowrap;font-size:11px;">
-        ${s.sub_from ? `<span style="color:var(--primary);font-weight:600;">${s.sub_from}</span><br><span style="color:var(--muted)">→ ${s.sub_to}</span><br>` : ''}
+      <td>
         <span class="badge-${s.paid_status==='paid'?'active':s.paid_status==='expired'?'inactive':'warn'}" style="font-size:10px;">
           ${s.paid_status==='paid'?'✓ paid':s.paid_status==='expired'?'expired':'unpaid'}
         </span>
       </td>
-      <td style="white-space:nowrap;">
-        <button class="btn-o me-1" onclick="showQR('${s._id}',\`${s.store_name}\`,\`${s.qr_code||""}\`)"><i class="fas fa-qrcode"></i></button>
+      <td>
         ${approveBtn}
-        <button class="btn-o me-1" onclick="openEditStore('${s._id}')"><i class="fas fa-edit"></i></button>
+        <button class="btn-o me-1" onclick="openEditStore('${s._id}')">Edit</button>
+        <button class="btn-o me-1" onclick="showQR('${s._id}',\`${s.store_name}\`,\`${s.qr_code||""}\`)"><i class="fas fa-qrcode"></i></button>
         <button class="btn-w me-1" onclick="toggleStore('${s._id}')">${s.status==="active"?"Off":"On"}</button>
         <button class="btn-d" onclick="deleteStore('${s._id}')">Del</button>
-      </td></tr>`;
+      </td>
+    </tr>`;
   });
-  document.getElementById("stores_table").innerHTML=html||`<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No stores found</td></tr>`;
+  document.getElementById("stores_table").innerHTML=html||`<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No stores found</td></tr>`;
+  renderPagination("stores_pagination", f.length, _storesPage, "goStorePage");
 }
+
 function populateCityFilter(elId,data,field){
   let sel=document.getElementById(elId);let cur=sel.value;
   let cities=[...new Set(data.map(x=>x[field]).filter(Boolean))].sort();
@@ -1164,8 +1261,19 @@ async function approveStore(id){
   await fetch(`/admin/stores/${id}/approve`,{method:"PUT",credentials:"include"});
   await loadStores(); await loadStats();
 }
-function showQR(sid,name,qr){
-  if(!qr||qr==="undefined"){alert("QR not available");return;}
+async function showQR(sid,name,qr){
+  // If qr_code is missing (stripped from list for performance), fetch from detail endpoint
+  if(!qr||qr==="undefined"||qr===""){
+    document.getElementById("qrStoreName").innerText=name+" (loading...)";
+    document.getElementById("qrImage").src="";
+    qrModal.show();
+    try{
+      let r=await fetch(`/admin/stores/${sid}/qr`,{credentials:"include"});
+      let s=await r.json();
+      qr=s.qr_code||"";
+    }catch(e){qr="";}
+  }
+  if(!qr){document.getElementById("qrStoreName").innerText=name+" — QR not found";return;}
   document.getElementById("qrImage").src=qr;
   document.getElementById("qrStoreName").innerText=name;
   document.getElementById("qrDownload").href=qr;
@@ -1183,23 +1291,32 @@ async function loadUsers(){
 }
 function filterUsers(){
   let search=(document.getElementById("user_search")?.value||"").toLowerCase();
-  let f=allUsers.filter(u=>!search||(u.name||"").toLowerCase().includes(search)||(u.phone||"").includes(search));
+  _filteredUsers=allUsers.filter(u=>!search||(u.name||"").toLowerCase().includes(search)||(u.phone||"").includes(search));
+  _usersPage=1;
+  renderUsersPage();
+}
+function renderUsersPage(){
+  let f=_filteredUsers;
+  let pageData=f.slice((_usersPage-1)*PAGE_SIZE, _usersPage*PAGE_SIZE);
   let html="";
-  f.forEach(u=>{
+  pageData.forEach(u=>{
     let totalColor=u.total_points>0?"color:#1a6640;font-weight:700;":"";
     html+=`<tr>
-      <td><strong>${u.name||"-"}</strong>${u.pending_withdraw?` <span onclick="showSection('vouchers',document.querySelector('[onclick*=vouchers]'))" title="Has pending gift voucher request — click to view" style="background:#fff3cd;color:#856404;font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid #ffc107;vertical-align:middle;cursor:pointer;">🎁 Voucher Pending</span>`:""}</td><td>${u.phone||"-"}</td><td>${u.city||"-"}</td>
+      <td><strong>${u.name||"-"}</strong>${u.pending_withdraw?` <span onclick="showSection('vouchers',document.querySelector('[onclick*=vouchers]'))" title="Has pending gift voucher request" style="background:#fff3cd;color:#856404;font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid #ffc107;vertical-align:middle;cursor:pointer;">🎁 Voucher Pending</span>`:""}</td>
+      <td>${u.phone||"-"}</td><td>${u.city||"-"}</td>
       <td>${u.visit_points||0}</td><td>${u.pool_points||0}</td>
       <td style="${totalColor}">${u.total_points||0}</td>
       <td><span class="badge-active">${u.redemption_count||0}</span></td>
       <td style="font-size:11px;color:var(--muted)">${u.registered_on||"-"}</td>
       <td style="white-space:nowrap;">
-        <button class="btn-o me-1" onclick="viewHistory('${u._id}','${(u.name||"").replace(/'/g,"\\'")}')"><i class="fas fa-history"></i></button>
-        <button class="btn-p" onclick="openAdjust('${u._id}','${(u.name||"").replace(/'/g,"\\'")}')"><i class="fas fa-coins"></i></button>
+        <button class="btn-o me-1" onclick="viewHistory('${u._id}','${(u.name||"").replace(/'/g,"\'")}')"><i class="fas fa-history"></i></button>
+        <button class="btn-p" onclick="openAdjust('${u._id}','${(u.name||"").replace(/'/g,"\'")}')"><i class="fas fa-coins"></i></button>
       </td></tr>`;
   });
   document.getElementById("users_table").innerHTML=html||`<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No users yet</td></tr>`;
+  renderPagination("users_pagination", f.length, _usersPage, "goUsersPage");
 }
+
 async function viewHistory(uid,uname){
   document.getElementById("histUserName").innerText=uname;
   document.getElementById("hist_table").innerHTML=`<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--muted)">Loading...</td></tr>`;
@@ -1244,7 +1361,6 @@ let allTxns = [];
 
 async function loadMerchantTxns() {
   try {
-    // Get all merchants for count
     if (!merchantsList.length) {
       let r = await fetch("/admin/merchants", {credentials:"include"});
       if (r.ok) merchantsList = await r.json();
@@ -1253,27 +1369,63 @@ async function loadMerchantTxns() {
     let ir = await fetch("/admin/merchant-transactions", {credentials:"include"});
     let invoices = ir.ok ? await ir.json() : [];
 
-    // Also get pending subscriptions for pending count
+    // Get all subscriptions to find pending ones (amount > 0)
     let sr = await fetch("/admin/subscriptions", {credentials:"include"});
     let subs = sr.ok ? await sr.json() : [];
-    // De-duplicate pending: count stores with pending subscription (latest record per store)
-    let pendingStores = new Map();
+
+    // Subscriptions with total=0 are FREE/activated plans — treat as successful
+    // Build combined list: invoices (paid) + pending subs with total > 0
+    let pendingRows = [];
+    let seenStores = new Set(invoices.map(i => i.store_name));
     subs.forEach(s => {
-      if (!pendingStores.has(s.store_name) || (s.created_at > (pendingStores.get(s.store_name)||{}).created_at)) {
-        pendingStores.set(s.store_name, s);
+      let total = parseFloat(s.total||0);
+      if (s.status === "pending") {
+        if (total === 0) {
+          // ₹0 pending = free plan, treat as successful — add as paid row
+          invoices.push({
+            invoice_no: "FREE",
+            merchant_name: s.merchant_name||"",
+            merchant_phone: s.merchant_phone||"",
+            store_name: s.store_name||"",
+            plan: s.plan||"",
+            base_price: 0,
+            gst: 0,
+            total: 0,
+            razorpay_payment_id: "",
+            created_at: s.created_at||"",
+            _txn_status: "free"
+          });
+        } else {
+          pendingRows.push({
+            invoice_no: "PENDING",
+            merchant_name: s.merchant_name||"",
+            merchant_phone: s.merchant_phone||"",
+            store_name: s.store_name||"",
+            plan: s.plan||"",
+            base_price: parseFloat(s.base_price||0),
+            gst: parseFloat(s.gst||0),
+            total: total,
+            razorpay_payment_id: "",
+            created_at: s.created_at||"",
+            _txn_status: "pending"
+          });
+        }
       }
     });
-    let pending = [...pendingStores.values()].filter(s => s.status === "pending");
 
-    allTxns = invoices;
+    // Mark invoices as paid
+    invoices = invoices.map(i => ({...i, _txn_status: i._txn_status||"paid"}));
+
+    allTxns = [...invoices, ...pendingRows];
 
     // Stats
+    let realPending = pendingRows.length;
+    let revenue = invoices.filter(i=>i._txn_status==="paid").reduce((s,t)=>s+(t.total||0),0);
     document.getElementById("txn_total_merchants").innerText = merchantsList.length;
     document.getElementById("txn_total_subs").innerText = invoices.length;
-    document.getElementById("txn_pending_subs").innerText = pending.length + " stores";
-    let revenue = invoices.reduce((sum, t) => sum + (t.total||0), 0);
+    document.getElementById("txn_pending_subs").innerText = realPending + " stores";
     document.getElementById("txn_total_revenue").innerText = "₹" + revenue.toFixed(2);
-    document.getElementById("txn_total").innerText = invoices.length + " records";
+    document.getElementById("txn_total").innerText = allTxns.length + " records";
 
     filterTxns();
   } catch(e) { console.error("loadMerchantTxns error:", e); }
@@ -1281,30 +1433,41 @@ async function loadMerchantTxns() {
 
 function filterTxns() {
   let search = (document.getElementById("txn_search")?.value || "").toLowerCase();
+  let statusF = document.getElementById("txn_status_filter")?.value || "";
   let f = allTxns.filter(t => {
-    return !search || (t.merchant_name||"").toLowerCase().includes(search) ||
+    let matchSearch = !search || (t.merchant_name||"").toLowerCase().includes(search) ||
            (t.merchant_phone||"").includes(search) || (t.store_name||"").toLowerCase().includes(search) ||
            (t.invoice_no||"").toLowerCase().includes(search);
+    let matchStatus = !statusF ||
+      (statusF==="paid" && (t._txn_status==="paid"||t._txn_status==="free")) ||
+      (statusF==="pending" && t._txn_status==="pending");
+    return matchSearch && matchStatus;
   });
+  document.getElementById("txn_total").innerText = f.length + " records";
   let html = "";
   f.forEach(t => {
-    let rzpId = t.razorpay_payment_id
-      ? `<br><small style="color:var(--muted);font-size:10px">${t.razorpay_payment_id}</small>` : "";
+    let statusBadge = t._txn_status==="pending"
+      ? `<span class="badge-waiting">⏳ Pending</span>`
+      : t._txn_status==="free"
+        ? `<span class="badge-new">✓ Free</span>`
+        : `<span class="badge-active">✓ Paid</span>`;
+    let rzpId = t.razorpay_payment_id || (t._txn_status==="free"?"free plan":"—");
     html += `<tr>
       <td style="font-size:12px;color:var(--muted)">${t.created_at||"-"}</td>
-      <td style="font-size:11px"><strong>${t.invoice_no||"-"}</strong>${rzpId}</td>
+      <td style="font-size:11px"><strong>${t.invoice_no||"-"}</strong></td>
       <td><strong>${t.merchant_name||"-"}</strong></td>
       <td style="font-size:12px">${t.merchant_phone||"-"}</td>
       <td style="font-size:12px">${t.store_name||"-"}</td>
       <td><span class="badge-active" style="font-size:11px">${t.plan||"-"}</span></td>
       <td style="font-size:12px">₹${(t.base_price||0).toFixed(2)}</td>
       <td style="font-size:12px">₹${(t.gst||0).toFixed(2)}</td>
-      <td style="color:#198754;font-weight:700">₹${(t.total||0).toFixed(2)}</td>
-      <td style="font-size:11px;color:var(--muted)">${t.razorpay_payment_id||"manual"}</td>
+      <td style="${t._txn_status==='pending'?'color:var(--warning)':'color:#198754'};font-weight:700">₹${(t.total||0).toFixed(2)}</td>
+      <td>${statusBadge}</td>
+      <td style="font-size:11px;color:var(--muted)">${rzpId}</td>
     </tr>`;
   });
   document.getElementById("txn_body").innerHTML = html ||
-    `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No payment records found</td></tr>`;
+    `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px">No payment records found</td></tr>`;
 }
 
 
@@ -1390,6 +1553,188 @@ function exportPaymentsCSV() {
   a.click();
 }
 
+
+// ═══════════ PROMO SLIDERS ═══════════
+let sliderModalInst;
+window.addEventListener("DOMContentLoaded", function() {
+  if (document.getElementById("sliderModal"))
+    sliderModalInst = new bootstrap.Modal(document.getElementById("sliderModal"));
+});
+
+async function loadSliders() {
+  try {
+    let r = await fetch("/admin/promo-sliders", {credentials:"include"});
+    let sliders = r.ok ? await r.json() : [];
+    const tbody = document.getElementById("sliders_table");
+    if (!sliders.length) {
+      tbody.innerHTML = "<tr><td colspan='6' style='text-align:center;padding:24px;color:var(--muted)'>No banners yet. Click + Add Banner to create one.</td></tr>";
+      return;
+    }
+    tbody.innerHTML = sliders.map(s => `<tr>
+      <td>${s.image_url ? `<img src="${s.image_url}" style="width:90px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.outerHTML='<span style=color:var(--muted);font-size:11px>No image</span>'">` : '<span style="color:var(--muted);font-size:11px;">—</span>'}</td>
+      <td><strong>${s.title||"—"}</strong></td>
+      <td style="font-size:12px;color:var(--muted)">${s.link_url||s.action||"—"}</td>
+      <td style="font-size:12px">${s.sort_order||0}</td>
+      <td>${s.is_active!==false?'<span class="badge-active">● Active</span>':'<span class="badge-inactive">○ Hidden</span>'}</td>
+      <td>
+        <button class="btn-o me-1" onclick='editSlider(${JSON.stringify(s).replace(/"/g,"&quot;")})'>Edit</button>
+        <button class="btn-d" onclick="deleteSlider('${s.id||s._id}')">Del</button>
+      </td>
+    </tr>`).join("");
+  } catch(e) { console.error(e); }
+}
+
+function openSliderModal() {
+  document.getElementById("sl_id").value = "";
+  document.getElementById("sl_title").value = "";
+  document.getElementById("sl_image_url").value = "";
+  document.getElementById("sl_link_url").value = "";
+  document.getElementById("sl_order").value = "0";
+  document.getElementById("sl_active").checked = true;
+  document.getElementById("sl_msg").innerText = "";
+  sliderModalInst.show();
+}
+
+function editSlider(s) {
+  document.getElementById("sl_id").value = s.id||s._id||"";
+  document.getElementById("sl_title").value = s.title||"";
+  document.getElementById("sl_image_url").value = s.image_url||"";
+  document.getElementById("sl_link_url").value = s.link_url||s.action||"";
+  document.getElementById("sl_order").value = s.sort_order||0;
+  document.getElementById("sl_active").checked = s.is_active!==false;
+  document.getElementById("sl_msg").innerText = "";
+  sliderModalInst.show();
+}
+
+async function saveSlider() {
+  const sid = document.getElementById("sl_id").value;
+  const img = document.getElementById("sl_image_url").value.trim();
+  if (!img) { document.getElementById("sl_msg").innerText = "Image URL is required"; return; }
+  const data = {
+    title:      document.getElementById("sl_title").value.trim(),
+    image_url:  img,
+    link_url:   document.getElementById("sl_link_url").value.trim(),
+    sort_order: parseInt(document.getElementById("sl_order").value)||0,
+    is_active:  document.getElementById("sl_active").checked,
+  };
+  try {
+    let url  = sid ? `/admin/promo-sliders/${sid}` : "/admin/promo-sliders";
+    let meth = sid ? "PUT" : "POST";
+    let res  = await fetch(url, {method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
+    if (!res.ok) { const d=await res.json(); document.getElementById("sl_msg").innerText=d.detail||"Error"; return; }
+    sliderModalInst.hide();
+    loadSliders();
+  } catch { document.getElementById("sl_msg").innerText = "Server error"; }
+}
+
+async function deleteSlider(id) {
+  if (!confirm("Delete this banner?")) return;
+  await fetch(`/admin/promo-sliders/${id}`, {method:"DELETE", credentials:"include"});
+  loadSliders();
+}
+
+// ═══════════ NOTIFICATIONS ═══════════
+async function loadNotifications() {
+  try {
+    let r = await fetch("/admin/notifications", {credentials:"include"});
+    let notifs = r.ok ? await r.json() : [];
+    const tbody = document.getElementById("notif_history");
+    if (!notifs.length) {
+      tbody.innerHTML = "<tr><td colspan='5' style='text-align:center;padding:24px;color:var(--muted)'>No notifications sent yet.</td></tr>";
+      return;
+    }
+    tbody.innerHTML = notifs.map(n => `<tr>
+      <td><strong>${n.title||"—"}</strong></td>
+      <td style="font-size:12px">${n.body||"—"}</td>
+      <td style="font-size:12px">${n.target==="all"?"👥 All Users":`📱 ${n.target_phone||n.target||"—"}`}</td>
+      <td style="font-size:12px;color:var(--muted)">${n.sent_at||n.created_at||"—"}</td>
+      <td>${n.status==="sent"?'<span class="badge-active">✓ Sent</span>':n.status==="failed"?'<span class="badge-inactive">✗ Failed</span>':'<span class="badge-waiting">⏳ Queued</span>'}</td>
+    </tr>`).join("");
+  } catch(e) { console.error(e); }
+}
+
+function toggleNotifUser() {
+  let target = document.getElementById("notif_target").value;
+  document.getElementById("notif_phone_row").style.display = target==="specific" ? "" : "none";
+}
+
+async function sendNotification() {
+  const title = document.getElementById("notif_title").value.trim();
+  const body  = document.getElementById("notif_body").value.trim();
+  const target = document.getElementById("notif_target").value;
+  const phone = document.getElementById("notif_phone").value.trim();
+  const image = document.getElementById("notif_image").value.trim();
+  if (!title||!body) { document.getElementById("notif_msg").innerText="Title and message are required"; return; }
+  if (target==="specific"&&!phone) { document.getElementById("notif_msg").innerText="Phone number required for specific user"; return; }
+  const data = { title, body, target, target_phone: target==="specific"?phone:"", image_url: image };
+  try {
+    let res = await fetch("/admin/notifications/send", {method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
+    let d = await res.json();
+    if (!res.ok) { document.getElementById("notif_msg").style.color="var(--danger)"; document.getElementById("notif_msg").innerText=d.detail||"Error sending"; return; }
+    document.getElementById("notif_msg").style.color="var(--primary)";
+    document.getElementById("notif_msg").innerText="✓ Notification sent successfully!";
+    document.getElementById("notif_title").value="";
+    document.getElementById("notif_body").value="";
+    document.getElementById("notif_image").value="";
+    loadNotifications();
+  } catch { document.getElementById("notif_msg").innerText="Server error"; }
+}
+
+
+// ═══════════ EMOJI PICKER ═══════════
+function toggleEmojiPicker() {
+  const p = document.getElementById("emoji_picker");
+  p.style.display = p.style.display === "none" ? "block" : "none";
+}
+function insertEmoji(e) {
+  const inp = document.getElementById("new_category");
+  // Insert emoji at cursor position or prepend
+  const start = inp.selectionStart;
+  const before = inp.value.substring(0, start);
+  const after = inp.value.substring(inp.selectionEnd);
+  inp.value = before + e + " " + after;
+  inp.focus();
+  document.getElementById("emoji_picker").style.display = "none";
+}
+// Close emoji picker on outside click
+document.addEventListener("click", function(e) {
+  const picker = document.getElementById("emoji_picker");
+  const btn = document.getElementById("emojiPickerBtn");
+  if (picker && !picker.contains(e.target) && btn && !btn.contains(e.target)) {
+    picker.style.display = "none";
+  }
+});
+
+// ═══════════ PAGINATION HELPER ═══════════
+const PAGE_SIZE = 25;
+let _storesPage = 1, _merchantsPage = 1, _usersPage = 1;
+let _filteredStores = [], _filteredMerchants = [], _filteredUsers = [];
+
+function renderPagination(containerId, total, currentPage, onPage) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  if (totalPages <= 1) { el.innerHTML = `<span style="font-size:12px;color:var(--muted)">${total} records</span>`; return; }
+  const start = (currentPage-1)*PAGE_SIZE+1;
+  const end = Math.min(currentPage*PAGE_SIZE, total);
+  let btns = "";
+  btns += `<button onclick="${onPage}(1)" ${currentPage===1?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">«</button>`;
+  btns += `<button onclick="${onPage}(${currentPage-1})" ${currentPage===1?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">‹</button>`;
+  // Show up to 5 page buttons
+  let startP = Math.max(1, currentPage-2);
+  let endP = Math.min(totalPages, startP+4);
+  for (let p=startP; p<=endP; p++) {
+    btns += `<button onclick="${onPage}(${p})" class="btn-o" style="padding:3px 8px;font-size:11px;${p===currentPage?"background:var(--primary);color:white;":""}">${p}</button>`;
+  }
+  btns += `<button onclick="${onPage}(${currentPage+1})" ${currentPage===totalPages?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">›</button>`;
+  btns += `<button onclick="${onPage}(${totalPages})" ${currentPage===totalPages?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">»</button>`;
+  el.innerHTML = `<span style="font-size:12px;color:var(--muted)">${start}–${end} of ${total}</span><div style="display:flex;gap:4px;">${btns}</div>`;
+}
+
+function goStorePage(p) { _storesPage = p; renderStoresPage(); }
+function goMerchPage(p) { _merchantsPage = p; renderMerchantsPage(); }
+function goUsersPage(p) { _usersPage = p; renderUsersPage(); }
+
 async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"include"});window.location.href="/admin";}
 
 
@@ -1431,28 +1776,27 @@ async function loadGiftCards() {
     let r = await fetch("/admin/gift-vouchers", {credentials:"include"});
     let cards = await r.json();
     const el = document.getElementById("gift_cards_list");
-    if (!cards.length) { el.innerHTML = "<p style='color:var(--muted)'>No gift cards yet. Click + Add Card to create one.</p>"; return; }
-    el.innerHTML = cards.map(v => `
-      <div class="col-md-6 col-lg-4">
-        <div class="card border-0 shadow-sm p-3 position-relative" style="background:linear-gradient(135deg,#3E5F55 0%,#A9CDBA 100%);color:white;border-radius:14px;">
-          <div class="d-flex align-items-center gap-3">
-            ${v.logo ? `<img src="${v.logo}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;background:white;" onerror="this.style.display='none'">` 
-                     : `<div style="width:48px;height:48px;background:rgba(255,255,255,0.2);border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift fa-lg"></i></div>`}
-            <div>
-              ${v.title ? `<div style="font-size:11px;opacity:.8;">${v.title}</div>` : ""}
-              <div class="fw-bold">${v.text||""}</div>
-              ${v.validity ? `<div style="font-size:11px;opacity:.7;">Valid: ${v.validity}</div>` : ""}
-            </div>
-          </div>
-          <div class="mt-2 d-flex gap-2 justify-content-end">
-            <span style="font-size:10px;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:8px;">${v.is_active?"● Active":"○ Hidden"}</span>
-            <button class="btn btn-sm" style="background:rgba(255,255,255,0.9);color:#3E5F55;font-size:11px;padding:1px 10px;" 
-              onclick='editGiftCard(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
-            <button class="btn btn-sm btn-danger" style="font-size:11px;padding:1px 8px;" 
-              onclick="deleteGiftCard('${v.id||v._id}')">Del</button>
-          </div>
-        </div>
-      </div>`).join("");
+    if (!cards.length) { el.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No gift cards yet. Click + Add Card to create one.</td></tr>"; return; }
+    el.innerHTML = cards.map(v => {
+      let logoHtml = v.logo
+        ? `<img src="${v.logo}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;border:1px solid var(--border);" onerror="this.outerHTML='<i class=fas fa-gift style=color:var(--primary)></i>'">`
+        : `<div style="width:40px;height:40px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary)"></i></div>`;
+      let statusBadge = v.is_active
+        ? `<span class="badge-active">● Active</span>`
+        : `<span class="badge-inactive">○ Hidden</span>`;
+      return `<tr>
+        <td>${logoHtml}</td>
+        <td><strong>${v.title||"—"}</strong></td>
+        <td>${v.text||"—"}</td>
+        <td style="font-size:12px;color:var(--muted)">${v.validity||"—"}</td>
+        <td style="font-size:12px">${v.merchant_name||"—"}</td>
+        <td>${statusBadge}</td>
+        <td>
+          <button class="btn-o me-1" onclick='editGiftCard(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
+          <button class="btn-d" onclick="deleteGiftCard('${v.id||v._id}')">Del</button>
+        </td>
+      </tr>`;
+    }).join("");
   } catch(e) { console.error(e); }
 }
 
@@ -1732,6 +2076,49 @@ function saveStore() {
     } catch { document.getElementById("store_msg").innerText="Server error"; }
 }
 </script>
+
+<!-- Promo Slider Modal -->
+<div class="modal fade" id="sliderModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">🖼️ Promo Banner</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="sl_id">
+        <div class="mb-3">
+          <label class="form-label">Title (optional)</label>
+          <input id="sl_title" class="form-control" placeholder="e.g. Summer Sale">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Banner Image URL *</label>
+          <input id="sl_image_url" class="form-control" placeholder="https://...">
+          <small class="text-muted">Recommended: 1200×450px or 16:6 ratio</small>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Link / Action (optional)</label>
+          <input id="sl_link_url" class="form-control" placeholder="https://... or store_id or category">
+          <small class="text-muted">Tap destination when user clicks the banner</small>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Sort Order</label>
+          <input id="sl_order" class="form-control" type="number" value="0" min="0">
+          <small class="text-muted">Lower number = shown first</small>
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="sl_active" checked>
+          <label class="form-check-label" for="sl_active">Active (show in app)</label>
+        </div>
+        <p id="sl_msg" style="color:var(--danger);font-size:13px;"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn-p" onclick="saveSlider()">Save Banner</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Gift Card Modal -->
 <div class="modal fade" id="giftCardModal" tabindex="-1">
