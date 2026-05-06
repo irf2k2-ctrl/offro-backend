@@ -13,7 +13,7 @@
 <style>
 :root{--bg:#FDFBF6;--sidebar:#3E5F55;--primary:#3E5F55;--accent:#A9CDBA;--light:#CDEBD6;--beige:#E7D7C8;--text:#2c3e35;--muted:#6b8c7e;--border:#d4e8de;--danger:#c0392b;--warning:#e67e22;}
 *{box-sizing:border-box;}
-body{background:#FDFBF6;color:#2c3e35;font-family:'Segoe UI',sans-serif;margin:0;}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;margin:0;}
 .sidebar{width:230px;height:100vh;background:var(--sidebar);position:fixed;padding:20px 16px;top:0;left:0;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
 .sidebar-logo{display:flex;align-items:center;gap:9px;margin-bottom:2px;}
 .sidebar-logo svg{width:32px;height:32px;flex-shrink:0;}
@@ -26,14 +26,14 @@ body{background:#FDFBF6;color:#2c3e35;font-family:'Segoe UI',sans-serif;margin:0
 .sidebar .logout:hover{background:rgba(255,100,80,.15)!important;}
 .main{margin-left:230px;padding:24px;min-height:100vh;}
 .page-title{font-size:18px;font-weight:700;color:var(--primary);margin-bottom:18px;}
-.card-stat{background:#fff;border:1px solid #d4e8de;border-radius:12px;padding:24px;text-align:center;}
+.card-stat{background:white;border-radius:12px;padding:18px;text-align:center;border:1px solid var(--border);box-shadow:0 2px 8px rgba(62,95,85,.07);}
 .card-stat h3{font-size:30px;color:var(--primary);font-weight:700;margin:0;}
 .card-stat p{color:var(--muted);margin:4px 0 0;font-size:12px;}
 .card-stat.warn h3{color:var(--warning);}
 .section{display:none;}.section.active{display:block;}
 .table-wrap{background:white;border-radius:12px;border:1px solid var(--border);overflow:hidden;box-shadow:0 2px 8px rgba(62,95,85,.06);}
 table{width:100%;border-collapse:collapse;}
-th{background:#3E5F55;color:#fff;padding:10px;text-align:left;font-size:14px;}
+th{background:var(--primary);color:white;padding:10px 12px;text-align:left;font-size:11.5px;font-weight:600;}
 td{padding:9px 12px;border-bottom:1px solid var(--border);color:var(--text);font-size:12.5px;}
 tr:last-child td{border-bottom:none;}
 tr:hover td{background:#f7faf8;}
@@ -54,7 +54,7 @@ tr:hover td{background:#f7faf8;}
 .btn-w:hover{background:var(--warning);color:white;}
 .btn-approve{background:#198754;color:white;border:none;border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;}
 .btn-approve:hover{background:#157347;}
-.modal-content{background:#fff;color:#2c3e35;border-radius:12px;}
+.modal-content{background:white;color:var(--text);border-radius:14px;border:none;box-shadow:0 20px 50px rgba(0,0,0,.15);}
 .modal-header{background:var(--primary);color:white;border-radius:14px 14px 0 0;padding:14px 20px;border-bottom:none;}
 .modal-title{font-weight:600;font-size:14px;}
 .modal-body{padding:20px;}
@@ -76,27 +76,11 @@ tr:hover td{background:#f7faf8;}
 .star-row .fa-star{cursor:pointer;color:#ccc;font-size:18px;transition:color 0.15s;}
 .star-row .fa-star.on{color:#f59e0b;}
 .star-row .fa-star:hover{color:#fbbf24;}
-
-/* ── MOBILE SIDEBAR ── */
-.sidebar-close-btn {
-    display:none; position:absolute; top:14px; right:14px;
-    background:none; border:none; color:rgba(255,255,255,0.7); font-size:20px; cursor:pointer;
-}
-.sidebar-close-btn:hover { color:#fff; }
-.menu-toggle { display:none; background:#3E5F55; border:none; color:#fff; padding:8px 14px; border-radius:8px; margin-bottom:16px; cursor:pointer; font-size:14px; }
-@media (max-width: 768px) {
-    .sidebar { transform: translateX(-100%); }
-    .sidebar.open { transform: translateX(0); }
-    .sidebar-close-btn { display:block; }
-    .main { margin-left:0 !important; padding:16px; }
-    .menu-toggle { display:block !important; }
-}
 </style>
 </head>
 <body>
 
 <div class="sidebar">
-<button class="sidebar-close-btn" onclick="closeSidebar()"><i class="fas fa-times"></i></button>
   <div class="sidebar-logo">
     <svg viewBox="0 0 100 130" fill="none" width="32" height="38">
       <path d="M50 10C30.1 10 14 26.1 14 46c0 26.5 36 74 36 74s36-47.5 36-74C86 26.1 69.9 10 50 10z" fill="#CDEBD6"/>
@@ -110,11 +94,11 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('merchants',this)"><i class="fas fa-user-tie fa-fw"></i> Merchants</a>
   <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
   <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
+  <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
   <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <a href="#" onclick="showSection('gift_cards',this)"><i class="fas fa-id-card fa-fw"></i> Gift Cards (App)</a>
   <div class="sep"></div>
-  <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
   <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
   <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
@@ -128,7 +112,6 @@ tr:hover td{background:#f7faf8;}
 </div>
 
 <div class="main">
-<button class="menu-toggle" onclick="openSidebar()"><i class="fas fa-bars"></i> Menu</button>
 
   <!-- OVERVIEW -->
   <div id="section-overview" class="section active">
@@ -164,7 +147,10 @@ tr:hover td{background:#f7faf8;}
       <div class="fw-bold" style="font-size:18px;color:var(--primary)">⭐ Store Ratings</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Set the admin-controlled rating displayed to users in the app</div>
     </div>
-    <button class="btn-p" onclick="loadRatings()"><i class="fas fa-sync me-1"></i> Refresh</button>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      <input id="ratings_search" class="form-control form-control-sm" placeholder="🔍 Search store or category..." style="max-width:260px;" oninput="filterRatings()">
+      <button class="btn-p" onclick="loadRatings(true)"><i class="fas fa-sync me-1"></i> Refresh</button>
+    </div>
   </div>
   <div class="table-wrap">
     <table>
@@ -305,7 +291,7 @@ tr:hover td{background:#f7faf8;}
       <div style="overflow-x:auto;">
       <table class="table table-hover" style="min-width:900px;">
         <thead><tr>
-          <th>Date</th><th>Invoice No</th><th>Merchant</th><th>Phone</th>
+          <th>Date (IST)</th><th>Invoice No</th><th>Merchant</th><th>Phone</th>
           <th>Store</th><th>Plan</th><th>Base</th><th>GST</th><th>Total</th><th>Payment ID</th>
         </tr></thead>
         <tbody id="txn_body"></tbody>
@@ -434,15 +420,17 @@ tr:hover td{background:#f7faf8;}
           <span class="input-group-text" style="background:#25D366;color:white;border:none;">+</span>
           <input id="sm_whatsapp" class="form-control" placeholder="919876543210 (with country code, no +)">
         </div>
-        <small class="text-muted">Users will tap to open WhatsApp chat directly</small>
+        <small class="text-muted">Enter number with country code (e.g. 919876543210). Will auto-generate wa.me link.</small>
       </div>
       <div class="mb-3">
         <label class="form-label"><i class="fab fa-facebook" style="color:#1877F2;"></i> Facebook URL</label>
         <input id="sm_facebook" class="form-control" placeholder="https://facebook.com/yourpage">
+        <small class="text-muted">Enter full URL starting with https://</small>
       </div>
       <div class="mb-3">
         <label class="form-label"><i class="fab fa-instagram" style="color:#E1306C;"></i> Instagram URL</label>
         <input id="sm_instagram" class="form-control" placeholder="https://instagram.com/yourhandle">
+        <small class="text-muted">Enter full URL starting with https://</small>
       </div>
       <div class="mb-3">
         <label class="form-label"><i class="fab fa-youtube" style="color:#FF0000;"></i> YouTube URL</label>
@@ -485,10 +473,15 @@ tr:hover td{background:#f7faf8;}
             <input id="store_lat" class="form-control" placeholder="17.3850"></div>
           <div class="col-md-6"><label class="form-label">Longitude</label>
             <input id="store_lng" class="form-control" placeholder="78.4867"></div>
-          <div class="col-12"><label class="form-label">Store Image</label>
-            <input id="store_image" class="form-control" type="file" accept="image/*" onchange="previewImage()">
-            <img id="store_image_preview" src="" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
+          <div class="col-12"><label class="form-label">Image 1 — Main Card Photo</label>
+            <input id="store_image" class="form-control" type="file" accept="image/*" onchange="previewImage(1)">
+            <img id="store_image_preview" src="" style="width:100%;height:120px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
             <input type="hidden" id="store_image_b64"></div>
+          <div class="col-12"><label class="form-label">Image 2 — Gift Voucher / Gallery</label>
+            <small class="text-muted d-block mb-1">Used as secondary image and as Gift Voucher banner in the app.</small>
+            <input id="store_image2" class="form-control" type="file" accept="image/*" onchange="previewImage(2)">
+            <img id="store_image2_preview" src="" style="width:100%;height:120px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
+            <input type="hidden" id="store_image2_b64"></div>
           <div class="col-12">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="store_new_in_town">
@@ -738,29 +731,30 @@ window.onload=()=>{
 };
 
 // ─── GIFT VOUCHERS ───
-async function loadVouchers() {
-    try {
-        let res = await fetch("/admin/gift-vouchers", { credentials:"include" });
-        let vouchers = await res.json();
-        const el = document.getElementById("vouchers_list");
-        if (!vouchers.length) { el.innerHTML="<p style='color:#94a3b8'>No vouchers yet.</p>"; return; }
-        el.innerHTML = vouchers.map(v => `
-            <div class="col-md-6">
-                <div class="voucher-preview d-flex align-items-center gap-3 position-relative">
-                    ${v.logo ? `<img src="${v.logo}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:white;" onerror="this.style.display='none'">` : `<div style="width:52px;height:52px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:#B8860B;font-size:22px;"></i></div>`}
-                    <div class="flex-grow-1">
-                        ${v.title?`<small style="color:#B8860B;font-weight:700;">${v.title}</small><br>`:""}
-                        <strong>${v.text||""}</strong>
-                        ${v.validity?`<br><small>Valid: ${v.validity}</small>`:""}
-                    </div>
-                    <div class="d-flex gap-1 position-absolute" style="top:8px;right:8px;">
-                        <button class="btn btn-sm" style="background:#3E5F55;color:#2c3e35;font-size:10px;padding:2px 7px;" onclick='editVoucher(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
-                        <button class="btn btn-sm btn-danger" style="font-size:10px;padding:2px 7px;" onclick="deleteVoucher('${v.id||v._id}')">Del</button>
-                    </div>
-                    <span style="position:absolute;bottom:8px;right:8px;font-size:10px;color:${v.is_active?'#16a34a':'#dc2626'}">${v.is_active?"● Active":"○ Hidden"}</span>
-                </div>
-            </div>`).join("");
-    } catch(e) { console.error(e); }
+async function loadVouchers(){
+  document.getElementById("vouchers_table").innerHTML=`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>`;
+  let r=await fetch("/admin/withdraw-requests",{credentials:"include"});
+  let data=await r.json();
+  if(!data.length){document.getElementById("vouchers_table").innerHTML=`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">No voucher requests yet</td></tr>`;return;}
+  let html="";
+  data.forEach(v=>{
+    let statusBadge=v.status==="fulfilled"
+      ?`<span class="badge-active">✅ Sent</span>`
+      :`<span style="background:#fff3cd;color:#856404;font-size:11px;padding:2px 8px;border-radius:8px;border:1px solid #ffc107;">⏳ Pending</span>`;
+    let action=v.status==="fulfilled"
+      ?`<span style="font-size:11px;color:var(--muted)">${v.voucher_type||"Amazon"}: <strong>${v.voucher_code}</strong></span>`
+      :`<button class="btn-p" onclick="openFulfillModal('${v._id}','${(v.user_name||"").replace(/'/g,"\'")}',${v.points},${v.voucher_value})">Send Voucher</button>`;
+    html+=`<tr>
+      <td><strong>${v.user_name||"-"}</strong></td>
+      <td>${v.phone||"-"}</td>
+      <td><strong>${v.points}</strong> pts</td>
+      <td><strong>₹${v.voucher_value}</strong></td>
+      <td style="font-size:11px;color:var(--muted)">${v.created_at||"-"}</td>
+      <td>${statusBadge}</td>
+      <td>${action}</td>
+    </tr>`;
+  });
+  document.getElementById("vouchers_table").innerHTML=html;
 }
 
 function openFulfillModal(reqId, userName, points, value){
@@ -810,26 +804,43 @@ function showSection(name, el){
 }
 
 // ===== STATS =====
-async function loadStats() {
-    try {
-        let res = await fetch("/admin/stats", { credentials:"include" });
-        if (res.status===401||res.status===403) { window.location.href="/admin"; return; }
-        let d = await res.json();
-        document.getElementById("stat_merchants").innerText = d.total_merchants||0;
-        document.getElementById("stat_active").innerText    = d.active_merchants||0;
-        document.getElementById("stat_stores").innerText    = d.total_stores||0;
-        document.getElementById("stat_deals").innerText     = d.total_deals||0;
-    } catch(e) { console.error(e); }
+async function loadStats(){
+  try{
+    let r=await fetch("/admin/stats",{credentials:"include"});
+    if(r.status===401){window.location.href="/admin";return;}
+    let d=await r.json();
+    document.getElementById("stat_merchants").innerText=d.total_merchants;
+    document.getElementById("stat_active").innerText=d.active_merchants;
+    document.getElementById("stat_stores").innerText=d.total_stores;
+    document.getElementById("stat_waiting").innerText=d.waiting_approval||0;
+    document.getElementById("stat_users").innerText=d.total_users||0;
+  }catch(e){console.error(e);}
 }
 
 // ===== CATEGORIES =====
 async function loadCategories(){
-  try{let r=await fetch("/admin/categories",{credentials:"include"});if(r.ok)categoriesList=await r.json();}catch{}
+  try{
+    let r=await fetch("/admin/categories",{credentials:"include"});
+    if(r.ok){
+      categoriesList=await r.json();
+      // If empty, auto-seed defaults silently
+      if(categoriesList.length===0) await seedDefaultCategories(true);
+    }
+  }catch{}
+}
+async function seedDefaultCategories(silent=false){
+  const defaults=["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Spa","Fashion","Other"];
+  for(const name of defaults){
+    await fetch("/admin/categories",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name}),credentials:"include"});
+  }
+  let r=await fetch("/admin/categories",{credentials:"include"});
+  if(r.ok){categoriesList=await r.json();renderCategories();}
+  if(!silent) alert("Default categories restored!");
 }
 function renderCategories(){
   let html=categoriesList.length
     ? categoriesList.map(c=>`<span class="cat-chip">${c}<button onclick="deleteCategory('${c}')" title="Delete">×</button></span>`).join("")
-    : `<span style="color:var(--muted);">No categories yet.</span>`;
+    : `<span style="color:var(--muted);">No categories yet. Add one above or <a href="#" onclick="seedDefaultCategories()">restore defaults</a>.</span>`;
   document.getElementById("categories_list").innerHTML=html;
 }
 async function addCategory(){
@@ -876,7 +887,7 @@ function renderPlans(){
   document.getElementById("plans_editor").innerHTML=html;
 }
 async function savePricing(){
-  let gst=parseFloat(document.getElementById("gst_input").value)||18;
+  let gst_raw=document.getElementById("gst_input").value; let gst=(gst_raw===""||gst_raw===null)?0:parseFloat(gst_raw);
   let rate=parseFloat(document.getElementById("conversion_rate_input").value)||0.10;
   let minW=parseInt(document.getElementById("min_withdraw_input").value)||200;
   let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
@@ -895,22 +906,40 @@ async function loadSocialLinks(){
   let r=await fetch("/admin/social",{credentials:"include"});
   if(!r.ok) return;
   let d=await r.json();
-  document.getElementById("sm_whatsapp").value=d.whatsapp||"";
+  // Show raw number for whatsapp (not the full wa.me URL)
+  document.getElementById("sm_whatsapp").value=d.whatsapp_number||d.whatsapp||"";
   document.getElementById("sm_facebook").value=d.facebook||"";
   document.getElementById("sm_instagram").value=d.instagram||"";
   document.getElementById("sm_youtube").value=d.youtube||"";
 }
 async function saveSocialLinks(){
+  // Auto-format URLs before saving
+  function fmtUrl(url) {
+    url = url.trim();
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+    return "https://" + url;
+  }
+  let wa = document.getElementById("sm_whatsapp").value.trim().replace(/[^0-9]/g,"");
+  // Build proper wa.me link
+  let waUrl = wa ? `https://wa.me/${wa}` : "";
   let data={
-    whatsapp:document.getElementById("sm_whatsapp").value.trim(),
-    facebook:document.getElementById("sm_facebook").value.trim(),
-    instagram:document.getElementById("sm_instagram").value.trim(),
-    youtube:document.getElementById("sm_youtube").value.trim(),
+    whatsapp: waUrl,
+    whatsapp_number: wa,
+    facebook:  fmtUrl(document.getElementById("sm_facebook").value),
+    instagram: fmtUrl(document.getElementById("sm_instagram").value),
+    youtube:   fmtUrl(document.getElementById("sm_youtube").value),
   };
   let r=await fetch("/admin/social",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),credentials:"include"});
   let el=document.getElementById("social_msg");
-  el.innerText=r.ok?"✅ Saved!":"❌ Error saving";
-  setTimeout(()=>el.innerText="",3000);
+  if (r.ok) {
+    el.style.color="green";
+    el.innerText="✅ Saved! Links are now active in the app.";
+  } else {
+    el.style.color="var(--danger)";
+    el.innerText="❌ Error saving";
+  }
+  setTimeout(()=>{el.innerText="";el.style.color="";},3000);
 }
 
 // ===== POLICIES =====
@@ -944,27 +973,12 @@ async function saveTerms(type){
 }
 
 // ===== MERCHANTS =====
-async async function loadMerchants() {
-    try {
-        let res = await fetch("/admin/merchants", { credentials:"include" });
-        merchantsList = await res.json();
-        let html = "";
-        merchantsList.forEach(m => {
-            html += `<tr>
-                <td>${m.name||"-"}</td>
-                <td>${m.phone||"-"}</td>
-                <td>${m.city||"-"}</td>
-                <td><span class="badge-${m.status||'inactive'}">${m.status||"inactive"}</span></td>
-                <td>
-                    <button class="btn btn-sm btn-warning me-1" onclick="toggleMerchant('${m._id}')">
-                        ${m.status==="active"?"Deactivate":"Activate"}
-                    </button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteMerchant('${m._id}')">Delete</button>
-                </td>
-            </tr>`;
-        });
-        document.getElementById("merchants_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No merchants</td></tr>";
-    } catch(e) { console.error(e); }
+async function loadMerchants(){
+  let r=await fetch("/admin/merchants",{credentials:"include"});
+  if(!r.ok){window.location.href="/admin";return;}
+  merchantsList=await r.json();
+  populateCityFilter("merchant_city_filter",merchantsList,"city");
+  filterMerchants();
 }
 function filterMerchants(){
   let city=document.getElementById("merchant_city_filter").value;
@@ -1056,7 +1070,7 @@ function filterStores(){
         </span>
       </td>
       <td style="white-space:nowrap;">
-        <button class="btn-o me-1" onclick="showQR('${s._id}',\`${s.store_name}\`,\`${s.qr_code||""}\`)"><i class="fas fa-qrcode"></i></button>
+        <button class="btn-o me-1" onclick="fetchAndShowQR('${s._id}',\`${s.store_name}\`)"><i class="fas fa-qrcode"></i></button>
         ${approveBtn}
         <button class="btn-o me-1" onclick="openEditStore('${s._id}')"><i class="fas fa-edit"></i></button>
         <button class="btn-w me-1" onclick="toggleStore('${s._id}')">${s.status==="active"?"Off":"On"}</button>
@@ -1084,7 +1098,9 @@ async function openCreateStore(){
   ["store_name","store_city","store_area","store_address","store_phone","store_lat","store_lng"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("store_points").value="10";
   document.getElementById("store_image_b64").value="";
+  document.getElementById("store_image2_b64").value="";
   document.getElementById("store_image_preview").style.display="none";
+  document.getElementById("store_image2_preview").style.display="none";
   document.getElementById("store_new_in_town").checked=false;
   document.getElementById("store_msg").innerText="";
   populateCategoryDropdown("");
@@ -1092,6 +1108,11 @@ async function openCreateStore(){
 }
 async function openEditStore(id){
   let s=allStores.find(x=>x._id===id);if(!s)return;
+  // Fetch full store detail to get image2 and all fields
+  try{
+    let dr=await fetch(`/admin/stores/${id}`,{credentials:"include"});
+    if(dr.ok){ let detail=await dr.json(); s=Object.assign({},s,detail); }
+  }catch(e){}
   editingStore=true;
   document.getElementById("storeModalTitle").innerText="Edit Store";
   document.getElementById("storeSubmitBtn").innerText="Save Changes";
@@ -1118,16 +1139,22 @@ async function openEditStore(id){
   document.getElementById("store_lng").value=s.lng||"";
   document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
   document.getElementById("store_image_b64").value="";
+  document.getElementById("store_image2_b64").value="";
   if(s.image){let p=document.getElementById("store_image_preview");p.src=s.image;p.style.display="block";}
   else document.getElementById("store_image_preview").style.display="none";
+  if(s.image2){let p2=document.getElementById("store_image2_preview");p2.src=s.image2;p2.style.display="block";}
+  else document.getElementById("store_image2_preview").style.display="none";
   document.getElementById("store_msg").innerText="";
   populateCategoryDropdown(s.category||"");
   storeModal.show();
 }
-function previewImage(){
-  let file=document.getElementById("store_image").files[0];if(!file)return;
+function previewImage(n){
+  const inputId = n===2 ? "store_image2" : "store_image";
+  const prevId  = n===2 ? "store_image2_preview" : "store_image_preview";
+  const b64Id   = n===2 ? "store_image2_b64" : "store_image_b64";
+  let file=document.getElementById(inputId).files[0];if(!file)return;
   let reader=new FileReader();
-  reader.onload=function(e){let p=document.getElementById("store_image_preview");p.src=e.target.result;p.style.display="block";document.getElementById("store_image_b64").value=e.target.result;};
+  reader.onload=function(e){let p=document.getElementById(prevId);p.src=e.target.result;p.style.display="block";document.getElementById(b64Id).value=e.target.result;};
   reader.readAsDataURL(file);
 }
 async function submitStore(){
@@ -1144,6 +1171,7 @@ async function submitStore(){
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
+    image2:document.getElementById("store_image2_b64").value||null,
     is_new_in_town:document.getElementById("store_new_in_town").checked};
   // Only send merchant_id if selected (prevents overwriting with empty on edit)
   if(mid) payloadBase.merchant_id=mid;
@@ -1163,6 +1191,16 @@ async function approveStore(id){
   if(!confirm("Approve and set store to Active?"))return;
   await fetch(`/admin/stores/${id}/approve`,{method:"PUT",credentials:"include"});
   await loadStores(); await loadStats();
+}
+async function fetchAndShowQR(sid,name){
+  const btn=event&&event.target?event.target:null;
+  try{
+    let r=await fetch(`/admin/stores/${sid}/qr`,{credentials:"include"});
+    if(!r.ok){alert("QR not available");return;}
+    let data=await r.json();
+    if(!data.qr_code){alert("QR not generated for this store yet");return;}
+    showQR(sid,name,data.qr_code);
+  }catch(e){alert("Failed to load QR: "+e.message);}
 }
 function showQR(sid,name,qr){
   if(!qr||qr==="undefined"){alert("QR not available");return;}
@@ -1394,17 +1432,43 @@ async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"
 
 
 // ═══════════ RATINGS ═══════════
+let _ratingsCache = null;
+function filterRatings() {
+  if (_ratingsCache) _renderRatings(_ratingsCache);
+}
+function _renderRatings(stores) {
+  const q = (document.getElementById("ratings_search")||{value:""}).value.toLowerCase();
+  const filtered = q ? stores.filter(s=>(s.store_name||"").toLowerCase().includes(q)||(s.category||"").toLowerCase().includes(q)) : stores;
+  if (!filtered.length) { document.getElementById("ratings_table").innerHTML="<tr><td colspan='5' style='text-align:center;color:var(--muted)'>No stores found</td></tr>"; return; }
+  document.getElementById("ratings_table").innerHTML = filtered.map(s => {
+    const ur = parseFloat(s.rating||0).toFixed(1);
+    const ar = parseFloat(s.admin_rating||0).toFixed(1);
+    const cnt = s.rating_count || s.review_count || 0;
+    return `<tr>
+      <td><strong>${s.store_name||"-"}</strong><br><small style="color:var(--muted)">${s.city||""}</small></td>
+      <td>${s.category||"-"}</td>
+      <td>${parseFloat(ur)>0?`<span style="color:#f59e0b">★ ${ur}</span><br><small style="color:var(--muted)">${cnt} review${cnt!==1?'s':''}</small>`:"—"}</td>
+      <td>${parseFloat(ar)>0?`<span style="color:var(--primary)">★ ${ar}</span>`:"—"}</td>
+      <td>
+        <div class="d-flex gap-1 align-items-center star-row" data-id="${s._id}">
+          ${[1,2,3,4,5].map(n=>`<i class="fas fa-star ${parseFloat(ar)>=n?'on':''}" style="cursor:pointer;font-size:18px;color:${parseFloat(ar)>=n?'#f59e0b':'#ccc'};" onclick="setStoreRating('${s._id}',${n},this)"></i>`).join("")}
+          <button onclick="clearStoreRating('${s._id}')" class="btn btn-sm ms-2" style="font-size:10px;padding:2px 8px;background:var(--border);color:var(--text);">Clear</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+}
 async function loadRatings(forceRefresh=false) {
-    const tbody = document.getElementById("ratings_table");
-    tbody.innerHTML = `<tr><td colspan='5' style='color:#6b8c7e;text-align:center;'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>`;
-    try {
-        // Always fetch fresh so user ratings from app are reflected immediately
-        if (true) {
-            let res = await fetch("/admin/stores", { credentials:"include" });
-            _ratingsCache = await res.json();
-        }
-        _renderRatings(_ratingsCache);
-    } catch(e) { tbody.innerHTML = `<tr><td colspan='5' style='color:#ef4444'>Error: ${e.message}</td></tr>`; }
+  document.getElementById("ratings_table").innerHTML = "<tr><td colspan='5' style='text-align:center;color:var(--muted)'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>";
+  try {
+    if (!_ratingsCache || forceRefresh) {
+      // Fetch stores (has admin_rating + avg rating)
+      let r = await fetch("/admin/stores/slim", {credentials:"include"});
+      _ratingsCache = await r.json();
+    }
+    // Ratings already included in slim store data — no secondary fetch needed
+    _renderRatings(_ratingsCache);
+  } catch(e) { document.getElementById("ratings_table").innerHTML="<tr><td colspan='5' style='color:var(--danger)'>Error loading ratings</td></tr>"; }
 }
 
 async function setStoreRating(storeId, val, el) {
@@ -1416,6 +1480,19 @@ async function setStoreRating(storeId, val, el) {
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({admin_rating: val})
     });
+    if (_ratingsCache) { const s=_ratingsCache.find(x=>x._id===storeId); if(s) s.admin_rating=val; }
+  } catch(e) { console.error(e); }
+}
+
+async function clearStoreRating(storeId) {
+  if (!confirm("Clear admin rating for this store?")) return;
+  try {
+    await fetch(`/admin/stores/${storeId}/rating`, {
+      method:"PUT", credentials:"include",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({admin_rating: 0})
+    });
+    if (_ratingsCache) { const s=_ratingsCache.find(x=>x._id===storeId); if(s) s.admin_rating=0; _renderRatings(_ratingsCache); }
   } catch(e) { console.error(e); }
 }
 
@@ -1456,16 +1533,32 @@ async function loadGiftCards() {
   } catch(e) { console.error(e); }
 }
 
+async function onGcStoreChange(storeId) {
+  const preview = document.getElementById("gc_store_preview");
+  if (!storeId) { preview.innerHTML = ""; return; }
+  const store = (window.allStoresForVoucher||[]).find(s => s._id === storeId);
+  if (store && store.image2) {
+    preview.innerHTML = `<img src="${store.image2}" style="max-width:160px;max-height:80px;border-radius:8px;border:1px solid var(--border);">
+      <small class="text-muted d-block mt-1">This image will appear on the voucher card</small>`;
+  } else {
+    preview.innerHTML = `<small style="color:var(--warning)">No Image 2 found for this store. Add it in Store settings.</small>`;
+  }
+}
+
 async function openGiftCardModal() {
-  if (merchantsList.length === 0) await loadMerchants();
+  // Load stores for store selector
+  // Always refresh store list
+  try { const r = await fetch("/admin/stores",{credentials:"include"}); window.allStoresForVoucher = await r.json(); } catch(e) { window.allStoresForVoucher = window.allStoresForVoucher||[]; }
+  const storeSel = document.getElementById("gc_store");
+  storeSel.innerHTML = `<option value="">None</option>` + (window.allStoresForVoucher||[]).map(s=>`<option value="${s._id}">${s.store_name||s._id}</option>`).join("");
+  
   document.getElementById("gc_id").value = "";
   document.getElementById("gc_title").value = "";
   document.getElementById("gc_text").value = "";
   document.getElementById("gc_validity").value = "";
-  document.getElementById("gc_logo").value = "";
   document.getElementById("gc_active").checked = true;
   document.getElementById("gc_msg").innerText = "";
-  _populateGcMerchants("");
+  document.getElementById("gc_store_preview").innerHTML = "";
   gcModalInst.show();
 }
 
@@ -1474,33 +1567,59 @@ function editGiftCard(v) {
   document.getElementById("gc_title").value    = v.title||"";
   document.getElementById("gc_text").value     = v.text||"";
   document.getElementById("gc_validity").value = v.validity||"";
-  document.getElementById("gc_logo").value     = v.logo||"";
   document.getElementById("gc_active").checked = v.is_active !== false;
   document.getElementById("gc_msg").innerText  = "";
-  _populateGcMerchants(v.merchant_id||"");
+  // Populate store selector and trigger preview
+  if (!window.allStoresForVoucher) {
+    fetch("/admin/stores",{credentials:"include"}).then(r=>r.json()).then(d=>{window.allStoresForVoucher=d;_setGcStoreDropdown(v.store_id||"");}).catch(()=>{});
+  } else { _setGcStoreDropdown(v.store_id||""); }
   gcModalInst.show();
 }
 
-function _populateGcMerchants(selectedId) {
-  let sel = document.getElementById("gc_merchant");
-  sel.innerHTML = "<option value=''>None</option>";
-  (merchantsList||[]).forEach(m => {
-    sel.innerHTML += `<option value="${m._id}" ${m._id===selectedId?"selected":""}>${m.name}</option>`;
-  });
+function _setGcStoreDropdown(selectedStoreId) {
+  const storeSel = document.getElementById("gc_store");
+  storeSel.innerHTML = `<option value="">None</option>` + (window.allStoresForVoucher||[]).map(s=>`<option value="${s._id}" ${s._id===selectedStoreId?"selected":""}>${s.store_name||s._id}</option>`).join("");
+  onGcStoreChange(selectedStoreId);
+}
+
+function previewGcImage(input) {
+  const preview = document.getElementById("gc_image2_preview");
+  if (!input.files || !input.files[0]) { preview.innerHTML = ""; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById("gc_image2_url").value = e.target.result;
+    preview.innerHTML = `<img src="${e.target.result}" style="max-width:180px;max-height:90px;border-radius:8px;border:1px solid var(--border);margin-top:6px;">`;
+  };
+  reader.readAsDataURL(input.files[0]);
 }
 
 async function saveGiftCard() {
+  const _saveBtn = document.querySelector("#gcModal .btn-p");
+  if (_saveBtn && _saveBtn.disabled) return;
+  if (_saveBtn) _saveBtn.disabled = true;
   const vid  = document.getElementById("gc_id").value;
   const text = document.getElementById("gc_text").value.trim();
   if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
+  // Check for custom image override
+  const imgFile = document.getElementById("gc_image2_file").files[0];
+  let image2Url = document.getElementById("gc_image2_url").value || "";
+  // If image file selected, upload it first
+  if (imgFile) {
+    try {
+      const fd = new FormData();
+      fd.append("file", imgFile);
+      const up = await fetch("/admin/upload-image", {method:"POST", credentials:"include", body:fd});
+      if (up.ok) { const ud = await up.json(); image2Url = ud.url || image2Url; }
+    } catch(e) { /* fallback to base64 */ }
+  }
   const data = {
     title:       document.getElementById("gc_title").value.trim(),
     text,
     validity:    document.getElementById("gc_validity").value.trim(),
-    logo:        document.getElementById("gc_logo").value.trim(),
-    merchant_id: document.getElementById("gc_merchant").value,
+    store_id:    document.getElementById("gc_store").value,
     is_active:   document.getElementById("gc_active").checked,
   };
+  if (image2Url) data.logo = image2Url;
   try {
     let url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
     let meth = vid ? "PUT" : "POST";
@@ -1508,7 +1627,8 @@ async function saveGiftCard() {
     if (!res.ok) { const d = await res.json(); document.getElementById("gc_msg").innerText = d.detail||"Error"; return; }
     gcModalInst.hide();
     loadGiftCards();
-  } catch { document.getElementById("gc_msg").innerText = "Server error"; }
+  } catch(err) { document.getElementById("gc_msg").innerText = "Server error: "+(err.message||""); }
+  finally { const sb=document.querySelector("#gcModal .btn-p"); if(sb) sb.disabled=false; }
 }
 
 async function deleteGiftCard(id) {
@@ -1517,220 +1637,6 @@ async function deleteGiftCard(id) {
   loadGiftCards();
 }
 
-
-function _renderRatings(stores) {
-    const q = _ratingsSearch.toLowerCase();
-    const filtered = q ? stores.filter(s=>(s.store_name||"").toLowerCase().includes(q)||(s.category||"").toLowerCase().includes(q)) : stores;
-    let html = "";
-    filtered.forEach(s => {
-        const ur = parseFloat(s.rating||0).toFixed(1);
-        const urCount = s.rating_count || 0;
-        const ar = parseFloat(s.admin_rating||0).toFixed(1);
-        html += `<tr>
-            <td><strong>${s.store_name||"-"}</strong><br><small style="color:#94a3b8">${s.city||""}</small></td>
-            <td>${s.category||"-"}</td>
-            <td>${parseFloat(ur)>0?`<span style="color:#f59e0b">★ ${ur}</span><br><small style="color:#94a3b8">${urCount} review${urCount!==1?"s":""}</small>`:"—"}</td>
-            <td>${parseFloat(ar)>0?`<span style="color:#3E5F55">★ ${ar}</span>`:"—"}</td>
-            <td>
-                <div class="star-row d-flex gap-1 align-items-center" data-id="${s._id}">
-                    ${[1,2,3,4,5].map(n=>`<i class="fas fa-star ${parseFloat(ar)>=n?'on':''}" style="cursor:pointer;font-size:18px;" data-val="${n}" onclick="setRating('${s._id}',${n},this)"></i>`).join("")}
-                    <button onclick="clearRating('${s._id}')" class="btn btn-sm ms-2" style="font-size:10px;padding:2px 7px;background:rgba(255,255,255,0.15);color:#2c3e35;border-radius:6px;">Clear</button>
-                </div>
-            </td>
-        </tr>`;
-    });
-    document.getElementById("ratings_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No stores</td></tr>";
-}
-
-function clearRating(storeId) {
-    try {
-        await fetch(`/admin/stores/${storeId}/rating`, {
-            method:"PUT", credentials:"include",
-            headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({admin_rating:0})
-        });
-        if (_ratingsCache) { const s=_ratingsCache.find(x=>x._id===storeId); if(s) s.admin_rating=0; _renderRatings(_ratingsCache); }
-    } catch(e) { console.error(e); }
-}
-
-function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); }
-
-function openSidebar()  { document.getElementById("sidebar").classList.add("open"); }
-
-function deleteVoucher(id) {
-    if (!confirm("Delete voucher?")) return;
-    await fetch(`/admin/gift-vouchers/${id}`, { method:"DELETE", credentials:"include" });
-    loadVouchers();
-}
-
-function editVoucher(v) {
-    document.getElementById("edit_voucher_id").value = v.id||v._id||"";
-    document.getElementById("v_title").value    = v.title||"";
-    document.getElementById("v_text").value     = v.text||"";
-    document.getElementById("v_validity").value = v.validity||"";
-    // set store selector
-    const storeSel2 = document.getElementById("v_store");
-    if (storeSel2) { storeSel2.value = v.store_id||""; onVoucherStoreChange(v.store_id||""); }
-    document.getElementById("v_active").checked = v.is_active!==false;
-    document.getElementById("v_msg").innerText  = "";
-    _populateVoucherMerchants(v.merchant_id||"");
-    voucherModalInst.show();
-}
-
-function onVoucherStoreChange(storeId) {
-    const preview = document.getElementById("v_store_img_preview");
-    if (!storeId) { preview.innerHTML = ""; return; }
-    // Find the store from allStoresList
-    const store = (window.allStoresList||[]).find(s => s._id === storeId);
-    if (store && store.image2) {
-        preview.innerHTML = `<img src="${store.image2}" style="max-width:160px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">
-        <small style="color:#6b8c7e;display:block;margin-top:4px;">This image will appear on the voucher card</small>`;
-    } else {
-        preview.innerHTML = `<small style="color:#f59e0b">No Image 2 found for this store. Please add it in Store settings.</small>`;
-    }
-}
-
-function openVoucherModal() {
-    // Load stores for the dropdown
-    if (!window.allStoresList) {
-        try { const r = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = await r.json(); } catch(e) { window.allStoresList = []; }
-    }
-    const storeSel = document.getElementById("v_store");
-    storeSel.innerHTML = `<option value="">None</option>` + (window.allStoresList||[]).map(s=>`<option value="${s._id}">${s.store_name||s._id}</option>`).join("");
-    
-    document.getElementById("edit_voucher_id").value = "";
-    document.getElementById("v_title").value = "";
-    document.getElementById("v_text").value  = "";
-    document.getElementById("v_validity").value = "";
-    document.getElementById("v_store_img_preview").innerHTML = "";
-    document.getElementById("v_active").checked = true;
-    document.getElementById("v_msg").innerText = "";
-    _populateVoucherMerchants("");
-    voucherModalInst.show();
-}
-
-function saveVoucher() {
-    const vid  = document.getElementById("edit_voucher_id").value;
-    const text = document.getElementById("v_text").value.trim();
-    if (!text) { document.getElementById("v_msg").innerText="Offer text required"; return; }
-    const data = {
-        title:       document.getElementById("v_title").value.trim(),
-        text,
-        validity:    document.getElementById("v_validity").value.trim(),
-        store_id:    document.getElementById("v_store").value,
-        
-        is_active:   document.getElementById("v_active").checked,
-    };
-    try {
-        let url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
-        let meth = vid ? "PUT" : "POST";
-        let res  = await fetch(url, { method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data) });
-        if (!res.ok) { const d=await res.json(); document.getElementById("v_msg").innerText=d.detail||"Error"; return; }
-        voucherModalInst.hide();
-        loadVouchers();
-    } catch { document.getElementById("v_msg").innerText="Server error"; }
-}
-
-function setRating(storeId, val, el) {
-    // Highlight stars
-    const row = el.closest(".star-row");
-    row.querySelectorAll(".fa-star").forEach((s,i) => { s.classList.toggle("on", i<val); });
-    try {
-        await fetch(`/admin/stores/${storeId}/rating`, {
-            method:"PUT", credentials:"include",
-            headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({admin_rating:val})
-        });
-    } catch(e) { console.error(e); }
-}
-
-function storeImg(s) {
-    const img = s.image || (s.images && s.images[0]) || "";
-    if (!img) return `<div class="store-thumb-ph"><i class="fas fa-store"></i></div>`;
-    return `<img src="${img}" class="store-thumb" onerror="this.outerHTML='<div class=store-thumb-ph><i class=fas fa-store></i></div>'">`;
-}
-
-function _populateMerchantSelect() {
-    let select = document.getElementById("store_merchant");
-    select.innerHTML = "<option value=''>Select merchant...</option>";
-    merchantsList.forEach(m => {
-        select.innerHTML += `<option value="${m._id}">${m.name} (${m.phone})</option>`;
-    });
-    select.onchange = function() {
-        let m = merchantsList.find(x => x._id===this.value);
-        if (m) {
-            document.getElementById("store_city").value = m.city||"";
-            document.getElementById("store_area").value = m.area||"";
-            document.getElementById("store_phone").value = m.phone||"";
-        }
-    };
-}
-
-function _populateVoucherMerchants(selectedId) {
-    let sel = document.getElementById("v_merchant");
-    sel.innerHTML = "<option value=''>None</option>";
-    merchantsList.forEach(m => {
-        sel.innerHTML += `<option value="${m._id}" ${m._id===selectedId?"selected":""}>${m.name}</option>`;
-    });
-}
-
-function editStore(s) {
-    if (merchantsList.length===0) loadMerchants();
-    document.getElementById("storeModalTitle").innerText = "Edit Store";
-    document.getElementById("edit_store_id").value = s._id||"";
-    document.getElementById("store_name").value = s.store_name||"";
-    document.getElementById("store_category").value = s.category||"";
-    document.getElementById("store_city").value = s.city||"";
-    document.getElementById("store_area").value = s.area||"";
-    document.getElementById("store_address").value = s.address||"";
-    document.getElementById("store_phone").value = s.phone||"";
-    document.getElementById("store_visit_points").value = s.visit_points||0;
-    document.getElementById("store_image_url").value = s.image||"";
-    document.getElementById("store_image2_url").value = s.image2||"";
-    document.getElementById("store_msg").innerText = "";
-    // Show image1 preview
-    const prev = document.getElementById("store_image_preview");
-    if (s.image) {
-        prev.innerHTML = `<img src="${s.image}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">`;
-    } else { prev.innerHTML = ""; }
-    // Show image2 preview
-    const prev2 = document.getElementById("store_image2_preview");
-    if (s.image2) {
-        prev2.innerHTML = `<img src="${s.image2}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;margin-top:4px;" onerror="this.style.display='none'">`;
-    } else { prev2.innerHTML = ""; }
-    _populateMerchantSelect();
-    // Set merchant
-    setTimeout(() => { document.getElementById("store_merchant").value = s.merchant_id||""; }, 100);
-    storeModalInst.show();
-}
-
-function saveStore() {
-    const editId = document.getElementById("edit_store_id").value;
-    const merchant_id = document.getElementById("store_merchant").value;
-    const store_name  = document.getElementById("store_name").value.trim();
-    if (!merchant_id||!store_name) { document.getElementById("store_msg").innerText="Merchant and Store Name required"; return; }
-    const data = {
-        merchant_id,
-        store_name,
-        category:     document.getElementById("store_category").value,
-        city:         document.getElementById("store_city").value,
-        area:         document.getElementById("store_area").value,
-        address:      document.getElementById("store_address").value,
-        phone:        document.getElementById("store_phone").value,
-        visit_points: parseInt(document.getElementById("store_visit_points").value)||0,
-        image:        document.getElementById("store_image_url").value.trim(),
-        image2:       document.getElementById("store_image2_url").value.trim(),
-    };
-    try {
-        let url  = editId ? `/admin/stores/${editId}` : "/admin/stores";
-        let meth = editId ? "PUT" : "POST";
-        let res  = await fetch(url, { method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data) });
-        let result = await res.json();
-        if (!res.ok) { document.getElementById("store_msg").innerText=result.detail||"Error"; return; }
-        storeModalInst.hide();
-        loadStores(); loadStats();
-    } catch { document.getElementById("store_msg").innerText="Server error"; }
-}
 </script>
 
 <!-- Gift Card Modal -->
@@ -1756,14 +1662,17 @@ function saveStore() {
           <input id="gc_validity" class="form-control" placeholder="e.g. 31 May 2026">
         </div>
         <div class="mb-3">
-          <label class="form-label fw-semibold">Logo URL</label>
-          <input id="gc_logo" class="form-control" placeholder="https://... or data:image/...">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Linked Merchant (optional)</label>
-          <select id="gc_merchant" class="form-select">
+          <label class="form-label fw-semibold">Linked Store <small style="color:var(--muted)">(Image 2 from store used as voucher banner)</small></label>
+          <select id="gc_store" class="form-select" onchange="onGcStoreChange(this.value)">
             <option value="">None</option>
           </select>
+          <div id="gc_store_preview" class="mt-2"></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Override Banner Image <small style="color:var(--muted)">(optional – overrides store Image 2)</small></label>
+          <input type="file" id="gc_image2_file" class="form-control" accept="image/*" onchange="previewGcImage(this)">
+          <div id="gc_image2_preview" class="mt-2"></div>
+          <input type="hidden" id="gc_image2_url" value="">
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="gc_active" checked>
