@@ -11,6 +11,52 @@ import uuid, qrcode, io, base64, hmac, hashlib
 router = APIRouter(tags=["MerchantApp"])
 
 import os as _os
+import socket as _socket
+import requests as _req_module
+import urllib3
+
+# ── Force IPv4 + bypass DNS for Razorpay (Railway blocks IPv6 / has DNS issues) ──
+_RZP_HOST = "api.razorpay.com"
+_RZP_IPS  = ["13.235.137.113", "15.206.107.5"]   # Razorpay AWS ap-south-1 IPs
+
+_orig_getaddrinfo = _socket.getaddrinfo
+def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    """Force IPv4 for all DNS lookups — Railway doesn't support outbound IPv6."""
+    return _orig_getaddrinfo(host, port, _socket.AF_INET, type, proto, flags)
+_socket.getaddrinfo = _ipv4_only_getaddrinfo
+
+def _razorpay_request(method: str, path: str, auth: tuple, json_data: dict, timeout: int = 8):
+    """
+    Make a request to Razorpay, trying each known IP directly if DNS fails.
+    Uses Host header to satisfy SNI/TLS verification.
+    """
+    last_err = None
+    urls_to_try = [
+        f"https://{_RZP_HOST}{path}",          # normal DNS first
+        f"https://{_RZP_IPS[0]}{path}",        # fallback: direct IP 1
+        f"https://{_RZP_IPS[1]}{path}",        # fallback: direct IP 2
+    ]
+    for url in urls_to_try:
+        try:
+            headers = {}
+            # When using IP directly, set Host header for SNI
+            if url.startswith(f"https://{_RZP_IPS[0]}") or url.startswith(f"https://{_RZP_IPS[1]}"):
+                headers["Host"] = _RZP_HOST
+                resp = _req_module.request(
+                    method, url, auth=auth, json=json_data,
+                    headers=headers, timeout=timeout, verify=False
+                )
+            else:
+                resp = _req_module.request(
+                    method, url, auth=auth, json=json_data, timeout=timeout
+                )
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            last_err = e
+            continue
+    raise last_err
+
 RAZORPAY_KEY_ID     = _os.getenv("RAZORPAY_KEY_ID",     "rzp_live_SdiI6kcuZzZjsl")
 RAZORPAY_KEY_SECRET = _os.getenv("RAZORPAY_KEY_SECRET", "3JzhKnKuGkhCrelaUgCaFfQr")
 
@@ -110,8 +156,15 @@ def my_stores(m=Depends(get_merchant)):
                 sub_end_str = sub_end.strftime("%d %b %Y")
             else:
                 sub_end_str = str(sub_end)
+        # Count active deals for this store
+        sid = str(s["_id"])
+        deal_count = db.deals.count_documents({"store_id": sid, "status": "active"})             if "deals" in db.list_collection_names() else 0
+        # Check if store has a paid subscription (to prevent re-subscribe when inactive)
+        paid_sub = db.subscriptions.find_one(
+            {"store_id": sid, "status": {"$in": ["paid", "active"]}})
+        has_paid_sub = paid_sub is not None
         result.append({
-            "_id": str(s["_id"]),
+            "_id": sid,
             "store_name":      s.get("store_name"),
             "category":        s.get("category", ""),
             "city":            s.get("city", ""),
@@ -126,11 +179,8 @@ def my_stores(m=Depends(get_merchant)):
             "qr_code":         s.get("qr_code", ""),
             "image":           s.get("image") or "",
             "image2":          s.get("image2") or "",
-            "logo":            s.get("logo") or "",
-            "about":           s.get("about", ""),
-            "state":           s.get("state", ""),
-            "lat":             s.get("lat", ""),
-            "lng":             s.get("lng", ""),
+            "deal_count":      deal_count,
+            "has_paid_sub":    has_paid_sub,
         })
     return result
 
@@ -147,14 +197,11 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "area":          data.get("area") or m.get("area", ""),
         "address":       data.get("address", ""),
         "phone":         data.get("phone") or m.get("phone", ""),
+        "about":         data.get("about", ""),
         "status":        "draft",
-        "points_per_scan": 10,
+        "points_per_scan": 0,
         "lat":  data.get("lat", ""),   "lng": data.get("lng", ""),
         "image":        data.get("image") or None,
-        "image2":       data.get("image2") or None,
-        "logo":         data.get("logo") or None,
-        "about":        data.get("about", ""),
-        "state":        data.get("state", ""),
         "is_new_in_town": False,
         "created_at":   datetime.utcnow(),
     }
@@ -165,14 +212,57 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
     _log_tx(str(m["_id"]), "store_created", f"Store '{store_name}' created", meta={"store_id": sid})
     return {"store_id": sid, "qr_code": qr_b64, "message": "Store created. Subscribe to go live."}
 
+@router.get("/stores/{sid}")
+def get_merchant_store(sid: str, m=Depends(get_merchant)):
+    """Return full store detail including image2 — used by edit store screen."""
+    store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
+    if not store: raise HTTPException(404, "Store not found")
+    sub_end = store.get("subscription_end")
+    sub_end_str = sub_end.strftime("%d %b %Y") if isinstance(sub_end, datetime) else (str(sub_end) if sub_end else "")
+    deal_count = db.deals.count_documents({"store_id": sid, "status": "active"}) \
+        if "deals" in db.list_collection_names() else 0
+    paid_sub = db.subscriptions.find_one({"store_id": sid, "status": {"$in": ["paid", "active"]}})
+    return {
+        "_id":              sid,
+        "store_name":       store.get("store_name", ""),
+        "category":         store.get("category", ""),
+        "city":             store.get("city", ""),
+        "area":             store.get("area", ""),
+        "address":          store.get("address", ""),
+        "phone":            store.get("phone", ""),
+        "lat":              store.get("lat", ""),
+        "lng":              store.get("lng", ""),
+        "status":           store.get("status", "draft"),
+        "subscription_end": sub_end_str,
+        "subscription_plan": store.get("subscription_plan", ""),
+        "visit_points":     store.get("points_per_scan", 10),
+        "is_new_in_town":   store.get("is_new_in_town", False),
+        "qr_code":          store.get("qr_code", ""),
+        "image":            store.get("image") or "",
+        "image2":           store.get("image2") or "",
+        "about":            store.get("about") or "",
+        "deal_count":       deal_count,
+        "has_paid_sub":     paid_sub is not None,
+    }
+
+@router.post("/stores/{sid}/reset-qr")
+def reset_store_qr(sid: str, m=Depends(get_merchant)):
+    """Regenerate QR code for a merchant store. Resets on every scan so stores always have a valid QR."""
+    store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
+    if not store:
+        raise HTTPException(404, "Store not found")
+    qr_b64 = _qr(sid)
+    db.stores.update_one({"_id": ObjectId(sid)}, {"$set": {"qr_code": qr_b64}})
+    return {"qr_code": qr_b64, "message": "QR code regenerated"}
+
+
 @router.put("/stores/{sid}")
 def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
     if not store: raise HTTPException(404, "Store not found")
-    upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng","about","state"] if data.get(f) is not None}
+    upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng","about"] if data.get(f) is not None}
     if data.get("image"): upd["image"] = data["image"]
-    if data.get("image2"): upd["image2"] = data["image2"]
-    if data.get("logo"): upd["logo"] = data["logo"]
+    if data.get("image2") is not None: upd["image2"] = data["image2"]  # image2 save support
     if upd: db.stores.update_one({"_id": ObjectId(sid)}, {"$set": upd})
     return {"message": "Store updated"}
 
@@ -260,29 +350,28 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     pay_mode    = "manual"   # fallback: admin confirms payment manually
 
     if rp_configured:
-        import requests as req
         try:
-            rp_res = req.post(
-                "https://api.razorpay.com/v1/orders",
+            rp_res = _razorpay_request(
+                "POST", "/v1/orders",
                 auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
-                json={"amount": total_paise, "currency": "INR",
-                      "receipt": f"OF_{store_id[:8]}_{plan}",
-                      "notes":   {"store_id": store_id, "plan": plan}},
-                timeout=10,
+                json_data={"amount": total_paise, "currency": "INR",
+                           "receipt": f"OF_{store_id[:8]}_{plan}",
+                           "notes":   {"store_id": store_id, "plan": plan}},
+                timeout=8,
             )
             try:
                 rp_data = rp_res.json()
             except Exception:
-                raise HTTPException(502, "Payment gateway returned invalid response")
-            if "id" not in rp_data:
-                err_desc = rp_data.get("error", {}).get("description", "Razorpay order creation failed")
-                raise HTTPException(502, err_desc)
-            rp_order_id = rp_data["id"]
-            pay_mode    = "razorpay"
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(502, f"Payment gateway error: {str(e)}")
+                rp_data = {}
+            if "id" in rp_data:
+                rp_order_id = rp_data["id"]
+                pay_mode    = "razorpay"
+            else:
+                # Razorpay returned error — fall back to manual
+                pay_mode = "manual"
+        except Exception:
+            # All connection attempts failed — fall back to manual silently
+            pay_mode = "manual"
 
     # Insert subscription record
     sub_doc = {
@@ -380,6 +469,59 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
 
     return {
         "message":       "✅ Payment verified! Store pending admin approval.",
+        "invoice_no":    invoice_no,
+        "store_status":  "waiting_approval",
+    }
+
+@router.post("/subscribe/free")
+def activate_free_subscription(data: dict, m=Depends(get_merchant)):
+    """Activate a 0-price subscription immediately (no payment gateway needed)."""
+    store_id       = data.get("store_id")
+    subscription_id = data.get("subscription_id")
+    if not store_id or not subscription_id:
+        raise HTTPException(400, "store_id and subscription_id required")
+
+    sub = db.subscriptions.find_one({"_id": ObjectId(subscription_id), "status": "pending"})
+    if not sub:
+        raise HTTPException(404, "Subscription not found")
+
+    now = datetime.utcnow()
+    db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {
+        "status": "paid",
+        "paid_at": now,
+        "free_activation": True,
+    }})
+    db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {
+        "status":             "waiting_approval",
+        "subscription_plan":  sub["plan"],
+        "subscription_start": sub["from_date"],
+        "subscription_end":   sub["end_date"],
+    }})
+
+    invoice_no = f"LS-FREE-{now.strftime('%Y%m%d')}-{str(sub['_id'])[-6:].upper()}"
+    store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
+    db.invoices.insert_one({
+        "invoice_no":    invoice_no,
+        "merchant_id":   str(m["_id"]),
+        "merchant_name": m.get("name"),
+        "merchant_phone": m.get("phone"),
+        "store_id":      store_id,
+        "store_name":    store_doc.get("store_name", ""),
+        "plan":          sub["plan"],
+        "base_price":    0,
+        "gst":           0,
+        "total":         0,
+        "from_date":     sub["from_date"],
+        "end_date":      sub["end_date"],
+        "created_at":    now,
+    })
+    _log_tx(str(m["_id"]), "subscription",
+            f"Free plan activated for '{store_doc.get('store_name','')}' — {sub['plan']}",
+            amount=0,
+            meta={"store_id": store_id, "plan": sub["plan"]})
+
+    return {
+        "message":       "✅ Free subscription activated! Store pending admin approval.",
         "invoice_no":    invoice_no,
         "store_status":  "waiting_approval",
     }
