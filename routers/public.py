@@ -14,20 +14,31 @@ def get_stores(city: str = None, category: str = None):
     if category and category != "All":
         query["category"] = category
 
-    stores = list(db.stores.find(query))
-    result = []
-    # Check collections once (not inside the loop — that was very slow)
-    cols = db.list_collection_names()
-    has_deals = "deals" in cols
-    # Pre-fetch ALL active deals for these stores in ONE query
+    stores = list(db.stores.find(query, {
+        "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
+        "image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
+        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"merchant_id":1
+    }))
+    if not stores:
+        return []
+
+    # Pre-fetch ALL active deals in ONE query — no N+1
     store_ids = [str(s["_id"]) for s in stores]
-    all_deals = list(db.deals.find({"store_id": {"$in": store_ids}, "status": "active"})) if has_deals else []
-    deals_by_store: dict = {}
-    for d in all_deals:
-        sid = d.get("store_id","")
-        deals_by_store.setdefault(sid, []).append(d)
+    cols = db.list_collection_names()  # called ONCE, not per-store
+    deals_by_store = {}
+    if "deals" in cols:
+        all_deals = list(db.deals.find(
+            {"store_id": {"$in": store_ids}, "status": "active"},
+            {"store_id":1,"title":1,"discount":1,"discount_percent":1}
+        ))
+        for d in all_deals:
+            sid = d.get("store_id","")
+            if sid not in deals_by_store:
+                deals_by_store[sid] = []
+            deals_by_store[sid].append(d)
+
+    result = []
     for s in stores:
-        # Get active deals for this store
         store_id = str(s["_id"])
         deals = deals_by_store.get(store_id, [])
         deal_count = len(deals)
@@ -44,7 +55,6 @@ def get_stores(city: str = None, category: str = None):
             elif d.get("title"):
                 deal_summary = d.get("title","")
 
-        # Use admin_rating if set, else raw rating
         admin_rating = s.get("admin_rating")
         raw_rating   = s.get("rating", 0) or 0
         display_rating = float(admin_rating) if admin_rating else float(raw_rating)
@@ -405,3 +415,19 @@ def validate_discount(body: dict):
 def get_about_public():
     doc = db.settings.find_one({"key": "about_us"}) or {}
     return {"content": doc.get("content", "")}
+
+# =================== PROMO SLIDERS (public - for Flutter app) ===================
+@router.get("/promo-sliders")
+def get_promo_sliders_public():
+    """Returns active promo slider banners for the app home screen."""
+    docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
+    result = []
+    for d in docs:
+        result.append({
+            "id": str(d["_id"]),
+            "title": d.get("title", ""),
+            "image_url": d.get("image_url", ""),
+            "link_url": d.get("link_url", ""),
+            "sort_order": d.get("sort_order", 0),
+        })
+    return result

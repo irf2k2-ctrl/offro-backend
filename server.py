@@ -42,6 +42,28 @@ def public_gift_vouchers():
         })
     return result
 
+# ── Combined home-data endpoint — reduces Flutter startup from 3 requests to 1 ──
+@app.get("/home-data")
+def get_home_data(city: str = None, category: str = None):
+    """Returns stores + categories + gift-vouchers + promo-sliders in one call."""
+    from routers.public import get_stores, get_categories, get_promo_sliders_public
+    stores = get_stores(city=city, category=category)
+    cats = get_categories()
+    # Gift vouchers
+    gv_docs = list(db.gift_vouchers.find({"is_active": True}).sort("_id", -1))
+    gift_vouchers = [{"id":str(v["_id"]),"title":v.get("title",""),"text":v.get("text",""),
+                      "validity":v.get("validity",""),"logo":v.get("logo","")} for v in gv_docs]
+    # Promo sliders
+    ps_docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
+    promo_sliders = [{"id":str(p["_id"]),"title":p.get("title",""),"image_url":p.get("image_url",""),
+                      "link":p.get("link",""),"order":p.get("sort_order",1)} for p in ps_docs]
+    return {
+        "stores": stores,
+        "categories": cats,
+        "gift_vouchers": gift_vouchers,
+        "promo_sliders": promo_sliders,
+    }
+
 # ── Admin image upload endpoint (used by Gift Cards form) ──
 @app.post("/admin/upload-image")
 async def upload_image(file: UploadFile = File(...)):
