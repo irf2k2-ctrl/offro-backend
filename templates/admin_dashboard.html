@@ -246,7 +246,7 @@ tr:hover td{background:#f7faf8;}
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Logo</th><th>Title</th><th>Offer Text</th><th>Validity</th><th>Merchant</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Logo</th><th>Title</th><th>Price</th><th>Offer Text</th><th>Validity</th><th>Merchant</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody id="gift_cards_list"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
     </table>
   </div>
@@ -1810,6 +1810,7 @@ async function loadGiftCards() {
       return `<tr>
         <td>${logoHtml}</td>
         <td><strong>${v.title||"—"}</strong></td>
+        <td style="font-weight:700;color:var(--primary)">₹${v.price||v.value||"—"}</td>
         <td>${v.text||"—"}</td>
         <td style="font-size:12px;color:var(--muted)">${v.validity||"—"}</td>
         <td style="font-size:12px">${v.merchant_name||"—"}</td>
@@ -1827,6 +1828,7 @@ async function openGiftCardModal() {
   if (merchantsList.length === 0) await loadMerchants();
   document.getElementById("gc_id").value = "";
   document.getElementById("gc_title").value = "";
+  document.getElementById("gc_price").value = "";
   document.getElementById("gc_text").value = "";
   document.getElementById("gc_validity").value = "";
   document.getElementById("gc_logo").value = "";
@@ -1839,6 +1841,7 @@ async function openGiftCardModal() {
 function editGiftCard(v) {
   document.getElementById("gc_id").value       = v.id||v._id||"";
   document.getElementById("gc_title").value    = v.title||"";
+  document.getElementById("gc_price").value    = v.price||v.value||"";
   document.getElementById("gc_text").value     = v.text||"";
   document.getElementById("gc_validity").value = v.validity||"";
   document.getElementById("gc_logo").value     = v.logo||"";
@@ -1857,11 +1860,14 @@ function _populateGcMerchants(selectedId) {
 }
 
 async function saveGiftCard() {
-  const vid  = document.getElementById("gc_id").value;
-  const text = document.getElementById("gc_text").value.trim();
-  if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
+  const vid   = document.getElementById("gc_id").value;
+  const text  = document.getElementById("gc_text").value.trim();
+  const price = document.getElementById("gc_price").value.trim();
+  if (!text)  { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
+  if (!price) { document.getElementById("gc_msg").innerText = "Price / Value is required"; return; }
   const data = {
     title:       document.getElementById("gc_title").value.trim(),
+    price:       price,
     text,
     validity:    document.getElementById("gc_validity").value.trim(),
     logo:        document.getElementById("gc_logo").value.trim(),
@@ -1872,10 +1878,15 @@ async function saveGiftCard() {
     let url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
     let meth = vid ? "PUT" : "POST";
     let res  = await fetch(url, {method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
-    if (!res.ok) { const d = await res.json(); document.getElementById("gc_msg").innerText = d.detail||"Error"; return; }
+    if (!res.ok) {
+      let errText = "";
+      try { const d = await res.json(); errText = d.detail||JSON.stringify(d); } catch { errText = await res.text(); }
+      document.getElementById("gc_msg").innerText = errText || `Error ${res.status}`;
+      return;
+    }
     gcModalInst.hide();
     loadGiftCards();
-  } catch { document.getElementById("gc_msg").innerText = "Server error"; }
+  } catch(e) { document.getElementById("gc_msg").innerText = "Server error: " + e.message; }
 }
 
 async function deleteGiftCard(id) {
@@ -2157,8 +2168,13 @@ async function saveStore() {
       <div class="modal-body">
         <input type="hidden" id="gc_id" value="">
         <div class="mb-3">
-          <label class="form-label fw-semibold">Title (e.g. "₹999 DEALS")</label>
-          <input id="gc_title" class="form-control" placeholder="₹999 DEALS">
+          <label class="form-label fw-semibold">Title (label shown on card, e.g. "DIWALI DEAL")</label>
+          <input id="gc_title" class="form-control" placeholder="DIWALI DEAL">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Price / Value (₹) *</label>
+          <input id="gc_price" class="form-control" type="number" min="1" placeholder="e.g. 150">
+          <div class="form-text">This is the big ₹ number shown on the card in the app.</div>
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Offer Text *</label>
