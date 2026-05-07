@@ -437,10 +437,10 @@ def get_promo_sliders_public():
 @router.get("/gift-vouchers-public")
 def get_gift_vouchers_public():
     """Returns active gift vouchers shown on the app home screen (Voucher Zone)."""
-    docs = list(db.gift_vouchers.find().sort("_id", -1))
+    docs = list(db.gift_vouchers.find({"is_active": {"$ne": False}}).sort("_id", -1))
     result = []
     for d in docs:
-        d["id"] = str(d.pop("_id"))
+        vid = str(d.pop("_id"))
         # Normalise store field
         store = d.get("store", {})
         if isinstance(store, dict):
@@ -448,5 +448,16 @@ def get_gift_vouchers_public():
             if sid:
                 store["id"] = str(sid)
                 store.pop("_id", None)
-        result.append(d)
+        # If store_id exists, try to pull store image for display
+        store_id = d.get("store_id", "")
+        if store_id and not d.get("logo"):
+            try:
+                from bson import ObjectId as OId
+                s = db.stores.find_one({"_id": OId(store_id)}, {"store_image2":1,"image":1,"store_name":1})
+                if s:
+                    d["logo"] = s.get("store_image2") or s.get("image") or ""
+                    if not d.get("title") and s.get("store_name"):
+                        d["title"] = s["store_name"]
+            except: pass
+        result.append({"id": vid, **d})
     return result

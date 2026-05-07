@@ -819,16 +819,26 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
     docs = list(db.gift_vouchers.find().sort("_id", -1))
     result = []
     for v in docs:
+        # resolve merchant name for display
+        mid = v.get("merchant_id", "")
+        mname = ""
+        if mid:
+            try:
+                m = db.merchants.find_one({"_id": ObjectId(mid)}, {"name": 1})
+                mname = m.get("name", "") if m else ""
+            except: pass
         result.append({
-            "id":          str(v["_id"]),
-            "title":       v.get("title", ""),
-            "text":        v.get("text", ""),
-            "validity":    v.get("validity", ""),
-            "logo":        v.get("logo", ""),
-            "store_id":    v.get("store_id", ""),
-            "merchant_id": v.get("merchant_id", ""),
-            "is_active":   v.get("is_active", True),
-            "created_at":  str(v.get("created_at", ""))[:10],
+            "id":            str(v["_id"]),
+            "title":         v.get("title", ""),
+            "price":         str(v.get("price", v.get("value", ""))),
+            "text":          v.get("text", ""),
+            "validity":      v.get("validity", ""),
+            "logo":          v.get("logo", ""),
+            "store_id":      v.get("store_id", ""),
+            "merchant_id":   v.get("merchant_id", ""),
+            "merchant_name": mname,
+            "is_active":     v.get("is_active", True),
+            "created_at":    str(v.get("created_at", ""))[:10],
         })
     return result
 
@@ -849,6 +859,7 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
         except: pass
     doc = {
         "title":       (data.get("title") or "").strip(),
+        "price":       str(data.get("price") or data.get("value") or "").strip(),
         "text":        text,
         "validity":    (data.get("validity") or "").strip(),
         "logo":        logo,
@@ -864,7 +875,7 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
 def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
     """Update an existing gift voucher."""
     upd = {}
-    for field in ["title", "text", "validity", "logo", "merchant_id", "store_id"]:
+    for field in ["title", "price", "text", "validity", "logo", "merchant_id", "store_id"]:
         if field in data:
             upd[field] = (data[field] or "").strip()
     if "store_id" in upd and upd["store_id"] and "logo" not in upd:
@@ -952,51 +963,13 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
 
     sent_at = datetime.utcnow().strftime("%d %b %Y %H:%M")
 
-    # ── FCM v1 send using service account credentials ──
+    # Attempt FCM send if server key is configured
     sent_count = 0
-    fcm_error = ""
-    sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
-    project_id = os.environ.get("FIREBASE_PROJECT_ID", "").strip()
-    status = "queued"
-
-    if sa_json and project_id:
+    status = "saved"
+    fcm_key = os.environ.get("FCM_SERVER_KEY", "")
+    if fcm_key:
         try:
-            import json as _json, time as _time, urllib.request as _ureq
-            import base64 as _b64, hashlib as _hl, hmac as _hm
-
-            # ── Build JWT for Google OAuth2 token ──
-            sa = _json.loads(sa_json)
-            _project_id = project_id or sa.get("project_id", "")
-            client_email = sa["client_email"]
-            private_key_pem = sa["private_key"]
-
-            now = int(_time.time())
-            header = _b64.urlsafe_b64encode(_json.dumps({"alg":"RS256","typ":"JWT"}).encode()).rstrip(b"=")
-            payload_jwt = _b64.urlsafe_b64encode(_json.dumps({
-                "iss": client_email,
-                "scope": "https://www.googleapis.com/auth/firebase.messaging",
-                "aud": "https://oauth2.googleapis.com/token",
-                "iat": now, "exp": now + 3600
-            }).encode()).rstrip(b"=")
-
-            from cryptography.hazmat.primitives import hashes, serialization
-            from cryptography.hazmat.primitives.asymmetric import padding
-            from cryptography.hazmat.backends import default_backend
-
-            private_key = serialization.load_pem_private_key(
-                private_key_pem.encode(), password=None, backend=default_backend())
-            sign_input = header + b"." + payload_jwt
-            signature = private_key.sign(sign_input, padding.PKCS1v15(), hashes.SHA256())
-            jwt_token = (sign_input + b"." + _b64.urlsafe_b64encode(signature).rstrip(b"=")).decode()
-
-            # ── Exchange JWT for access token ──
-            token_data = f"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={jwt_token}".encode()
-            treq = _ureq.Request("https://oauth2.googleapis.com/token", data=token_data,
-                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
-            with _ureq.urlopen(treq, timeout=10) as tr:
-                access_token = _json.loads(tr.read())["access_token"]
-
-            # ── Collect FCM tokens ──
+            import urllib.request, json as _json
             tokens = []
             if target == "all":
                 users_cur = db.users.find({"fcm_token": {"$exists": True, "$ne": ""}}, {"fcm_token":1})
@@ -1006,42 +979,23 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 u = db.users.find_one({"phone": phone}, {"fcm_token":1})
                 if u and u.get("fcm_token"): tokens = [u["fcm_token"]]
 
-            if not tokens:
-                status = "no_tokens"
-            else:
-                fcm_url = f"https://fcm.googleapis.com/v1/projects/{_project_id}/messages:send"
-                fail_count = 0
-                for tok in tokens:
-                    msg = {
-                        "message": {
-                            "token": tok,
-                            "notification": {"title": title, "body": body},
-                            "android": {"priority": "high",
-                                        "notification": {"click_action": "FLUTTER_NOTIFICATION_CLICK",
-                                                         **({"image_url": data["image_url"]} if data.get("image_url") else {})}},
-                            "data": {"type": "promo"}
-                        }
-                    }
-                    freq = _ureq.Request(fcm_url, data=_json.dumps(msg).encode(),
-                        headers={"Authorization": f"Bearer {access_token}",
-                                 "Content-Type": "application/json"})
-                    try:
-                        with _ureq.urlopen(freq, timeout=10) as fr:
-                            sent_count += 1
-                    except Exception as fe:
-                        fail_count += 1
-                        fcm_error = str(fe)
-                if sent_count > 0 and fail_count == 0:
-                    status = "sent"
-                elif sent_count > 0:
-                    status = "partial"
-                else:
-                    status = "failed"
+            for tok in tokens:
+                payload = _json.dumps({
+                    "to": tok,
+                    "notification": {"title": title, "body": body,
+                                     **({"image": data.get("image_url")} if data.get("image_url") else {})},
+                    "data": {"click_action": "FLUTTER_NOTIFICATION_CLICK"}
+                }).encode()
+                req = urllib.request.Request(
+                    "https://fcm.googleapis.com/fcm/send",
+                    data=payload,
+                    headers={"Authorization": f"key={fcm_key}", "Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    if resp.status == 200: sent_count += 1
+            status = "sent"
         except Exception as e:
-            status = "error"
-            fcm_error = str(e)
-    else:
-        fcm_error = "FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_PROJECT_ID env var not set"
+            status = "partial"
 
     # Save to DB always
     doc = {"title": title, "body": body, "target": target,
@@ -1051,4 +1005,22 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
            "sent_count": sent_count, "created_at": datetime.utcnow()}
     db.notifications.insert_one(doc)
 
-    return {"message": "Notification saved", "status": status, "sent_count": sent_count, "error": fcm_error if status not in ("sent","queued") else "", "note": "Set FCM_SERVER_KEY env var on Railway to enable push delivery" if not fcm_key else ""}
+    return {"message": "Notification saved", "status": status, "sent_count": sent_count}
+
+
+# =================== IMAGE UPLOAD (admin) ===================
+@router.post("/upload-image")
+async def upload_image_endpoint(request: Request, a=Depends(get_current_admin)):
+    """Upload an image (multipart/form-data) and return a base64 data URL."""
+    from fastapi import UploadFile
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(400, "No file provided")
+    contents = await file.read()
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 5MB)")
+    ct = file.content_type or "image/jpeg"
+    b64 = base64.b64encode(contents).decode("utf-8")
+    data_url = f"data:{ct};base64,{b64}"
+    return {"url": data_url, "image_url": data_url}

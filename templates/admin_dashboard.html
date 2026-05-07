@@ -98,7 +98,7 @@ tr:hover td{background:#f7faf8;}
 <div class="sidebar">
 <button class="sidebar-close-btn" onclick="closeSidebar()"><i class="fas fa-times"></i></button>
   <div class="sidebar-logo">
-    <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/c662367f1_offro_logo_white.png" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" 
+    <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/fdde9d36c_442ce6b8e_boldlogowht.png" 
          style="height:38px;width:auto;object-fit:contain;" alt="OffrO">
   </div>
   <div class="sidebar-sub">Admin Panel</div>
@@ -109,8 +109,7 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
   <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <a href="#" onclick="showSection('gift_cards',this)"><i class="fas fa-id-card fa-fw"></i> Gift Cards (App)</a>
-  <!-- Sliders hidden for now — will be activated later -->
-  <a href="#" onclick="showSection('promo_sliders',this)" style="display:none;"><i class="fas fa-images fa-fw"></i> Promo Sliders</a>
+  <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Promo Sliders</a>
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
@@ -166,9 +165,6 @@ tr:hover td{background:#f7faf8;}
     <button class="btn-p" onclick="loadRatings()"><i class="fas fa-sync me-1"></i> Refresh</button>
   </div>
   <div class="table-wrap">
-    <div class="d-flex gap-2 mb-3 align-items-center flex-wrap">
-      <input id="ratings_search" class="form-control" placeholder="Search store or category…" style="max-width:280px;" oninput="_ratingsCache&&_renderRatings(_ratingsCache)">
-    </div>
     <table>
       <thead>
         <tr><th>Store</th><th>Category</th><th>User Avg</th><th>Admin Set</th><th>Set Rating</th></tr>
@@ -246,14 +242,14 @@ tr:hover td{background:#f7faf8;}
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Logo</th><th>Title</th><th>Price</th><th>Offer Text</th><th>Validity</th><th>Merchant</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Logo</th><th>Title</th><th>Offer Text</th><th>Validity</th><th>Merchant</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody id="gift_cards_list"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
     </table>
   </div>
 </div>
 
 <!-- PROMO SLIDERS -->
-<div id="section-promo_sliders" class="section" style="display:none!important;">
+<div id="section-promo_sliders" class="section">
   <div class="section-header">
     <div>
       <div class="fw-bold" style="font-size:18px;color:var(--primary)">🖼️ Promo Sliders</div>
@@ -326,14 +322,49 @@ tr:hover td{background:#f7faf8;}
 <div id="section-categories" class="section">
     <div class="page-title">Categories</div>
     <div class="table-wrap" style="padding:22px;">
-      <p style="color:var(--muted);font-size:13px;margin-bottom:6px;">Type a category name and click <strong>+ Add</strong>. The icon is automatically assigned by the app based on the category name.</p>
-      <div style="background:#f0f9f4;border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--primary);">
-        <strong>Auto icons:</strong> Grocery 🛒 · Restaurant 🍽️ · Pharmacy 💊 · Electronics 📱 · Clothing 👗 · Bakery 🎂 · Salon ✂️ · Pet Store 🐾 · Others 🏪
-        <br>Add new categories freely — the app will show the default store icon for any unrecognised name.
-      </div>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">Add categories with emojis. Example: <strong>🍕 Pizza</strong> or <strong>💇 Salon</strong></p>
       <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
-        <input id="new_category" class="form-control" placeholder="e.g. Pharmacy" style="max-width:280px;" type="text" autocomplete="off">
+        <div style="position:relative;">
+          <button type="button" id="emojiPickerBtn" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;cursor:pointer;z-index:2;padding:0;" onclick="toggleEmojiPicker()" title="Pick emoji">😊</button>
+          <input id="new_category" class="form-control" placeholder="e.g. 🍕 Pizza" style="max-width:280px;padding-left:38px;">
+        </div>
         <button class="btn-p" onclick="addCategory()">+ Add</button>
+      </div>
+      <!-- Quick emoji picker -->
+      <div id="emoji_picker" style="display:none;background:white;border:1px solid var(--border);border-radius:10px;padding:10px;max-width:360px;margin-bottom:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:600;">COMMON EMOJIS</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+          <span onclick="insertEmoji('🛍️')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🛍️</span>
+          <span onclick="insertEmoji('🍕')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍕</span>
+          <span onclick="insertEmoji('🍔')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍔</span>
+          <span onclick="insertEmoji('☕')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">☕</span>
+          <span onclick="insertEmoji('💇')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💇</span>
+          <span onclick="insertEmoji('💊')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💊</span>
+          <span onclick="insertEmoji('👗')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">👗</span>
+          <span onclick="insertEmoji('📱')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">📱</span>
+          <span onclick="insertEmoji('🏪')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🏪</span>
+          <span onclick="insertEmoji('🎁')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎁</span>
+          <span onclick="insertEmoji('💄')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💄</span>
+          <span onclick="insertEmoji('🥗')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🥗</span>
+          <span onclick="insertEmoji('🍰')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍰</span>
+          <span onclick="insertEmoji('🧴')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🧴</span>
+          <span onclick="insertEmoji('🍜')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍜</span>
+          <span onclick="insertEmoji('🎮')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎮</span>
+          <span onclick="insertEmoji('📚')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">📚</span>
+          <span onclick="insertEmoji('🏋️')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🏋️</span>
+          <span onclick="insertEmoji('🐾')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🐾</span>
+          <span onclick="insertEmoji('🚗')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🚗</span>
+          <span onclick="insertEmoji('🏠')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🏠</span>
+          <span onclick="insertEmoji('✂️')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">✂️</span>
+          <span onclick="insertEmoji('💍')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💍</span>
+          <span onclick="insertEmoji('🌸')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🌸</span>
+          <span onclick="insertEmoji('🎵')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎵</span>
+          <span onclick="insertEmoji('🛒')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🛒</span>
+          <span onclick="insertEmoji('🥩')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🥩</span>
+          <span onclick="insertEmoji('🍺')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍺</span>
+          <span onclick="insertEmoji('🎂')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎂</span>
+          <span onclick="insertEmoji('🧹')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🧹</span>
+        </div>
       </div>
       <div id="categories_list" style="margin-top:8px;"></div>
     </div>
@@ -588,15 +619,6 @@ tr:hover td{background:#f7faf8;}
               </label>
             </div>
           </div>
-          <div class="col-md-6">
-            <label class="form-label">Store Badge <small style="color:var(--muted)">(shown on carousel card)</small></label>
-            <select id="store_badge" class="form-select">
-              <option value="">— No Badge —</option>
-              <option value="new_store">🆕 New Store</option>
-              <option value="just_opened">🎉 Just Opened</option>
-              <option value="newly_added">✨ Newly Added</option>
-            </select>
-          </div>
         </div>
         <p id="store_msg" class="mt-3 mb-0" style="color:#c0392b;font-size:12px;"></p>
       </div>
@@ -839,37 +861,28 @@ window.onload=()=>{
 
 // ─── GIFT VOUCHERS ───
 async function loadVouchers() {
-    const tbody = document.getElementById("vouchers_table");
-    if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>`;
     try {
-        let res = await fetch("/admin/withdraw-requests", { credentials:"include" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
+        let res = await fetch("/admin/gift-vouchers", { credentials:"include" });
         let vouchers = await res.json();
-        if (!vouchers.length) {
-            tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No voucher requests yet.</td></tr>";
-            return;
-        }
-        tbody.innerHTML = vouchers.map(v => {
-            let statusBadge = v.status==="fulfilled"
-                ? `<span class="badge-active">✓ Fulfilled</span>`
-                : `<span class="badge-waiting">⏳ Pending</span>`;
-            let actionBtn = v.status!=="fulfilled"
-                ? `<button class="btn-p" onclick="openFulfillModal('${v.id||v._id}','${(v.user_name||v.phone||"User").replace(/'/g,"\'")}',${v.points||0},${((v.points||0)*0.1).toFixed(2)})">🎁 Fulfill</button>`
-                : `<span style="color:var(--muted);font-size:12px">${v.voucher_code||"—"}</span>`;
-            return `<tr>
-                <td><strong>${v.user_name||"—"}</strong></td>
-                <td style="font-size:12px">${v.phone||"—"}</td>
-                <td><strong>${v.points||0}</strong></td>
-                <td>₹${((v.points||0)*0.1).toFixed(2)}</td>
-                <td style="font-size:11px;color:var(--muted)">${v.requested_at||v.created_at||"—"}</td>
-                <td>${statusBadge}</td>
-                <td>${actionBtn}</td>
-            </tr>`;
-        }).join("");
-    } catch(e) {
-        tbody.innerHTML = `<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--danger)'>Error: ${e.message}</td></tr>`;
-    }
+        const el = document.getElementById("vouchers_list");
+        if (!vouchers.length) { el.innerHTML="<p style='color:#94a3b8'>No vouchers yet.</p>"; return; }
+        el.innerHTML = vouchers.map(v => `
+            <div class="col-md-6">
+                <div class="voucher-preview d-flex align-items-center gap-3 position-relative">
+                    ${v.logo ? `<img src="${v.logo}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:white;" onerror="this.style.display='none'">` : `<div style="width:52px;height:52px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:#B8860B;font-size:22px;"></i></div>`}
+                    <div class="flex-grow-1">
+                        ${v.title?`<small style="color:#B8860B;font-weight:700;">${v.title}</small><br>`:""}
+                        <strong>${v.text||""}</strong>
+                        ${v.validity?`<br><small>Valid: ${v.validity}</small>`:""}
+                    </div>
+                    <div class="d-flex gap-1 position-absolute" style="top:8px;right:8px;">
+                        <button class="btn btn-sm" style="background:#3E5F55;color:#2c3e35;font-size:10px;padding:2px 7px;" onclick='editVoucher(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
+                        <button class="btn btn-sm btn-danger" style="font-size:10px;padding:2px 7px;" onclick="deleteVoucher('${v.id||v._id}')">Del</button>
+                    </div>
+                    <span style="position:absolute;bottom:8px;right:8px;font-size:10px;color:${v.is_active?'#16a34a':'#dc2626'}">${v.is_active?"● Active":"○ Hidden"}</span>
+                </div>
+            </div>`).join("");
+    } catch(e) { console.error(e); }
 }
 
 function openFulfillModal(reqId, userName, points, value){
@@ -926,12 +939,10 @@ async function loadStats() {
         let res = await fetch("/admin/stats", { credentials:"include" });
         if (res.status===401||res.status===403) { window.location.href="/admin"; return; }
         let d = await res.json();
-        if(document.getElementById("stat_merchants")) document.getElementById("stat_merchants").innerText = d.total_merchants||0;
-        if(document.getElementById("stat_active"))    document.getElementById("stat_active").innerText    = d.active_merchants||0;
-        if(document.getElementById("stat_stores"))    document.getElementById("stat_stores").innerText    = d.total_stores||0;
-        if(document.getElementById("stat_deals"))     document.getElementById("stat_deals").innerText     = d.total_deals||0;
-        if(document.getElementById("stat_users"))     document.getElementById("stat_users").innerText     = d.total_users||0;
-        if(document.getElementById("stat_waiting"))   document.getElementById("stat_waiting").innerText   = d.waiting_approval||0;
+        document.getElementById("stat_merchants").innerText = d.total_merchants||0;
+        document.getElementById("stat_active").innerText    = d.active_merchants||0;
+        document.getElementById("stat_stores").innerText    = d.total_stores||0;
+        document.getElementById("stat_deals").innerText     = d.total_deals||0;
     } catch(e) { console.error(e); }
 }
 
@@ -1057,7 +1068,7 @@ async function saveTerms(type){
 }
 
 // ===== MERCHANTS =====
-async function loadMerchants() {
+async async function loadMerchants() {
   try {
     let res = await fetch("/admin/merchants", {credentials:"include"});
     merchantsList = await res.json();
@@ -1229,7 +1240,6 @@ async function openEditStore(id){
   document.getElementById("store_address").value=s.address||"";
   document.getElementById("store_phone").value=s.phone||"";
   document.getElementById("store_points").value=(s.points_per_scan!=null&&s.points_per_scan!==undefined)?s.points_per_scan:10;
-  if(document.getElementById("store_badge")) document.getElementById("store_badge").value=s.badge||"";
   document.getElementById("store_lat").value=s.lat||"";
   document.getElementById("store_lng").value=s.lng||"";
   document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
@@ -1258,7 +1268,6 @@ async function submitStore(){
     city:document.getElementById("store_city").value,area:document.getElementById("store_area").value,
     address:document.getElementById("store_address").value,phone:document.getElementById("store_phone").value,
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
-      badge:document.getElementById("store_badge")?.value||"",
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
     is_new_in_town:document.getElementById("store_new_in_town").checked};
@@ -1437,11 +1446,6 @@ async function loadMerchantTxns() {
     invoices = invoices.map(i => ({...i, _txn_status: i._txn_status||"paid"}));
 
     allTxns = [...invoices, ...pendingRows];
-    // Sort by most recent date first
-    allTxns.sort((a, b) => {
-      const da = new Date(a.created_at || 0), db = new Date(b.created_at || 0);
-      return db - da;
-    });
 
     // Stats
     let realPending = pendingRows.length;
@@ -1586,18 +1590,6 @@ window.addEventListener("DOMContentLoaded", function() {
     sliderModalInst = new bootstrap.Modal(document.getElementById("sliderModal"));
 });
 
-// ── Google Drive URL converter ──
-function convertDriveUrl(url) {
-  if (!url) return url;
-  // https://drive.google.com/file/d/FILE_ID/view?... => direct image
-  let m = url.match(/drive\.google\.com\/file\/d\/([^/]+)/);
-  if (m) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
-  // https://drive.google.com/open?id=FILE_ID
-  let m2 = url.match(/drive\.google\.com\/open\?id=([^&]+)/);
-  if (m2) return `https://drive.google.com/uc?export=view&id=${m2[1]}`;
-  return url;
-}
-
 async function loadSliders() {
   try {
     let r = await fetch("/admin/promo-sliders", {credentials:"include"});
@@ -1608,7 +1600,7 @@ async function loadSliders() {
       return;
     }
     tbody.innerHTML = sliders.map(s => `<tr>
-      <td>${s.image_url ? `<img src="${convertDriveUrl(s.image_url)}" style="width:90px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.outerHTML='<span style=color:var(--muted);font-size:11px>No image</span>'">` : '<span style="color:var(--muted);font-size:11px;">—</span>'}</td>
+      <td>${s.image_url ? `<img src="${s.image_url}" style="width:90px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.outerHTML='<span style=color:var(--muted);font-size:11px>No image</span>'">` : '<span style="color:var(--muted);font-size:11px;">—</span>'}</td>
       <td><strong>${s.title||"—"}</strong></td>
       <td style="font-size:12px;color:var(--muted)">${s.link_url||s.action||"—"}</td>
       <td style="font-size:12px">${s.sort_order||0}</td>
@@ -1629,7 +1621,29 @@ function openSliderModal() {
   document.getElementById("sl_order").value = "0";
   document.getElementById("sl_active").checked = true;
   document.getElementById("sl_msg").innerText = "";
+  document.getElementById("sl_upload_status").innerText = "";
+  document.getElementById("sl_image_file").value = "";
+  document.getElementById("sl_image_preview").style.display = "none";
   sliderModalInst.show();
+}
+
+function updateSliderPreview() {
+  const url = document.getElementById("sl_image_url").value.trim();
+  const preview = document.getElementById("sl_image_preview");
+  const img = document.getElementById("sl_preview_img");
+  if (url) { img.src = url; preview.style.display = "block"; }
+  else { preview.style.display = "none"; }
+}
+
+function previewSliderImage(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    document.getElementById("sl_preview_img").src = e.target.result;
+    document.getElementById("sl_image_preview").style.display = "block";
+  };
+  reader.readAsDataURL(file);
 }
 
 function editSlider(s) {
@@ -1640,16 +1654,51 @@ function editSlider(s) {
   document.getElementById("sl_order").value = s.sort_order||0;
   document.getElementById("sl_active").checked = s.is_active!==false;
   document.getElementById("sl_msg").innerText = "";
+  document.getElementById("sl_upload_status").innerText = "";
+  document.getElementById("sl_image_file").value = "";
+  if (s.image_url) {
+    document.getElementById("sl_preview_img").src = s.image_url;
+    document.getElementById("sl_image_preview").style.display = "block";
+  } else {
+    document.getElementById("sl_image_preview").style.display = "none";
+  }
   sliderModalInst.show();
 }
 
 async function saveSlider() {
   const sid = document.getElementById("sl_id").value;
-  const img = document.getElementById("sl_image_url").value.trim();
-  if (!img) { document.getElementById("sl_msg").innerText = "Image URL is required"; return; }
+  const btn = document.getElementById("sl_save_btn");
+  btn.disabled = true; btn.innerText = "Saving...";
+  document.getElementById("sl_msg").innerText = "";
+
+  // Step 1: upload file if selected
+  let imgUrl = document.getElementById("sl_image_url").value.trim();
+  const fileInput = document.getElementById("sl_image_file");
+  if (fileInput.files.length > 0) {
+    document.getElementById("sl_upload_status").innerText = "⏳ Uploading image...";
+    try {
+      const fd = new FormData();
+      fd.append("file", fileInput.files[0]);
+      const upRes = await fetch("/admin/upload-image", { method:"POST", credentials:"include", body:fd });
+      if (upRes.ok) {
+        const upData = await upRes.json();
+        imgUrl = upData.url || upData.image_url || imgUrl;
+        document.getElementById("sl_image_url").value = imgUrl;
+        document.getElementById("sl_upload_status").innerText = "✅ Uploaded";
+      } else {
+        document.getElementById("sl_upload_status").innerText = "⚠️ Upload failed, using URL if provided";
+      }
+    } catch { document.getElementById("sl_upload_status").innerText = "⚠️ Upload error"; }
+  }
+
+  if (!imgUrl) {
+    document.getElementById("sl_msg").innerText = "Image URL or uploaded file is required";
+    btn.disabled = false; btn.innerText = "Save Banner";
+    return;
+  }
   const data = {
     title:      document.getElementById("sl_title").value.trim(),
-    image_url:  img,
+    image_url:  imgUrl,
     link_url:   document.getElementById("sl_link_url").value.trim(),
     sort_order: parseInt(document.getElementById("sl_order").value)||0,
     is_active:  document.getElementById("sl_active").checked,
@@ -1658,10 +1707,11 @@ async function saveSlider() {
     let url  = sid ? `/admin/promo-sliders/${sid}` : "/admin/promo-sliders";
     let meth = sid ? "PUT" : "POST";
     let res  = await fetch(url, {method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
-    if (!res.ok) { const d=await res.json(); document.getElementById("sl_msg").innerText=d.detail||"Error"; return; }
+    if (!res.ok) { const d=await res.json(); document.getElementById("sl_msg").innerText=d.detail||"Error"; btn.disabled=false;btn.innerText="Save Banner"; return; }
     sliderModalInst.hide();
     loadSliders();
   } catch { document.getElementById("sl_msg").innerText = "Server error"; }
+  btn.disabled = false; btn.innerText = "Save Banner";
 }
 
 async function deleteSlider(id) {
@@ -1707,19 +1757,32 @@ async function sendNotification() {
   try {
     let res = await fetch("/admin/notifications/send", {method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
     let d = await res.json();
-    if (!res.ok) { document.getElementById("notif_msg").style.color="var(--danger)"; document.getElementById("notif_msg").innerText=d.detail||"Error: "+JSON.stringify(d); return; }
+    if (!res.ok) { document.getElementById("notif_msg").style.color="var(--danger)"; document.getElementById("notif_msg").innerText=d.detail||"Error sending"; return; }
     document.getElementById("notif_msg").style.color="var(--primary)";
-    document.getElementById("notif_msg").innerText="✓ Notification saved! " + (d.sent_count ? d.sent_count+" devices notified" : "(FCM not configured — saved to history)");
+    document.getElementById("notif_msg").innerText="✓ Notification sent successfully!";
     document.getElementById("notif_title").value="";
     document.getElementById("notif_body").value="";
     document.getElementById("notif_image").value="";
-    setTimeout(() => document.getElementById("notif_msg").innerText="", 5000);
     loadNotifications();
-  } catch(err) { document.getElementById("notif_msg").style.color="var(--danger)"; document.getElementById("notif_msg").innerText="Server error: "+err.message; }
+  } catch { document.getElementById("notif_msg").innerText="Server error"; }
 }
 
 
 // ═══════════ EMOJI PICKER ═══════════
+function toggleEmojiPicker() {
+  const p = document.getElementById("emoji_picker");
+  p.style.display = p.style.display === "none" ? "block" : "none";
+}
+function insertEmoji(e) {
+  const inp = document.getElementById("new_category");
+  // Insert emoji at cursor position or prepend
+  const start = inp.selectionStart;
+  const before = inp.value.substring(0, start);
+  const after = inp.value.substring(inp.selectionEnd);
+  inp.value = before + e + " " + after;
+  inp.focus();
+  document.getElementById("emoji_picker").style.display = "none";
+}
 // Close emoji picker on outside click
 document.addEventListener("click", function(e) {
   const picker = document.getElementById("emoji_picker");
@@ -1765,14 +1828,15 @@ async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"
 // ═══════════ RATINGS ═══════════
 async function loadRatings(forceRefresh=false) {
     const tbody = document.getElementById("ratings_table");
-    if (!tbody) return;
     tbody.innerHTML = `<tr><td colspan='5' style='color:#6b8c7e;text-align:center;'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>`;
     try {
-        let res = await fetch("/admin/stores", { credentials:"include" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        _ratingsCache = await res.json();
+        // Always fetch fresh so user ratings from app are reflected immediately
+        if (true) {
+            let res = await fetch("/admin/stores", { credentials:"include" });
+            _ratingsCache = await res.json();
+        }
         _renderRatings(_ratingsCache);
-    } catch(e) { tbody.innerHTML = `<tr><td colspan='5' style='color:#ef4444;text-align:center;padding:24px'>Error: ${e.message}</td></tr>`; }
+    } catch(e) { tbody.innerHTML = `<tr><td colspan='5' style='color:#ef4444'>Error: ${e.message}</td></tr>`; }
 }
 
 async function setStoreRating(storeId, val, el) {
@@ -1810,7 +1874,6 @@ async function loadGiftCards() {
       return `<tr>
         <td>${logoHtml}</td>
         <td><strong>${v.title||"—"}</strong></td>
-        <td style="font-weight:700;color:var(--primary)">₹${v.price||v.value||"—"}</td>
         <td>${v.text||"—"}</td>
         <td style="font-size:12px;color:var(--muted)">${v.validity||"—"}</td>
         <td style="font-size:12px">${v.merchant_name||"—"}</td>
@@ -1828,7 +1891,6 @@ async function openGiftCardModal() {
   if (merchantsList.length === 0) await loadMerchants();
   document.getElementById("gc_id").value = "";
   document.getElementById("gc_title").value = "";
-  document.getElementById("gc_price").value = "";
   document.getElementById("gc_text").value = "";
   document.getElementById("gc_validity").value = "";
   document.getElementById("gc_logo").value = "";
@@ -1841,7 +1903,6 @@ async function openGiftCardModal() {
 function editGiftCard(v) {
   document.getElementById("gc_id").value       = v.id||v._id||"";
   document.getElementById("gc_title").value    = v.title||"";
-  document.getElementById("gc_price").value    = v.price||v.value||"";
   document.getElementById("gc_text").value     = v.text||"";
   document.getElementById("gc_validity").value = v.validity||"";
   document.getElementById("gc_logo").value     = v.logo||"";
@@ -1860,14 +1921,11 @@ function _populateGcMerchants(selectedId) {
 }
 
 async function saveGiftCard() {
-  const vid   = document.getElementById("gc_id").value;
-  const text  = document.getElementById("gc_text").value.trim();
-  const price = document.getElementById("gc_price").value.trim();
-  if (!text)  { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
-  if (!price) { document.getElementById("gc_msg").innerText = "Price / Value is required"; return; }
+  const vid  = document.getElementById("gc_id").value;
+  const text = document.getElementById("gc_text").value.trim();
+  if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
   const data = {
     title:       document.getElementById("gc_title").value.trim(),
-    price:       price,
     text,
     validity:    document.getElementById("gc_validity").value.trim(),
     logo:        document.getElementById("gc_logo").value.trim(),
@@ -1878,15 +1936,10 @@ async function saveGiftCard() {
     let url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
     let meth = vid ? "PUT" : "POST";
     let res  = await fetch(url, {method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
-    if (!res.ok) {
-      let errText = "";
-      try { const d = await res.json(); errText = d.detail||JSON.stringify(d); } catch { errText = await res.text(); }
-      document.getElementById("gc_msg").innerText = errText || `Error ${res.status}`;
-      return;
-    }
+    if (!res.ok) { const d = await res.json(); document.getElementById("gc_msg").innerText = d.detail||"Error"; return; }
     gcModalInst.hide();
     loadGiftCards();
-  } catch(e) { document.getElementById("gc_msg").innerText = "Server error: " + e.message; }
+  } catch { document.getElementById("gc_msg").innerText = "Server error"; }
 }
 
 async function deleteGiftCard(id) {
@@ -1897,8 +1950,7 @@ async function deleteGiftCard(id) {
 
 
 function _renderRatings(stores) {
-    const searchEl = document.getElementById("ratings_search");
-    const q = searchEl ? searchEl.value.toLowerCase() : "";
+    const q = _ratingsSearch.toLowerCase();
     const filtered = q ? stores.filter(s=>(s.store_name||"").toLowerCase().includes(q)||(s.category||"").toLowerCase().includes(q)) : stores;
     let html = "";
     filtered.forEach(s => {
@@ -1921,7 +1973,7 @@ function _renderRatings(stores) {
     document.getElementById("ratings_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No stores</td></tr>";
 }
 
-async function clearRating(storeId) {
+function clearRating(storeId) {
     try {
         await fetch(`/admin/stores/${storeId}/rating`, {
             method:"PUT", credentials:"include",
@@ -1936,7 +1988,7 @@ function closeSidebar() { document.getElementById("sidebar").classList.remove("o
 
 function openSidebar()  { document.getElementById("sidebar").classList.add("open"); }
 
-async function deleteVoucher(id) {
+function deleteVoucher(id) {
     if (!confirm("Delete voucher?")) return;
     await fetch(`/admin/gift-vouchers/${id}`, { method:"DELETE", credentials:"include" });
     loadVouchers();
@@ -1969,7 +2021,7 @@ function onVoucherStoreChange(storeId) {
     }
 }
 
-async function openVoucherModal() {
+function openVoucherModal() {
     // Load stores for the dropdown
     if (!window.allStoresList) {
         try { const r = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = await r.json(); } catch(e) { window.allStoresList = []; }
@@ -1988,7 +2040,7 @@ async function openVoucherModal() {
     voucherModalInst.show();
 }
 
-async function saveVoucher() {
+function saveVoucher() {
     const vid  = document.getElementById("edit_voucher_id").value;
     const text = document.getElementById("v_text").value.trim();
     if (!text) { document.getElementById("v_msg").innerText="Offer text required"; return; }
@@ -2010,7 +2062,7 @@ async function saveVoucher() {
     } catch { document.getElementById("v_msg").innerText="Server error"; }
 }
 
-async function setRating(storeId, val, el) {
+function setRating(storeId, val, el) {
     // Highlight stars
     const row = el.closest(".star-row");
     row.querySelectorAll(".fa-star").forEach((s,i) => { s.classList.toggle("on", i<val); });
@@ -2064,7 +2116,6 @@ function editStore(s) {
     document.getElementById("store_address").value = s.address||"";
     document.getElementById("store_phone").value = s.phone||"";
     document.getElementById("store_visit_points").value = s.visit_points||0;
-  if(document.getElementById("store_badge")) document.getElementById("store_badge").value = s.badge||"";
     document.getElementById("store_image_url").value = s.image||"";
     document.getElementById("store_image2_url").value = s.image2||"";
     document.getElementById("store_msg").innerText = "";
@@ -2084,7 +2135,7 @@ function editStore(s) {
     storeModalInst.show();
 }
 
-async function saveStore() {
+function saveStore() {
     const editId = document.getElementById("edit_store_id").value;
     const merchant_id = document.getElementById("store_merchant").value;
     const store_name  = document.getElementById("store_name").value.trim();
@@ -2098,7 +2149,6 @@ async function saveStore() {
         address:      document.getElementById("store_address").value,
         phone:        document.getElementById("store_phone").value,
         visit_points: parseInt(document.getElementById("store_visit_points").value)||0,
-        badge: document.getElementById("store_badge")?.value || "",
         image:        document.getElementById("store_image_url").value.trim(),
         image2:       document.getElementById("store_image2_url").value.trim(),
     };
@@ -2116,7 +2166,7 @@ async function saveStore() {
 
 <!-- Promo Slider Modal -->
 <div class="modal fade" id="sliderModal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">🖼️ Promo Banner</h5>
@@ -2128,14 +2178,28 @@ async function saveStore() {
           <label class="form-label">Title (optional)</label>
           <input id="sl_title" class="form-control" placeholder="e.g. Summer Sale">
         </div>
+        <!-- Image section -->
         <div class="mb-3">
-          <label class="form-label">Banner Image URL *</label>
-          <input id="sl_image_url" class="form-control" placeholder="https://...">
-          <small class="text-muted">Recommended: 1200×450px or 16:6 ratio</small>
+          <label class="form-label fw-semibold">Banner Image *</label>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;">
+            <div style="flex:1;min-width:200px;">
+              <label class="form-label" style="font-size:12px;color:var(--muted);">Upload Image</label>
+              <input type="file" id="sl_image_file" class="form-control form-control-sm" accept="image/*" onchange="previewSliderImage(event)">
+              <div id="sl_upload_status" style="font-size:12px;margin-top:4px;"></div>
+            </div>
+            <div style="flex:1;min-width:200px;">
+              <label class="form-label" style="font-size:12px;color:var(--muted);">or paste Image URL</label>
+              <input id="sl_image_url" class="form-control form-control-sm" placeholder="https://..." oninput="updateSliderPreview()">
+            </div>
+          </div>
+          <div id="sl_image_preview" style="margin-top:10px;display:none;">
+            <img id="sl_preview_img" src="" alt="Preview" style="max-width:100%;height:auto;max-height:180px;border-radius:8px;border:1px solid var(--border);object-fit:cover;">
+          </div>
+          <small class="text-muted d-block mt-1">Recommended: 1200×450px or 16:6 ratio. JPG/PNG/WebP.</small>
         </div>
         <div class="mb-3">
           <label class="form-label">Link / Action (optional)</label>
-          <input id="sl_link_url" class="form-control" placeholder="https://... or store_id or category">
+          <input id="sl_link_url" class="form-control" placeholder="https://... or store_id or category name">
           <small class="text-muted">Tap destination when user clicks the banner</small>
         </div>
         <div class="mb-3">
@@ -2151,7 +2215,7 @@ async function saveStore() {
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn-p" onclick="saveSlider()">Save Banner</button>
+        <button class="btn-p" id="sl_save_btn" onclick="saveSlider()">Save Banner</button>
       </div>
     </div>
   </div>
@@ -2168,13 +2232,8 @@ async function saveStore() {
       <div class="modal-body">
         <input type="hidden" id="gc_id" value="">
         <div class="mb-3">
-          <label class="form-label fw-semibold">Title (label shown on card, e.g. "DIWALI DEAL")</label>
-          <input id="gc_title" class="form-control" placeholder="DIWALI DEAL">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Price / Value (₹) *</label>
-          <input id="gc_price" class="form-control" type="number" min="1" placeholder="e.g. 150">
-          <div class="form-text">This is the big ₹ number shown on the card in the app.</div>
+          <label class="form-label fw-semibold">Title (e.g. "₹999 DEALS")</label>
+          <input id="gc_title" class="form-control" placeholder="₹999 DEALS">
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Offer Text *</label>
