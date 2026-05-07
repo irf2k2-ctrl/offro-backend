@@ -98,7 +98,7 @@ tr:hover td{background:#f7faf8;}
 <div class="sidebar">
 <button class="sidebar-close-btn" onclick="closeSidebar()"><i class="fas fa-times"></i></button>
   <div class="sidebar-logo">
-    <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/fdde9d36c_442ce6b8e_boldlogowht.png" 
+    <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/fdde9d36c_442ce6b8e_boldlogowht.png" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" 
          style="height:38px;width:auto;object-fit:contain;" alt="OffrO">
   </div>
   <div class="sidebar-sub">Admin Panel</div>
@@ -619,6 +619,15 @@ tr:hover td{background:#f7faf8;}
               </label>
             </div>
           </div>
+          <div class="col-md-6">
+            <label class="form-label">Store Badge <small style="color:var(--muted)">(shown on carousel card)</small></label>
+            <select id="store_badge" class="form-select">
+              <option value="">— No Badge —</option>
+              <option value="new_store">🆕 New Store</option>
+              <option value="just_opened">🎉 Just Opened</option>
+              <option value="newly_added">✨ Newly Added</option>
+            </select>
+          </div>
         </div>
         <p id="store_msg" class="mt-3 mb-0" style="color:#c0392b;font-size:12px;"></p>
       </div>
@@ -861,28 +870,37 @@ window.onload=()=>{
 
 // ─── GIFT VOUCHERS ───
 async function loadVouchers() {
+    const tbody = document.getElementById("vouchers_table");
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>`;
     try {
-        let res = await fetch("/admin/gift-vouchers", { credentials:"include" });
+        let res = await fetch("/admin/withdraw-requests", { credentials:"include" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
         let vouchers = await res.json();
-        const el = document.getElementById("vouchers_list");
-        if (!vouchers.length) { el.innerHTML="<p style='color:#94a3b8'>No vouchers yet.</p>"; return; }
-        el.innerHTML = vouchers.map(v => `
-            <div class="col-md-6">
-                <div class="voucher-preview d-flex align-items-center gap-3 position-relative">
-                    ${v.logo ? `<img src="${v.logo}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:white;" onerror="this.style.display='none'">` : `<div style="width:52px;height:52px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:#B8860B;font-size:22px;"></i></div>`}
-                    <div class="flex-grow-1">
-                        ${v.title?`<small style="color:#B8860B;font-weight:700;">${v.title}</small><br>`:""}
-                        <strong>${v.text||""}</strong>
-                        ${v.validity?`<br><small>Valid: ${v.validity}</small>`:""}
-                    </div>
-                    <div class="d-flex gap-1 position-absolute" style="top:8px;right:8px;">
-                        <button class="btn btn-sm" style="background:#3E5F55;color:#2c3e35;font-size:10px;padding:2px 7px;" onclick='editVoucher(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
-                        <button class="btn btn-sm btn-danger" style="font-size:10px;padding:2px 7px;" onclick="deleteVoucher('${v.id||v._id}')">Del</button>
-                    </div>
-                    <span style="position:absolute;bottom:8px;right:8px;font-size:10px;color:${v.is_active?'#16a34a':'#dc2626'}">${v.is_active?"● Active":"○ Hidden"}</span>
-                </div>
-            </div>`).join("");
-    } catch(e) { console.error(e); }
+        if (!vouchers.length) {
+            tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No voucher requests yet.</td></tr>";
+            return;
+        }
+        tbody.innerHTML = vouchers.map(v => {
+            let statusBadge = v.status==="fulfilled"
+                ? `<span class="badge-active">✓ Fulfilled</span>`
+                : `<span class="badge-waiting">⏳ Pending</span>`;
+            let actionBtn = v.status!=="fulfilled"
+                ? `<button class="btn-p" onclick="openFulfillModal('${v.id||v._id}','${(v.user_name||v.phone||"User").replace(/'/g,"\'")}',${v.points||0},${((v.points||0)*0.1).toFixed(2)})">🎁 Fulfill</button>`
+                : `<span style="color:var(--muted);font-size:12px">${v.voucher_code||"—"}</span>`;
+            return `<tr>
+                <td><strong>${v.user_name||"—"}</strong></td>
+                <td style="font-size:12px">${v.phone||"—"}</td>
+                <td><strong>${v.points||0}</strong></td>
+                <td>₹${((v.points||0)*0.1).toFixed(2)}</td>
+                <td style="font-size:11px;color:var(--muted)">${v.requested_at||v.created_at||"—"}</td>
+                <td>${statusBadge}</td>
+                <td>${actionBtn}</td>
+            </tr>`;
+        }).join("");
+    } catch(e) {
+        tbody.innerHTML = `<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--danger)'>Error: ${e.message}</td></tr>`;
+    }
 }
 
 function openFulfillModal(reqId, userName, points, value){
@@ -939,10 +957,12 @@ async function loadStats() {
         let res = await fetch("/admin/stats", { credentials:"include" });
         if (res.status===401||res.status===403) { window.location.href="/admin"; return; }
         let d = await res.json();
-        document.getElementById("stat_merchants").innerText = d.total_merchants||0;
-        document.getElementById("stat_active").innerText    = d.active_merchants||0;
-        document.getElementById("stat_stores").innerText    = d.total_stores||0;
-        document.getElementById("stat_deals").innerText     = d.total_deals||0;
+        if(document.getElementById("stat_merchants")) document.getElementById("stat_merchants").innerText = d.total_merchants||0;
+        if(document.getElementById("stat_active"))    document.getElementById("stat_active").innerText    = d.active_merchants||0;
+        if(document.getElementById("stat_stores"))    document.getElementById("stat_stores").innerText    = d.total_stores||0;
+        if(document.getElementById("stat_deals"))     document.getElementById("stat_deals").innerText     = d.total_deals||0;
+        if(document.getElementById("stat_users"))     document.getElementById("stat_users").innerText     = d.total_users||0;
+        if(document.getElementById("stat_waiting"))   document.getElementById("stat_waiting").innerText   = d.waiting_approval||0;
     } catch(e) { console.error(e); }
 }
 
@@ -1240,6 +1260,7 @@ async function openEditStore(id){
   document.getElementById("store_address").value=s.address||"";
   document.getElementById("store_phone").value=s.phone||"";
   document.getElementById("store_points").value=(s.points_per_scan!=null&&s.points_per_scan!==undefined)?s.points_per_scan:10;
+  if(document.getElementById("store_badge")) document.getElementById("store_badge").value=s.badge||"";
   document.getElementById("store_lat").value=s.lat||"";
   document.getElementById("store_lng").value=s.lng||"";
   document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
@@ -1268,6 +1289,7 @@ async function submitStore(){
     city:document.getElementById("store_city").value,area:document.getElementById("store_area").value,
     address:document.getElementById("store_address").value,phone:document.getElementById("store_phone").value,
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
+      badge:document.getElementById("store_badge")?.value||"",
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
     is_new_in_town:document.getElementById("store_new_in_town").checked};
@@ -1446,6 +1468,11 @@ async function loadMerchantTxns() {
     invoices = invoices.map(i => ({...i, _txn_status: i._txn_status||"paid"}));
 
     allTxns = [...invoices, ...pendingRows];
+    // Sort by most recent date first
+    allTxns.sort((a, b) => {
+      const da = new Date(a.created_at || 0), db = new Date(b.created_at || 0);
+      return db - da;
+    });
 
     // Stats
     let realPending = pendingRows.length;
@@ -1590,6 +1617,18 @@ window.addEventListener("DOMContentLoaded", function() {
     sliderModalInst = new bootstrap.Modal(document.getElementById("sliderModal"));
 });
 
+// ── Google Drive URL converter ──
+function convertDriveUrl(url) {
+  if (!url) return url;
+  // https://drive.google.com/file/d/FILE_ID/view?... => direct image
+  let m = url.match(/drive\.google\.com\/file\/d\/([^/]+)/);
+  if (m) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
+  // https://drive.google.com/open?id=FILE_ID
+  let m2 = url.match(/drive\.google\.com\/open\?id=([^&]+)/);
+  if (m2) return `https://drive.google.com/uc?export=view&id=${m2[1]}`;
+  return url;
+}
+
 async function loadSliders() {
   try {
     let r = await fetch("/admin/promo-sliders", {credentials:"include"});
@@ -1600,7 +1639,7 @@ async function loadSliders() {
       return;
     }
     tbody.innerHTML = sliders.map(s => `<tr>
-      <td>${s.image_url ? `<img src="${s.image_url}" style="width:90px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.outerHTML='<span style=color:var(--muted);font-size:11px>No image</span>'">` : '<span style="color:var(--muted);font-size:11px;">—</span>'}</td>
+      <td>${s.image_url ? `<img src="${convertDriveUrl(s.image_url)}" style="width:90px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.outerHTML='<span style=color:var(--muted);font-size:11px>No image</span>'">` : '<span style="color:var(--muted);font-size:11px;">—</span>'}</td>
       <td><strong>${s.title||"—"}</strong></td>
       <td style="font-size:12px;color:var(--muted)">${s.link_url||s.action||"—"}</td>
       <td style="font-size:12px">${s.sort_order||0}</td>
@@ -1699,14 +1738,15 @@ async function sendNotification() {
   try {
     let res = await fetch("/admin/notifications/send", {method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
     let d = await res.json();
-    if (!res.ok) { document.getElementById("notif_msg").style.color="var(--danger)"; document.getElementById("notif_msg").innerText=d.detail||"Error sending"; return; }
+    if (!res.ok) { document.getElementById("notif_msg").style.color="var(--danger)"; document.getElementById("notif_msg").innerText=d.detail||"Error: "+JSON.stringify(d); return; }
     document.getElementById("notif_msg").style.color="var(--primary)";
-    document.getElementById("notif_msg").innerText="✓ Notification sent successfully!";
+    document.getElementById("notif_msg").innerText="✓ Notification saved! " + (d.sent_count ? d.sent_count+" devices notified" : "(FCM not configured — saved to history)");
     document.getElementById("notif_title").value="";
     document.getElementById("notif_body").value="";
     document.getElementById("notif_image").value="";
+    setTimeout(() => document.getElementById("notif_msg").innerText="", 5000);
     loadNotifications();
-  } catch { document.getElementById("notif_msg").innerText="Server error"; }
+  } catch(err) { document.getElementById("notif_msg").style.color="var(--danger)"; document.getElementById("notif_msg").innerText="Server error: "+err.message; }
 }
 
 
@@ -1770,15 +1810,14 @@ async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"
 // ═══════════ RATINGS ═══════════
 async function loadRatings(forceRefresh=false) {
     const tbody = document.getElementById("ratings_table");
+    if (!tbody) return;
     tbody.innerHTML = `<tr><td colspan='5' style='color:#6b8c7e;text-align:center;'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>`;
     try {
-        // Always fetch fresh so user ratings from app are reflected immediately
-        if (true) {
-            let res = await fetch("/admin/stores", { credentials:"include" });
-            _ratingsCache = await res.json();
-        }
+        let res = await fetch("/admin/stores", { credentials:"include" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        _ratingsCache = await res.json();
         _renderRatings(_ratingsCache);
-    } catch(e) { tbody.innerHTML = `<tr><td colspan='5' style='color:#ef4444'>Error: ${e.message}</td></tr>`; }
+    } catch(e) { tbody.innerHTML = `<tr><td colspan='5' style='color:#ef4444;text-align:center;padding:24px'>Error: ${e.message}</td></tr>`; }
 }
 
 async function setStoreRating(storeId, val, el) {
@@ -2058,6 +2097,7 @@ function editStore(s) {
     document.getElementById("store_address").value = s.address||"";
     document.getElementById("store_phone").value = s.phone||"";
     document.getElementById("store_visit_points").value = s.visit_points||0;
+  if(document.getElementById("store_badge")) document.getElementById("store_badge").value = s.badge||"";
     document.getElementById("store_image_url").value = s.image||"";
     document.getElementById("store_image2_url").value = s.image2||"";
     document.getElementById("store_msg").innerText = "";
@@ -2091,6 +2131,7 @@ async function saveStore() {
         address:      document.getElementById("store_address").value,
         phone:        document.getElementById("store_phone").value,
         visit_points: parseInt(document.getElementById("store_visit_points").value)||0,
+        badge: document.getElementById("store_badge")?.value || "",
         image:        document.getElementById("store_image_url").value.trim(),
         image2:       document.getElementById("store_image2_url").value.trim(),
     };

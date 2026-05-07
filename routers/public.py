@@ -17,7 +17,7 @@ def get_stores(city: str = None, category: str = None):
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
         "image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
-        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"merchant_id":1
+        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"badge":1,"merchant_id":1
     }))
     if not stores:
         return []
@@ -78,6 +78,7 @@ def get_stores(city: str = None, category: str = None):
             "offer":      deal_summary,
             "deal_count":    deal_count,
             "is_new_in_town": s.get("is_new_in_town", False),
+            "badge": s.get("badge", ""),
             "merchant_id": s.get("merchant_id", "")
         })
     return result

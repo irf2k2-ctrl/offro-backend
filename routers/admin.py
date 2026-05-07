@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
@@ -233,6 +234,7 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "points_per_scan":s.get("points_per_scan", 0),
         "visit_points":   s.get("visit_points", 0),
         "is_new_in_town": s.get("is_new_in_town", False),
+        "badge": s.get("badge", ""),
         "image":          s.get("image") or "",
         "qr_code":        s.get("qr_code", ""),
         "lat":            s.get("lat", ""),
@@ -278,6 +280,7 @@ def _fmt_store(s):
         "lat": s.get("lat",""), "lng": s.get("lng",""),
         "image": s.get("image") or "",
         "is_new_in_town": s.get("is_new_in_town", False),
+        "badge": s.get("badge", ""),
         "deal_status": _store_deal_status(sid),
         "subscription_end": str(s.get("subscription_end","")),
         "paid_status": paid_status,
@@ -361,6 +364,7 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "lat": data.get("lat",""), "lng": data.get("lng",""),
         "image": data.get("image") or None,
         "is_new_in_town": bool(data.get("is_new_in_town", False)),
+        "badge": data.get("badge", ""),
         "created_at": datetime.utcnow()
     }
     result = db.stores.insert_one(store)
@@ -414,25 +418,10 @@ def get_store_detail(id: str, a=Depends(get_current_admin)):
         "image":          s.get("image") or "",
         "image2":         s.get("store_image2") or s.get("image2") or "",
         "is_new_in_town": s.get("is_new_in_town", False),
+        "badge": s.get("badge", ""),
         "status":         s.get("status", "active"),
         "merchant_id":    s.get("merchant_id", ""),
     }
-
-
-@router.get("/stores/{id}/qr")
-def get_store_qr(id: str, a=Depends(get_current_admin)):
-    """Return only the QR code for a store (fast endpoint)."""
-    try:
-        s = db.stores.find_one({"_id": ObjectId(id)}, {"qr_code": 1})
-        if not s:
-            raise HTTPException(404, "Store not found")
-        qr = s.get("qr_code", "")
-        if not qr:
-            qr = generate_qr_base64(id)
-            db.stores.update_one({"_id": ObjectId(id)}, {"$set": {"qr_code": qr}})
-        return {"qr_code": qr}
-    except Exception as e:
-        raise HTTPException(400, str(e))
 
 @router.put("/stores/{id}")
 def update_store(id: str, data: dict, a=Depends(get_current_admin)):
@@ -453,6 +442,7 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
     if data.get("image2"):         # save image2 as store_image2 (matches public.py field name)
         upd["store_image2"] = data["image2"]
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])
+    if "badge" in data: upd["badge"] = data.get("badge", "")
     if "status" in data: upd["status"] = data["status"]
     if upd: db.stores.update_one({"_id": ObjectId(id)}, {"$set": upd})
     return {"message": "Updated"}
@@ -901,51 +891,31 @@ def delete_gift_voucher(vid: str, a=Depends(get_current_admin)):
 
 @router.get("/promo-sliders")
 def list_promo_sliders(a=Depends(get_current_admin)):
-    """List all promo banner slides."""
     docs = list(db.promo_sliders.find().sort("sort_order", 1))
-    result = []
-    for d in docs:
-        result.append({
-            "id": str(d["_id"]),
-            "title": d.get("title", ""),
-            "image_url": d.get("image_url", ""),
-            "link_url": d.get("link_url", ""),
-            "sort_order": d.get("sort_order", 0),
-            "is_active": d.get("is_active", True),
-            "created_at": d["created_at"].strftime("%d %b %Y") if d.get("created_at") else "",
-        })
-    return result
+    return [{"id": str(d["_id"]), "title": d.get("title",""), "image_url": d.get("image_url",""),
+             "link_url": d.get("link_url",""), "sort_order": d.get("sort_order",0),
+             "is_active": d.get("is_active", True)} for d in docs]
 
 @router.post("/promo-sliders")
 def create_promo_slider(data: dict, a=Depends(get_current_admin)):
-    img = (data.get("image_url") or "").strip()
-    if not img:
-        raise HTTPException(400, "image_url is required")
-    doc = {
-        "title": (data.get("title") or "").strip(),
-        "image_url": img,
-        "link_url": (data.get("link_url") or "").strip(),
-        "sort_order": int(data.get("sort_order") or 0),
-        "is_active": bool(data.get("is_active", True)),
-        "created_at": datetime.utcnow(),
-    }
-    result = db.promo_sliders.insert_one(doc)
-    return {"message": "Slider created", "id": str(result.inserted_id)}
+    if not data.get("image_url"):
+        raise HTTPException(400, "image_url required")
+    doc = {"title": data.get("title",""), "image_url": data["image_url"],
+           "link_url": data.get("link_url",""), "sort_order": int(data.get("sort_order",0)),
+           "is_active": bool(data.get("is_active", True)), "created_at": datetime.utcnow()}
+    r = db.promo_sliders.insert_one(doc)
+    return {"message": "Slider created", "id": str(r.inserted_id)}
 
 @router.put("/promo-sliders/{sid}")
 def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     upd = {}
-    for field in ["title", "image_url", "link_url"]:
-        if field in data:
-            upd[field] = (data[field] or "").strip()
-    if "sort_order" in data:
-        upd["sort_order"] = int(data["sort_order"] or 0)
-    if "is_active" in data:
-        upd["is_active"] = bool(data["is_active"])
-    if not upd:
-        raise HTTPException(400, "Nothing to update")
+    for f in ["title","image_url","link_url"]:
+        if f in data: upd[f] = data[f]
+    if "sort_order" in data: upd["sort_order"] = int(data["sort_order"])
+    if "is_active"  in data: upd["is_active"]  = bool(data["is_active"])
+    if not upd: raise HTTPException(400, "Nothing to update")
     db.promo_sliders.update_one({"_id": ObjectId(sid)}, {"$set": upd})
-    return {"message": "Slider updated"}
+    return {"message": "Updated"}
 
 @router.delete("/promo-sliders/{sid}")
 def delete_promo_slider(sid: str, a=Depends(get_current_admin)):
@@ -957,39 +927,71 @@ def delete_promo_slider(sid: str, a=Depends(get_current_admin)):
 
 @router.get("/notifications")
 def list_notifications(a=Depends(get_current_admin)):
-    """List sent notification history."""
-    docs = list(db.notifications.find().sort("created_at", -1).limit(100))
+    docs = list(db.notifications.find().sort("_id", -1).limit(100))
     result = []
     for d in docs:
         result.append({
             "id": str(d["_id"]),
-            "title": d.get("title", ""),
-            "body": d.get("body", ""),
-            "target": d.get("target", "all"),
-            "target_phone": d.get("target_phone", ""),
-            "image_url": d.get("image_url", ""),
-            "status": d.get("status", "sent"),
-            "sent_at": (d["created_at"] + timedelta(hours=5, minutes=30)).strftime("%d %b %Y %H:%M IST") if d.get("created_at") else "",
+            "title": d.get("title",""),
+            "body": d.get("body",""),
+            "target": d.get("target","all"),
+            "target_phone": d.get("target_phone",""),
+            "image_url": d.get("image_url",""),
+            "status": d.get("status","sent"),
+            "sent_at": d.get("sent_at",""),
         })
     return result
 
 @router.post("/notifications/send")
 def send_notification(data: dict, a=Depends(get_current_admin)):
-    """Save notification record and (future) send via FCM."""
-    title = (data.get("title") or "").strip()
-    body  = (data.get("body") or "").strip()
+    title  = (data.get("title") or "").strip()
+    body   = (data.get("body")  or "").strip()
+    target = (data.get("target") or "all")
     if not title or not body:
         raise HTTPException(400, "title and body are required")
-    target = data.get("target", "all")
-    doc = {
-        "title": title,
-        "body": body,
-        "target": target,
-        "target_phone": (data.get("target_phone") or "").strip() if target == "specific" else "",
-        "image_url": (data.get("image_url") or "").strip(),
-        "status": "sent",
-        "created_at": datetime.utcnow(),
-    }
+
+    sent_at = datetime.utcnow().strftime("%d %b %Y %H:%M")
+
+    # Attempt FCM send if server key is configured
+    sent_count = 0
+    status = "saved"
+    fcm_key = os.environ.get("FCM_SERVER_KEY", "")
+    if fcm_key:
+        try:
+            import urllib.request, json as _json
+            tokens = []
+            if target == "all":
+                users_cur = db.users.find({"fcm_token": {"$exists": True, "$ne": ""}}, {"fcm_token":1})
+                tokens = [u["fcm_token"] for u in users_cur if u.get("fcm_token")]
+            else:
+                phone = (data.get("target_phone") or "").strip()
+                u = db.users.find_one({"phone": phone}, {"fcm_token":1})
+                if u and u.get("fcm_token"): tokens = [u["fcm_token"]]
+
+            for tok in tokens:
+                payload = _json.dumps({
+                    "to": tok,
+                    "notification": {"title": title, "body": body,
+                                     **({"image": data.get("image_url")} if data.get("image_url") else {})},
+                    "data": {"click_action": "FLUTTER_NOTIFICATION_CLICK"}
+                }).encode()
+                req = urllib.request.Request(
+                    "https://fcm.googleapis.com/fcm/send",
+                    data=payload,
+                    headers={"Authorization": f"key={fcm_key}", "Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    if resp.status == 200: sent_count += 1
+            status = "sent"
+        except Exception as e:
+            status = "partial"
+
+    # Save to DB always
+    doc = {"title": title, "body": body, "target": target,
+           "target_phone": data.get("target_phone",""),
+           "image_url": data.get("image_url",""),
+           "status": status, "sent_at": sent_at,
+           "sent_count": sent_count, "created_at": datetime.utcnow()}
     db.notifications.insert_one(doc)
-    # TODO: Integrate FCM here to actually push notifications
-    return {"message": "Notification recorded", "status": "sent"}
+
+    return {"message": "Notification saved", "status": status, "sent_count": sent_count}
