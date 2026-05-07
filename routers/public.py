@@ -467,3 +467,15 @@ def get_gift_vouchers_public():
             except: pass
         result.append({"id": vid, **d})
     return result
+
+
+# ── Alias routes (short form for app compatibility) ──
+@router.get("/sliders")
+def get_sliders_alias():
+    """Alias for /promo-sliders — returns active banners."""
+    return get_promo_sliders_public()
+
+@router.get("/gift-vouchers")
+def get_gift_vouchers_alias():
+    """Alias for /gift-vouchers-public — returns active vouchers."""
+    return get_gift_vouchers_public()
