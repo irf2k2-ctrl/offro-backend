@@ -95,7 +95,7 @@ tr:hover td{background:#f7faf8;}
 </head>
 <body>
 
-<div class="sidebar">
+<div class="sidebar" id="sidebar">
 <button class="sidebar-close-btn" onclick="closeSidebar()"><i class="fas fa-times"></i></button>
   <div class="sidebar-logo">
     <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/fdde9d36c_442ce6b8e_boldlogowht.png" 
@@ -149,6 +149,7 @@ tr:hover td{background:#f7faf8;}
     </div>
     <button class="btn-p" onclick="loadVouchers()"><i class="fas fa-sync me-1"></i> Refresh</button>
   </div>
+  <div id="vouchers_list" class="row g-3 mb-4"></div>
   <div class="table-wrap"><table>
     <thead><tr><th>User</th><th>Phone</th><th>Points</th><th>Value</th><th>Requested</th><th>Status</th><th>Action</th></tr></thead>
     <tbody id="vouchers_table"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
@@ -855,6 +856,7 @@ window.onload=()=>{
   userHistoryModal=new bootstrap.Modal(document.getElementById("userHistoryModal"));
   adjustModal_inst=new bootstrap.Modal(document.getElementById("adjustModal"));
   fulfillModal_inst=new bootstrap.Modal(document.getElementById("fulfillModal"));
+  if(document.getElementById("voucherModal")) window.voucherModalInst=new bootstrap.Modal(document.getElementById("voucherModal"));
   loadStats();
   loadCategories();
 };
@@ -942,7 +944,7 @@ async function loadStats() {
         document.getElementById("stat_merchants").innerText = d.total_merchants||0;
         document.getElementById("stat_active").innerText    = d.active_merchants||0;
         document.getElementById("stat_stores").innerText    = d.total_stores||0;
-        document.getElementById("stat_deals").innerText     = d.total_deals||0;
+        if(document.getElementById("stat_deals")) if(document.getElementById("stat_deals")) document.getElementById("stat_deals").innerText = d.total_deals||0;
     } catch(e) { console.error(e); }
 }
 
@@ -1973,7 +1975,7 @@ function _renderRatings(stores) {
     document.getElementById("ratings_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No stores</td></tr>";
 }
 
-function clearRating(storeId) {
+async function clearRating(storeId) {
     try {
         await fetch(`/admin/stores/${storeId}/rating`, {
             method:"PUT", credentials:"include",
@@ -1988,7 +1990,7 @@ function closeSidebar() { document.getElementById("sidebar").classList.remove("o
 
 function openSidebar()  { document.getElementById("sidebar").classList.add("open"); }
 
-function deleteVoucher(id) {
+async function deleteVoucher(id) {
     if (!confirm("Delete voucher?")) return;
     await fetch(`/admin/gift-vouchers/${id}`, { method:"DELETE", credentials:"include" });
     loadVouchers();
@@ -2021,7 +2023,7 @@ function onVoucherStoreChange(storeId) {
     }
 }
 
-function openVoucherModal() {
+async function openVoucherModal() {
     // Load stores for the dropdown
     if (!window.allStoresList) {
         try { const r = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = await r.json(); } catch(e) { window.allStoresList = []; }
@@ -2040,7 +2042,7 @@ function openVoucherModal() {
     voucherModalInst.show();
 }
 
-function saveVoucher() {
+async function saveVoucher() {
     const vid  = document.getElementById("edit_voucher_id").value;
     const text = document.getElementById("v_text").value.trim();
     if (!text) { document.getElementById("v_msg").innerText="Offer text required"; return; }
@@ -2062,7 +2064,7 @@ function saveVoucher() {
     } catch { document.getElementById("v_msg").innerText="Server error"; }
 }
 
-function setRating(storeId, val, el) {
+async function setRating(storeId, val, el) {
     // Highlight stars
     const row = el.closest(".star-row");
     row.querySelectorAll(".fa-star").forEach((s,i) => { s.classList.toggle("on", i<val); });
@@ -2115,9 +2117,10 @@ function editStore(s) {
     document.getElementById("store_area").value = s.area||"";
     document.getElementById("store_address").value = s.address||"";
     document.getElementById("store_phone").value = s.phone||"";
-    document.getElementById("store_visit_points").value = s.visit_points||0;
-    document.getElementById("store_image_url").value = s.image||"";
-    document.getElementById("store_image2_url").value = s.image2||"";
+    document.getElementById("store_points").value = s.visit_points||0;
+    document.getElementById("store_image_b64").value = s.image||"";
+    // store_image2_url not in modal - store in data attribute
+    document.getElementById("storeModal").dataset.image2 = s.image2||"";
     document.getElementById("store_msg").innerText = "";
     // Show image1 preview
     const prev = document.getElementById("store_image_preview");
@@ -2125,7 +2128,7 @@ function editStore(s) {
         prev.innerHTML = `<img src="${s.image}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">`;
     } else { prev.innerHTML = ""; }
     // Show image2 preview
-    const prev2 = document.getElementById("store_image2_preview");
+    const prev2 = document.getElementById("store_image_preview");
     if (s.image2) {
         prev2.innerHTML = `<img src="${s.image2}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;margin-top:4px;" onerror="this.style.display='none'">`;
     } else { prev2.innerHTML = ""; }
@@ -2135,7 +2138,7 @@ function editStore(s) {
     storeModalInst.show();
 }
 
-function saveStore() {
+async function saveStore() {
     const editId = document.getElementById("edit_store_id").value;
     const merchant_id = document.getElementById("store_merchant").value;
     const store_name  = document.getElementById("store_name").value.trim();
@@ -2148,9 +2151,9 @@ function saveStore() {
         area:         document.getElementById("store_area").value,
         address:      document.getElementById("store_address").value,
         phone:        document.getElementById("store_phone").value,
-        visit_points: parseInt(document.getElementById("store_visit_points").value)||0,
-        image:        document.getElementById("store_image_url").value.trim(),
-        image2:       document.getElementById("store_image2_url").value.trim(),
+        visit_points: parseInt(document.getElementById("store_points").value)||0,
+        image:        document.getElementById("store_image_b64").value.trim() || document.getElementById("store_image").value.trim() || "",
+        image2:       "",
     };
     try {
         let url  = editId ? `/admin/stores/${editId}` : "/admin/stores";
@@ -2262,6 +2265,52 @@ function saveStore() {
       <div class="modal-footer">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
         <button class="btn-p btn-sm" onclick="saveGiftCard()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Voucher Edit Modal -->
+<div class="modal fade" id="voucherModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">🎁 Gift Voucher</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="edit_voucher_id" value="">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Title *</label>
+          <input id="v_title" class="form-control" placeholder="e.g. ₹100 Amazon Voucher">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Offer Text *</label>
+          <input id="v_text" class="form-control" placeholder="e.g. FREE ₹100 Amazon Gift Card">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Validity</label>
+          <input id="v_validity" class="form-control" placeholder="e.g. 31 Dec 2026">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Linked Merchant (optional)</label>
+          <select id="v_merchant" class="form-select"><option value="">None</option></select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Linked Store (optional)</label>
+          <select id="v_store" class="form-select" onchange="onVoucherStoreChange(this.value)"><option value="">None</option></select>
+        </div>
+        <div id="v_store_img_preview" class="mb-2"></div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="v_active" checked>
+          <label class="form-check-label" for="v_active">Active (show in app)</label>
+        </div>
+        <p id="v_msg" style="color:var(--danger);font-size:13px;"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn-p btn-sm" onclick="saveVoucher()">Save</button>
       </div>
     </div>
   </div>
