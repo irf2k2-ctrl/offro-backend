@@ -432,3 +432,21 @@ def get_promo_sliders_public():
             "sort_order": d.get("sort_order", 0),
         })
     return result
+
+# =================== GIFT VOUCHERS (public - for Flutter app home screen) ===================
+@router.get("/gift-vouchers-public")
+def get_gift_vouchers_public():
+    """Returns active gift vouchers shown on the app home screen (Voucher Zone)."""
+    docs = list(db.gift_vouchers.find().sort("_id", -1))
+    result = []
+    for d in docs:
+        d["id"] = str(d.pop("_id"))
+        # Normalise store field
+        store = d.get("store", {})
+        if isinstance(store, dict):
+            sid = store.get("_id") or store.get("id")
+            if sid:
+                store["id"] = str(sid)
+                store.pop("_id", None)
+        result.append(d)
+    return result

@@ -2,18 +2,9 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
-import uuid, qrcode, io, base64
-from datetime import datetime, timedelta
+import uuid
 
 router = APIRouter(tags=["Users"])
-
-def _qr(store_id: str) -> str:
-    qr = qrcode.QRCode(version=1, box_size=8, border=2)
-    qr.add_data(f"offro://redeem?store_id={store_id}")
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="#3E5F55", back_color="white")
-    buf = io.BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
-    return "data:image/png;base64," + base64.b64encode(buf.read()).decode()
 
 def get_current_user(request: Request):
     token = request.cookies.get("user_token")
@@ -38,10 +29,12 @@ def register_user(data: dict):
     if db.users.find_one({"phone": phone}):
         raise HTTPException(status_code=400, detail="Phone already registered")
     user = {
-        "name": name, "phone": phone,
+        "name": name,
+        "phone": phone,
         "city": data.get("city", ""),
-        "visit_points": 0, "pool_points": 0,
-        "token": None, "favorites": []
+        "visit_points": 0,
+        "pool_points": 0,
+        "token": None
     }
     result = db.users.insert_one(user)
     return {"message": "Registered successfully", "user_id": str(result.inserted_id)}
@@ -84,61 +77,64 @@ def get_profile(user=Depends(get_current_user)):
         "city": user.get("city", ""),
         "visit_points": user.get("visit_points", 0),
         "pool_points": user.get("pool_points", 0),
-        "total_points": user.get("visit_points", 0) + user.get("pool_points", 0),
-        "profile_image": user.get("profile_image")
+        "total_points": user.get("visit_points", 0) + user.get("pool_points", 0)
     }
-
-@router.put("/city")
-def update_city(data: dict, user=Depends(get_current_user)):
-    city = data.get("city", "").strip()
-    db.users.update_one({"_id": user["_id"]}, {"$set": {"city": city}})
-    return {"message": "City updated"}
-
-@router.put("/profile")
-def update_profile(data: dict, user=Depends(get_current_user)):
-    allowed = ["name", "city", "profile_image"]
-    upd = {k: data[k] for k in allowed if k in data}
-    if not upd:
-        raise HTTPException(400, "Nothing to update")
-    db.users.update_one({"_id": user["_id"]}, {"$set": upd})
-    return {"message": "Profile updated"}
 
 # =================== WALLET ===================
 @router.get("/wallet")
 def get_wallet(user=Depends(get_current_user)):
+    visit = user.get("visit_points", 0)
+    pool = user.get("pool_points", 0)
+    pricing = db.pricing.find_one({}) or {}
+    rate = float(pricing.get("conversion_rate", 0.10))
+    min_w = int(pricing.get("min_withdraw_points", 200))
+    total = visit + pool
     return {
-        "user_id": str(user["_id"]),
-        "visit_points": user.get("visit_points", 0),
-        "pool_points": user.get("pool_points", 0),
-        "total_points": user.get("visit_points", 0)
+        "visit_points": visit,
+        "pool_points": pool,
+        "total_points": total,
+        "conversion_rate": rate,
+        "min_withdraw_points": min_w,
+        "value_in_rupees": round(total * rate, 2),
+        "profile_image":  user.get("profile_image", None),
     }
 
 @router.post("/wallet/withdraw")
 def withdraw(data: dict, user=Depends(get_current_user)):
-    amount = int(data.get("amount", 0))
-    pts = user.get("visit_points", 0)
-    if amount < 200:
-        raise HTTPException(400, "Minimum withdrawal is 200 points")
-    if pts < amount:
-        raise HTTPException(400, f"Insufficient points. You have {pts} points.")
-    db.users.update_one({"_id": user["_id"]}, {"$inc": {"visit_points": -amount}})
+    pricing = db.pricing.find_one({}) or {}
+    min_withdraw = int(pricing.get("min_withdraw_points", 200))
+    visit = user.get("visit_points", 0)
+    pool = user.get("pool_points", 0)
+    total = visit + pool
+    amount = int(data.get("amount", min_withdraw))
+    if total < min_withdraw:
+        raise HTTPException(status_code=400, detail=f"Minimum {min_withdraw} points required to withdraw. You have {total}.")
+    if total < amount:
+        raise HTTPException(status_code=400, detail=f"Not enough points. You have {total}.")
+    # Mark pending_withdraw on user (don't deduct yet — deduct when voucher is sent)
+    db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"pending_withdraw": True}}
+    )
+    from datetime import datetime
     db.withdraw_requests.insert_one({
         "user_id": str(user["_id"]),
         "user_name": user.get("name"),
-        "user_phone": user.get("phone"),
+        "phone": user.get("phone"),
+        "email": user.get("email",""),
         "points": amount,
-        "inr_value": amount / 10,
+        "voucher_value": round(amount / 10, 2),
         "status": "pending",
         "created_at": datetime.utcnow()
     })
-    return {"message": f"Withdrawal of {amount} points (₹{amount/10:.0f}) requested. Gift voucher delivered within 3–5 business days."}
+    return {"message": "Gift Voucher request submitted! You will receive your Amazon/Flipkart voucher within 3-5 business days.", "remaining_points": total}
 
-# =================== REDEEM QR ===================
+# =================== QR REDEEM ===================
 @router.post("/redeem")
 def redeem_qr(data: dict, request: Request):
     """
     Called when user scans a store QR code.
-    After successful redemption, the store QR is regenerated for security.
+    Payload: { store_id, user_token or user_id }
     """
     store_id = data.get("store_id")
     user_token = data.get("user_token") or request.cookies.get("user_token")
@@ -150,8 +146,9 @@ def redeem_qr(data: dict, request: Request):
 
     user = db.users.find_one({"token": user_token})
     if not user:
-        raise HTTPException(status_code=403, detail="Invalid user token")
+        raise HTTPException(status_code=403, detail="Invalid user session")
 
+    # Find store
     try:
         store = db.stores.find_one({"_id": ObjectId(store_id)})
     except Exception:
@@ -160,35 +157,51 @@ def redeem_qr(data: dict, request: Request):
     if not store:
         raise HTTPException(status_code=404, detail="Store not found")
     if store.get("status") != "active":
-        raise HTTPException(status_code=403, detail="Store is not active")
+        raise HTTPException(status_code=400, detail="Store is not active")
 
-    # 24-hour cooldown per store per user
-    since = datetime.utcnow() - timedelta(hours=24)
+    points_to_add = int(store.get("points_per_scan", 10))
+    user_id = str(user["_id"])
+
+    # Prevent duplicate scan within 24 hours
+    from datetime import datetime, timedelta
     recent = db.redemptions.find_one({
-        "user_id": str(user["_id"]),
+        "user_id": user_id,
         "store_id": store_id,
-        "created_at": {"$gte": since}
+        "created_at": {"$gte": datetime.utcnow() - timedelta(hours=24)}
     })
     if recent:
         raise HTTPException(status_code=429, detail="Already redeemed from this store today. Try again tomorrow.")
 
-    pts = store.get("points_per_scan", 10)
-    db.users.update_one({"_id": user["_id"]}, {"$inc": {"visit_points": pts}})
+    # Add points
+    db.users.update_one(
+        {"_id": user["_id"]},
+        {"$inc": {"visit_points": points_to_add}}
+    )
     db.redemptions.insert_one({
-        "user_id": str(user["_id"]),
-        "user_name": user.get("name"),
-        "user_phone": user.get("phone"),
+        "user_id": user_id,
         "store_id": store_id,
         "store_name": store.get("store_name"),
-        "points": pts,
+        "merchant_id": store.get("merchant_id"),
+        "points": points_to_add,
         "created_at": datetime.utcnow()
     })
 
-    # 🔐 Regenerate QR code for security after successful scan
-    new_qr = _qr(store_id)
-    db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {"qr_code": new_qr}})
+    updated_user = db.users.find_one({"_id": user["_id"]})
+    return {
+        "message": f"✅ {points_to_add} points added!",
+        "store_name": store.get("store_name"),
+        "points_earned": points_to_add,
+        "total_points": updated_user.get("visit_points", 0) + updated_user.get("pool_points", 0)
+    }
 
-    return {"message": f"✅ {pts} points added! Keep earning more.", "points": pts, "qr_regenerated": True}
+
+# =================== UPDATE CITY ===================
+@router.put("/city")
+def update_city(data: dict, user=Depends(get_current_user)):
+    city = data.get("city", "").strip()
+    if city:
+        db.users.update_one({"_id": user["_id"]}, {"$set": {"city": city}})
+    return {"message": "City updated", "city": city}
 
 # =================== REDEMPTION HISTORY ===================
 @router.get("/redemptions")
@@ -197,62 +210,34 @@ def redemption_history(user=Depends(get_current_user)):
     redemptions = list(db.redemptions.find({"user_id": user_id}).sort("created_at", -1).limit(50))
     result = []
     for r in redemptions:
-        r["_id"] = str(r["_id"])
-        created = r.get("created_at")
-        r["date"] = created.isoformat() if created else ""
-        # Fetch store image for the scan history card
-        store_img = None
-        store_id = r.get("store_id")
-        if store_id:
-            try:
-                store_doc = db.stores.find_one({"_id": ObjectId(store_id)}, {"image": 1})
-                if store_doc:
-                    store_img = store_doc.get("image")
-            except Exception:
-                pass
-        r["store_image"] = store_img
-        result.append(r)
+        result.append({
+            "store_name": r.get("store_name"),
+            "points": r.get("points"),
+            "date": r.get("created_at").strftime("%d %b %Y %H:%M") if r.get("created_at") else ""
+        })
     return result
 
-# =================== FAVORITES ===================
-@router.get("/favorites")
-def get_favorites(user=Depends(get_current_user)):
-    fav_ids = user.get("favorites", [])
-    if not fav_ids:
-        return []
-    stores = []
-    for sid in fav_ids:
-        try:
-            s = db.stores.find_one({"_id": ObjectId(sid), "status": "active"})
-            if s:
-                stores.append({
-                    "_id": str(s["_id"]),
-                    "store_name": s.get("store_name"),
-                    "category": s.get("category", ""),
-                    "city": s.get("city", ""),
-                    "area": s.get("area", ""),
-                    "image": s.get("image"),
-                    "images": s.get("images", []),
-                    "visit_points": s.get("points_per_scan", 10),
-                    "rating": s.get("rating", 0),
-                })
-        except Exception:
-            pass
-    return stores
 
-@router.get("/favorites/{store_id}/check")
-def check_favorite(store_id: str, user=Depends(get_current_user)):
-    fav_ids = user.get("favorites", [])
-    return {"is_favorite": store_id in fav_ids}
+# =================== UPDATE USER PROFILE (image etc.) ===================
+@router.put("/profile")
+def update_user_profile(data: dict, user=Depends(get_current_user)):
+    allowed = ["profile_image", "name"]
+    update = {k: v for k, v in data.items() if k in allowed}
+    if not update:
+        from fastapi import HTTPException
+        raise HTTPException(400, "Nothing to update")
+    db.users.update_one({"_id": user["_id"]}, {"$set": update})
+    return {"ok": True}
 
-@router.post("/favorites/{store_id}")
-def toggle_favorite(store_id: str, user=Depends(get_current_user)):
-    fav_ids = user.get("favorites", [])
-    if store_id in fav_ids:
-        fav_ids.remove(store_id)
-        action = "removed"
-    else:
-        fav_ids.append(store_id)
-        action = "added"
-    db.users.update_one({"_id": user["_id"]}, {"$set": {"favorites": fav_ids}})
-    return {"message": f"Favourite {action}", "is_favorite": action == "added"}
+
+# =================== SAVE FCM / DEVICE TOKEN ===================
+@router.post("/fcm-token")
+def save_fcm_token(data: dict, user=Depends(get_current_user)):
+    """Stores a device token (FCM or device ID) for push notifications."""
+    fcm_token = data.get("fcm_token", "").strip()
+    if fcm_token:
+        db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"fcm_token": fcm_token, "fcm_updated_at": __import__("datetime").datetime.utcnow()}}
+        )
+    return {"ok": True}
