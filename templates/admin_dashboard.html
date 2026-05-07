@@ -864,27 +864,66 @@ window.onload=()=>{
 // ─── GIFT VOUCHERS ───
 async function loadVouchers() {
     try {
+        // Part 1: Load gift card templates (preview cards)
         let res = await fetch("/admin/gift-vouchers", { credentials:"include" });
-        let vouchers = await res.json();
+        let vouchers = res.ok ? await res.json() : [];
         const el = document.getElementById("vouchers_list");
-        if (!vouchers.length) { el.innerHTML="<p style='color:#94a3b8'>No vouchers yet.</p>"; return; }
-        el.innerHTML = vouchers.map(v => `
-            <div class="col-md-6">
-                <div class="voucher-preview d-flex align-items-center gap-3 position-relative">
-                    ${v.logo ? `<img src="${v.logo}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:white;" onerror="this.style.display='none'">` : `<div style="width:52px;height:52px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:#B8860B;font-size:22px;"></i></div>`}
-                    <div class="flex-grow-1">
-                        ${v.title?`<small style="color:#B8860B;font-weight:700;">${v.title}</small><br>`:""}
-                        <strong>${v.text||""}</strong>
-                        ${v.validity?`<br><small>Valid: ${v.validity}</small>`:""}
+        if (!vouchers.length) {
+            el.innerHTML="<p style='color:#94a3b8'>No gift card templates yet.</p>";
+        } else {
+            el.innerHTML = vouchers.map(v => `
+                <div class="col-md-6">
+                    <div class="voucher-preview d-flex align-items-center gap-3 position-relative">
+                        ${v.logo ? `<img src="${v.logo}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:white;" onerror="this.style.display='none'">` : `<div style="width:52px;height:52px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:#B8860B;font-size:22px;"></i></div>`}
+                        <div class="flex-grow-1">
+                            ${v.title?`<small style="color:#B8860B;font-weight:700;">${v.title}</small><br>`:""}
+                            <strong>${v.text||""}</strong>
+                            ${v.validity?`<br><small>Valid: ${v.validity}</small>`:""}
+                        </div>
+                        <div class="d-flex gap-1 position-absolute" style="top:8px;right:8px;">
+                            <button class="btn btn-sm" style="background:#3E5F55;color:white;font-size:10px;padding:2px 7px;" onclick='editVoucher(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
+                            <button class="btn btn-sm btn-danger" style="font-size:10px;padding:2px 7px;" onclick="deleteVoucher('${v.id||v._id}')">Del</button>
+                        </div>
+                        <span style="position:absolute;bottom:8px;right:8px;font-size:10px;color:${v.is_active?'#16a34a':'#dc2626'}">${v.is_active?"● Active":"○ Hidden"}</span>
                     </div>
-                    <div class="d-flex gap-1 position-absolute" style="top:8px;right:8px;">
-                        <button class="btn btn-sm" style="background:#3E5F55;color:#2c3e35;font-size:10px;padding:2px 7px;" onclick='editVoucher(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
-                        <button class="btn btn-sm btn-danger" style="font-size:10px;padding:2px 7px;" onclick="deleteVoucher('${v.id||v._id}')">Del</button>
-                    </div>
-                    <span style="position:absolute;bottom:8px;right:8px;font-size:10px;color:${v.is_active?'#16a34a':'#dc2626'}">${v.is_active?"● Active":"○ Hidden"}</span>
-                </div>
-            </div>`).join("");
-    } catch(e) { console.error(e); }
+                </div>`).join("");
+        }
+
+        // Part 2: Load withdrawal requests into table
+        const tbody = document.getElementById("vouchers_table");
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--muted)"><i class="fas fa-spinner fa-spin"></i> Loading requests...</td></tr>`;
+        let wr = await fetch("/admin/withdraw-requests", { credentials:"include" });
+        let reqs = wr.ok ? await wr.json() : [];
+        if (!reqs.length) {
+            tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No withdrawal requests yet.</td></tr>";
+        } else {
+            // Sort newest first
+            reqs.sort((a,b) => new Date(b.created_at||b.requested_at||0) - new Date(a.created_at||a.requested_at||0));
+            tbody.innerHTML = reqs.map(r => {
+                let pts = r.points || 0;
+                let val = (pts/10).toFixed(2);
+                let dt = r.created_at || r.requested_at || "-";
+                let status = r.status||"pending";
+                let badge = status==="fulfilled"
+                    ? `<span class="badge-active">✓ Fulfilled</span>`
+                    : status==="rejected"
+                    ? `<span style="background:#fee2e2;color:#dc2626;border-radius:12px;padding:2px 10px;font-size:11px;">✗ Rejected</span>`
+                    : `<span class="badge-waiting">⏳ Pending</span>`;
+                let action = status==="pending"
+                    ? `<button class="btn-p" style="font-size:11px;padding:3px 10px;" onclick="openFulfillModal('${r._id||r.id}','${(r.user_name||r.name||"").replace(/'/g,"")}',${pts},${val})">Fulfill</button>`
+                    : `<span style="color:var(--muted);font-size:11px">${r.voucher_code||"—"}</span>`;
+                return `<tr>
+                    <td><strong>${r.user_name||r.name||"-"}</strong></td>
+                    <td style="font-size:12px">${r.phone||"-"}</td>
+                    <td style="font-weight:700">${pts} pts</td>
+                    <td style="color:#198754;font-weight:700">₹${val}</td>
+                    <td style="font-size:11px;color:var(--muted)">${dt}</td>
+                    <td>${badge}</td>
+                    <td>${action}</td>
+                </tr>`;
+            }).join("");
+        }
+    } catch(e) { console.error("loadVouchers error:", e); }
 }
 
 function openFulfillModal(reqId, userName, points, value){
@@ -944,7 +983,9 @@ async function loadStats() {
         document.getElementById("stat_merchants").innerText = d.total_merchants||0;
         document.getElementById("stat_active").innerText    = d.active_merchants||0;
         document.getElementById("stat_stores").innerText    = d.total_stores||0;
-        if(document.getElementById("stat_deals")) if(document.getElementById("stat_deals")) document.getElementById("stat_deals").innerText = d.total_deals||0;
+        if(document.getElementById("stat_waiting")) document.getElementById("stat_waiting").innerText = d.pending_approval||0;
+        if(document.getElementById("stat_users"))   document.getElementById("stat_users").innerText   = d.total_users||0;
+        if(document.getElementById("stat_deals"))   document.getElementById("stat_deals").innerText   = d.total_deals||0;
     } catch(e) { console.error(e); }
 }
 
@@ -1448,6 +1489,11 @@ async function loadMerchantTxns() {
     invoices = invoices.map(i => ({...i, _txn_status: i._txn_status||"paid"}));
 
     allTxns = [...invoices, ...pendingRows];
+    // Sort newest first
+    allTxns.sort((a,b) => {
+        let da = new Date(a.created_at||0), db = new Date(b.created_at||0);
+        return db - da;
+    });
 
     // Stats
     let realPending = pendingRows.length;
@@ -1667,6 +1713,17 @@ function editSlider(s) {
   sliderModalInst.show();
 }
 
+function convertDriveUrl(url) {
+  if (!url) return url;
+  // Format: https://drive.google.com/file/d/FILE_ID/view?...
+  let m = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
+  // Format: https://drive.google.com/open?id=FILE_ID
+  let m2 = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m2) return `https://drive.google.com/uc?export=view&id=${m2[1]}`;
+  return url;
+}
+
 async function saveSlider() {
   const sid = document.getElementById("sl_id").value;
   const btn = document.getElementById("sl_save_btn");
@@ -1674,7 +1731,7 @@ async function saveSlider() {
   document.getElementById("sl_msg").innerText = "";
 
   // Step 1: upload file if selected
-  let imgUrl = document.getElementById("sl_image_url").value.trim();
+  let imgUrl = convertDriveUrl(document.getElementById("sl_image_url").value.trim());
   const fileInput = document.getElementById("sl_image_file");
   if (fileInput.files.length > 0) {
     document.getElementById("sl_upload_status").innerText = "⏳ Uploading image...";
@@ -2109,6 +2166,7 @@ function _populateVoucherMerchants(selectedId) {
 
 function editStore(s) {
     if (merchantsList.length===0) loadMerchants();
+    populateCategoryDropdown(s.category||"");
     document.getElementById("storeModalTitle").innerText = "Edit Store";
     document.getElementById("edit_store_id").value = s._id||"";
     document.getElementById("store_name").value = s.store_name||"";

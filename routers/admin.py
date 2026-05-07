@@ -551,11 +551,13 @@ def adjust_points(id: str, data: dict, a=Depends(get_current_admin)):
 @router.get("/stats")
 def admin_stats(a=Depends(get_current_admin)):
     cols = db.list_collection_names()
+    pending = db.stores.count_documents({"status":"waiting_approval"})
     return {
         "total_merchants": db.merchants.count_documents({}),
         "active_merchants": db.merchants.count_documents({"status":"active"}),
         "total_stores": db.stores.count_documents({}),
-        "waiting_approval": db.stores.count_documents({"status":"waiting_approval"}),
+        "waiting_approval": pending,
+        "pending_approval": pending,
         "total_deals": db.deals.count_documents({}) if "deals" in cols else 0,
         "total_users": db.users.count_documents({}) if "users" in cols else 0,
     }
