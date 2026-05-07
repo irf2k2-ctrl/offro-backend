@@ -98,8 +98,8 @@ tr:hover td{background:#f7faf8;}
 <div class="sidebar" id="sidebar">
 <button class="sidebar-close-btn" onclick="closeSidebar()"><i class="fas fa-times"></i></button>
   <div class="sidebar-logo">
-    <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/5f31663a8_9d2619500_realpngfile.png" 
-         style="height:44px;width:auto;object-fit:contain;filter:brightness(0) invert(1);" alt="OffrO">
+    <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/fdde9d36c_442ce6b8e_boldlogowht.png" 
+         style="height:38px;width:auto;object-fit:contain;" alt="OffrO">
   </div>
   <div class="sidebar-sub">Admin Panel</div>
   <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
@@ -149,6 +149,7 @@ tr:hover td{background:#f7faf8;}
     </div>
     <button class="btn-p" onclick="loadVouchers()"><i class="fas fa-sync me-1"></i> Refresh</button>
   </div>
+  <div id="vouchers_list" class="row g-3 mb-4"></div>
   <div class="table-wrap"><table>
     <thead><tr><th>User</th><th>Phone</th><th>Points</th><th>Value</th><th>Requested</th><th>Status</th><th>Action</th></tr></thead>
     <tbody id="vouchers_table"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
@@ -163,7 +164,6 @@ tr:hover td{background:#f7faf8;}
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Set the admin-controlled rating displayed to users in the app</div>
     </div>
     <button class="btn-p" onclick="loadRatings()"><i class="fas fa-sync me-1"></i> Refresh</button>
-      <input id="ratings_search" class="form-control" style="max-width:220px;" placeholder="🔍 Search store..." oninput="_ratingsSearch=this.value;if(_ratingsCache.length)_renderRatings(_ratingsCache);">
   </div>
   <div class="table-wrap">
     <table>
@@ -612,19 +612,8 @@ tr:hover td{background:#f7faf8;}
             <input id="store_image" class="form-control" type="file" accept="image/*" onchange="previewImage()">
             <img id="store_image_preview" src="" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
             <input type="hidden" id="store_image_b64"></div>
-          <div class="col-md-6">
-            <label class="form-label">Store Status Tag</label>
-            <select id="store_status_tag" class="form-select">
-              <option value="">— None —</option>
-              <option value="newly_added">🆕 Newly Added</option>
-              <option value="just_opened">🎉 Just Opened</option>
-              <option value="popular">🔥 Popular</option>
-              <option value="trending">📈 Trending</option>
-              <option value="closing_soon">⏰ Closing Soon</option>
-            </select>
-          </div>
-          <div class="col-md-6 d-flex align-items-end">
-            <div class="form-check mb-2">
+          <div class="col-12">
+            <div class="form-check">
               <input class="form-check-input" type="checkbox" id="store_new_in_town">
               <label class="form-check-label" for="store_new_in_town" style="font-size:13px;font-weight:600;color:var(--primary);">
                 🏷️ Mark as "New In Town"
@@ -767,7 +756,6 @@ tr:hover td{background:#f7faf8;}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 let merchantsList=[], allStores=[], categoriesList=[], allUsers=[];
-let _ratingsCache=[], _ratingsSearch="";
 let storeModal, merchantModal, qrModal, userHistoryModal, adjustModal_inst;
 let editingStore=false;
 
@@ -876,7 +864,32 @@ window.onload=()=>{
 // ─── GIFT VOUCHERS ───
 async function loadVouchers() {
     try {
-        // Load withdrawal requests into table
+        // Part 1: Load gift card templates (preview cards)
+        let res = await fetch("/admin/gift-vouchers", { credentials:"include" });
+        let vouchers = res.ok ? await res.json() : [];
+        const el = document.getElementById("vouchers_list");
+        if (!vouchers.length) {
+            el.innerHTML="<p style='color:#94a3b8'>No gift card templates yet.</p>";
+        } else {
+            el.innerHTML = vouchers.map(v => `
+                <div class="col-md-6">
+                    <div class="voucher-preview d-flex align-items-center gap-3 position-relative">
+                        ${v.logo ? `<img src="${v.logo}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:white;" onerror="this.style.display='none'">` : `<div style="width:52px;height:52px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:#B8860B;font-size:22px;"></i></div>`}
+                        <div class="flex-grow-1">
+                            ${v.title?`<small style="color:#B8860B;font-weight:700;">${v.title}</small><br>`:""}
+                            <strong>${v.text||""}</strong>
+                            ${v.validity?`<br><small>Valid: ${v.validity}</small>`:""}
+                        </div>
+                        <div class="d-flex gap-1 position-absolute" style="top:8px;right:8px;">
+                            <button class="btn btn-sm" style="background:#3E5F55;color:white;font-size:10px;padding:2px 7px;" onclick='editVoucher(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
+                            <button class="btn btn-sm btn-danger" style="font-size:10px;padding:2px 7px;" onclick="deleteVoucher('${v.id||v._id}')">Del</button>
+                        </div>
+                        <span style="position:absolute;bottom:8px;right:8px;font-size:10px;color:${v.is_active?'#16a34a':'#dc2626'}">${v.is_active?"● Active":"○ Hidden"}</span>
+                    </div>
+                </div>`).join("");
+        }
+
+        // Part 2: Load withdrawal requests into table
         const tbody = document.getElementById("vouchers_table");
         tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--muted)"><i class="fas fa-spinner fa-spin"></i> Loading requests...</td></tr>`;
         let wr = await fetch("/admin/withdraw-requests", { credentials:"include" });
@@ -1201,7 +1214,7 @@ function renderStoresPage(){
       <td style="font-size:12px">${s.merchant_name||"—"}</td>
       <td style="font-size:12px">${s.category||"—"}</td>
       <td style="font-size:12px">${s.city||"—"}${s.area?`<br><small style="color:var(--muted)">${s.area}</small>`:""}  </td>
-      <td style="font-size:12px">${s.points_per_scan!=null?s.points_per_scan:(s.visit_points||0)}</td>
+      <td style="font-size:12px">${s.visit_points||0}</td>
       <td>${newBadge}</td><td>${statusBadge}</td><td>${dealBadge}</td>
       <td>
         <span class="badge-${s.paid_status==='paid'?'active':s.paid_status==='expired'?'inactive':'warn'}" style="font-size:10px;">
@@ -1242,7 +1255,6 @@ async function openCreateStore(){
   document.getElementById("store_image_b64").value="";
   document.getElementById("store_image_preview").style.display="none";
   document.getElementById("store_new_in_town").checked=false;
-  document.getElementById("store_status_tag").value="";
   document.getElementById("store_msg").innerText="";
   populateCategoryDropdown("");
   storeModal.show();
@@ -1274,7 +1286,6 @@ async function openEditStore(id){
   document.getElementById("store_lat").value=s.lat||"";
   document.getElementById("store_lng").value=s.lng||"";
   document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
-  document.getElementById("store_status_tag").value=s.store_status_tag||s.status_tag||"";
   document.getElementById("store_image_b64").value="";
   if(s.image){let p=document.getElementById("store_image_preview");p.src=s.image;p.style.display="block";}
   else document.getElementById("store_image_preview").style.display="none";
@@ -1302,8 +1313,7 @@ async function submitStore(){
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
-    is_new_in_town:document.getElementById("store_new_in_town").checked,
-    store_status_tag:document.getElementById("store_status_tag").value||null};
+    is_new_in_town:document.getElementById("store_new_in_town").checked};
   // Only send merchant_id if selected (prevents overwriting with empty on edit)
   if(mid) payloadBase.merchant_id=mid;
   let payload=payloadBase;
@@ -2165,7 +2175,7 @@ function editStore(s) {
     document.getElementById("store_area").value = s.area||"";
     document.getElementById("store_address").value = s.address||"";
     document.getElementById("store_phone").value = s.phone||"";
-    document.getElementById("store_points").value = (s.points_per_scan!=null&&s.points_per_scan!==undefined)?s.points_per_scan:(s.visit_points||0);
+    document.getElementById("store_points").value = s.visit_points||0;
     document.getElementById("store_image_b64").value = s.image||"";
     // store_image2_url not in modal - store in data attribute
     document.getElementById("storeModal").dataset.image2 = s.image2||"";

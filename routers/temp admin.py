@@ -235,7 +235,6 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "visit_points":   s.get("visit_points", 0),
         "is_new_in_town": s.get("is_new_in_town", False),
         "badge": s.get("badge", ""),
-        "store_status_tag": s.get("store_status_tag", ""),
         "image":          s.get("image") or "",
         "qr_code":        s.get("qr_code", ""),
         "lat":            s.get("lat", ""),
@@ -282,7 +281,6 @@ def _fmt_store(s):
         "image": s.get("image") or "",
         "is_new_in_town": s.get("is_new_in_town", False),
         "badge": s.get("badge", ""),
-        "store_status_tag": s.get("store_status_tag", ""),
         "deal_status": _store_deal_status(sid),
         "subscription_end": str(s.get("subscription_end","")),
         "paid_status": paid_status,
@@ -367,7 +365,6 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "image": data.get("image") or None,
         "is_new_in_town": bool(data.get("is_new_in_town", False)),
         "badge": data.get("badge", ""),
-        "store_status_tag": data.get("store_status_tag") or "",
         "created_at": datetime.utcnow()
     }
     result = db.stores.insert_one(store)
@@ -422,7 +419,6 @@ def get_store_detail(id: str, a=Depends(get_current_admin)):
         "image2":         s.get("store_image2") or s.get("image2") or "",
         "is_new_in_town": s.get("is_new_in_town", False),
         "badge": s.get("badge", ""),
-        "store_status_tag": s.get("store_status_tag", ""),
         "status":         s.get("status", "active"),
         "merchant_id":    s.get("merchant_id", ""),
     }
@@ -447,7 +443,6 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
         upd["store_image2"] = data["image2"]
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])
     if "badge" in data: upd["badge"] = data.get("badge", "")
-    if "store_status_tag" in data: upd["store_status_tag"] = data.get("store_status_tag") or ""
     if "status" in data: upd["status"] = data["status"]
     if upd: db.stores.update_one({"_id": ObjectId(id)}, {"$set": upd})
     return {"message": "Updated"}
