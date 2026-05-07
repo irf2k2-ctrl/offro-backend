@@ -1070,7 +1070,7 @@ async function saveTerms(type){
 }
 
 // ===== MERCHANTS =====
-async async function loadMerchants() {
+async function loadMerchants() {
   try {
     let res = await fetch("/admin/merchants", {credentials:"include"});
     merchantsList = await res.json();
