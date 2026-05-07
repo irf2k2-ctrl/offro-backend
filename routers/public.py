@@ -424,11 +424,15 @@ def get_promo_sliders_public():
     docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
+        img = d.get("image_url", "") or d.get("image", "")
         result.append({
             "id": str(d["_id"]),
             "title": d.get("title", ""),
-            "image_url": d.get("image_url", ""),
+            "subtitle": d.get("subtitle", "") or d.get("text", ""),
+            "image": img,
+            "image_url": img,
             "link_url": d.get("link_url", ""),
+            "bg_color": d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
         })
     return result
@@ -437,7 +441,9 @@ def get_promo_sliders_public():
 @router.get("/gift-vouchers-public")
 def get_gift_vouchers_public():
     """Returns active gift vouchers shown on the app home screen (Voucher Zone)."""
-    docs = list(db.gift_vouchers.find({"is_active": {"$ne": False}}).sort("_id", -1))
+    # Fetch all, then filter in Python to handle bool/string/missing is_active variants
+    docs = list(db.gift_vouchers.find({}).sort("_id", -1))
+    docs = [d for d in docs if d.get("is_active", True) not in (False, "false", "0", 0)]
     result = []
     for d in docs:
         vid = str(d.pop("_id"))
