@@ -954,8 +954,9 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
 
     # Attempt FCM send if server key is configured
     sent_count = 0
-    status = "saved"
-    fcm_key = os.environ.get("FCM_SERVER_KEY", "")
+    fcm_key = os.environ.get("FCM_SERVER_KEY", "").strip()
+    status = "queued" if not fcm_key else "sending"
+    fcm_error = ""
     if fcm_key:
         try:
             import urllib.request, json as _json
@@ -968,23 +969,42 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 u = db.users.find_one({"phone": phone}, {"fcm_token":1})
                 if u and u.get("fcm_token"): tokens = [u["fcm_token"]]
 
-            for tok in tokens:
-                payload = _json.dumps({
-                    "to": tok,
-                    "notification": {"title": title, "body": body,
-                                     **({"image": data.get("image_url")} if data.get("image_url") else {})},
-                    "data": {"click_action": "FLUTTER_NOTIFICATION_CLICK"}
-                }).encode()
-                req = urllib.request.Request(
-                    "https://fcm.googleapis.com/fcm/send",
-                    data=payload,
-                    headers={"Authorization": f"key={fcm_key}", "Content-Type": "application/json"}
-                )
-                with urllib.request.urlopen(req, timeout=8) as resp:
-                    if resp.status == 200: sent_count += 1
-            status = "sent"
+            if not tokens:
+                status = "no_tokens"
+            else:
+                fail_count = 0
+                for tok in tokens:
+                    payload = _json.dumps({
+                        "to": tok,
+                        "notification": {"title": title, "body": body,
+                                         **({"image": data.get("image_url")} if data.get("image_url") else {})},
+                        "data": {"click_action": "FLUTTER_NOTIFICATION_CLICK", "type": "promo"}
+                    }).encode()
+                    req = urllib.request.Request(
+                        "https://fcm.googleapis.com/fcm/send",
+                        data=payload,
+                        headers={"Authorization": f"key={fcm_key}", "Content-Type": "application/json"}
+                    )
+                    try:
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            r = _json.loads(resp.read())
+                            if r.get("success", 0) > 0:
+                                sent_count += 1
+                            else:
+                                fail_count += 1
+                                fcm_error = str(r.get("results", [{}])[0].get("error",""))
+                    except Exception as te:
+                        fail_count += 1
+                        fcm_error = str(te)
+                if sent_count > 0 and fail_count == 0:
+                    status = "sent"
+                elif sent_count > 0:
+                    status = "partial"
+                else:
+                    status = "failed"
         except Exception as e:
-            status = "partial"
+            status = "error"
+            fcm_error = str(e)
 
     # Save to DB always
     doc = {"title": title, "body": body, "target": target,
@@ -994,4 +1014,4 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
            "sent_count": sent_count, "created_at": datetime.utcnow()}
     db.notifications.insert_one(doc)
 
-    return {"message": "Notification saved", "status": status, "sent_count": sent_count}
+    return {"message": "Notification saved", "status": status, "sent_count": sent_count, "error": fcm_error if status not in ("sent","queued") else "", "note": "Set FCM_SERVER_KEY env var on Railway to enable push delivery" if not fcm_key else ""}
