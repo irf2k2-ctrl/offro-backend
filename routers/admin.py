@@ -281,9 +281,23 @@ def _fmt_store(s):
 
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
-    # Exclude large base64 image fields from list for performance
-    projection = {"image": 0, "images": 0, "logo": 0}
-    stores = list(db.stores.find({}, projection))
+    # FIX: include image/images but strip base64 data URIs (keep URLs only)
+    stores = list(db.stores.find({}, {"logo": 0}))
+    for s in stores:
+        # Keep only URL-based images, strip base64 to save bandwidth
+        img = s.get("image","") or ""
+        imgs = s.get("images",[]) or []
+        if isinstance(imgs, str): imgs = [imgs]
+        # Use first URL image found
+        thumb = ""
+        if img and not img.startswith("data:"): thumb = img
+        elif imgs:
+            for i in imgs:
+                if i and not str(i).startswith("data:"):
+                    thumb = i; break
+        s["_thumb"] = thumb
+        if img and img.startswith("data:"): s.pop("image", None)
+        if imgs: s.pop("images", None)
     if not stores:
         return []
     
@@ -513,7 +527,10 @@ def admin_stats(a=Depends(get_current_admin)):
         "total_stores": db.stores.count_documents({}),
         "waiting_approval": db.stores.count_documents({"status":"waiting_approval"}),
         "total_deals": db.deals.count_documents({}) if "deals" in cols else 0,
-        "total_users": db.users.count_documents({}) if "users" in cols else 0,
+        # FIX: check both 'users' and 'app_users' collection names
+        "total_users": (db.users.count_documents({}) if "users" in cols else 0) or
+                       (db.app_users.count_documents({}) if "app_users" in cols else 0),
+        "waiting_vouchers": db.withdraw_requests.count_documents({"status":"pending"}) if "withdraw_requests" in cols else 0,
     }
 
 # ===================== SUBSCRIPTIONS (Admin view) =====================

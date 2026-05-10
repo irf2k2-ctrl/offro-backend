@@ -961,6 +961,7 @@ async function loadStats() {   // FIX 2: must be async (uses await)
         let res = await fetch("/admin/stats", { credentials:"include" });
         if (res.status===401||res.status===403) { window.location.href="/admin"; return; }
         let d = await res.json();
+        console.log("📊 Stats from backend:", d); // DEBUG — remove after confirming
         document.getElementById("stat_merchants").innerText = d.total_merchants||0;
         document.getElementById("stat_active").innerText    = d.active_merchants||0;
         document.getElementById("stat_stores").innerText    = d.total_stores||0;
@@ -1184,8 +1185,13 @@ function renderStoresPage(){
   let html="";
   pageData.forEach(s=>{
     // FIX: handle both image (string) and images (array) from backend
-    let imgSrc = s.image || (Array.isArray(s.images) && s.images.length ? s.images[0] : "") || "";
-    let img = imgSrc ? `<img src="${imgSrc}" style="width:36px;height:36px;border-radius:6px;object-fit:cover;margin-right:6px;" onerror="this.style.display='none'">` : "";
+    // FIX: backend sends _thumb (URL only), fallback to image/images
+    let imgSrc = s._thumb || s.image || (Array.isArray(s.images) && s.images.length ? s.images[0] : "") || "";
+    // Strip base64 data URIs — they're too large to render in table
+    if (imgSrc && imgSrc.startsWith("data:")) imgSrc = "";
+    let img = imgSrc
+      ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="this.style.display='none'">`
+      : `<span style="display:inline-block;width:38px;height:38px;border-radius:6px;background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;text-align:center;font-size:16px;">🏪</span>`;
     let newBadge=s.is_new_in_town?`<span class="badge-new">New</span>`:`<span style="color:var(--muted);font-size:11px;">—</span>`;
     let dealBadge=s.deal_status==='active'
       ?`<span class="badge-deal-active">🔥 Active</span>`
