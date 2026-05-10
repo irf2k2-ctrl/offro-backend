@@ -136,7 +136,7 @@ tr:hover td{background:#f7faf8;}
       <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_active">--</h3><p>Active Merchants</p></div></div>
       <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_stores">--</h3><p>Total Stores</p></div></div>
       <div class="col-6 col-md-3"><div class="card-stat warn"><h3 id="stat_waiting">--</h3><p>⏳ Waiting Approval</p></div></div>
-      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_users">--</h3><p>Registered Users</p></div></div>
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_users">--</h3><p>App Users</p></div></div>
     </div>
   </div>
 
@@ -868,6 +868,11 @@ window.onload=()=>{
   fulfillModal_inst=new bootstrap.Modal(document.getElementById("fulfillModal"));
   loadStats();
   loadCategories();
+  // FIX B: auto-refresh stats every 60s when on overview
+  setInterval(() => {
+    const ovSection = document.getElementById("section-overview");
+    if (ovSection && ovSection.classList.contains("active")) loadStats();
+  }, 60000);
 };
 
 // ─── GIFT VOUCHERS ───
@@ -1178,7 +1183,9 @@ function renderStoresPage(){
   let pageData=f.slice((_storesPage-1)*PAGE_SIZE, _storesPage*PAGE_SIZE);
   let html="";
   pageData.forEach(s=>{
-    let img=s.image?`<img src="${s.image}" style="width:32px;height:32px;border-radius:5px;object-fit:cover;margin-right:6px;">`:"";
+    // FIX: handle both image (string) and images (array) from backend
+    let imgSrc = s.image || (Array.isArray(s.images) && s.images.length ? s.images[0] : "") || "";
+    let img = imgSrc ? `<img src="${imgSrc}" style="width:36px;height:36px;border-radius:6px;object-fit:cover;margin-right:6px;" onerror="this.style.display='none'">` : "";
     let newBadge=s.is_new_in_town?`<span class="badge-new">New</span>`:`<span style="color:var(--muted);font-size:11px;">—</span>`;
     let dealBadge=s.deal_status==='active'
       ?`<span class="badge-deal-active">🔥 Active</span>`
