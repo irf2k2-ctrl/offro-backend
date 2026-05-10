@@ -1185,10 +1185,17 @@ function renderStoresPage(){
   let html="";
   pageData.forEach(s=>{
     // FIX: handle both image (string) and images (array) from backend
-    // FIX: backend sends _thumb (URL only), fallback to image/images
-    let imgSrc = s._thumb || s.image || (Array.isArray(s.images) && s.images.length ? s.images[0] : "") || "";
-    // Strip base64 data URIs — they're too large to render in table
-    if (imgSrc && imgSrc.startsWith("data:")) imgSrc = "";
+    // FIX: s.image now contains the thumbnail URL from backend
+    let _raw = s.image || s._thumb || (Array.isArray(s.images) ? s.images[0] : (s.images||"")) || "";
+    // Skip base64
+    if (_raw && _raw.startsWith("data:")) _raw = "";
+    // If relative path, prepend backend origin
+    let imgSrc = "";
+    if (_raw) {
+      imgSrc = (_raw.startsWith("http://") || _raw.startsWith("https://") || _raw.startsWith("//"))
+        ? _raw
+        : (window._backendBase||"") + (_raw.startsWith("/") ? "" : "/") + _raw;
+    }
     let img = imgSrc
       ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="this.style.display='none'">`
       : `<span style="display:inline-block;width:38px;height:38px;border-radius:6px;background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;text-align:center;font-size:16px;">🏪</span>`;
@@ -1826,7 +1833,12 @@ function renderPagination(containerId, total, currentPage, onPage) {
   el.innerHTML = `<span style="font-size:12px;color:var(--muted)">${start}–${end} of ${total}</span><div style="display:flex;gap:4px;">${btns}</div>`;
 }
 
-function goStorePage(p) { _storesPage = p; renderStoresPage(); }
+function goStorePage(p) { _storesPage = p; // DEBUG — log first store image fields
+if (window._stores && window._stores.length) {
+  const s0 = window._stores[0];
+  console.log("🏪 First store image fields:", {image: s0.image, _thumb: s0._thumb, images: s0.images});
+}
+renderStoresPage(); }
 function goMerchPage(p) { _merchantsPage = p; renderMerchantsPage(); }
 function goUsersPage(p) { _usersPage = p; renderUsersPage(); }
 

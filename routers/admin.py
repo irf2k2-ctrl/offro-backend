@@ -228,7 +228,7 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "points_per_scan":s.get("points_per_scan", 10),
         "visit_points":   s.get("visit_points", 10),
         "is_new_in_town": s.get("is_new_in_town", False),
-        "image":          "",  # excluded from list query for performance
+        "image":          s.get("_thumb", ""),   # FIX: pass thumbnail URL through
         "qr_code":        s.get("qr_code", ""),
         "lat":            s.get("lat", ""),
         "lng":            s.get("lng", ""),
@@ -240,7 +240,7 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "sub_plan":       sub.get("plan", "") if sub else "",
         "merchant_id":    mid,
         "about":          s.get("about", ""),
-        "logo":           "",  # excluded from list for performance
+        "logo":           "",
     }
 
 def _fmt_store(s):
@@ -521,17 +521,20 @@ def adjust_points(id: str, data: dict, a=Depends(get_current_admin)):
 @router.get("/stats")
 def admin_stats(a=Depends(get_current_admin)):
     cols = db.list_collection_names()
-    return {
+    print("📊 Collections in DB:", cols)   # DEBUG
+    users_count = db.users.count_documents({}) if "users" in cols else 0
+    print(f"📊 Users count: {users_count}")  # DEBUG
+    result = {
         "total_merchants": db.merchants.count_documents({}),
         "active_merchants": db.merchants.count_documents({"status":"active"}),
         "total_stores": db.stores.count_documents({}),
         "waiting_approval": db.stores.count_documents({"status":"waiting_approval"}),
         "total_deals": db.deals.count_documents({}) if "deals" in cols else 0,
-        # FIX: check both 'users' and 'app_users' collection names
-        "total_users": (db.users.count_documents({}) if "users" in cols else 0) or
-                       (db.app_users.count_documents({}) if "app_users" in cols else 0),
+        "total_users": users_count,
         "waiting_vouchers": db.withdraw_requests.count_documents({"status":"pending"}) if "withdraw_requests" in cols else 0,
     }
+    print(f"📊 Stats response: {result}")  # DEBUG
+    return result
 
 # ===================== SUBSCRIPTIONS (Admin view) =====================
 
