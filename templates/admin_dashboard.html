@@ -951,7 +951,7 @@ function showSection(name, el){
 }
 
 // ===== STATS =====
-async async function loadStats() {   // FIX 2: must be async (uses await)
+async function loadStats() {   // FIX 2: must be async (uses await)
     try {
         let res = await fetch("/admin/stats", { credentials:"include" });
         if (res.status===401||res.status===403) { window.location.href="/admin"; return; }
@@ -1991,7 +1991,7 @@ function _renderRatings(stores) {
     document.getElementById("ratings_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No stores</td></tr>";
 }
 
-async async function clearRating(storeId) {
+async function clearRating(storeId) {
     try {
         await fetch(`/admin/stores/${storeId}/rating`, {
             method:"PUT", credentials:"include",
@@ -2080,7 +2080,7 @@ async function saveVoucher() {
     } catch { document.getElementById("v_msg").innerText="Server error"; }
 }
 
-async async function setRating(storeId, val, el) {  // FIX 2: async
+async function setRating(storeId, val, el) {  // FIX 2: async
     // Highlight stars immediately for instant feedback
     const row = el.closest(".star-row");
     row.querySelectorAll(".fa-star").forEach((s,i) => { s.classList.toggle("on", i<val); });
