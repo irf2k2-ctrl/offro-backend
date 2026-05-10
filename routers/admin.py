@@ -386,6 +386,59 @@ def delete_store(id: str, a=Depends(get_current_admin)):
     db.stores.delete_one({"_id": ObjectId(id)})
     return {"message": "Deleted"}
 
+# ===================== STORE RATING (Admin Override) =====================
+
+@router.put("/stores/{id}/rating")
+def set_store_rating(id: str, data: dict, a=Depends(get_current_admin)):
+    """Admin sets an override rating for a store. Shown in dashboard and app."""
+    from bson import ObjectId as ObjId
+    admin_rating = data.get("admin_rating")
+    if admin_rating is None:
+        raise HTTPException(400, "admin_rating required")
+    val = float(admin_rating)
+    db.stores.update_one({"_id": ObjId(id)}, {"$set": {"admin_rating": val, "rating": val}})
+    return {"ok": True, "admin_rating": val}
+
+@router.delete("/stores/{id}/rating")
+def clear_store_rating(id: str, a=Depends(get_current_admin)):
+    """Admin clears override rating so user average is used again."""
+    from bson import ObjectId as ObjId
+    db.stores.update_one({"_id": ObjId(id)}, {"$unset": {"admin_rating": ""}})
+    return {"ok": True}
+
+# ===================== GIFT VOUCHERS (Voucher Zone - App Display) =====================
+
+@router.get("/gift-vouchers")
+def list_gift_vouchers(a=Depends(get_current_admin)):
+    """List all gift vouchers shown in Voucher Zone on the app home screen."""
+    docs = list(db.gift_vouchers.find({}).sort("_id", -1))
+    result = []
+    for d in docs:
+        d["id"] = str(d.pop("_id"))
+        result.append(d)
+    return result
+
+@router.post("/gift-vouchers")
+def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
+    """Create a new voucher card shown in the Voucher Zone section of the app."""
+    data.setdefault("is_active", True)
+    data.setdefault("created_at", datetime.utcnow().isoformat())
+    res = db.gift_vouchers.insert_one(data)
+    return {"ok": True, "id": str(res.inserted_id)}
+
+@router.put("/gift-vouchers/{id}")
+def update_gift_voucher(id: str, data: dict, a=Depends(get_current_admin)):
+    """Update an existing Voucher Zone card."""
+    data.pop("_id", None); data.pop("id", None)
+    db.gift_vouchers.update_one({"_id": ObjectId(id)}, {"$set": data})
+    return {"ok": True}
+
+@router.delete("/gift-vouchers/{id}")
+def delete_gift_voucher(id: str, a=Depends(get_current_admin)):
+    """Delete a Voucher Zone card."""
+    db.gift_vouchers.delete_one({"_id": ObjectId(id)})
+    return {"ok": True}
+
 # ===================== USERS =====================
 
 @router.get("/users")
