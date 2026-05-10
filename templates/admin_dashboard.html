@@ -95,11 +95,11 @@ tr:hover td{background:#f7faf8;}
 </head>
 <body>
 
-<div class="sidebar" id="sidebar">
+<div class="sidebar">
 <button class="sidebar-close-btn" onclick="closeSidebar()"><i class="fas fa-times"></i></button>
   <div class="sidebar-logo">
-    <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/5f31663a8_9d2619500_realpngfile.png" 
-         style="height:44px;width:auto;object-fit:contain;filter:brightness(0) invert(1);" alt="OffrO">
+    <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/fdde9d36c_442ce6b8e_boldlogowht.png" 
+         style="height:38px;width:auto;object-fit:contain;" alt="OffrO">
   </div>
   <div class="sidebar-sub">Admin Panel</div>
   <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
@@ -108,7 +108,7 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
   <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
   <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
-  <a href="#" onclick="showSection('gift_cards',this)"><i class="fas fa-id-card fa-fw"></i> Gift Cards (App)</a>
+  <a href="#" onclick="showSection('voucher_zone',this)"><i class="fas fa-id-card fa-fw"></i> Voucher Zone</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Promo Sliders</a>
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <div class="sep"></div>
@@ -162,8 +162,10 @@ tr:hover td{background:#f7faf8;}
       <div class="fw-bold" style="font-size:18px;color:var(--primary)">⭐ Store Ratings</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Set the admin-controlled rating displayed to users in the app</div>
     </div>
-    <button class="btn-p" onclick="loadRatings()"><i class="fas fa-sync me-1"></i> Refresh</button>
-      <input id="ratings_search" class="form-control" style="max-width:220px;" placeholder="🔍 Search store..." oninput="_ratingsSearch=this.value;if(_ratingsCache.length)_renderRatings(_ratingsCache);">
+    <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="ratings_search_input" class="form-control" placeholder="Search store..." style="max-width:200px;font-size:13px;" oninput="_ratingsSearch=this.value;if(_ratingsCache.length)_renderRatings(_ratingsCache);">
+        <button class="btn-p" onclick="loadRatings()"><i class="fas fa-sync me-1"></i> Refresh</button>
+      </div>
   </div>
   <div class="table-wrap">
     <table>
@@ -233,10 +235,10 @@ tr:hover td{background:#f7faf8;}
 
   <!-- CATEGORIES -->
   
-<div id="section-gift_cards" class="section">
+<div id="section-voucher_zone" class="section">
   <div class="section-header">
     <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🎁 Gift Cards (App Display)</div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🎁 Voucher Zone (App Display)</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage the voucher cards shown on the app home screen</div>
     </div>
     <button class="btn-p" onclick="openGiftCardModal()"><i class="fas fa-plus me-1"></i> Add Card</button>
@@ -244,7 +246,7 @@ tr:hover td{background:#f7faf8;}
   <div class="table-wrap">
     <table>
       <thead><tr><th>Logo</th><th>Title</th><th>Offer Text</th><th>Validity</th><th>Merchant</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody id="gift_cards_list"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+      <tbody id="voucher_zone_list"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -608,23 +610,19 @@ tr:hover td{background:#f7faf8;}
             <input id="store_lat" class="form-control" placeholder="17.3850"></div>
           <div class="col-md-6"><label class="form-label">Longitude</label>
             <input id="store_lng" class="form-control" placeholder="78.4867"></div>
-          <div class="col-12"><label class="form-label">Store Image</label>
-            <input id="store_image" class="form-control" type="file" accept="image/*" onchange="previewImage()">
+          <div class="col-12"><label class="form-label">Store Image 1 (Main)</label>
+            <input id="store_image" class="form-control" type="file" accept="image/*" onchange="previewImage(1)">
             <img id="store_image_preview" src="" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
-            <input type="hidden" id="store_image_b64"></div>
-          <div class="col-md-6">
-            <label class="form-label">Store Status Tag</label>
-            <select id="store_status_tag" class="form-select">
-              <option value="">— None —</option>
-              <option value="newly_added">🆕 Newly Added</option>
-              <option value="just_opened">🎉 Just Opened</option>
-              <option value="popular">🔥 Popular</option>
-              <option value="trending">📈 Trending</option>
-              <option value="closing_soon">⏰ Closing Soon</option>
-            </select>
-          </div>
-          <div class="col-md-6 d-flex align-items-end">
-            <div class="form-check mb-2">
+            <input type="hidden" id="store_image_b64">
+            <input type="hidden" id="store_image_url"></div>
+          <div class="col-12">
+            <label class="form-label">Store Image 2 <small class="text-muted">(Gallery / Gift Voucher Banner)</small></label>
+            <input id="store_image2" class="form-control" type="file" accept="image/*" onchange="previewImage(2)">
+            <img id="store_image2_preview" src="" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
+            <input type="hidden" id="store_image2_b64">
+            <input type="hidden" id="store_image2_url"></div>
+          <div class="col-12">
+            <div class="form-check">
               <input class="form-check-input" type="checkbox" id="store_new_in_town">
               <label class="form-check-label" for="store_new_in_town" style="font-size:13px;font-weight:600;color:var(--primary);">
                 🏷️ Mark as "New In Town"
@@ -767,8 +765,8 @@ tr:hover td{background:#f7faf8;}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 let merchantsList=[], allStores=[], categoriesList=[], allUsers=[];
-let _ratingsCache=[], _ratingsSearch="";
 let storeModal, merchantModal, qrModal, userHistoryModal, adjustModal_inst;
+let _ratingsCache=[], _ratingsSearch='';
 let editingStore=false;
 
 
@@ -868,49 +866,40 @@ window.onload=()=>{
   userHistoryModal=new bootstrap.Modal(document.getElementById("userHistoryModal"));
   adjustModal_inst=new bootstrap.Modal(document.getElementById("adjustModal"));
   fulfillModal_inst=new bootstrap.Modal(document.getElementById("fulfillModal"));
-  if(document.getElementById("voucherModal")) window.voucherModalInst=new bootstrap.Modal(document.getElementById("voucherModal"));
   loadStats();
   loadCategories();
 };
 
 // ─── GIFT VOUCHERS ───
 async function loadVouchers() {
+    const tbody = document.getElementById("vouchers_table");
+    tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>";
     try {
-        // Load withdrawal requests into table
-        const tbody = document.getElementById("vouchers_table");
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--muted)"><i class="fas fa-spinner fa-spin"></i> Loading requests...</td></tr>`;
-        let wr = await fetch("/admin/withdraw-requests", { credentials:"include" });
-        let reqs = wr.ok ? await wr.json() : [];
-        if (!reqs.length) {
+        let res = await fetch("/admin/withdraw-requests", { credentials:"include" });
+        if (res.status===401||res.status===403) { window.location.href="/admin/login"; return; }
+        let vouchers = await res.json();
+        if (!vouchers.length) {
             tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No withdrawal requests yet.</td></tr>";
-        } else {
-            // Sort newest first
-            reqs.sort((a,b) => new Date(b.created_at||b.requested_at||0) - new Date(a.created_at||a.requested_at||0));
-            tbody.innerHTML = reqs.map(r => {
-                let pts = r.points || 0;
-                let val = (pts/10).toFixed(2);
-                let dt = r.created_at || r.requested_at || "-";
-                let status = r.status||"pending";
-                let badge = status==="fulfilled"
-                    ? `<span class="badge-active">✓ Fulfilled</span>`
-                    : status==="rejected"
-                    ? `<span style="background:#fee2e2;color:#dc2626;border-radius:12px;padding:2px 10px;font-size:11px;">✗ Rejected</span>`
-                    : `<span class="badge-waiting">⏳ Pending</span>`;
-                let action = status==="pending"
-                    ? `<button class="btn-p" style="font-size:11px;padding:3px 10px;" onclick="openFulfillModal('${r._id||r.id}','${(r.user_name||r.name||"").replace(/'/g,"")}',${pts},${val})">Fulfill</button>`
-                    : `<span style="color:var(--muted);font-size:11px">${r.voucher_code||"—"}</span>`;
-                return `<tr>
-                    <td><strong>${r.user_name||r.name||"-"}</strong></td>
-                    <td style="font-size:12px">${r.phone||"-"}</td>
-                    <td style="font-weight:700">${pts} pts</td>
-                    <td style="color:#198754;font-weight:700">₹${val}</td>
-                    <td style="font-size:11px;color:var(--muted)">${dt}</td>
-                    <td>${badge}</td>
-                    <td>${action}</td>
-                </tr>`;
-            }).join("");
+            return;
         }
-    } catch(e) { console.error("loadVouchers error:", e); }
+        tbody.innerHTML = vouchers.map(v => {
+            const date = v.created_at ? new Date(v.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : "—";
+            const pts = v.points || 0;
+            const val = (pts * (v.rate||0.1)).toFixed(2);
+            const isPending = (v.status||"pending") === "pending";
+            return `<tr>
+                <td><strong>${v.user_name||v.name||"—"}</strong></td>
+                <td>${v.phone||"—"}</td>
+                <td>${pts} pts</td>
+                <td>₹${val}</td>
+                <td style="font-size:12px;">${date}</td>
+                <td><span class="badge" style="background:${isPending?'#f59e0b':'#16a34a'};color:white;padding:3px 8px;border-radius:12px;font-size:11px;">${isPending?"Pending":"Fulfilled"}</span></td>
+                <td>${isPending?`<button class='btn-p' style='font-size:11px;padding:4px 10px;' onclick="openFulfillModal('${v._id||v.id}','${v.user_name||v.name||"User"}',${pts},'${val}')">Fulfill</button>`:"<span style='color:var(--muted);font-size:12px;'>Done</span>"}</td>
+            </tr>`;
+        }).join("");
+    } catch(e) {
+        tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:#ef4444'>Error: "+e.message+"</td></tr>";
+    }
 }
 
 function openFulfillModal(reqId, userName, points, value){
@@ -956,7 +945,7 @@ function showSection(name, el){
   if(name==="discounts") loadDiscounts();
   if(name==="about") loadAbout();
   if(name==="ratings") loadRatings();
-  if(name==="gift_cards") loadGiftCards();
+  if(name==="voucher_zone") loadGiftCards();
   if(name==="promo_sliders") loadSliders();
   if(name==="notifications") loadNotifications();
 }
@@ -970,9 +959,7 @@ async function loadStats() {
         document.getElementById("stat_merchants").innerText = d.total_merchants||0;
         document.getElementById("stat_active").innerText    = d.active_merchants||0;
         document.getElementById("stat_stores").innerText    = d.total_stores||0;
-        if(document.getElementById("stat_waiting")) document.getElementById("stat_waiting").innerText = d.pending_approval||0;
-        if(document.getElementById("stat_users"))   document.getElementById("stat_users").innerText   = d.total_users||0;
-        if(document.getElementById("stat_deals"))   document.getElementById("stat_deals").innerText   = d.total_deals||0;
+        document.getElementById("stat_deals").innerText     = d.total_deals||0;
     } catch(e) { console.error(e); }
 }
 
@@ -1201,7 +1188,7 @@ function renderStoresPage(){
       <td style="font-size:12px">${s.merchant_name||"—"}</td>
       <td style="font-size:12px">${s.category||"—"}</td>
       <td style="font-size:12px">${s.city||"—"}${s.area?`<br><small style="color:var(--muted)">${s.area}</small>`:""}  </td>
-      <td style="font-size:12px">${s.points_per_scan!=null?s.points_per_scan:(s.visit_points||0)}</td>
+      <td style="font-size:12px">${s.visit_points||0}</td>
       <td>${newBadge}</td><td>${statusBadge}</td><td>${dealBadge}</td>
       <td>
         <span class="badge-${s.paid_status==='paid'?'active':s.paid_status==='expired'?'inactive':'warn'}" style="font-size:10px;">
@@ -1242,7 +1229,6 @@ async function openCreateStore(){
   document.getElementById("store_image_b64").value="";
   document.getElementById("store_image_preview").style.display="none";
   document.getElementById("store_new_in_town").checked=false;
-  document.getElementById("store_status_tag").value="";
   document.getElementById("store_msg").innerText="";
   populateCategoryDropdown("");
   storeModal.show();
@@ -1274,7 +1260,6 @@ async function openEditStore(id){
   document.getElementById("store_lat").value=s.lat||"";
   document.getElementById("store_lng").value=s.lng||"";
   document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
-  document.getElementById("store_status_tag").value=s.store_status_tag||s.status_tag||"";
   document.getElementById("store_image_b64").value="";
   if(s.image){let p=document.getElementById("store_image_preview");p.src=s.image;p.style.display="block";}
   else document.getElementById("store_image_preview").style.display="none";
@@ -1302,8 +1287,7 @@ async function submitStore(){
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
-    is_new_in_town:document.getElementById("store_new_in_town").checked,
-    store_status_tag:document.getElementById("store_status_tag").value||null};
+    is_new_in_town:document.getElementById("store_new_in_town").checked};
   // Only send merchant_id if selected (prevents overwriting with empty on edit)
   if(mid) payloadBase.merchant_id=mid;
   let payload=payloadBase;
@@ -1479,11 +1463,6 @@ async function loadMerchantTxns() {
     invoices = invoices.map(i => ({...i, _txn_status: i._txn_status||"paid"}));
 
     allTxns = [...invoices, ...pendingRows];
-    // Sort newest first
-    allTxns.sort((a,b) => {
-        let da = new Date(a.created_at||0), db = new Date(b.created_at||0);
-        return db - da;
-    });
 
     // Stats
     let realPending = pendingRows.length;
@@ -1510,6 +1489,12 @@ function filterTxns() {
       (statusF==="pending" && t._txn_status==="pending");
     return matchSearch && matchStatus;
   });
+  // Sort by date descending (newest first)
+  f.sort((a,b) => {
+    const da = a.created_at ? new Date(a.created_at) : new Date(0);
+    const db2 = b.created_at ? new Date(b.created_at) : new Date(0);
+    return db2 - da;
+  });
   document.getElementById("txn_total").innerText = f.length + " records";
   let html = "";
   f.forEach(t => {
@@ -1519,8 +1504,9 @@ function filterTxns() {
         ? `<span class="badge-new">✓ Free</span>`
         : `<span class="badge-active">✓ Paid</span>`;
     let rzpId = t.razorpay_payment_id || (t._txn_status==="free"?"free plan":"—");
+    const txnDate = t.created_at ? new Date(t.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : "—";
     html += `<tr>
-      <td style="font-size:12px;color:var(--muted)">${t.created_at||"-"}</td>
+      <td style="font-size:12px;color:var(--muted)">${txnDate}</td>
       <td style="font-size:11px"><strong>${t.invoice_no||"-"}</strong></td>
       <td><strong>${t.merchant_name||"-"}</strong></td>
       <td style="font-size:12px">${t.merchant_phone||"-"}</td>
@@ -1659,29 +1645,7 @@ function openSliderModal() {
   document.getElementById("sl_order").value = "0";
   document.getElementById("sl_active").checked = true;
   document.getElementById("sl_msg").innerText = "";
-  document.getElementById("sl_upload_status").innerText = "";
-  document.getElementById("sl_image_file").value = "";
-  document.getElementById("sl_image_preview").style.display = "none";
   sliderModalInst.show();
-}
-
-function updateSliderPreview() {
-  const url = document.getElementById("sl_image_url").value.trim();
-  const preview = document.getElementById("sl_image_preview");
-  const img = document.getElementById("sl_preview_img");
-  if (url) { img.src = url; preview.style.display = "block"; }
-  else { preview.style.display = "none"; }
-}
-
-function previewSliderImage(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    document.getElementById("sl_preview_img").src = e.target.result;
-    document.getElementById("sl_image_preview").style.display = "block";
-  };
-  reader.readAsDataURL(file);
 }
 
 function editSlider(s) {
@@ -1692,62 +1656,16 @@ function editSlider(s) {
   document.getElementById("sl_order").value = s.sort_order||0;
   document.getElementById("sl_active").checked = s.is_active!==false;
   document.getElementById("sl_msg").innerText = "";
-  document.getElementById("sl_upload_status").innerText = "";
-  document.getElementById("sl_image_file").value = "";
-  if (s.image_url) {
-    document.getElementById("sl_preview_img").src = s.image_url;
-    document.getElementById("sl_image_preview").style.display = "block";
-  } else {
-    document.getElementById("sl_image_preview").style.display = "none";
-  }
   sliderModalInst.show();
-}
-
-function convertDriveUrl(url) {
-  if (!url) return url;
-  // Format: https://drive.google.com/file/d/FILE_ID/view?...
-  let m = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-  if (m) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
-  // Format: https://drive.google.com/open?id=FILE_ID
-  let m2 = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (m2) return `https://drive.google.com/uc?export=view&id=${m2[1]}`;
-  return url;
 }
 
 async function saveSlider() {
   const sid = document.getElementById("sl_id").value;
-  const btn = document.getElementById("sl_save_btn");
-  btn.disabled = true; btn.innerText = "Saving...";
-  document.getElementById("sl_msg").innerText = "";
-
-  // Step 1: upload file if selected
-  let imgUrl = convertDriveUrl(document.getElementById("sl_image_url").value.trim());
-  const fileInput = document.getElementById("sl_image_file");
-  if (fileInput.files.length > 0) {
-    document.getElementById("sl_upload_status").innerText = "⏳ Uploading image...";
-    try {
-      const fd = new FormData();
-      fd.append("file", fileInput.files[0]);
-      const upRes = await fetch("/admin/upload-image", { method:"POST", credentials:"include", body:fd });
-      if (upRes.ok) {
-        const upData = await upRes.json();
-        imgUrl = upData.url || upData.image_url || imgUrl;
-        document.getElementById("sl_image_url").value = imgUrl;
-        document.getElementById("sl_upload_status").innerText = "✅ Uploaded";
-      } else {
-        document.getElementById("sl_upload_status").innerText = "⚠️ Upload failed, using URL if provided";
-      }
-    } catch { document.getElementById("sl_upload_status").innerText = "⚠️ Upload error"; }
-  }
-
-  if (!imgUrl) {
-    document.getElementById("sl_msg").innerText = "Image URL or uploaded file is required";
-    btn.disabled = false; btn.innerText = "Save Banner";
-    return;
-  }
+  const img = document.getElementById("sl_image_url").value.trim();
+  if (!img) { document.getElementById("sl_msg").innerText = "Image URL is required"; return; }
   const data = {
     title:      document.getElementById("sl_title").value.trim(),
-    image_url:  imgUrl,
+    image_url:  img,
     link_url:   document.getElementById("sl_link_url").value.trim(),
     sort_order: parseInt(document.getElementById("sl_order").value)||0,
     is_active:  document.getElementById("sl_active").checked,
@@ -1756,11 +1674,10 @@ async function saveSlider() {
     let url  = sid ? `/admin/promo-sliders/${sid}` : "/admin/promo-sliders";
     let meth = sid ? "PUT" : "POST";
     let res  = await fetch(url, {method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
-    if (!res.ok) { const d=await res.json(); document.getElementById("sl_msg").innerText=d.detail||"Error"; btn.disabled=false;btn.innerText="Save Banner"; return; }
+    if (!res.ok) { const d=await res.json(); document.getElementById("sl_msg").innerText=d.detail||"Error"; return; }
     sliderModalInst.hide();
     loadSliders();
   } catch { document.getElementById("sl_msg").innerText = "Server error"; }
-  btn.disabled = false; btn.innerText = "Save Banner";
 }
 
 async function deleteSlider(id) {
@@ -1792,6 +1709,31 @@ async function loadNotifications() {
 function toggleNotifUser() {
   let target = document.getElementById("notif_target").value;
   document.getElementById("notif_phone_row").style.display = target==="specific" ? "" : "none";
+}
+
+// FIX 7: Retry all queued/failed notifications via backend
+async function processNotifQueue() {
+  const qs = document.getElementById("queue_status");
+  qs.innerText = "⏳ Processing queue…";
+  qs.style.color = "var(--muted)";
+  try {
+    let r = await fetch("/admin/notifications/process-queue", {
+      method: "POST", credentials: "include",
+      headers: {"Content-Type":"application/json"}, body: "{}"
+    });
+    let d = await r.json();
+    if (r.ok) {
+      qs.style.color = "var(--primary)";
+      qs.innerText = `✓ ${d.processed||0} delivered, ${d.failed||0} failed, ${d.skipped||0} skipped`;
+    } else {
+      qs.style.color = "var(--danger)";
+      qs.innerText = d.detail || "Failed to process queue";
+    }
+    setTimeout(loadNotifications, 800);
+  } catch(e) {
+    qs.style.color = "var(--danger)";
+    qs.innerText = "Server error — check logs";
+  }
 }
 
 async function sendNotification() {
@@ -1911,7 +1853,7 @@ async function loadGiftCards() {
   try {
     let r = await fetch("/admin/gift-vouchers", {credentials:"include"});
     let cards = await r.json();
-    const el = document.getElementById("gift_cards_list");
+    const el = document.getElementById("voucher_zone_list");
     if (!cards.length) { el.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No gift cards yet. Click + Add Card to create one.</td></tr>"; return; }
     el.innerHTML = cards.map(v => {
       let logoHtml = v.logo
@@ -2156,7 +2098,6 @@ function _populateVoucherMerchants(selectedId) {
 
 function editStore(s) {
     if (merchantsList.length===0) loadMerchants();
-    populateCategoryDropdown(s.category||"");
     document.getElementById("storeModalTitle").innerText = "Edit Store";
     document.getElementById("edit_store_id").value = s._id||"";
     document.getElementById("store_name").value = s.store_name||"";
@@ -2165,10 +2106,9 @@ function editStore(s) {
     document.getElementById("store_area").value = s.area||"";
     document.getElementById("store_address").value = s.address||"";
     document.getElementById("store_phone").value = s.phone||"";
-    document.getElementById("store_points").value = (s.points_per_scan!=null&&s.points_per_scan!==undefined)?s.points_per_scan:(s.visit_points||0);
-    document.getElementById("store_image_b64").value = s.image||"";
-    // store_image2_url not in modal - store in data attribute
-    document.getElementById("storeModal").dataset.image2 = s.image2||"";
+    document.getElementById("store_visit_points").value = s.visit_points||0;
+    document.getElementById("store_image_url").value = s.image||"";
+    document.getElementById("store_image2_url").value = s.image2||"";
     document.getElementById("store_msg").innerText = "";
     // Show image1 preview
     const prev = document.getElementById("store_image_preview");
@@ -2176,7 +2116,7 @@ function editStore(s) {
         prev.innerHTML = `<img src="${s.image}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">`;
     } else { prev.innerHTML = ""; }
     // Show image2 preview
-    const prev2 = document.getElementById("store_image_preview");
+    const prev2 = document.getElementById("store_image2_preview");
     if (s.image2) {
         prev2.innerHTML = `<img src="${s.image2}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;margin-top:4px;" onerror="this.style.display='none'">`;
     } else { prev2.innerHTML = ""; }
@@ -2199,9 +2139,9 @@ async function saveStore() {
         area:         document.getElementById("store_area").value,
         address:      document.getElementById("store_address").value,
         phone:        document.getElementById("store_phone").value,
-        visit_points: parseInt(document.getElementById("store_points").value)||0,
-        image:        document.getElementById("store_image_b64").value.trim() || document.getElementById("store_image").value.trim() || "",
-        image2:       "",
+        visit_points: parseInt(document.getElementById("store_visit_points").value)||0,
+        image:        document.getElementById("store_image_url").value.trim(),
+        image2:       document.getElementById("store_image2_url").value.trim(),
     };
     try {
         let url  = editId ? `/admin/stores/${editId}` : "/admin/stores";
@@ -2217,7 +2157,7 @@ async function saveStore() {
 
 <!-- Promo Slider Modal -->
 <div class="modal fade" id="sliderModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
+  <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">🖼️ Promo Banner</h5>
@@ -2229,28 +2169,14 @@ async function saveStore() {
           <label class="form-label">Title (optional)</label>
           <input id="sl_title" class="form-control" placeholder="e.g. Summer Sale">
         </div>
-        <!-- Image section -->
         <div class="mb-3">
-          <label class="form-label fw-semibold">Banner Image *</label>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;">
-            <div style="flex:1;min-width:200px;">
-              <label class="form-label" style="font-size:12px;color:var(--muted);">Upload Image</label>
-              <input type="file" id="sl_image_file" class="form-control form-control-sm" accept="image/*" onchange="previewSliderImage(event)">
-              <div id="sl_upload_status" style="font-size:12px;margin-top:4px;"></div>
-            </div>
-            <div style="flex:1;min-width:200px;">
-              <label class="form-label" style="font-size:12px;color:var(--muted);">or paste Image URL</label>
-              <input id="sl_image_url" class="form-control form-control-sm" placeholder="https://..." oninput="updateSliderPreview()">
-            </div>
-          </div>
-          <div id="sl_image_preview" style="margin-top:10px;display:none;">
-            <img id="sl_preview_img" src="" alt="Preview" style="max-width:100%;height:auto;max-height:180px;border-radius:8px;border:1px solid var(--border);object-fit:cover;">
-          </div>
-          <small class="text-muted d-block mt-1">Recommended: 1200×450px or 16:6 ratio. JPG/PNG/WebP.</small>
+          <label class="form-label">Banner Image URL *</label>
+          <input id="sl_image_url" class="form-control" placeholder="https://...">
+          <small class="text-muted">Recommended: 1200×450px or 16:6 ratio</small>
         </div>
         <div class="mb-3">
           <label class="form-label">Link / Action (optional)</label>
-          <input id="sl_link_url" class="form-control" placeholder="https://... or store_id or category name">
+          <input id="sl_link_url" class="form-control" placeholder="https://... or store_id or category">
           <small class="text-muted">Tap destination when user clicks the banner</small>
         </div>
         <div class="mb-3">
@@ -2266,7 +2192,7 @@ async function saveStore() {
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn-p" id="sl_save_btn" onclick="saveSlider()">Save Banner</button>
+        <button class="btn-p" onclick="saveSlider()">Save Banner</button>
       </div>
     </div>
   </div>
@@ -2313,52 +2239,6 @@ async function saveStore() {
       <div class="modal-footer">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
         <button class="btn-p btn-sm" onclick="saveGiftCard()">Save</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-
-<!-- Voucher Edit Modal -->
-<div class="modal fade" id="voucherModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">🎁 Gift Voucher</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="edit_voucher_id" value="">
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Title *</label>
-          <input id="v_title" class="form-control" placeholder="e.g. ₹100 Amazon Voucher">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Offer Text *</label>
-          <input id="v_text" class="form-control" placeholder="e.g. FREE ₹100 Amazon Gift Card">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Validity</label>
-          <input id="v_validity" class="form-control" placeholder="e.g. 31 Dec 2026">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Linked Merchant (optional)</label>
-          <select id="v_merchant" class="form-select"><option value="">None</option></select>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Linked Store (optional)</label>
-          <select id="v_store" class="form-select" onchange="onVoucherStoreChange(this.value)"><option value="">None</option></select>
-        </div>
-        <div id="v_store_img_preview" class="mb-2"></div>
-        <div class="form-check mb-3">
-          <input class="form-check-input" type="checkbox" id="v_active" checked>
-          <label class="form-check-label" for="v_active">Active (show in app)</label>
-        </div>
-        <p id="v_msg" style="color:var(--danger);font-size:13px;"></p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn-p btn-sm" onclick="saveVoucher()">Save</button>
       </div>
     </div>
   </div>

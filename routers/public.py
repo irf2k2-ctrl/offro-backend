@@ -1,70 +1,41 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 from database import db
 from bson import ObjectId
 
 router = APIRouter(tags=["Public"])
 
-# ─────────────────────────────────────────────────────────────
-# HELPER — strip base64 from image fields, keep URLs only
-# Base64 images are served from /store-image/<id> endpoint
-# ─────────────────────────────────────────────────────────────
-def _img_url(store_id: str, field: str, val: str | None) -> str | None:
-    """Return URL if already a URL, or a lazy endpoint if base64, or None."""
-    if not val:
-        return None
-    if val.startswith("http"):
-        return val
-    if val.startswith("data:image"):
-        # Serve base64 via a lightweight proxy endpoint — clients cache it
-        return f"/store-image/{store_id}/{field}"
-    return None
-
-
-# =================== PUBLIC STORES LIST (PAGINATED) ===================
+# =================== PUBLIC STORES LIST ===================
 @router.get("/stores")
-def get_stores(
-    city:     str  = None,
-    category: str  = None,
-    limit:    int  = Query(default=50, ge=1, le=200),
-    skip:     int  = Query(default=0, ge=0),
-):
-    """
-    Public endpoint — Flutter app fetches this.
-    Supports pagination: /stores?limit=20&skip=0
-    Images: base64 stripped from list — use /store-image/<id>/<field> to load individually.
-    """
+def get_stores(city: str = None, category: str = None):
+    """Public endpoint - Flutter app fetches this"""
     query = {"status": "active"}
     if city:
-        query["city"] = {"$regex": f"^{city.strip()}$", "$options": "i"}
+        query["city"] = {"$regex": city, "$options": "i"}
     if category and category != "All":
         query["category"] = category
 
-    # Only lightweight fields — NO image/base64 in list response
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
-        "image":1,"store_image2":1,"status":1,"points_per_scan":1,
-        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"badge":1,
-        "merchant_id":1,
-    }).skip(skip).limit(limit))
-
-    total_count = db.stores.count_documents(query)
-
+        "image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
+        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"badge":1,"merchant_id":1
+    }))
     if not stores:
-        return {"stores": [], "total": 0, "limit": limit, "skip": skip, "has_more": False}
+        return []
 
     # Pre-fetch ALL active deals in ONE query — no N+1
     store_ids = [str(s["_id"]) for s in stores]
-    deals_by_store: dict = {}
-    try:
+    cols = db.list_collection_names()  # called ONCE, not per-store
+    deals_by_store = {}
+    if "deals" in cols:
         all_deals = list(db.deals.find(
             {"store_id": {"$in": store_ids}, "status": "active"},
             {"store_id":1,"title":1,"discount":1,"discount_percent":1}
         ))
         for d in all_deals:
             sid = d.get("store_id","")
-            deals_by_store.setdefault(sid, []).append(d)
-    except Exception:
-        pass
+            if sid not in deals_by_store:
+                deals_by_store[sid] = []
+            deals_by_store[sid].append(d)
 
     result = []
     for s in stores:
@@ -87,157 +58,70 @@ def get_stores(
         admin_rating = s.get("admin_rating")
         raw_rating   = s.get("rating", 0) or 0
         display_rating = float(admin_rating) if admin_rating else float(raw_rating)
-
-        # Image: return URL if hosted, or lazy endpoint if base64, or None
-        raw_img  = s.get("image") or ""
-        raw_img2 = s.get("store_image2") or ""
-        img_out  = _img_url(store_id, "image",  raw_img)
-        img2_out = _img_url(store_id, "image2", raw_img2)
-
         result.append({
-            "_id":          store_id,
-            "store_name":   s.get("store_name"),
-            "category":     s.get("category", ""),
-            "city":         s.get("city", ""),
-            "area":         s.get("area", ""),
-            "address":      s.get("address", ""),
-            "phone":        s.get("phone", ""),
-            "image":        img_out,
-            "image2":       img2_out,
-            "status":       s.get("status", "active"),
+            "_id": store_id,
+            "store_name": s.get("store_name"),
+            "category": s.get("category", ""),
+            "city": s.get("city", ""),
+            "area": s.get("area", ""),
+            "address": s.get("address", ""),
+            "phone": s.get("phone", ""),
+            "image": s.get("image") or None,
+            "image2": s.get("store_image2") or None,
+            "images": s.get("images", []),
+            "status": s.get("status", "active"),
             "visit_points": s.get("points_per_scan", 10),
             "points_per_scan": s.get("points_per_scan", 10),
-            "latitude":     s.get("lat") or None,
-            "longitude":    s.get("lng") or None,
-            "rating":       display_rating,
-            "offer":        deal_summary,
-            "deal_count":   deal_count,
+            "latitude": s.get("lat") or None,
+            "longitude": s.get("lng") or None,
+            "rating": display_rating,
+            "offer":      deal_summary,
+            "deal_count":    deal_count,
             "is_new_in_town": s.get("is_new_in_town", False),
-            "badge":        s.get("badge", ""),
-            "merchant_id":  s.get("merchant_id", ""),
+            "badge": s.get("badge", ""),
+            "merchant_id": s.get("merchant_id", "")
         })
-
-    return {
-        "stores":   result,
-        "total":    total_count,
-        "limit":    limit,
-        "skip":     skip,
-        "has_more": (skip + limit) < total_count,
-    }
-
-
-# =================== LAZY IMAGE ENDPOINT ===================
-@router.get("/store-image/{store_id}/{field}")
-def get_store_image(store_id: str, field: str):
-    """
-    Serve base64 image as proper HTTP image response.
-    Flutter's CachedNetworkImage will cache this by URL — loads once, cached forever.
-    field: 'image' or 'image2'
-    """
-    from fastapi import HTTPException
-    from fastapi.responses import Response
-    import base64, re
-
-    if field not in ("image", "image2"):
-        raise HTTPException(400, "field must be image or image2")
-
-    db_field = "image" if field == "image" else "store_image2"
-    try:
-        store = db.stores.find_one(
-            {"_id": ObjectId(store_id)},
-            {db_field: 1}
-        )
-    except Exception:
-        raise HTTPException(400, "Invalid store_id")
-
-    if not store:
-        raise HTTPException(404, "Store not found")
-
-    raw = store.get(db_field, "") or ""
-    if not raw.startswith("data:image"):
-        raise HTTPException(404, "No image")
-
-    # Parse data URL
-    match = re.match(r"data:([^;]+);base64,(.+)", raw, re.DOTALL)
-    if not match:
-        raise HTTPException(400, "Bad image data")
-
-    mime    = match.group(1)
-    b64data = match.group(2)
-    try:
-        img_bytes = base64.b64decode(b64data)
-    except Exception:
-        raise HTTPException(500, "Image decode error")
-
-    return Response(
-        content    = img_bytes,
-        media_type = mime,
-        headers    = {
-            "Cache-Control": "public, max-age=86400",  # cache 24h on client
-            "Content-Length": str(len(img_bytes)),
-        }
-    )
-
+    return result
 
 # =================== SINGLE STORE ===================
 @router.get("/stores/{store_id}")
 def get_store(store_id: str):
-    from fastapi import HTTPException
     try:
         store = db.stores.find_one({"_id": ObjectId(store_id)})
     except Exception:
+        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Invalid store_id")
     if not store:
+        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Store not found")
-
-    sid = str(store["_id"])
-    deals = []
-    try:
-        deals = list(db.deals.find({"store_id": sid, "status": "active"}))
-    except Exception:
-        pass
-
+    deals = list(db.deals.find({"store_id": store_id, "status": "active"})) \
+        if "deals" in db.list_collection_names() else []
     deals_list = [{
-        "title":       d.get("title"),
-        "discount":    d.get("discount"),
-        "category":    d.get("category"),
+        "title": d.get("title"),
+        "discount": d.get("discount"),
+        "category": d.get("category"),
         "description": d.get("description"),
-        "start_date":  d.get("start_date"),
-        "end_date":    d.get("end_date")
+        "start_date": d.get("start_date"),
+        "end_date": d.get("end_date")
     } for d in deals]
-
-    # Full image for detail page — serve proxy URL or hosted URL
-    raw_img  = store.get("image")  or ""
-    raw_img2 = store.get("store_image2") or store.get("image2") or ""
-    img_out  = _img_url(sid, "image",  raw_img)
-    img2_out = _img_url(sid, "image2", raw_img2)
-
     return {
-        "_id":          sid,
-        "store_name":   store.get("store_name"),
-        "category":     store.get("category", ""),
-        "city":         store.get("city", ""),
-        "area":         store.get("area", ""),
-        "address":      store.get("address", ""),
-        "phone":        store.get("phone", ""),
-        "image":        img_out,
-        "image2":       img2_out,
-        "latitude":     store.get("lat") or None,
-        "longitude":    store.get("lng") or None,
+        "_id": str(store["_id"]),
+        "store_name": store.get("store_name"),
+        "category": store.get("category", ""),
+        "city": store.get("city", ""),
+        "area": store.get("area", ""),
+        "address": store.get("address", ""),
+        "phone": store.get("phone", ""),
+        "image": store.get("image") or None,
+        "image2": store.get("store_image2") or None,
+        "images": store.get("images", []),
+        "latitude": store.get("lat") or None,
+        "longitude": store.get("lng") or None,
         "visit_points": store.get("points_per_scan", 10),
-        "rating":       float(store.get("admin_rating") or store.get("rating") or 0),
-        "about":        store.get("about") or store.get("description") or "",
-        "deals":        deals_list,
+        "rating": float(store.get("admin_rating") or store.get("rating") or 0),
+        "about":       store.get("about") or store.get("description") or "",
+        "deals": deals_list
     }
-
-
-# =================== PROMO SLIDERS ===================
-@router.get("/promo-sliders")
-def get_promo_sliders_public():
-    docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
-    return [{"id":str(p["_id"]),"title":p.get("title",""),"image_url":p.get("image_url",""),
-             "link":p.get("link",""),"order":p.get("sort_order",1)} for p in docs]
-
 
 # =================== PUBLIC CATEGORIES ===================
 @router.get("/categories")
@@ -245,18 +129,19 @@ def get_categories():
     doc = db.categories.find_one({})
     return doc.get("categories", ["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"]) if doc else []
 
-
 # =================== PUBLIC TERMS ===================
 @router.get("/terms/{type}")
 def get_terms_public(type: str):
-    from fastapi import HTTPException
     if type not in ("merchant", "user"):
+        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="type must be merchant or user")
     doc = db.terms.find_one({"type": type}) or {}
     return {"type": type, "content": doc.get("content", "")}
 
 
-# =================== POLICY ===================
+# =================== TERMS ===================
+# /terms/{type} handled above
+
 @router.get("/policy/{policy_type}")
 def get_policy(policy_type: str):
     doc = db.policies.find_one({"type": policy_type}) or {}
@@ -266,8 +151,7 @@ def get_policy(policy_type: str):
         content = defaults.get(policy_type, "")
     return {"content": content}
 
-
-# =================== SOCIAL LINKS ===================
+# =================== SOCIAL LINKS (public) ===================
 @router.get("/social")
 def get_social_public():
     doc = db.settings.find_one({"key": "social_links"}) or {}
@@ -278,19 +162,345 @@ def get_social_public():
         "youtube":   doc.get("youtube", ""),
     }
 
+# =================== CATEGORIES ===================
+# /categories handled above
 
-# =================== ABOUT US ===================
+def _default_user_terms():
+    return """# Terms & Conditions
+
+## 1. Acceptance of Terms
+By using LocalSaver, you agree to these terms. If you do not agree, please do not use the app.
+
+## 2. Eligibility
+You must be 18 years or older to use this service. By registering, you confirm you meet this requirement.
+
+## 3. User Account
+- You are responsible for maintaining the confidentiality of your account.
+- Provide accurate information during registration.
+- One account per person. Multiple accounts will be terminated.
+
+## 4. Points & Rewards
+- Points are earned by visiting registered stores and scanning their QR code.
+- Points cannot be transferred between accounts.
+- 2 Points = Rs.1 | Minimum withdrawal: 200 points (Rs.100).
+
+## 5. QR Code Usage
+- Each store QR can be scanned once per visit (cooldown applies).
+- Attempting to spoof or duplicate scans will result in account suspension.
+
+## 6. Prohibited Activities
+- Creating fake accounts or using bots.
+- Attempting to manipulate the points system.
+
+## 7. Termination
+LocalSaver may suspend accounts that violate these terms without prior notice.
+
+## 8. Contact
+For queries: support@localsaver.in"""
+
+def _default_merchant_terms():
+    return """# Merchant Terms & Conditions
+
+## 1. Agreement
+By registering as a merchant on LocalSaver, you agree to these terms.
+
+## 2. Listing Requirements
+- Stores must operate from a fixed physical location.
+- All store details must be accurate.
+- You must have the legal right to operate the listed business.
+
+## 3. Subscription & Fees
+- Store listing requires an active subscription.
+- Subscription fees include GST as per Indian law.
+- See Refund Policy for cancellation terms.
+
+## 4. Store Approval
+- After payment, stores enter Waiting Approval status.
+- Admin reviews and approves within 24-48 hours.
+
+## 5. QR Code Obligations
+- The QR code must be displayed prominently at your store.
+- Misuse of QR codes will result in immediate termination.
+
+## 6. Contact
+Merchant support: merchants@localsaver.in"""
+
+def _default_privacy():
+    return """# Privacy Policy
+
+## 1. Information We Collect
+- Account Information: Name, phone number, city, area.
+- Location Data: City-level only, for showing nearby deals.
+- Usage Data: Store visits, QR scans, points transactions.
+
+## 2. How We Use Your Information
+- To provide and improve the LocalSaver service.
+- To show relevant stores and deals in your city.
+- To track your points and transaction history.
+
+## 3. Information Sharing
+We do not sell your personal information. We may share data:
+- With merchants: only aggregate visit counts, not personal details.
+- With law enforcement if required by law.
+- With service providers under strict confidentiality.
+
+## 4. Data Security
+- All data is stored on secured servers with encryption.
+- Tokens are hashed and never stored in plain text.
+- We use HTTPS for all data transmission.
+
+## 5. Your Rights
+- Access: Request a copy of your personal data.
+- Correction: Update inaccurate information.
+- Deletion: Request account deletion via support.
+
+## 6. Contact
+Privacy queries: privacy@localsaver.in"""
+
+def _default_refund():
+    return """# Refund Policy
+
+## Subscription Refunds
+
+### Eligible for Refund
+- Store NOT approved within 5 business days of payment.
+- Duplicate payments made accidentally.
+- LocalSaver terminates listing due to our error.
+
+### NOT Eligible for Refund
+- Subscriptions where the store has already been approved and activated.
+- Requests made after 7 days of payment.
+- Stores removed due to policy violations or fraud.
+- Change of mind after store approval.
+
+## Refund Process
+1. Email refunds@localsaver.in with your Invoice Number and phone.
+2. Our team will review within 3-5 business days.
+3. Approved refunds credited to original payment method within 7-10 business days.
+
+## Points & Rewards
+- User reward points are non-refundable and non-transferable.
+
+## Contact
+refunds@localsaver.in"""
+
+def _default_kyc():
+    return """# KYC (Know Your Customer) Policy
+
+## Why KYC?
+KYC verification helps us prevent fraud, comply with Indian regulations, and protect merchants and users.
+
+## Who Needs KYC?
+- Merchants requesting refunds above Rs.10,000.
+- Merchants flagged for suspicious activity.
+- High-volume subscription accounts.
+
+## Documents Required
+
+### Individual Merchants
+- Identity Proof: Aadhaar Card / PAN Card / Voter ID.
+- Address Proof: Utility bill or Aadhaar.
+- Business Proof: GST certificate or Shop Registration (if applicable).
+
+### Business Entities
+- Certificate of Incorporation or Partnership Deed.
+- PAN of the business.
+- Authorized signatory ID proof.
+
+## KYC Process
+1. Email documents to kyc@localsaver.in with subject: KYC - [Phone Number].
+2. Verification within 3-5 business days.
+3. You will be notified of approval or discrepancies.
+
+## Non-Compliance
+Failure to complete KYC may result in:
+- Withholding of payouts.
+- Temporary suspension of merchant account.
+
+## Contact
+kyc@localsaver.in"""
+
+
+# =================== DISCOUNT VALIDATION (public) ===================
+
+# =================== USER RATINGS ===================
+from fastapi import Request as _Req
+
+def _get_user_optional(request: _Req):
+    token = request.cookies.get("user_token") or request.headers.get("Authorization","").replace("Bearer ","").strip()
+    if not token: return None
+    return db.users.find_one({"token": token})
+
+@router.post("/stores/{store_id}/rate")
+def rate_store(store_id: str, data: dict, request: _Req):
+    """User submits a rating (1-5) for a store. Computes running average."""
+    try:
+        from bson import ObjectId as ObjId
+        store = db.stores.find_one({"_id": ObjId(store_id)})
+    except Exception:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Invalid store id")
+    if not store:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    user = _get_user_optional(request)
+    user_id = str(user["_id"]) if user else None
+    new_r = float(data.get("rating", 0))
+    if not (1 <= new_r <= 5):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Rating must be 1-5")
+
+    # Store individual rating in ratings collection
+    if user_id:
+        db.ratings.update_one(
+            {"store_id": store_id, "user_id": user_id},
+            {"$set": {"store_id": store_id, "user_id": user_id, "rating": new_r}},
+            upsert=True
+        )
+
+    # Recompute average from ratings collection (skip if no documents)
+    all_ratings = list(db.ratings.find({"store_id": store_id}, {"rating": 1}))
+    if all_ratings:
+        avg = sum(r["rating"] for r in all_ratings) / len(all_ratings)
+        avg = round(avg, 1)
+    else:
+        avg = new_r
+
+    # Only update store rating if no admin_rating override
+    if not store.get("admin_rating"):
+        try:
+            from bson import ObjectId as ObjId2
+            db.stores.update_one({"_id": ObjId2(store_id)}, {"$set": {"rating": avg, "user_rating": avg}})
+        except Exception:
+            pass
+
+    return {"message": "Rating submitted", "avg_rating": avg, "rating": avg}
+
+
+@router.get("/stores/{store_id}/my-rating")
+def my_rating(store_id: str, request: _Req):
+    """Get the logged-in user's own rating for a store."""
+    user = _get_user_optional(request)
+    if not user:
+        return {"rating": None}
+    user_id = str(user["_id"])
+    doc = db.ratings.find_one({"store_id": store_id, "user_id": user_id})
+    return {"rating": doc["rating"] if doc else None}
+
+@router.post("/discount/validate")
+def validate_discount(body: dict):
+    from fastapi import HTTPException
+    from datetime import datetime
+    code = (body.get("code","")).strip().upper()
+    if not code:
+        raise HTTPException(400, "Code required")
+    doc = db.discounts.find_one({"code": code})
+    if not doc:
+        raise HTTPException(404, "Invalid discount code")
+    if not doc.get("active", True):
+        raise HTTPException(400, "This code is no longer active")
+    if doc.get("expiry_date") and datetime.utcnow() > doc["expiry_date"]:
+        raise HTTPException(400, "This code has expired")
+    if doc.get("max_uses", 0) > 0 and doc.get("used_count", 0) >= doc["max_uses"]:
+        raise HTTPException(400, "This code has reached its usage limit")
+    return {
+        "ok": True,
+        "code": code,
+        "value": doc.get("value", 0),
+        "discount_id": str(doc["_id"])
+    }
+
+# =================== ABOUT US (public) ===================
 @router.get("/about")
 def get_about_public():
     doc = db.settings.find_one({"key": "about_us"}) or {}
     return {"content": doc.get("content", "")}
 
+# =================== PROMO SLIDERS (public - for Flutter app) ===================
+@router.get("/promo-sliders")
+def get_promo_sliders_public():
+    """Returns active promo slider banners for the app home screen."""
+    docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
+    result = []
+    for d in docs:
+        img = d.get("image_url", "") or d.get("image", "")
+        result.append({
+            "id": str(d["_id"]),
+            "title": d.get("title", ""),
+            "subtitle": d.get("subtitle", "") or d.get("text", ""),
+            "image": img,
+            "image_url": img,
+            "link_url": d.get("link_url", ""),
+            "store_id": d.get("store_id", ""),   # FIX 8: expose store_id for banner tap
+            "bg_color": d.get("bg_color", ""),
+            "sort_order": d.get("sort_order", 0),
+        })
+    return result
 
-def _default_privacy():
-    return "Privacy Policy — Contact support@offro.app"
+# =================== GIFT VOUCHERS (public - for Flutter app home screen) ===================
+@router.get("/gift-vouchers-public")
+def get_gift_vouchers_public():
+    """Returns active gift vouchers shown on the app home screen (Voucher Zone)."""
+    # Fetch all, then filter in Python to handle bool/string/missing is_active variants
+    docs = list(db.gift_vouchers.find({}).sort("_id", -1))
+    docs = [d for d in docs if d.get("is_active", True) not in (False, "false", "0", 0)]
+    result = []
+    for d in docs:
+        vid = str(d.pop("_id"))
+        # Normalise store field
+        store = d.get("store", {})
+        if isinstance(store, dict):
+            sid = store.get("_id") or store.get("id")
+            if sid:
+                store["id"] = str(sid)
+                store.pop("_id", None)
+        # If store_id exists, try to pull store image for display
+        store_id = d.get("store_id", "")
+        if store_id and not d.get("logo"):
+            try:
+                from bson import ObjectId as OId
+                s = db.stores.find_one({"_id": OId(store_id)}, {"store_image2":1,"image":1,"store_name":1})
+                if s:
+                    d["logo"] = s.get("store_image2") or s.get("image") or ""
+                    if not d.get("title") and s.get("store_name"):
+                        d["title"] = s["store_name"]
+            except: pass
+        result.append({"id": vid, **d})
+    return result
 
-def _default_refund():
-    return "Refund Policy — Contact support@offro.app"
 
-def _default_kyc():
-    return "KYC Policy — Contact support@offro.app"
+# ── Alias routes (short form for app compatibility) ──
+@router.get("/sliders")
+def get_sliders_alias():
+    """Alias for /promo-sliders — returns active banners."""
+    return get_promo_sliders_public()
+
+@router.get("/gift-vouchers")
+def get_gift_vouchers_alias():
+    """Alias for /gift-vouchers-public — returns active vouchers."""
+    return get_gift_vouchers_public()
+
+
+# =================== FCM TOKEN REGISTRATION (FIX 7) ===================
+@router.post("/register-fcm-token")
+def register_fcm_token(body: dict, request: _Req):
+    """Register or update FCM push token for a user device."""
+    token = body.get("token", "").strip()
+    phone = body.get("phone", "").strip()
+    user_id = body.get("user_id", "").strip()
+    if not token:
+        raise HTTPException(400, "Token required")
+    # Find user by phone or user_id
+    query = {}
+    if user_id:
+        try:
+            from bson import ObjectId as OId2
+            query = {"_id": OId2(user_id)}
+        except: pass
+    elif phone:
+        query = {"phone": phone}
+    if not query:
+        raise HTTPException(400, "user_id or phone required")
+    db.users.update_one(query, {"$set": {"fcm_token": token, "fcm_updated": __import__("datetime").datetime.utcnow().isoformat()}})
+    return {"ok": True}
