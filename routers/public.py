@@ -421,10 +421,13 @@ def get_about_public():
 @router.get("/promo-sliders")
 def get_promo_sliders_public():
     """Returns active promo slider banners for the app home screen."""
+    # FIX 4: Only return sliders that are active AND have a valid image
     docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
+        if not img:
+            continue  # FIX 4: skip sliders with no image
         result.append({
             "id": str(d["_id"]),
             "title": d.get("title", ""),

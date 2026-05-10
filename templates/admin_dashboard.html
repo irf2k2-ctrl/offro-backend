@@ -951,7 +951,7 @@ function showSection(name, el){
 }
 
 // ===== STATS =====
-async function loadStats() {
+async async function loadStats() {   // FIX 2: must be async (uses await)
     try {
         let res = await fetch("/admin/stats", { credentials:"include" });
         if (res.status===401||res.status===403) { window.location.href="/admin"; return; }
@@ -960,6 +960,10 @@ async function loadStats() {
         document.getElementById("stat_active").innerText    = d.active_merchants||0;
         document.getElementById("stat_stores").innerText    = d.total_stores||0;
         document.getElementById("stat_deals").innerText     = d.total_deals||0;
+        // FIX 1: populate user count and waiting approval (were missing)
+        document.getElementById("stat_users").innerText     = d.total_users||0;
+        if(document.getElementById("stat_waiting"))
+          document.getElementById("stat_waiting").innerText = d.waiting_approval||0;
     } catch(e) { console.error(e); }
 }
 
@@ -1842,7 +1846,7 @@ async function setStoreRating(storeId, val, el) {
   } catch(e) { console.error(e); }
 }
 
-// ═══════════ GIFT CARDS (App Display) ═══════════
+// ═══════════ VOUCHER ZONE (App Display) ═══════════
 let gcModalInst;
 window.addEventListener("DOMContentLoaded", function() {
   if (document.getElementById("giftCardModal"))
@@ -1854,7 +1858,7 @@ async function loadGiftCards() {
     let r = await fetch("/admin/gift-vouchers", {credentials:"include"});
     let cards = await r.json();
     const el = document.getElementById("voucher_zone_list");
-    if (!cards.length) { el.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No gift cards yet. Click + Add Card to create one.</td></tr>"; return; }
+    if (!cards.length) { el.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No voucher cards yet. Click + Add Card to create one.</td></tr>"; return; }
     el.innerHTML = cards.map(v => {
       let logoHtml = v.logo
         ? `<img src="${v.logo}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;border:1px solid var(--border);" onerror="this.outerHTML='<i class=fas fa-gift style=color:var(--primary)></i>'">`
@@ -1885,6 +1889,9 @@ async function openGiftCardModal() {
   document.getElementById("gc_text").value = "";
   document.getElementById("gc_validity").value = "";
   document.getElementById("gc_logo").value = "";
+  document.getElementById("gc_logo_file").value="";
+  document.getElementById("gc_logo_preview").style.display="none";
+  document.getElementById("gc_logo_img").src="";
   document.getElementById("gc_active").checked = true;
   document.getElementById("gc_msg").innerText = "";
   _populateGcMerchants("");
@@ -1897,6 +1904,8 @@ function editGiftCard(v) {
   document.getElementById("gc_text").value     = v.text||"";
   document.getElementById("gc_validity").value = v.validity||"";
   document.getElementById("gc_logo").value     = v.logo||"";
+  if (v.logo) { document.getElementById("gc_logo_img").src=v.logo; document.getElementById("gc_logo_preview").style.display="block"; }
+  else { document.getElementById("gc_logo_preview").style.display="none"; document.getElementById("gc_logo_file").value=""; }
   document.getElementById("gc_active").checked = v.is_active !== false;
   document.getElementById("gc_msg").innerText  = "";
   _populateGcMerchants(v.merchant_id||"");
@@ -1911,6 +1920,24 @@ function _populateGcMerchants(selectedId) {
   });
 }
 
+function previewVoucherLogo(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const b64 = e.target.result; // data:image/... string
+    document.getElementById("gc_logo").value = b64;
+    document.getElementById("gc_logo_img").src = b64;
+    document.getElementById("gc_logo_preview").style.display = "block";
+  };
+  reader.readAsDataURL(file);
+}
+function clearVoucherLogo() {
+  document.getElementById("gc_logo").value = "";
+  document.getElementById("gc_logo_file").value = "";
+  document.getElementById("gc_logo_preview").style.display = "none";
+  document.getElementById("gc_logo_img").src = "";
+}
 async function saveGiftCard() {
   const vid  = document.getElementById("gc_id").value;
   const text = document.getElementById("gc_text").value.trim();
@@ -1934,7 +1961,7 @@ async function saveGiftCard() {
 }
 
 async function deleteGiftCard(id) {
-  if (!confirm("Delete this gift card?")) return;
+  if (!confirm("Delete this voucher card?")) return;
   await fetch(`/admin/gift-vouchers/${id}`, {method:"DELETE", credentials:"include"});
   loadGiftCards();
 }
@@ -1964,7 +1991,7 @@ function _renderRatings(stores) {
     document.getElementById("ratings_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No stores</td></tr>";
 }
 
-async function clearRating(storeId) {
+async async function clearRating(storeId) {
     try {
         await fetch(`/admin/stores/${storeId}/rating`, {
             method:"PUT", credentials:"include",
@@ -2053,17 +2080,20 @@ async function saveVoucher() {
     } catch { document.getElementById("v_msg").innerText="Server error"; }
 }
 
-async function setRating(storeId, val, el) {
-    // Highlight stars
+async async function setRating(storeId, val, el) {  // FIX 2: async
+    // Highlight stars immediately for instant feedback
     const row = el.closest(".star-row");
     row.querySelectorAll(".fa-star").forEach((s,i) => { s.classList.toggle("on", i<val); });
     try {
-        await fetch(`/admin/stores/${storeId}/rating`, {
+        const res = await fetch(`/admin/stores/${storeId}/rating`, {
             method:"PUT", credentials:"include",
             headers:{"Content-Type":"application/json"},
             body:JSON.stringify({admin_rating:val})
         });
-    } catch(e) { console.error(e); }
+        if (!res.ok) console.error("Rating save failed:", res.status);
+        // FIX 2: re-load stores so the rating column refreshes from DB
+        setTimeout(() => loadStores(), 500);
+    } catch(e) { console.error("setRating error:", e); }
 }
 
 function storeImg(s) {
@@ -2198,12 +2228,12 @@ async function saveStore() {
   </div>
 </div>
 
-<!-- Gift Card Modal -->
+<!-- Voucher Zone Modal -->
 <div class="modal fade" id="giftCardModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">🎁 Gift Card</h5>
+        <h5 class="modal-title">🎁 Voucher Zone Card</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -2221,8 +2251,13 @@ async function saveStore() {
           <input id="gc_validity" class="form-control" placeholder="e.g. 31 May 2026">
         </div>
         <div class="mb-3">
-          <label class="form-label fw-semibold">Logo URL</label>
-          <input id="gc_logo" class="form-control" placeholder="https://... or data:image/...">
+          <label class="form-label fw-semibold">Logo Image</label>
+          <input type="file" id="gc_logo_file" class="form-control" accept="image/*" onchange="previewVoucherLogo(this)">
+          <input type="hidden" id="gc_logo" value="">
+          <div id="gc_logo_preview" style="margin-top:8px;display:none;">
+            <img id="gc_logo_img" src="" style="height:60px;border-radius:8px;border:1px solid var(--border);object-fit:contain;background:#f8f8f8;padding:4px;">
+            <button type="button" onclick="clearVoucherLogo()" style="margin-left:8px;font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer;">✕ Remove</button>
+          </div>
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Linked Merchant (optional)</label>

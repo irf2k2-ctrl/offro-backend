@@ -213,12 +213,104 @@ def redemption_history(user=Depends(get_current_user)):
         result.append({
             "store_name": r.get("store_name"),
             "points": r.get("points"),
-            "date": r.get("created_at").strftime("%d %b %Y %H:%M") if r.get("created_at") else ""
+            "date": (
+            (lambda dt: dt.strftime("%d %b %Y %H:%M IST")
+                if hasattr(dt, "strftime")
+                else str(dt)[:16].replace("T", " ")
+            )(r["created_at"])
+        ) if r.get("created_at") else ""  # FIX 6: robust date format with IST label
         })
     return result
 
 
 # =================== UPDATE USER PROFILE (image etc.) ===================
+@router.get("/wallet/history")
+def wallet_transaction_history(user=Depends(get_current_user)):
+    """FIX 6: Returns wallet activity — redeems and withdraw requests sorted newest first."""
+    user_id = str(user["_id"])
+    from datetime import timezone
+
+    def _fmt(dt):
+        if dt is None: return ""
+        if hasattr(dt, "strftime"):
+            return dt.strftime("%d %b %Y %H:%M IST")  # stored as UTC, label as IST for display
+        return str(dt)[:16].replace("T", " ")
+
+    # Redemptions (points earned via QR scan)
+    redeems = list(db.redemptions.find({"user_id": user_id}).sort("created_at", -1).limit(50))
+    # Withdraw requests (points redeemed for voucher)
+    withdrawals = list(db.withdraw_requests.find({"user_id": user_id}).sort("created_at", -1).limit(20))
+
+    txns = []
+    for r in redeems:
+        txns.append({
+            "type": "earn",
+            "label": f"+{r.get('points', 0)} pts — {r.get('store_name', 'QR Scan')}",
+            "points": r.get("points", 0),
+            "store_name": r.get("store_name", ""),
+            "date": _fmt(r.get("created_at")),
+            "raw_ts": r.get("created_at").timestamp() if hasattr(r.get("created_at"), "timestamp") else 0,
+        })
+    for w in withdrawals:
+        txns.append({
+            "type": "redeem",
+            "label": f"−{w.get('points', 0)} pts — Gift Voucher Request",
+            "points": -w.get("points", 0),
+            "store_name": "Voucher Request",
+            "status": w.get("status", "pending"),
+            "date": _fmt(w.get("created_at")),
+            "raw_ts": w.get("created_at").timestamp() if hasattr(w.get("created_at"), "timestamp") else 0,
+        })
+
+    txns.sort(key=lambda x: x["raw_ts"], reverse=True)
+    for t in txns: t.pop("raw_ts", None)
+    return txns
+
+@router.get("/favorites")
+def get_favorites(user=Depends(get_current_user)):
+    """FIX 7: Returns list of favorite stores for this user."""
+    user_id = str(user["_id"])
+    fav_ids = user.get("favorite_store_ids", [])
+    if not fav_ids:
+        return []
+    from bson import ObjectId as OId
+    valid_ids = []
+    for fid in fav_ids:
+        try: valid_ids.append(OId(str(fid)))
+        except: pass
+    stores = list(db.stores.find({"_id": {"$in": valid_ids}}))
+    result = []
+    for s in stores:
+        img = s.get("image") or (s.get("images") or [None])[0] or ""
+        result.append({
+            "_id": str(s["_id"]),
+            "store_name": s.get("store_name",""),
+            "category": s.get("category",""),
+            "area": s.get("area",""),
+            "city": s.get("city",""),
+            "rating": float(s.get("admin_rating") or s.get("rating") or 0),
+            "image": img,
+        })
+    return result
+
+@router.post("/favorites/{store_id}")
+def toggle_favorite(store_id: str, user=Depends(get_current_user)):
+    """FIX 7: Toggle favorite — add if not present, remove if already favorited."""
+    user_id = user["_id"]
+    fav_ids = [str(f) for f in user.get("favorite_store_ids", [])]
+    if store_id in fav_ids:
+        db.users.update_one({"_id": user_id}, {"$pull": {"favorite_store_ids": store_id}})
+        return {"is_favorite": False}
+    else:
+        db.users.update_one({"_id": user_id}, {"$addToSet": {"favorite_store_ids": store_id}})
+        return {"is_favorite": True}
+
+@router.get("/favorites/{store_id}/check")
+def check_favorite(store_id: str, user=Depends(get_current_user)):
+    """FIX 7: Check if a specific store is favorited."""
+    fav_ids = [str(f) for f in user.get("favorite_store_ids", [])]
+    return {"is_favorite": store_id in fav_ids}
+
 @router.put("/profile")
 def update_user_profile(data: dict, user=Depends(get_current_user)):
     allowed = ["profile_image", "name"]
