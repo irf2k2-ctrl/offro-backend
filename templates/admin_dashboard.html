@@ -273,7 +273,7 @@ tr:hover td{background:#f7faf8;}
   <div class="section-header">
     <div>
       <div class="fw-bold" style="font-size:18px;color:var(--primary)">🔔 Push Notifications</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Send notifications to all users or specific users</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Topic-based FCM — all users, city-wise, offers, or specific user</div>
     </div>
   </div>
   <div class="row g-4">
@@ -282,18 +282,25 @@ tr:hover td{background:#f7faf8;}
         <div class="fw-bold mb-3" style="color:var(--primary);font-size:15px;">📤 Send New Notification</div>
         <div class="mb-3">
           <label class="form-label">Title *</label>
-          <input id="notif_title" class="form-control" placeholder="e.g. New deals near you!">
+          <input id="notif_title" class="form-control" placeholder="e.g. 🔥 New deals near you!">
         </div>
         <div class="mb-3">
           <label class="form-label">Message *</label>
           <textarea id="notif_body" class="form-control" rows="3" placeholder="e.g. Check out today's exclusive offers from our merchants!"></textarea>
         </div>
         <div class="mb-3">
-          <label class="form-label">Target</label>
-          <select id="notif_target" class="form-select" onchange="toggleNotifUser()">
-            <option value="all">All Users</option>
-            <option value="specific">Specific User (by phone)</option>
+          <label class="form-label fw-semibold">Target Audience</label>
+          <select id="notif_target" class="form-select" onchange="toggleNotifTarget()">
+            <option value="all_users">👥 All Users (FCM topic)</option>
+            <option value="city">🏙️ City-wise Users</option>
+            <option value="offers">🎁 Offers Subscribers</option>
+            <option value="specific">📱 Specific User (by phone)</option>
           </select>
+        </div>
+        <div class="mb-3" id="notif_city_row" style="display:none;">
+          <label class="form-label">City Name</label>
+          <input id="notif_city" class="form-control" placeholder="e.g. Ballari, Bangalore, Hubli">
+          <div style="font-size:11px;color:var(--muted);margin-top:3px;">Topic will be: <code id="notif_city_topic_preview">—</code></div>
         </div>
         <div class="mb-3" id="notif_phone_row" style="display:none;">
           <label class="form-label">Phone Number</label>
@@ -303,18 +310,27 @@ tr:hover td{background:#f7faf8;}
           <label class="form-label">Image URL (optional)</label>
           <input id="notif_image" class="form-control" placeholder="https://...">
         </div>
-        <button class="btn-p" onclick="sendNotification()"><i class="fas fa-paper-plane me-1"></i> Send Notification</button>
+        <div class="mb-3" id="notif_topic_preview_box" style="background:#f0f7f3;border-radius:8px;padding:10px 14px;font-size:12px;color:var(--primary);">
+          📡 Will send to FCM topic: <strong id="notif_topic_label">all_users</strong>
+        </div>
+        <button class="btn-p" onclick="sendNotification()" id="notif_send_btn"><i class="fas fa-paper-plane me-1"></i> Send Notification</button>
         <p id="notif_msg" class="mt-2" style="font-size:13px;"></p>
       </div>
     </div>
     <div class="col-md-7">
       <div class="section-header" style="margin-bottom:10px;">
         <div class="fw-bold" style="color:var(--primary);font-size:15px;">📋 Sent Notifications</div>
-        <button class="btn-o" onclick="loadNotifications()"><i class="fas fa-sync"></i> Refresh</button>
+        <div class="d-flex gap-2">
+          <button class="btn-o" onclick="loadNotifications()"><i class="fas fa-sync"></i> Refresh</button>
+          <button class="btn-o" onclick="processNotifQueue()" style="font-size:12px;background:#fff3e0;border-color:#e67e22;color:#e67e22;">
+            <i class="fas fa-redo"></i> Retry Failed
+          </button>
+        </div>
       </div>
+      <p id="queue_status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Title</th><th>Message</th><th>Target</th><th>Sent At</th><th>Status</th></tr></thead>
+          <thead><tr><th>Title</th><th>Target</th><th>Sent At</th><th>Delivered</th><th>Status</th></tr></thead>
           <tbody id="notif_history"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
         </table>
       </div>
@@ -1724,75 +1740,127 @@ async function deleteSlider(id) {
 }
 
 // ═══════════ NOTIFICATIONS ═══════════
+const _TOPIC_LABELS = {
+  "all_users": "all_users",
+  "offers":    "offers",
+  "city":      null,  // dynamic: {city}_users
+  "specific":  "direct (token)",
+};
+
+function toggleNotifTarget() {
+  const target = document.getElementById("notif_target").value;
+  document.getElementById("notif_phone_row").style.display  = target === "specific" ? ""     : "none";
+  document.getElementById("notif_city_row").style.display   = target === "city"     ? ""     : "none";
+  document.getElementById("notif_topic_preview_box").style.display = target === "specific" ? "none" : "";
+  // Update topic preview label
+  const city = document.getElementById("notif_city").value.trim();
+  let label = _TOPIC_LABELS[target] || target;
+  if (target === "city") label = city ? city.toLowerCase().replace(/ /g, "_") + "_users" : "— enter city —";
+  document.getElementById("notif_topic_label").innerText = label;
+}
+
+// Also update city topic preview live
+document.addEventListener("DOMContentLoaded", () => {
+  const cityInput = document.getElementById("notif_city");
+  if (cityInput) {
+    cityInput.addEventListener("input", () => {
+      const v = cityInput.value.trim().toLowerCase().replace(/ /g, "_");
+      document.getElementById("notif_topic_label").innerText = v ? v + "_users" : "— enter city —";
+      document.getElementById("notif_city_topic_preview").innerText = v ? v + "_users" : "—";
+    });
+  }
+});
+
 async function loadNotifications() {
   try {
     let r = await fetch("/admin/notifications", {credentials:"include"});
     let notifs = r.ok ? await r.json() : [];
     const tbody = document.getElementById("notif_history");
     if (!notifs.length) {
-      tbody.innerHTML = "<tr><td colspan='5' style='text-align:center;padding:24px;color:var(--muted)'>No notifications sent yet.</td></tr>";
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">No notifications sent yet.</td></tr>`;
       return;
     }
+    const statusBadge = s => {
+      const map = {
+        sent:    `<span style="background:#e8f5e9;color:#2e7d32;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;">✅ Sent</span>`,
+        partial: `<span style="background:#fff3e0;color:#e65100;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;">⚠️ Partial</span>`,
+        failed:  `<span style="background:#fde8e8;color:#c0392b;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;">❌ Failed</span>`,
+        queued:  `<span style="background:#e8f0fe;color:#1a73e8;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;">⏳ Queued</span>`,
+        skipped_no_tokens: `<span style="background:#f5f5f5;color:#757575;padding:2px 9px;border-radius:12px;font-size:11px;">⊘ No tokens</span>`,
+      };
+      return map[s] || `<span style="background:#f5f5f5;color:#555;padding:2px 9px;border-radius:12px;font-size:11px;">${s}</span>`;
+    };
+    const targetLabel = n => {
+      if (n.target === "all_users" || n.target === "all") return "👥 All Users";
+      if (n.target === "offers") return "🎁 Offers";
+      if (n.target === "city") return `🏙️ ${n.target_city || "City"}`;
+      if (n.target === "specific") return `📱 ${n.target_phone || "—"}`;
+      return n.target || "—";
+    };
     tbody.innerHTML = notifs.map(n => `<tr>
-      <td><strong>${n.title||"—"}</strong></td>
-      <td style="font-size:12px">${n.body||"—"}</td>
-      <td style="font-size:12px">${n.target==="all"?"👥 All Users":`📱 ${n.target_phone||n.target||"—"}`}</td>
+      <td><strong>${n.title||"—"}</strong><br><span style="font-size:11px;color:var(--muted)">${(n.body||"").substring(0,50)}…</span></td>
+      <td style="font-size:12px;">${targetLabel(n)}<br><span style="font-size:10px;color:var(--muted)">topic: ${n.topic||"—"}</span></td>
       <td style="font-size:12px;color:var(--muted)">${n.sent_at||n.created_at||"—"}</td>
-      <td>${n.status==="sent"?'<span class="badge-active">✓ Sent</span>':n.status==="failed"?'<span class="badge-inactive">✗ Failed</span>':'<span class="badge-waiting">⏳ Queued</span>'}</td>
+      <td style="font-size:12px;text-align:center;">${n.processed||0} <span style="color:var(--danger)">/ ${n.failed||0}✗</span></td>
+      <td>${statusBadge(n.status)}</td>
     </tr>`).join("");
-  } catch(e) { console.error(e); }
+  } catch(e) { document.getElementById("notif_history").innerHTML=`<tr><td colspan="5">Error loading</td></tr>`; }
 }
 
-function toggleNotifUser() {
-  let target = document.getElementById("notif_target").value;
-  document.getElementById("notif_phone_row").style.display = target==="specific" ? "" : "none";
-}
-
-// FIX 7: Retry all queued/failed notifications via backend
+// Retry queued/failed
 async function processNotifQueue() {
   const qs = document.getElementById("queue_status");
-  qs.innerText = "⏳ Processing queue…";
-  qs.style.color = "var(--muted)";
+  qs.style.color = "var(--muted)"; qs.innerText = "⏳ Retrying queued notifications...";
   try {
     let r = await fetch("/admin/notifications/process-queue", {
       method: "POST", credentials: "include",
-      headers: {"Content-Type":"application/json"}, body: "{}"
+      headers: {"Content-Type":"application/json"},
     });
     let d = await r.json();
     if (r.ok) {
       qs.style.color = "var(--primary)";
-      qs.innerText = `✓ ${d.processed||0} delivered, ${d.failed||0} failed, ${d.skipped||0} skipped`;
+      qs.innerText = `✅ Retry done — sent: ${d.processed}, failed: ${d.failed}, skipped: ${d.skipped}`;
     } else {
-      qs.style.color = "var(--danger)";
-      qs.innerText = d.detail || "Failed to process queue";
+      qs.style.color = "var(--danger)"; qs.innerText = d.detail || "Retry failed";
     }
     setTimeout(loadNotifications, 800);
   } catch(e) {
-    qs.style.color = "var(--danger)";
-    qs.innerText = "Server error — check logs";
+    qs.style.color = "var(--danger)"; qs.innerText = "Server error during retry";
   }
 }
 
 async function sendNotification() {
-  const title = document.getElementById("notif_title").value.trim();
-  const body  = document.getElementById("notif_body").value.trim();
-  const target = document.getElementById("notif_target").value;
-  const phone = document.getElementById("notif_phone").value.trim();
-  const image = document.getElementById("notif_image").value.trim();
-  if (!title||!body) { document.getElementById("notif_msg").innerText="Title and message are required"; return; }
-  if (target==="specific"&&!phone) { document.getElementById("notif_msg").innerText="Phone number required for specific user"; return; }
-  const data = { title, body, target, target_phone: target==="specific"?phone:"", image_url: image };
+  const title   = document.getElementById("notif_title").value.trim();
+  const body    = document.getElementById("notif_body").value.trim();
+  const target  = document.getElementById("notif_target").value;
+  const phone   = document.getElementById("notif_phone").value.trim();
+  const city    = document.getElementById("notif_city").value.trim();
+  const image   = document.getElementById("notif_image").value.trim();
+  const msgEl   = document.getElementById("notif_msg");
+  const btn     = document.getElementById("notif_send_btn");
+
+  if (!title || !body) { msgEl.style.color="var(--danger)"; msgEl.innerText="Title and message are required"; return; }
+  if (target === "specific" && !phone) { msgEl.style.color="var(--danger)"; msgEl.innerText="Phone number required"; return; }
+  if (target === "city" && !city) { msgEl.style.color="var(--danger)"; msgEl.innerText="City name required"; return; }
+
+  btn.disabled = true; btn.innerText = "Sending…";
+  msgEl.style.color = "var(--muted)"; msgEl.innerText = "Sending notification…";
+
+  const data = { title, body, target, target_phone: target==="specific"?phone:"", target_city: target==="city"?city:"", image_url: image, use_topic: target !== "specific" };
   try {
-    let res = await fetch("/admin/notifications/send", {method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
-    let d = await res.json();
-    if (!res.ok) { document.getElementById("notif_msg").style.color="var(--danger)"; document.getElementById("notif_msg").innerText=d.detail||"Error sending"; return; }
-    document.getElementById("notif_msg").style.color="var(--primary)";
-    document.getElementById("notif_msg").innerText="✓ Notification sent successfully!";
-    document.getElementById("notif_title").value="";
-    document.getElementById("notif_body").value="";
-    document.getElementById("notif_image").value="";
-    loadNotifications();
-  } catch { document.getElementById("notif_msg").innerText="Server error"; }
+    let r = await fetch("/admin/notifications/send", {method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
+    let d = await r.json();
+    if (!r.ok) { msgEl.style.color="var(--danger)"; msgEl.innerText = d.detail||"Error sending"; }
+    else {
+      msgEl.style.color="var(--primary)";
+      msgEl.innerText = `✅ ${d.message||"Notification sent!"}`;
+      document.getElementById("notif_title").value="";
+      document.getElementById("notif_body").value="";
+      document.getElementById("notif_image").value="";
+      loadNotifications();
+    }
+  } catch { msgEl.style.color="var(--danger)"; msgEl.innerText="Server error"; }
+  finally { btn.disabled=false; btn.innerText="📤 Send Notification"; btn.innerHTML='<i class="fas fa-paper-plane me-1"></i> Send Notification'; }
 }
 
 

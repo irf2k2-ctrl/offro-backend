@@ -790,9 +790,125 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
 
 # ===================== NOTIFICATIONS (FIX 7) =====================
 
+# ═══════════════════════════════════════════════════════════
+# FIREBASE ADMIN SDK — initialized once at module load
+# Uses FIREBASE_SERVICE_ACCOUNT env var (JSON string)
+# ═══════════════════════════════════════════════════════════
+def _get_fcm_app():
+    """Return initialized firebase_admin app (singleton)."""
+    import firebase_admin
+    from firebase_admin import credentials as fb_cred
+    import os, json as _j
+    try:
+        return firebase_admin.get_app("offro")
+    except ValueError:
+        pass
+    sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "")
+    if not sa_json:
+        return None
+    try:
+        sa_dict = _j.loads(sa_json)
+        cred = fb_cred.Certificate(sa_dict)
+        return firebase_admin.initialize_app(cred, name="offro")
+    except Exception as e:
+        print(f"[FCM] Firebase init failed: {e}")
+        return None
+
+
+def _send_via_firebase_admin(tokens: list, title: str, body: str, image_url: str = "", data: dict = None) -> tuple:
+    """Send individual FCM messages via Firebase Admin SDK (HTTP v1 API).
+    Returns (sent_count, failed_count).
+    """
+    from firebase_admin import messaging as fb_msg
+    app = _get_fcm_app()
+    if app is None:
+        print("[FCM] No app initialized — check FIREBASE_SERVICE_ACCOUNT env var")
+        return 0, 0
+
+    sent = 0; failed = 0
+    extra_data = data or {}
+
+    # Build multicast messages in batches of 500
+    for i in range(0, len(tokens), 500):
+        batch = tokens[i:i+500]
+        reg_ids = [t["token"] for t in batch]
+        try:
+            notif = fb_msg.Notification(title=title, body=body, image=image_url or None)
+            android_notif = fb_msg.AndroidNotification(
+                title=title, body=body,
+                image=image_url or None,
+                sound="default",
+                notification_count=1,
+            )
+            android_config = fb_msg.AndroidConfig(
+                priority="high",
+                notification=android_notif,
+            )
+            apns_config = fb_msg.APNSConfig(
+                payload=fb_msg.APNSPayload(
+                    aps=fb_msg.Aps(sound="default", badge=1)
+                )
+            )
+            mm = fb_msg.MulticastMessage(
+                tokens=reg_ids,
+                notification=notif,
+                android=android_config,
+                apns=apns_config,
+                data={k: str(v) for k, v in extra_data.items()},
+            )
+            resp = fb_msg.send_each_for_multicast(mm, app=app)
+            sent   += resp.success_count
+            failed += resp.failure_count
+            # Log any failures
+            for j, r in enumerate(resp.responses):
+                if not r.success:
+                    print(f"[FCM] Token {j} failed: {r.exception}")
+        except Exception as e:
+            print(f"[FCM] Batch {i//500 + 1} error: {e}")
+            failed += len(batch)
+
+    return sent, failed
+
+
+def _send_fcm_topic(topic: str, title: str, body: str, image_url: str = "", data: dict = None) -> bool:
+    """Send FCM notification to a topic (e.g. all_users, ballari_users, offers).
+    Returns True on success.
+    """
+    from firebase_admin import messaging as fb_msg
+    app = _get_fcm_app()
+    if app is None:
+        print("[FCM] No app for topic send — check FIREBASE_SERVICE_ACCOUNT env var")
+        return False
+
+    try:
+        extra_data = data or {}
+        msg = fb_msg.Message(
+            topic=topic,
+            notification=fb_msg.Notification(title=title, body=body, image=image_url or None),
+            android=fb_msg.AndroidConfig(
+                priority="high",
+                notification=fb_msg.AndroidNotification(
+                    title=title, body=body,
+                    image=image_url or None,
+                    sound="default",
+                ),
+            ),
+            apns=fb_msg.APNSConfig(
+                payload=fb_msg.APNSPayload(aps=fb_msg.Aps(sound="default", badge=1))
+            ),
+            data={k: str(v) for k, v in extra_data.items()},
+        )
+        msg_id = fb_msg.send(msg, app=app)
+        print(f"[FCM] Topic '{topic}' message sent: {msg_id}")
+        return True
+    except Exception as e:
+        print(f"[FCM] Topic '{topic}' send failed: {e}")
+        return False
+
+
 @router.get("/notifications")
 def get_notifications(a=Depends(get_current_admin)):
-    """Get notification history — all notifications sent or queued."""
+    """Get notification history."""
     docs = list(db.notifications.find({}).sort("created_at", -1).limit(100))
     result = []
     for d in docs:
@@ -803,31 +919,40 @@ def get_notifications(a=Depends(get_current_admin)):
 
 @router.post("/notifications/send")
 def send_notification(body: dict, a=Depends(get_current_admin)):
-    """Queue (and optionally send) a push notification to all or specific users."""
-    title  = body.get("title", "").strip()
-    msg    = body.get("body", "").strip()
-    target = body.get("target", "all")       # "all" | "specific"
-    phone  = body.get("target_phone", "")
-    img_url= body.get("image_url", "")
+    """Send push notification.
+    target: "all_users" | "city" | "offers" | "specific"
+    target_city: city name when target="city" (e.g. "Ballari")
+    """
+    title      = body.get("title", "").strip()
+    msg        = body.get("body", "").strip()
+    target     = body.get("target", "all_users")
+    phone      = body.get("target_phone", "").strip()
+    city_raw   = body.get("target_city", "").strip()
+    img_url    = body.get("image_url", "").strip()
+    use_topic  = body.get("use_topic", True)   # default: use FCM topics
 
     if not title or not msg:
         raise HTTPException(400, "Title and body are required")
     if target == "specific" and not phone:
         raise HTTPException(400, "Phone required for specific target")
+    if target == "city" and not city_raw:
+        raise HTTPException(400, "City name required for city target")
 
-    # Collect device tokens
-    if target == "specific":
-        user = db.users.find_one({"phone": phone}, {"fcm_token": 1, "name": 1})
-        tokens = [{"token": user["fcm_token"], "user_id": str(user["_id"])}] if user and user.get("fcm_token") else []
-    else:
-        users = list(db.users.find({"fcm_token": {"$exists": True, "$ne": ""}}, {"fcm_token": 1}))
-        tokens = [{"token": u["fcm_token"], "user_id": str(u["_id"])} for u in users if u.get("fcm_token")]
+    # Determine FCM topic name
+    topic_map = {
+        "all_users": "all_users",
+        "offers":    "offers",
+        "city":      (city_raw.lower().strip().replace(" ", "_") + "_users") if city_raw else None,
+    }
+    topic = topic_map.get(target)
 
-    # Save to DB with queued status
+    # Save to DB first
     notif_doc = {
         "title": title, "body": msg, "target": target,
-        "target_phone": phone, "image_url": img_url,
-        "token_count": len(tokens),
+        "target_phone": phone if target == "specific" else "",
+        "target_city": city_raw if target == "city" else "",
+        "image_url": img_url,
+        "topic": topic or "",
         "status": "queued",
         "processed": 0, "failed": 0,
         "created_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
@@ -836,17 +961,53 @@ def send_notification(body: dict, a=Depends(get_current_admin)):
     inserted = db.notifications.insert_one(notif_doc)
     notif_id = inserted.inserted_id
 
-    # Try sending immediately via FCM HTTP v1 / Legacy
-    sent, failed = _send_fcm_batch(tokens, title, msg, img_url)
+    sent = 0; failed = 0
 
-    status = "sent" if failed == 0 and sent > 0 else ("partial" if sent > 0 else ("queued" if not tokens else "failed"))
+    if target == "specific":
+        # Direct token send to individual user
+        user = db.users.find_one({"phone": phone}, {"fcm_token": 1})
+        tokens = [{"token": user["fcm_token"], "user_id": str(user["_id"])}] if user and user.get("fcm_token") else []
+        if tokens:
+            sent, failed = _send_via_firebase_admin(tokens, title, msg, img_url)
+        else:
+            failed = 1
+    elif topic and use_topic:
+        # Topic-based broadcast — sends to ALL subscribers of the topic
+        ok = _send_fcm_topic(topic, title, msg, img_url, data={"target": target, "city": city_raw})
+        if ok:
+            sent = 1; failed = 0   # topic sends don't have per-token counts
+        else:
+            failed = 1
+        # Also estimate reach from DB
+        if target == "city" and city_raw:
+            q = {"city": {"$regex": city_raw, "$options": "i"}, "fcm_token": {"$exists": True, "$ne": ""}}
+        else:
+            q = {"fcm_token": {"$exists": True, "$ne": ""}}
+        notif_doc["token_count"] = db.users.count_documents(q)
+        db.notifications.update_one({"_id": notif_id}, {"$set": {"token_count": notif_doc["token_count"]}})
+    else:
+        # Fallback: direct token send to matching users
+        if target == "city" and city_raw:
+            query = {"city": {"$regex": city_raw, "$options": "i"}, "fcm_token": {"$exists": True, "$ne": ""}}
+        else:
+            query = {"fcm_token": {"$exists": True, "$ne": ""}}
+        users = list(db.users.find(query, {"fcm_token": 1}))
+        tokens = [{"token": u["fcm_token"], "user_id": str(u["_id"])} for u in users if u.get("fcm_token")]
+        if tokens:
+            sent, failed = _send_via_firebase_admin(tokens, title, msg, img_url)
+
+    # Update status
+    status = "sent" if (sent > 0 and failed == 0) else ("partial" if sent > 0 else ("failed" if failed > 0 else "queued"))
     db.notifications.update_one({"_id": notif_id}, {"$set": {
         "status": status, "processed": sent, "failed": failed,
         "sent_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
     }})
 
-    return {"ok": True, "sent": sent, "failed": failed, "queued": len(tokens) - sent - failed,
-            "message": f"Notification {'sent' if sent>0 else 'queued'} ({sent} delivered, {failed} failed)"}
+    return {
+        "ok": True, "sent": sent, "failed": failed,
+        "status": status, "topic": topic or "",
+        "message": f"Notification {status} — topic: {topic or 'direct'}, delivered: {sent}, failed: {failed}"
+    }
 
 
 @router.post("/notifications/process-queue")
@@ -856,26 +1017,43 @@ def process_notification_queue(a=Depends(get_current_admin)):
     total_sent = 0; total_failed = 0; total_skipped = 0
 
     for notif in pending:
-        title = notif.get("title", "")
-        msg   = notif.get("body", "")
-        phone = notif.get("target_phone", "")
-        img   = notif.get("image_url", "")
+        title   = notif.get("title", "")
+        msg     = notif.get("body", "")
+        target  = notif.get("target", "all_users")
+        phone   = notif.get("target_phone", "")
+        city_raw= notif.get("target_city", "")
+        img     = notif.get("image_url", "")
+        topic   = notif.get("topic", "")
 
-        if notif.get("target") == "specific":
+        sent = 0; failed = 0
+
+        if target == "specific":
             user = db.users.find_one({"phone": phone}, {"fcm_token": 1})
             tokens = [{"token": user["fcm_token"], "user_id": str(user["_id"])}] if user and user.get("fcm_token") else []
+            if tokens:
+                sent, failed = _send_via_firebase_admin(tokens, title, msg, img)
+            else:
+                total_skipped += 1
+                db.notifications.update_one({"_id": notif["_id"]}, {"$set": {"status": "skipped_no_tokens"}})
+                continue
+        elif topic:
+            ok = _send_fcm_topic(topic, title, msg, img)
+            sent = 1 if ok else 0; failed = 0 if ok else 1
         else:
-            users = list(db.users.find({"fcm_token": {"$exists": True, "$ne": ""}}, {"fcm_token": 1}))
+            if city_raw:
+                query = {"city": {"$regex": city_raw, "$options": "i"}, "fcm_token": {"$exists": True, "$ne": ""}}
+            else:
+                query = {"fcm_token": {"$exists": True, "$ne": ""}}
+            users = list(db.users.find(query, {"fcm_token": 1}))
             tokens = [{"token": u["fcm_token"], "user_id": str(u["_id"])} for u in users if u.get("fcm_token")]
+            if not tokens:
+                total_skipped += 1
+                db.notifications.update_one({"_id": notif["_id"]}, {"$set": {"status": "skipped_no_tokens"}})
+                continue
+            sent, failed = _send_via_firebase_admin(tokens, title, msg, img)
 
-        if not tokens:
-            total_skipped += 1
-            db.notifications.update_one({"_id": notif["_id"]}, {"$set": {"status": "skipped_no_tokens"}})
-            continue
-
-        sent, failed = _send_fcm_batch(tokens, title, msg, img)
         total_sent += sent; total_failed += failed
-        new_status = "sent" if failed == 0 and sent > 0 else ("partial" if sent > 0 else "failed")
+        new_status = "sent" if (sent > 0 and failed == 0) else ("partial" if sent > 0 else "failed")
         db.notifications.update_one({"_id": notif["_id"]}, {"$set": {
             "status": new_status, "processed": sent, "failed": failed,
             "sent_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
@@ -883,42 +1061,3 @@ def process_notification_queue(a=Depends(get_current_admin)):
 
     return {"ok": True, "processed": total_sent, "failed": total_failed, "skipped": total_skipped}
 
-
-def _send_fcm_batch(tokens: list, title: str, body: str, image_url: str = "") -> tuple:
-    """Send FCM push notifications via Firebase Cloud Messaging Legacy HTTP API.
-    Returns (sent_count, failed_count).
-    Requires FCM_SERVER_KEY env var from Firebase project settings.
-    """
-    import os, requests as _req
-    FCM_KEY = os.environ.get("FCM_SERVER_KEY", "")
-    if not FCM_KEY or not tokens:
-        return 0, 0  # No key configured — all stay queued
-
-    sent = 0; failed = 0
-    FCM_URL = "https://fcm.googleapis.com/fcm/send"
-    headers = {"Authorization": f"key={FCM_KEY}", "Content-Type": "application/json"}
-
-    # Send in batches of 500 (FCM limit per request)
-    import json as _json
-    for i in range(0, len(tokens), 500):
-        batch = tokens[i:i+500]
-        reg_ids = [t["token"] for t in batch]
-        payload = {
-            "registration_ids": reg_ids,
-            "notification": {"title": title, "body": body},
-            "data": {"title": title, "body": body},
-        }
-        if image_url:
-            payload["notification"]["image"] = image_url
-        try:
-            r = _req.post(FCM_URL, headers=headers, json=payload, timeout=15)
-            if r.status_code == 200:
-                res = r.json()
-                sent   += res.get("success", 0)
-                failed += res.get("failure", 0)
-            else:
-                failed += len(batch)
-        except Exception:
-            failed += len(batch)
-
-    return sent, failed
