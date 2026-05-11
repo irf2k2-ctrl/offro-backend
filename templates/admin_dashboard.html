@@ -621,11 +621,25 @@ tr:hover td{background:#f7faf8;}
             <img id="store_image2_preview" src="" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
             <input type="hidden" id="store_image2_b64">
             <input type="hidden" id="store_image2_url"></div>
-          <div class="col-12">
-            <div class="form-check">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:13px;">🏷️ Store Badge / Tag</label>
+            <select id="store_badge" class="form-select form-select-sm">
+              <option value="">— No Badge —</option>
+              <option value="newly_added">✨ Newly Added</option>
+              <option value="just_opened">🎉 Just Opened</option>
+              <option value="new_store">🆕 New Store</option>
+              <option value="trending">🔥 Trending</option>
+              <option value="popular">⭐ Popular</option>
+              <option value="top_rated">🏆 Top Rated</option>
+              <option value="must_visit">📍 Must Visit</option>
+              <option value="limited_offer">⏳ Limited Offer</option>
+            </select>
+          </div>
+          <div class="col-md-6 d-flex align-items-end">
+            <div class="form-check mb-1">
               <input class="form-check-input" type="checkbox" id="store_new_in_town">
               <label class="form-check-label" for="store_new_in_town" style="font-size:13px;font-weight:600;color:var(--primary);">
-                🏷️ Mark as "New In Town"
+                📍 Mark as "New In Town"
               </label>
             </div>
           </div>
@@ -1190,7 +1204,13 @@ function renderStoresPage(){
     let img = imgSrc
       ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="this.style.display='none'">`
       : `<span style="display:inline-block;width:38px;height:38px;border-radius:6px;background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;text-align:center;font-size:16px;">🏪</span>`;
-    let newBadge=s.is_new_in_town?`<span class="badge-new">New</span>`:`<span style="color:var(--muted);font-size:11px;">—</span>`;
+    const _badgeLabels={newly_added:"✨ Newly Added",just_opened:"🎉 Just Opened",new_store:"🆕 New Store",trending:"🔥 Trending",popular:"⭐ Popular",top_rated:"🏆 Top Rated",must_visit:"📍 Must Visit",limited_offer:"⏳ Limited Offer"};
+    const _badge = s.badge||s.store_badge||"";
+    let newBadge = _badge
+      ? `<span class="badge-new" style="background:#2979FF;">${_badgeLabels[_badge]||_badge}</span>`
+      : s.is_new_in_town
+        ? `<span class="badge-new">📍 New In Town</span>`
+        : `<span style="color:var(--muted);font-size:11px;">—</span>`;
     let dealBadge=s.deal_status==='active'
       ?`<span class="badge-deal-active">🔥 Active</span>`
       :s.deal_status==='expired'
@@ -1275,6 +1295,7 @@ async function openEditStore(id){
   document.getElementById("store_lat").value=s.lat||"";
   document.getElementById("store_lng").value=s.lng||"";
   document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
+  document.getElementById("store_badge").value=s.badge||s.store_badge||"";
   document.getElementById("store_image_b64").value="";
   if(s.image){let p=document.getElementById("store_image_preview");p.src=s.image;p.style.display="block";}
   else document.getElementById("store_image_preview").style.display="none";
@@ -1302,7 +1323,8 @@ async function submitStore(){
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
-    is_new_in_town:document.getElementById("store_new_in_town").checked};
+    is_new_in_town:document.getElementById("store_new_in_town").checked,
+    badge:document.getElementById("store_badge").value||null};
   // Only send merchant_id if selected (prevents overwriting with empty on edit)
   if(mid) payloadBase.merchant_id=mid;
   let payload=payloadBase;
@@ -2188,6 +2210,8 @@ async function saveStore() {
         visit_points: parseInt(document.getElementById("store_visit_points").value)||0,
         image:        document.getElementById("store_image_url").value.trim(),
         image2:       document.getElementById("store_image2_url").value.trim(),
+        badge:        document.getElementById("store_badge").value||null,
+        is_new_in_town: document.getElementById("store_new_in_town").checked,
     };
     try {
         let url  = editId ? `/admin/stores/${editId}` : "/admin/stores";

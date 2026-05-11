@@ -240,6 +240,7 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "sub_plan":       sub.get("plan", "") if sub else "",
         "merchant_id":    mid,
         "about":          s.get("about", ""),
+        "badge":          s.get("badge", ""),
         "logo":           "",
     }
 
@@ -356,6 +357,7 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "points_per_scan": int(data.get("points_per_scan", 10)),
         "lat": data.get("lat",""), "lng": data.get("lng",""),
         "image": data.get("image") or None,
+        "badge": data.get("badge") or "",  # custom badge tag
         "is_new_in_town": bool(data.get("is_new_in_town", False)),
         "created_at": datetime.utcnow()
     }
@@ -376,6 +378,7 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
         upd["merchant_id"] = data["merchant_id"].strip()
     if "image" in data and data["image"]: upd["image"] = data["image"]
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])
+    if "badge" in data: upd["badge"] = data["badge"] or ""   # custom store badge/tag
     if "status" in data: upd["status"] = data["status"]
     if upd: db.stores.update_one({"_id": ObjectId(id)}, {"$set": upd})
     return {"message": "Updated"}
