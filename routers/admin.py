@@ -901,14 +901,18 @@ def _send_via_firebase_admin(tokens: list, title: str, body: str, image_url: str
             resp = fb_msg.send_each_for_multicast(mm, app=app)
             sent   += resp.success_count
             failed += resp.failure_count
-            # Log any failures
+            print(f"[FCM] Batch {i//500 + 1}: sent={resp.success_count} failed={resp.failure_count} total_tokens={len(reg_ids)}")
+            # Log failures and successes with message IDs
             for j, r in enumerate(resp.responses):
-                if not r.success:
-                    print(f"[FCM] Token {j} failed: {r.exception}")
+                if r.success:
+                    print(f"[FCM] ✅ sent successfully message_id={r.message_id}")
+                else:
+                    print(f"[FCM] ❌ Token {j} failed: {r.exception}")
         except Exception as e:
             print(f"[FCM] Batch {i//500 + 1} error: {e}")
             failed += len(batch)
 
+    print(f"[FCM] Direct send complete: total_sent={sent} total_failed={failed}")
     return sent, failed
 
 
