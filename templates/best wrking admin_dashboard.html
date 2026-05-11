@@ -330,7 +330,7 @@ tr:hover td{background:#f7faf8;}
       <p id="queue_status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Title</th><th>Target</th><th>Sent At</th><th>Delivered</th><th>Status</th><th style="width:60px;text-align:center;">Del</th></tr></thead>
+          <thead><tr><th>Title</th><th>Target</th><th>Sent At</th><th>Delivered</th><th>Status</th></tr></thead>
           <tbody id="notif_history"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
         </table>
       </div>
@@ -1777,7 +1777,7 @@ async function loadNotifications() {
     let notifs = r.ok ? await r.json() : [];
     const tbody = document.getElementById("notif_history");
     if (!notifs.length) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No notifications sent yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">No notifications sent yet.</td></tr>`;
       return;
     }
     const statusBadge = s => {
@@ -1803,39 +1803,11 @@ async function loadNotifications() {
       <td style="font-size:12px;color:var(--muted)">${n.sent_at||n.created_at||"—"}</td>
       <td style="font-size:12px;text-align:center;">${n.processed||0} <span style="color:var(--danger)">/ ${n.failed||0}✗</span></td>
       <td>${statusBadge(n.status)}</td>
-      <td style="text-align:center;">
-        <button onclick="deleteNotif('${n._id}')" title="Delete"
-          style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:16px;padding:2px 6px;border-radius:6px;"
-          onmouseover="this.style.background='#fdecea'" onmouseout="this.style.background='none'">
-          🗑️
-        </button>
-      </td>
     </tr>`).join("");
-  } catch(e) { document.getElementById("notif_history").innerHTML=`<tr><td colspan="6">Error loading</td></tr>`; }
+  } catch(e) { document.getElementById("notif_history").innerHTML=`<tr><td colspan="5">Error loading</td></tr>`; }
 }
 
 // Retry queued/failed
-
-// Delete a notification record
-async function deleteNotif(id) {
-  if (!confirm("Delete this notification record?")) return;
-  try {
-    const r = await fetch("/admin/notifications/" + id, {
-      method: "DELETE",
-      credentials: "include"
-    });
-    if (r.ok) {
-      showToast("Notification deleted");
-      loadNotifications();
-    } else {
-      const e = await r.json().catch(()=>({}));
-      showToast("Delete failed: " + (e.detail || r.status), true);
-    }
-  } catch(e) {
-    showToast("Error: " + e.message, true);
-  }
-}
-
 async function processNotifQueue() {
   const qs = document.getElementById("queue_status");
   qs.style.color = "var(--muted)"; qs.innerText = "⏳ Retrying queued notifications...";

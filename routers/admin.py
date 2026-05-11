@@ -896,7 +896,9 @@ def _send_via_firebase_admin(tokens: list, title: str, body: str, image_url: str
                 notification=notif,
                 android=android_config,
                 apns=apns_config,
-                data={k: str(v) for k, v in extra_data.items()},
+                data={**{k: str(v) for k, v in extra_data.items()},
+                      "image_url": image_url or "",
+                      "title": title, "body": body},
             )
             resp = fb_msg.send_each_for_multicast(mm, app=app)
             sent   += resp.success_count
@@ -942,7 +944,9 @@ def _send_fcm_topic(topic: str, title: str, body: str, image_url: str = "", data
             apns=fb_msg.APNSConfig(
                 payload=fb_msg.APNSPayload(aps=fb_msg.Aps(sound="default", badge=1))
             ),
-            data={k: str(v) for k, v in extra_data.items()},
+            data={**{k: str(v) for k, v in extra_data.items()},
+                  "image_url": image_url or "",
+                  "title": title, "body": body},
         )
         msg_id = fb_msg.send(msg, app=app)
         print(f"[FCM] Topic '{topic}' message sent: {msg_id}")
@@ -954,13 +958,28 @@ def _send_fcm_topic(topic: str, title: str, body: str, image_url: str = "", data
 
 @router.get("/notifications")
 def get_notifications(a=Depends(get_current_admin)):
-    """Get notification history."""
-    docs = list(db.notifications.find({}).sort("created_at", -1).limit(100))
+    """Get notification history — sorted newest first."""
+    docs = list(db.notifications.find({}).sort("created_at", -1).limit(200))
     result = []
     for d in docs:
         d["_id"] = str(d["_id"])
         result.append(d)
     return result
+
+
+@router.delete("/notifications/{notif_id}")
+def delete_notification(notif_id: str, a=Depends(get_current_admin)):
+    """Delete a notification record by ID."""
+    from bson import ObjectId
+    try:
+        oid = ObjectId(notif_id)
+    except Exception:
+        raise HTTPException(400, "Invalid notification ID")
+    result = db.notifications.delete_one({"_id": oid})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Notification not found")
+    print(f"[ADMIN] Deleted notification {notif_id}")
+    return {"ok": True, "deleted": notif_id}
 
 
 @router.post("/notifications/send")
