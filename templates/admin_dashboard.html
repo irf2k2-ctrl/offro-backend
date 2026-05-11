@@ -956,20 +956,20 @@ function showSection(name, el){
 }
 
 // ===== STATS =====
-async function loadStats() {   // FIX 2: must be async (uses await)
+async function loadStats() {
     try {
         let res = await fetch("/admin/stats", { credentials:"include" });
         if (res.status===401||res.status===403) { window.location.href="/admin"; return; }
         let d = await res.json();
-        console.log("📊 Stats from backend:", d); // DEBUG — remove after confirming
-        document.getElementById("stat_merchants").innerText = d.total_merchants||0;
-        document.getElementById("stat_active").innerText    = d.active_merchants||0;
-        document.getElementById("stat_stores").innerText    = d.total_stores||0;
-        document.getElementById("stat_deals").innerText     = d.total_deals||0;
-        // FIX 1: populate user count and waiting approval (were missing)
-        document.getElementById("stat_users").innerText     = d.total_users||0;
-        if(document.getElementById("stat_waiting"))
-          document.getElementById("stat_waiting").innerText = d.waiting_approval||0;
+        console.log("📊 /admin/stats response:", JSON.stringify(d));
+        // Helper: safe set — won't throw if element missing
+        const setEl = (id, val) => { const el = document.getElementById(id); if(el) el.innerText = val; };
+        setEl("stat_merchants", d.total_merchants ?? 0);
+        setEl("stat_active",    d.active_merchants ?? 0);
+        setEl("stat_stores",    d.total_stores     ?? 0);
+        setEl("stat_deals",     d.total_deals      ?? 0);
+        setEl("stat_users",     d.total_users      ?? 0);
+        setEl("stat_waiting",   d.waiting_approval ?? 0);
     } catch(e) { console.error(e); }
 }
 
@@ -1185,17 +1185,8 @@ function renderStoresPage(){
   let html="";
   pageData.forEach(s=>{
     // FIX: handle both image (string) and images (array) from backend
-    // FIX: s.image now contains the thumbnail URL from backend
-    let _raw = s.image || s._thumb || (Array.isArray(s.images) ? s.images[0] : (s.images||"")) || "";
-    // Skip base64
-    if (_raw && _raw.startsWith("data:")) _raw = "";
-    // If relative path, prepend backend origin
-    let imgSrc = "";
-    if (_raw) {
-      imgSrc = (_raw.startsWith("http://") || _raw.startsWith("https://") || _raw.startsWith("//"))
-        ? _raw
-        : (window._backendBase||"") + (_raw.startsWith("/") ? "" : "/") + _raw;
-    }
+    // Images are stored as base64 in MongoDB — use directly
+    let imgSrc = s.image || s._thumb || "";
     let img = imgSrc
       ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="this.style.display='none'">`
       : `<span style="display:inline-block;width:38px;height:38px;border-radius:6px;background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;text-align:center;font-size:16px;">🏪</span>`;

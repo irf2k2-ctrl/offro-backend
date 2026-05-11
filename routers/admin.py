@@ -281,23 +281,21 @@ def _fmt_store(s):
 
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
-    # FIX: include image/images but strip base64 data URIs (keep URLs only)
+    # Images stored as base64 in MongoDB — pass them through directly
     stores = list(db.stores.find({}, {"logo": 0}))
     for s in stores:
-        # Keep only URL-based images, strip base64 to save bandwidth
-        img = s.get("image","") or ""
-        imgs = s.get("images",[]) or []
-        if isinstance(imgs, str): imgs = [imgs]
-        # Use first URL image found
-        thumb = ""
-        if img and not img.startswith("data:"): thumb = img
+        # Build _thumb: prefer base64 image, fallback to images array
+        img = s.get("image", "") or ""
+        imgs = s.get("images", []) or []
+        if isinstance(imgs, str): imgs = [imgs] if imgs else []
+        if img:
+            s["_thumb"] = img  # base64 or URL — pass as-is
         elif imgs:
-            for i in imgs:
-                if i and not str(i).startswith("data:"):
-                    thumb = i; break
-        s["_thumb"] = thumb
-        if img and img.startswith("data:"): s.pop("image", None)
-        if imgs: s.pop("images", None)
+            s["_thumb"] = imgs[0] if imgs[0] else ""
+        else:
+            s["_thumb"] = ""
+        # Remove large images array to save payload — _thumb has what we need
+        s.pop("images", None)
     if not stores:
         return []
     
