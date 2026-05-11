@@ -963,9 +963,15 @@ def send_notification(body: dict, a=Depends(get_current_admin)):
 
     sent = 0; failed = 0
 
+    # Debug: count total users + users with tokens in DB
+    total_users   = db.users.count_documents({})
+    users_w_token = db.users.count_documents({"fcm_token": {"$exists": True, "$ne": ""}})
+    print(f"[NOTIF] target={target} | total_users={total_users} | users_with_fcm_token={users_w_token}")
+
     if target == "specific":
         # Direct token send to individual user
-        user = db.users.find_one({"phone": phone}, {"fcm_token": 1})
+        user = db.users.find_one({"phone": phone}, {"fcm_token": 1, "name": 1})
+        print(f"[NOTIF] specific user found: {bool(user)} | has_token: {bool(user and user.get('fcm_token'))}")
         tokens = [{"token": user["fcm_token"], "user_id": str(user["_id"])}] if user and user.get("fcm_token") else []
         if tokens:
             sent, failed = _send_via_firebase_admin(tokens, title, msg, img_url)
@@ -973,6 +979,7 @@ def send_notification(body: dict, a=Depends(get_current_admin)):
             failed = 1
     elif topic and use_topic:
         # Topic-based broadcast — sends to ALL subscribers of the topic
+        print(f"[NOTIF] Sending to topic: {topic}")
         ok = _send_fcm_topic(topic, title, msg, img_url, data={"target": target, "city": city_raw})
         if ok:
             sent = 1; failed = 0   # topic sends don't have per-token counts
@@ -985,6 +992,7 @@ def send_notification(body: dict, a=Depends(get_current_admin)):
             q = {"fcm_token": {"$exists": True, "$ne": ""}}
         notif_doc["token_count"] = db.users.count_documents(q)
         db.notifications.update_one({"_id": notif_id}, {"$set": {"token_count": notif_doc["token_count"]}})
+        print(f"[NOTIF] Topic send ok={ok} estimated_reach={notif_doc['token_count']}")
     else:
         # Fallback: direct token send to matching users
         if target == "city" and city_raw:
@@ -993,6 +1001,7 @@ def send_notification(body: dict, a=Depends(get_current_admin)):
             query = {"fcm_token": {"$exists": True, "$ne": ""}}
         users = list(db.users.find(query, {"fcm_token": 1}))
         tokens = [{"token": u["fcm_token"], "user_id": str(u["_id"])} for u in users if u.get("fcm_token")]
+        print(f"[NOTIF] Direct send: found {len(tokens)} tokens from query={query}")
         if tokens:
             sent, failed = _send_via_firebase_admin(tokens, title, msg, img_url)
 

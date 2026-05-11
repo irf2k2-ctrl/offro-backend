@@ -489,21 +489,35 @@ def get_gift_vouchers_alias():
 @router.post("/register-fcm-token")
 def register_fcm_token(body: dict, request: _Req):
     """Register or update FCM push token for a user device."""
-    token = body.get("token", "").strip()
-    phone = body.get("phone", "").strip()
-    user_id = body.get("user_id", "").strip()
+    import datetime as _dt
+    token   = (body.get("token", "") or "").strip()
+    phone   = (body.get("phone", "") or "").strip()
+    user_id = (body.get("user_id", "") or "").strip()
+
+    print(f"[FCM-REG] token={token[:30]}... phone={phone} user_id={user_id}")
+
     if not token:
         raise HTTPException(400, "Token required")
-    # Find user by phone or user_id
+
+    # Build query — prefer user_id (more reliable), fallback to phone
     query = {}
     if user_id:
         try:
             from bson import ObjectId as OId2
             query = {"_id": OId2(user_id)}
-        except: pass
-    elif phone:
+        except Exception as e:
+            print(f"[FCM-REG] invalid user_id: {user_id} — {e}")
+    if not query and phone:
         query = {"phone": phone}
     if not query:
         raise HTTPException(400, "user_id or phone required")
-    db.users.update_one(query, {"$set": {"fcm_token": token, "fcm_updated": __import__("datetime").datetime.utcnow().isoformat()}})
-    return {"ok": True}
+
+    result = db.users.update_one(
+        query,
+        {"$set": {"fcm_token": token, "fcm_updated": _dt.datetime.utcnow().isoformat()}}
+    )
+    print(f"[FCM-REG] matched={result.matched_count} modified={result.modified_count} query={query}")
+    if result.matched_count == 0:
+        print(f"[FCM-REG] ⚠️ No user found with query={query}")
+        return {"ok": False, "error": "user not found"}
+    return {"ok": True, "matched": result.matched_count, "modified": result.modified_count}
