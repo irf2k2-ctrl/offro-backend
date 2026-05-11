@@ -792,26 +792,68 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
 
 # ═══════════════════════════════════════════════════════════
 # FIREBASE ADMIN SDK — initialized once at module load
+# ═══════════════════════════════════════════════════════════
+# Phone normalization helper — handles country code mismatches
+# between what admin types and what is stored in MongoDB
+# e.g. admin types "8105674906", DB has "+918105674906"
+# ═══════════════════════════════════════════════════════════
+def _phone_variants(raw: str) -> list:
+    """Return all plausible phone string variants for MongoDB $in query."""
+    p = raw.strip().replace(" ", "").replace("-", "")
+    if not p:
+        return []
+    variants = {p}  # exact as typed
+    # Strip leading + or 0
+    digits = p.lstrip("+0")
+    # Handle Indian numbers: last 10 digits
+    last10 = digits[-10:] if len(digits) >= 10 else digits
+    # Build all common formats
+    variants.update([
+        last10,              # 8105674906
+        "+91" + last10,     # +918105674906
+        "91" + last10,      # 918105674906
+        "0"  + last10,      # 08105674906
+    ])
+    return list(variants)
+
+
 # Uses FIREBASE_SERVICE_ACCOUNT env var (JSON string)
 # ═══════════════════════════════════════════════════════════
 def _get_fcm_app():
-    """Return initialized firebase_admin app (singleton)."""
+    """Return initialized firebase_admin app (singleton).
+    Reads FIREBASE_SERVICE_ACCOUNT_JSON (Railway) or FIREBASE_SERVICE_ACCOUNT as fallback.
+    """
     import firebase_admin
     from firebase_admin import credentials as fb_cred
     import os, json as _j
+
+    # Return existing app if already initialized
     try:
         return firebase_admin.get_app("offro")
     except ValueError:
-        pass
-    sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "")
+        pass  # not initialized yet — proceed below
+
+    # Read env var — support both names (Railway uses _JSON suffix)
+    sa_json = (
+        os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+        or os.environ.get("FIREBASE_SERVICE_ACCOUNT", "")
+    ).strip()
+
     if not sa_json:
+        print("[FCM] ❌ FIREBASE_SERVICE_ACCOUNT_JSON env var not set — cannot init Firebase Admin")
         return None
+
     try:
         sa_dict = _j.loads(sa_json)
         cred = fb_cred.Certificate(sa_dict)
-        return firebase_admin.initialize_app(cred, name="offro")
+        app = firebase_admin.initialize_app(cred, name="offro")
+        print(f"[FCM] ✅ Firebase Admin initialized successfully (project={sa_dict.get('project_id', '?')})")
+        return app
+    except _j.JSONDecodeError as e:
+        print(f"[FCM] ❌ Firebase service account JSON is malformed: {e}")
+        return None
     except Exception as e:
-        print(f"[FCM] Firebase init failed: {e}")
+        print(f"[FCM] ❌ Firebase Admin init failed: {e}")
         return None
 
 
@@ -822,7 +864,7 @@ def _send_via_firebase_admin(tokens: list, title: str, body: str, image_url: str
     from firebase_admin import messaging as fb_msg
     app = _get_fcm_app()
     if app is None:
-        print("[FCM] No app initialized — check FIREBASE_SERVICE_ACCOUNT env var")
+        print("[FCM] No app initialized — check FIREBASE_SERVICE_ACCOUNT_JSON env var on Railway")
         return 0, 0
 
     sent = 0; failed = 0
@@ -877,7 +919,7 @@ def _send_fcm_topic(topic: str, title: str, body: str, image_url: str = "", data
     from firebase_admin import messaging as fb_msg
     app = _get_fcm_app()
     if app is None:
-        print("[FCM] No app for topic send — check FIREBASE_SERVICE_ACCOUNT env var")
+        print("[FCM] No app for topic send — check FIREBASE_SERVICE_ACCOUNT_JSON env var on Railway")
         return False
 
     try:
@@ -970,8 +1012,11 @@ def send_notification(body: dict, a=Depends(get_current_admin)):
 
     if target == "specific":
         # Direct token send to individual user
-        user = db.users.find_one({"phone": phone}, {"fcm_token": 1, "name": 1})
-        print(f"[NOTIF] specific user found: {bool(user)} | has_token: {bool(user and user.get('fcm_token'))}")
+        # Normalize phone: admin may type "8105674906", DB may store "+918105674906" or "918105674906"
+        phone_variants = _phone_variants(phone)
+        print(f"[NOTIF] specific lookup phone={phone!r} variants={phone_variants}")
+        user = db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "name": 1, "phone": 1})
+        print(f"[NOTIF] specific user found: {bool(user)} | has_token: {bool(user and user.get('fcm_token'))} | db_phone={user.get('phone') if user else 'N/A'}")
         tokens = [{"token": user["fcm_token"], "user_id": str(user["_id"])}] if user and user.get("fcm_token") else []
         if tokens:
             sent, failed = _send_via_firebase_admin(tokens, title, msg, img_url)
