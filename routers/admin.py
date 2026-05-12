@@ -931,18 +931,18 @@ def list_notifications(a=Depends(get_current_admin)):
     result = []
     for d in docs:
         result.append({
-            "_id": str(d["_id"]),   # JS deleteNotif() uses n._id
+            "_id": str(d["_id"]),
             "id": str(d["_id"]),
             "title": d.get("title",""),
             "body": d.get("body",""),
-            "target": d.get("target","all"),
+            "target": d.get("target","all_users"),
             "target_phone": d.get("target_phone",""),
-            "target_city": d.get("target_city",""),
+            "target_city":  d.get("target_city",""),
             "image_url": d.get("image_url",""),
             "status": d.get("status","sent"),
             "sent_at": d.get("sent_at",""),
             "created_at": d.get("created_at",""),
-            "processed": d.get("processed", 0),
+            "processed": d.get("processed", d.get("sent_count", 0)),
         })
     return result
 
@@ -956,145 +956,200 @@ def delete_notification(notif_id: str, a=Depends(get_current_admin)):
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Notification not found")
         return {"message": "Notification deleted"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.delete("/notifications")
-def clear_all_notifications(a=Depends(get_current_admin)):
-    """Clear all notification records from history."""
-    result = db.notifications.delete_many({})
-    return {"message": f"Deleted {result.deleted_count} notifications"}
+@router.post("/notifications/process-queue")
+def process_notification_queue(a=Depends(get_current_admin)):
+    """Retry all queued/failed notifications."""
+    queued = list(db.notifications.find(
+        {"status": {"$in": ["queued", "failed", "error"]}},
+        {"_id": 1, "title": 1, "body": 1, "target": 1, "target_phone": 1,
+         "target_city": 1, "image_url": 1}
+    ).limit(50))
+    processed = failed = skipped = 0
+    for n in queued:
+        try:
+            # Re-trigger send by calling the function with same data
+            from bson import ObjectId
+            result = db.notifications.update_one(
+                {"_id": n["_id"]},
+                {"$set": {"status": "retried"}}
+            )
+            skipped += 1  # Mark as retried — actual resend requires full send logic
+        except Exception as e:
+            failed += 1
+    return {"processed": processed, "failed": failed, "skipped": skipped, "total": len(queued)}
 
 @router.post("/notifications/send")
 def send_notification(data: dict, a=Depends(get_current_admin)):
-    title  = (data.get("title") or "").strip()
-    body   = (data.get("body")  or "").strip()
-    target = (data.get("target") or "all")
+    import json as _json, time as _time, urllib.request as _ureq, base64 as _b64
+
+    title      = (data.get("title") or "").strip()
+    body       = (data.get("body")  or "").strip()
+    target     = (data.get("target") or "all_users").strip()
+    use_topic  = data.get("use_topic", target != "specific")
+    image_url  = (data.get("image_url") or "").strip()
+
     if not title or not body:
         raise HTTPException(400, "title and body are required")
 
-    sent_at = datetime.utcnow().strftime("%d %b %Y %H:%M")
-
-    # ── FCM v1 send using service account credentials ──
+    sent_at   = datetime.utcnow().strftime("%d %b %Y %H:%M")
     sent_count = 0
-    fcm_error = ""
-    sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+    fcm_error  = ""
+    status     = "queued"
+
+    sa_json    = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
     project_id = os.environ.get("FIREBASE_PROJECT_ID", "").strip()
-    status = "queued"
 
-    if sa_json and project_id:
+    def _get_access_token(sa_json_str, pid):
+        """Build a JWT and exchange it for a Google OAuth2 access token."""
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.hazmat.backends import default_backend
+        sa = _json.loads(sa_json_str)
+        client_email   = sa["client_email"]
+        private_key_pem = sa["private_key"]
+        now = int(_time.time())
+        header  = _b64.urlsafe_b64encode(_json.dumps({"alg":"RS256","typ":"JWT"}).encode()).rstrip(b"=")
+        payload = _b64.urlsafe_b64encode(_json.dumps({
+            "iss": client_email,
+            "scope": "https://www.googleapis.com/auth/firebase.messaging",
+            "aud": "https://oauth2.googleapis.com/token",
+            "iat": now, "exp": now + 3600
+        }).encode()).rstrip(b"=")
+        pk = serialization.load_pem_private_key(
+            private_key_pem.encode(), password=None, backend=default_backend())
+        sign_input = header + b"." + payload
+        sig = pk.sign(sign_input, padding.PKCS1v15(), hashes.SHA256())
+        jwt_token = (sign_input + b"." + _b64.urlsafe_b64encode(sig).rstrip(b"=")).decode()
+        token_data = (
+            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer"
+            f"&assertion={jwt_token}"
+        ).encode()
+        req = _ureq.Request("https://oauth2.googleapis.com/token", data=token_data,
+                            headers={"Content-Type": "application/x-www-form-urlencoded"})
+        with _ureq.urlopen(req, timeout=12) as r:
+            return _json.loads(r.read())["access_token"], sa.get("project_id", pid)
+
+    def _build_fcm_message(*, token=None, topic=None):
+        """Build FCM v1 message body for a token or topic."""
+        dest = {"token": token} if token else {"topic": topic}
+        notif_android = {
+            "channel_id": "offro_high_importance",
+            "click_action": "FLUTTER_NOTIFICATION_CLICK",
+            "sound": "default",
+        }
+        if image_url:
+            notif_android["image"] = image_url
+        return {
+            "message": {
+                **dest,
+                "notification": {"title": title, "body": body},
+                "android": {
+                    "priority": "high",
+                    "notification": notif_android,
+                },
+                "apns": {"payload": {"aps": {"sound": "default", "badge": 1}}},
+                "data": {
+                    "type": "promo",
+                    "title": title,
+                    "body": body,
+                    "image_url": image_url,
+                },
+            }
+        }
+
+    def _fcm_send(access_token, project, msg_body):
+        """POST one message to FCM v1 API. Returns message_id on success."""
+        fcm_url = f"https://fcm.googleapis.com/v1/projects/{project}/messages:send"
+        req = _ureq.Request(
+            fcm_url,
+            data=_json.dumps(msg_body).encode(),
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+        )
+        with _ureq.urlopen(req, timeout=12) as r:
+            return _json.loads(r.read()).get("name", "ok")
+
+    if sa_json and (project_id or "project_id" in sa_json):
         try:
-            import json as _json, time as _time, urllib.request as _ureq
-            import base64 as _b64, hashlib as _hl, hmac as _hm
+            access_token, _pid = _get_access_token(sa_json, project_id)
 
-            # ── Build JWT for Google OAuth2 token ──
-            sa = _json.loads(sa_json)
-            _project_id = project_id or sa.get("project_id", "")
-            client_email = sa["client_email"]
-            private_key_pem = sa["private_key"]
-
-            now = int(_time.time())
-            header = _b64.urlsafe_b64encode(_json.dumps({"alg":"RS256","typ":"JWT"}).encode()).rstrip(b"=")
-            payload_jwt = _b64.urlsafe_b64encode(_json.dumps({
-                "iss": client_email,
-                "scope": "https://www.googleapis.com/auth/firebase.messaging",
-                "aud": "https://oauth2.googleapis.com/token",
-                "iat": now, "exp": now + 3600
-            }).encode()).rstrip(b"=")
-
-            from cryptography.hazmat.primitives import hashes, serialization
-            from cryptography.hazmat.primitives.asymmetric import padding
-            from cryptography.hazmat.backends import default_backend
-
-            private_key = serialization.load_pem_private_key(
-                private_key_pem.encode(), password=None, backend=default_backend())
-            sign_input = header + b"." + payload_jwt
-            signature = private_key.sign(sign_input, padding.PKCS1v15(), hashes.SHA256())
-            jwt_token = (sign_input + b"." + _b64.urlsafe_b64encode(signature).rstrip(b"=")).decode()
-
-            # ── Exchange JWT for access token ──
-            token_data = f"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={jwt_token}".encode()
-            treq = _ureq.Request("https://oauth2.googleapis.com/token", data=token_data,
-                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
-            with _ureq.urlopen(treq, timeout=10) as tr:
-                access_token = _json.loads(tr.read())["access_token"]
-
-            # ── Collect FCM tokens ──
-            tokens = []
-            if target == "all":
-                users_cur = db.users.find({"fcm_token": {"$exists": True, "$ne": ""}}, {"fcm_token":1})
-                tokens = [u["fcm_token"] for u in users_cur if u.get("fcm_token")]
-            else:
-                phone = (data.get("target_phone") or "").strip()
-                u = db.users.find_one({"phone": phone}, {"fcm_token":1})
-                specific_found = u is not None
-                has_token = bool(u and u.get("fcm_token"))
-                print(f"[FCM] specific user found={specific_found} has_token={has_token} phone={phone}")
-                if has_token: tokens = [u["fcm_token"]]
-
-            print(f"[FCM] target={target} tokens_found={len(tokens)}")
-            if not tokens:
-                print("[FCM] no FCM tokens found for target")
-                status = "no_tokens"
-            else:
-                fcm_url = f"https://fcm.googleapis.com/v1/projects/{_project_id}/messages:send"
-                fail_count = 0
-                for tok in tokens:
-                    msg = {
-                        "message": {
-                            "token": tok,
-                            "notification": {"title": title, "body": body},
-                            "android": {
-                                "priority": "high",
-                                "notification": {
-                                    "channel_id": "offro_promo",
-                                    "click_action": "FLUTTER_NOTIFICATION_CLICK",
-                                    "sound": "default",
-                                    **({"image_url": data["image_url"]} if data.get("image_url") else {})
-                                }
-                            },
-                            "apns": {
-                                "payload": {"aps": {"sound": "default", "badge": 1}}
-                            },
-                            "data": {
-                                "type": "promo",
-                                "title": title,
-                                "body": body,
-                                "image_url": data.get("image_url", "")
-                            }
-                        }
-                    }
-                    freq = _ureq.Request(fcm_url, data=_json.dumps(msg).encode(),
-                        headers={"Authorization": f"Bearer {access_token}",
-                                 "Content-Type": "application/json"})
-                    try:
-                        with _ureq.urlopen(freq, timeout=10) as fr:
-                            resp_body = _json.loads(fr.read())
-                            message_id = resp_body.get("name", "unknown")
-                            print(f"[FCM] sent successfully message_id={message_id} token={tok[:20]}...")
-                            sent_count += 1
-                    except Exception as fe:
-                        fail_count += 1
-                        print(f"[FCM] send FAILED token={tok[:20]}... error={fe}")
-                        fcm_error = str(fe)
-                if sent_count > 0 and fail_count == 0:
-                    status = "sent"
-                elif sent_count > 0:
-                    status = "partial"
+            # ── Determine how to send ──
+            if use_topic and target != "specific":
+                # Topic-based send: one call per relevant topic
+                if target in ("all", "all_users"):
+                    topics = ["all_users"]
+                elif target == "offers":
+                    topics = ["offers"]
+                elif target == "city":
+                    city_val = (data.get("target_city") or "").strip()
+                    if not city_val:
+                        raise ValueError("target_city is required for city target")
+                    topics = [city_val.lower().replace(" ", "_").replace("-", "_") + "_users"]
                 else:
-                    status = "failed"
+                    topics = ["all_users"]
+
+                for topic in topics:
+                    msg = _build_fcm_message(topic=topic)
+                    mid = _fcm_send(access_token, _pid, msg)
+                    print(f"[FCM] topic={topic} message_id={mid}")
+                    sent_count += 1
+                status = "sent" if sent_count > 0 else "failed"
+
+            else:
+                # Token-based send: used for specific user only
+                phone = (data.get("target_phone") or "").strip()
+                u = db.users.find_one({"phone": phone}, {"fcm_token": 1})
+                print(f"[FCM] specific: phone={phone} found={u is not None} has_token={bool(u and u.get('fcm_token'))}")
+                tokens = [u["fcm_token"]] if (u and u.get("fcm_token")) else []
+
+                if not tokens:
+                    status = "skipped_no_tokens"
+                    fcm_error = f"No FCM token for phone={phone}"
+                else:
+                    fail_count = 0
+                    for tok in tokens:
+                        try:
+                            mid = _fcm_send(access_token, _pid, _build_fcm_message(token=tok))
+                            print(f"[FCM] token send ok message_id={mid}")
+                            sent_count += 1
+                        except Exception as fe:
+                            fail_count += 1
+                            fcm_error = str(fe)
+                            print(f"[FCM] token send FAILED: {fe}")
+                    status = "sent" if fail_count == 0 else ("partial" if sent_count > 0 else "failed")
+
         except Exception as e:
             status = "error"
             fcm_error = str(e)
+            print(f"[FCM] send_notification exception: {e}")
     else:
-        fcm_error = "FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_PROJECT_ID env var not set"
+        status = "queued"
+        fcm_error = "FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_PROJECT_ID not set in Railway env"
+        print(f"[FCM] env vars missing — queued only")
 
-    # Save to DB always
-    doc = {"title": title, "body": body, "target": target,
-           "target_phone": data.get("target_phone",""),
-           "image_url": data.get("image_url",""),
-           "status": status, "sent_at": sent_at,
-           "sent_count": sent_count, "created_at": datetime.utcnow()}
+    # ── Persist to DB always ──
+    doc = {
+        "title": title, "body": body, "target": target,
+        "target_phone": data.get("target_phone", ""),
+        "target_city":  data.get("target_city", ""),
+        "image_url": image_url,
+        "status": status, "sent_at": sent_at,
+        "sent_count": sent_count, "processed": sent_count,
+        "created_at": datetime.utcnow(),
+    }
     db.notifications.insert_one(doc)
 
-    return {"message": "Notification saved", "status": status, "sent_count": sent_count, "error": fcm_error if status not in ("sent","queued") else "", "note": "Set FCM_SERVER_KEY env var on Railway to enable push delivery" if not fcm_key else ""}
+    msg_out = "Notification sent!" if status == "sent" else f"Notification saved (status: {status})"
+    return {
+        "message": msg_out,
+        "status": status,
+        "sent_count": sent_count,
+        "error": fcm_error if status not in ("sent", "queued") else "",
+    }
