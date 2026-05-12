@@ -1,9 +1,15 @@
+import os
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
 from datetime import datetime
 import uuid, qrcode, io, base64
+import time as _time
+
+# In-memory cache for /stores list (15-second TTL)
+_store_cache = {"data": None, "ts": 0.0}
+_STORE_CACHE_TTL = 15
 
 router = APIRouter(tags=["Admin"])
 
@@ -225,10 +231,11 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "address":        s.get("address", ""),
         "phone":          s.get("phone", ""),
         "status":         s.get("status", "active"),
-        "points_per_scan":s.get("points_per_scan", 10),
-        "visit_points":   s.get("visit_points", 10),
+        "points_per_scan":s.get("points_per_scan", 0),
+        "visit_points":   s.get("visit_points", 0),
         "is_new_in_town": s.get("is_new_in_town", False),
-        "image":          s.get("_thumb", ""),   # FIX: pass thumbnail URL through
+        "badge": s.get("badge", ""),
+        "image":          s.get("image") or "",
         "qr_code":        s.get("qr_code", ""),
         "lat":            s.get("lat", ""),
         "lng":            s.get("lng", ""),
@@ -240,8 +247,8 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "sub_plan":       sub.get("plan", "") if sub else "",
         "merchant_id":    mid,
         "about":          s.get("about", ""),
-        "badge":          s.get("badge", ""),
-        "logo":           "",
+        "logo":           s.get("logo") or "",
+        "image2":         s.get("store_image2") or s.get("image2") or "",
     }
 
 def _fmt_store(s):
@@ -269,10 +276,11 @@ def _fmt_store(s):
         "phone": s.get("phone"), "status": s.get("status", "active"),
         "merchant_name": merchant.get("name") if merchant else "Unknown",
         "merchant_id": mid, "qr_code": s.get("qr_code",""),
-        "points_per_scan": s.get("points_per_scan", 10),
+        "points_per_scan": s.get("points_per_scan", 0),
         "lat": s.get("lat",""), "lng": s.get("lng",""),
         "image": s.get("image") or "",
         "is_new_in_town": s.get("is_new_in_town", False),
+        "badge": s.get("badge", ""),
         "deal_status": _store_deal_status(sid),
         "subscription_end": str(s.get("subscription_end","")),
         "paid_status": paid_status,
@@ -282,21 +290,15 @@ def _fmt_store(s):
 
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
-    # Images stored as base64 in MongoDB — pass them through directly
-    stores = list(db.stores.find({}, {"logo": 0}))
-    for s in stores:
-        # Build _thumb: prefer base64 image, fallback to images array
-        img = s.get("image", "") or ""
-        imgs = s.get("images", []) or []
-        if isinstance(imgs, str): imgs = [imgs] if imgs else []
-        if img:
-            s["_thumb"] = img  # base64 or URL — pass as-is
-        elif imgs:
-            s["_thumb"] = imgs[0] if imgs[0] else ""
-        else:
-            s["_thumb"] = ""
-        # Remove large images array to save payload — _thumb has what we need
-        s.pop("images", None)
+    global _store_cache
+    now_ts = _time.time()
+    if _store_cache["data"] is not None and (now_ts - _store_cache["ts"]) < _STORE_CACHE_TTL:
+        return _store_cache["data"]
+    # Exclude large base64 image fields from list for performance
+    stores = list(db.stores.find({}, {
+        "store_image2": 0,  # heavy base64 — loaded separately in edit form
+        "qr_code": 0,       # always base64 — loaded separately in detail view
+    }))
     if not stores:
         return []
     
@@ -334,10 +336,14 @@ def list_stores(a=Depends(get_current_admin)):
     for m in db.merchants.find({"_id": {"$in": merch_obj_ids}}, {"name": 1, "phone": 1}):
         merchants[str(m["_id"])] = m
     
-    return [_fmt_store_fast(s, sub_map, deal_map, merchants) for s in stores]
+    result = [_fmt_store_fast(s, sub_map, deal_map, merchants) for s in stores]
+    _store_cache["data"] = result
+    _store_cache["ts"] = _time.time()
+    return result
 
 @router.post("/stores")
 def create_store(data: dict, a=Depends(get_current_admin)):
+    global _store_cache; _store_cache["data"] = None
     mid = data.get("merchant_id","").strip()
     name = data.get("store_name","").strip()
     if not mid: raise HTTPException(400, "merchant_id required")
@@ -354,11 +360,11 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "address": data.get("address",""),
         "phone": data.get("phone") or merchant.get("phone",""),
         "status": "active",
-        "points_per_scan": int(data.get("points_per_scan", 10)),
+        "points_per_scan": int(data.get("points_per_scan", 0)),
         "lat": data.get("lat",""), "lng": data.get("lng",""),
         "image": data.get("image") or None,
-        "badge": data.get("badge") or "",  # custom badge tag
         "is_new_in_town": bool(data.get("is_new_in_town", False)),
+        "badge": data.get("badge", ""),
         "created_at": datetime.utcnow()
     }
     result = db.stores.insert_one(store)
@@ -367,29 +373,104 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     db.stores.update_one({"_id": result.inserted_id}, {"$set": {"qr_code": qr}})
     return {"message": "Store created", "store_id": sid, "qr_code": qr}
 
+@router.get("/stores/slim")
+def get_stores_slim(a=Depends(get_current_admin)):
+    """Lightweight store list for ratings — no images, no heavy data."""
+    stores = list(db.stores.find({}, {
+        "_id":1,"store_name":1,"category":1,"city":1,"area":1,
+        "rating":1,"admin_rating":1,"user_rating":1,"rating_count":1,"status":1
+    }))
+    return [{
+        "_id": str(s["_id"]),
+        "store_name": s.get("store_name",""),
+        "category": s.get("category",""),
+        "city": s.get("city",""),
+        "area": s.get("area",""),
+        "rating": s.get("admin_rating") or s.get("rating") or 0,
+        "admin_rating": s.get("admin_rating",0),
+        "user_rating": s.get("user_rating",0),
+        "rating_count": s.get("rating_count",0),
+        "status": s.get("status","active"),
+    } for s in stores]
+
+@router.get("/stores/{id}")
+def get_store_detail(id: str, a=Depends(get_current_admin)):
+    """Get full store detail including image2 — used by edit form."""
+    try:
+        s = db.stores.find_one({"_id": ObjectId(id)})
+    except Exception:
+        raise HTTPException(404, "Not found")
+    if not s: raise HTTPException(404, "Not found")
+    return {
+        "_id":            str(s["_id"]),
+        "store_name":     s.get("store_name", ""),
+        "category":       s.get("category", ""),
+        "city":           s.get("city", ""),
+        "state":          s.get("state", ""),
+        "area":           s.get("area", ""),
+        "address":        s.get("address", ""),
+        "phone":          s.get("phone", ""),
+        "lat":            s.get("lat", ""),
+        "lng":            s.get("lng", ""),
+        "about":          s.get("about", ""),
+        "points_per_scan":s.get("points_per_scan", 0),
+        "visit_points":   s.get("visit_points", 0),
+        "image":          s.get("image") or "",
+        "image2":         s.get("store_image2") or s.get("image2") or "",
+        "is_new_in_town": s.get("is_new_in_town", False),
+        "badge": s.get("badge", ""),
+        "status":         s.get("status", "active"),
+        "merchant_id":    s.get("merchant_id", ""),
+    }
+
 @router.put("/stores/{id}")
 def update_store(id: str, data: dict, a=Depends(get_current_admin)):
+    global _store_cache; _store_cache["data"] = None
+    """Update any store field — used by admin dashboard Edit Store form."""
     store = db.stores.find_one({"_id": ObjectId(id)})
     if not store: raise HTTPException(404, "Not found")
     upd = {f: data[f] for f in ["store_name","category","city","state","area","address","phone","lat","lng","about"] if data.get(f) is not None}
     if "points_per_scan" in data and data["points_per_scan"] is not None:
         upd["points_per_scan"] = int(data["points_per_scan"])
+    if "visit_points" in data and data["visit_points"] is not None:
+        upd["visit_points"] = int(data["visit_points"])
     if "merchant_id" in data and data["merchant_id"] and data["merchant_id"].strip():
         upd["merchant_id"] = data["merchant_id"].strip()
-    if "image" in data and data["image"]: upd["image"] = data["image"]
+    # Accept image — only update if a new value is explicitly provided (not null/empty)
+    if data.get("image"):          # only overwrite if new image sent
+        upd["image"] = data["image"]
+    if data.get("image2"):         # save image2 as store_image2 (matches public.py field name)
+        upd["store_image2"] = data["image2"]
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])
-    if "badge" in data: upd["badge"] = data["badge"] or ""   # custom store badge/tag
+    if "badge" in data: upd["badge"] = data.get("badge", "")
     if "status" in data: upd["status"] = data["status"]
     if upd: db.stores.update_one({"_id": ObjectId(id)}, {"$set": upd})
     return {"message": "Updated"}
 
+@router.put("/stores/{id}/rating")
+def set_store_rating(id: str, data: dict, a=Depends(get_current_admin)):
+    """Set the admin-controlled rating for a store (1-5 stars).
+    This overwrites the displayed rating so the admin can curate what users see.
+    The raw user ratings are preserved separately in the 'user_rating' field.
+    """
+    rating = float(data.get("admin_rating", 0))
+    if not (0 <= rating <= 5):
+        raise HTTPException(400, "Rating must be between 0 and 5")
+    db.stores.update_one(
+        {"_id": ObjectId(id)},
+        {"$set": {"admin_rating": rating, "rating": rating}}
+    )
+    return {"message": "Rating updated", "rating": rating}
+
 @router.put("/stores/{id}/approve")
 def approve_store(id: str, a=Depends(get_current_admin)):
+    global _store_cache; _store_cache["data"] = None
     db.stores.update_one({"_id": ObjectId(id)}, {"$set": {"status": "active"}})
     return {"message": "Store approved and live"}
 
 @router.put("/stores/{id}/status")
 def toggle_store(id: str, a=Depends(get_current_admin)):
+    global _store_cache; _store_cache["data"] = None
     s = db.stores.find_one({"_id": ObjectId(id)})
     if not s: raise HTTPException(404, "Not found")
     ns = "inactive" if s.get("status") == "active" else "active"
@@ -398,61 +479,9 @@ def toggle_store(id: str, a=Depends(get_current_admin)):
 
 @router.delete("/stores/{id}")
 def delete_store(id: str, a=Depends(get_current_admin)):
+    global _store_cache; _store_cache["data"] = None
     db.stores.delete_one({"_id": ObjectId(id)})
     return {"message": "Deleted"}
-
-# ===================== STORE RATING (Admin Override) =====================
-
-@router.put("/stores/{id}/rating")
-def set_store_rating(id: str, data: dict, a=Depends(get_current_admin)):
-    """Admin sets an override rating for a store. Shown in dashboard and app."""
-    from bson import ObjectId as ObjId
-    admin_rating = data.get("admin_rating")
-    if admin_rating is None:
-        raise HTTPException(400, "admin_rating required")
-    val = float(admin_rating)
-    db.stores.update_one({"_id": ObjId(id)}, {"$set": {"admin_rating": val, "rating": val}})
-    return {"ok": True, "admin_rating": val}
-
-@router.delete("/stores/{id}/rating")
-def clear_store_rating(id: str, a=Depends(get_current_admin)):
-    """Admin clears override rating so user average is used again."""
-    from bson import ObjectId as ObjId
-    db.stores.update_one({"_id": ObjId(id)}, {"$unset": {"admin_rating": ""}})
-    return {"ok": True}
-
-# ===================== GIFT VOUCHERS (Voucher Zone - App Display) =====================
-
-@router.get("/gift-vouchers")
-def list_gift_vouchers(a=Depends(get_current_admin)):
-    """List all gift vouchers shown in Voucher Zone on the app home screen."""
-    docs = list(db.gift_vouchers.find({}).sort("_id", -1))
-    result = []
-    for d in docs:
-        d["id"] = str(d.pop("_id"))
-        result.append(d)
-    return result
-
-@router.post("/gift-vouchers")
-def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
-    """Create a new voucher card shown in the Voucher Zone section of the app."""
-    data.setdefault("is_active", True)
-    data.setdefault("created_at", datetime.utcnow().isoformat())
-    res = db.gift_vouchers.insert_one(data)
-    return {"ok": True, "id": str(res.inserted_id)}
-
-@router.put("/gift-vouchers/{id}")
-def update_gift_voucher(id: str, data: dict, a=Depends(get_current_admin)):
-    """Update an existing Voucher Zone card."""
-    data.pop("_id", None); data.pop("id", None)
-    db.gift_vouchers.update_one({"_id": ObjectId(id)}, {"$set": data})
-    return {"ok": True}
-
-@router.delete("/gift-vouchers/{id}")
-def delete_gift_voucher(id: str, a=Depends(get_current_admin)):
-    """Delete a Voucher Zone card."""
-    db.gift_vouchers.delete_one({"_id": ObjectId(id)})
-    return {"ok": True}
 
 # ===================== USERS =====================
 
@@ -522,20 +551,14 @@ def adjust_points(id: str, data: dict, a=Depends(get_current_admin)):
 @router.get("/stats")
 def admin_stats(a=Depends(get_current_admin)):
     cols = db.list_collection_names()
-    print("📊 Collections in DB:", cols)   # DEBUG
-    users_count = db.users.count_documents({}) if "users" in cols else 0
-    print(f"📊 Users count: {users_count}")  # DEBUG
-    result = {
+    return {
         "total_merchants": db.merchants.count_documents({}),
         "active_merchants": db.merchants.count_documents({"status":"active"}),
         "total_stores": db.stores.count_documents({}),
         "waiting_approval": db.stores.count_documents({"status":"waiting_approval"}),
         "total_deals": db.deals.count_documents({}) if "deals" in cols else 0,
-        "total_users": users_count,
-        "waiting_vouchers": db.withdraw_requests.count_documents({"status":"pending"}) if "withdraw_requests" in cols else 0,
+        "total_users": db.users.count_documents({}) if "users" in cols else 0,
     }
-    print(f"📊 Stats response: {result}")  # DEBUG
-    return result
 
 # ===================== SUBSCRIPTIONS (Admin view) =====================
 
@@ -587,7 +610,7 @@ def list_merchant_transactions(a=Depends(get_current_admin)):
             "razorpay_payment_id": inv.get("razorpay_payment_id", ""),
             "from_date":     fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
             "end_date":      ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
-            "created_at":    inv["created_at"].strftime("%d %b %Y %H:%M") if inv.get("created_at") else "",
+            "created_at":    (inv["created_at"] + timedelta(hours=5,minutes=30)).strftime("%d %b %Y %H:%M IST") if inv.get("created_at") else "",
         })
     return result
 
@@ -788,353 +811,290 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
     return {"ok": True, "message": f"{voucher_type} voucher sent successfully"}
 
 
-# ===================== NOTIFICATIONS (FIX 7) =====================
+# ===================== GIFT VOUCHERS (app-facing cards) =====================
 
-# ═══════════════════════════════════════════════════════════
-# FIREBASE ADMIN SDK — initialized once at module load
-# ═══════════════════════════════════════════════════════════
-# Phone normalization helper — handles country code mismatches
-# between what admin types and what is stored in MongoDB
-# e.g. admin types "8105674906", DB has "+918105674906"
-# ═══════════════════════════════════════════════════════════
-def _phone_variants(raw: str) -> list:
-    """Return all plausible phone string variants for MongoDB $in query."""
-    p = raw.strip().replace(" ", "").replace("-", "")
-    if not p:
-        return []
-    variants = {p}  # exact as typed
-    # Strip leading + or 0
-    digits = p.lstrip("+0")
-    # Handle Indian numbers: last 10 digits
-    last10 = digits[-10:] if len(digits) >= 10 else digits
-    # Build all common formats
-    variants.update([
-        last10,              # 8105674906
-        "+91" + last10,     # +918105674906
-        "91" + last10,      # 918105674906
-        "0"  + last10,      # 08105674906
-    ])
-    return list(variants)
+@router.get("/gift-vouchers")
+def list_gift_vouchers(a=Depends(get_current_admin)):
+    """List all gift vouchers shown in the app home screen."""
+    docs = list(db.gift_vouchers.find().sort("_id", -1))
+    result = []
+    for v in docs:
+        result.append({
+            "id":          str(v["_id"]),
+            "title":       v.get("title", ""),
+            "text":        v.get("text", ""),
+            "validity":    v.get("validity", ""),
+            "logo":        v.get("logo", ""),
+            "store_id":    v.get("store_id", ""),
+            "merchant_id": v.get("merchant_id", ""),
+            "is_active":   v.get("is_active", True),
+            "created_at":  str(v.get("created_at", ""))[:10],
+        })
+    return result
 
-
-# Uses FIREBASE_SERVICE_ACCOUNT env var (JSON string)
-# ═══════════════════════════════════════════════════════════
-def _get_fcm_app():
-    """Return initialized firebase_admin app (singleton).
-    Reads FIREBASE_SERVICE_ACCOUNT_JSON (Railway) or FIREBASE_SERVICE_ACCOUNT as fallback.
-    """
-    import firebase_admin
-    from firebase_admin import credentials as fb_cred
-    import os, json as _j
-
-    # Return existing app if already initialized
-    try:
-        return firebase_admin.get_app("offro")
-    except ValueError:
-        pass  # not initialized yet — proceed below
-
-    # Read env var — support both names (Railway uses _JSON suffix)
-    sa_json = (
-        os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
-        or os.environ.get("FIREBASE_SERVICE_ACCOUNT", "")
-    ).strip()
-
-    if not sa_json:
-        print("[FCM] ❌ FIREBASE_SERVICE_ACCOUNT_JSON env var not set — cannot init Firebase Admin")
-        return None
-
-    try:
-        sa_dict = _j.loads(sa_json)
-        cred = fb_cred.Certificate(sa_dict)
-        app = firebase_admin.initialize_app(cred, name="offro")
-        print(f"[FCM] ✅ Firebase Admin initialized successfully (project={sa_dict.get('project_id', '?')})")
-        return app
-    except _j.JSONDecodeError as e:
-        print(f"[FCM] ❌ Firebase service account JSON is malformed: {e}")
-        return None
-    except Exception as e:
-        print(f"[FCM] ❌ Firebase Admin init failed: {e}")
-        return None
-
-
-def _send_via_firebase_admin(tokens: list, title: str, body: str, image_url: str = "", data: dict = None) -> tuple:
-    """Send individual FCM messages via Firebase Admin SDK (HTTP v1 API).
-    Returns (sent_count, failed_count).
-    """
-    from firebase_admin import messaging as fb_msg
-    app = _get_fcm_app()
-    if app is None:
-        print("[FCM] No app initialized — check FIREBASE_SERVICE_ACCOUNT_JSON env var on Railway")
-        return 0, 0
-
-    sent = 0; failed = 0
-    extra_data = data or {}
-
-    # Build multicast messages in batches of 500
-    for i in range(0, len(tokens), 500):
-        batch = tokens[i:i+500]
-        reg_ids = [t["token"] for t in batch]
+@router.post("/gift-vouchers")
+def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
+    """Create a new gift voucher card visible in the app."""
+    text = (data.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Offer text is required")
+    store_id    = (data.get("store_id") or "").strip()
+    merchant_id = (data.get("merchant_id") or "").strip()
+    logo = (data.get("logo") or "").strip()
+    if not logo and store_id:
         try:
-            notif = fb_msg.Notification(title=title, body=body, image=image_url or None)
-            android_notif = fb_msg.AndroidNotification(
-                title=title, body=body,
-                image=image_url or None,
-                sound="default",
-                notification_count=1,
-            )
-            android_config = fb_msg.AndroidConfig(
-                priority="high",
-                notification=android_notif,
-            )
-            apns_config = fb_msg.APNSConfig(
-                payload=fb_msg.APNSPayload(
-                    aps=fb_msg.Aps(sound="default", badge=1)
-                )
-            )
-            mm = fb_msg.MulticastMessage(
-                tokens=reg_ids,
-                notification=notif,
-                android=android_config,
-                apns=apns_config,
-                data={**{k: str(v) for k, v in extra_data.items()},
-                      "image_url": image_url or "",
-                      "title": title, "body": body},
-            )
-            resp = fb_msg.send_each_for_multicast(mm, app=app)
-            sent   += resp.success_count
-            failed += resp.failure_count
-            print(f"[FCM] Batch {i//500 + 1}: sent={resp.success_count} failed={resp.failure_count} total_tokens={len(reg_ids)}")
-            # Log failures and successes with message IDs
-            for j, r in enumerate(resp.responses):
-                if r.success:
-                    print(f"[FCM] ✅ sent successfully message_id={r.message_id}")
-                else:
-                    print(f"[FCM] ❌ Token {j} failed: {r.exception}")
-        except Exception as e:
-            print(f"[FCM] Batch {i//500 + 1} error: {e}")
-            failed += len(batch)
+            s = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_image2":1,"image2":1})
+            if s:
+                logo = s.get("store_image2") or s.get("image2") or ""
+        except: pass
+    doc = {
+        "title":       (data.get("title") or "").strip(),
+        "text":        text,
+        "validity":    (data.get("validity") or "").strip(),
+        "logo":        logo,
+        "store_id":    store_id,
+        "merchant_id": merchant_id,
+        "is_active":   bool(data.get("is_active", True)),
+        "created_at":  datetime.utcnow(),
+    }
+    result = db.gift_vouchers.insert_one(doc)
+    return {"message": "Voucher created", "id": str(result.inserted_id)}
 
-    print(f"[FCM] Direct send complete: total_sent={sent} total_failed={failed}")
-    return sent, failed
+@router.put("/gift-vouchers/{vid}")
+def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
+    """Update an existing gift voucher."""
+    upd = {}
+    for field in ["title", "text", "validity", "logo", "merchant_id", "store_id"]:
+        if field in data:
+            upd[field] = (data[field] or "").strip()
+    if "store_id" in upd and upd["store_id"] and "logo" not in upd:
+        try:
+            s = db.stores.find_one({"_id": ObjectId(upd["store_id"])}, {"store_image2":1,"image2":1})
+            if s:
+                upd["logo"] = s.get("store_image2") or s.get("image2") or ""
+        except: pass
+    if "is_active" in data:
+        upd["is_active"] = bool(data["is_active"])
+    if not upd:
+        raise HTTPException(400, "Nothing to update")
+    db.gift_vouchers.update_one({"_id": ObjectId(vid)}, {"$set": upd})
+    return {"message": "Voucher updated"}
+
+@router.delete("/gift-vouchers/{vid}")
+def delete_gift_voucher(vid: str, a=Depends(get_current_admin)):
+    """Delete a gift voucher."""
+    db.gift_vouchers.delete_one({"_id": ObjectId(vid)})
+    return {"message": "Deleted"}
 
 
-def _send_fcm_topic(topic: str, title: str, body: str, image_url: str = "", data: dict = None) -> bool:
-    """Send FCM notification to a topic (e.g. all_users, ballari_users, offers).
-    Returns True on success.
-    """
-    from firebase_admin import messaging as fb_msg
-    app = _get_fcm_app()
-    if app is None:
-        print("[FCM] No app for topic send — check FIREBASE_SERVICE_ACCOUNT_JSON env var on Railway")
-        return False
+# ===================== PROMO SLIDERS =====================
 
-    try:
-        extra_data = data or {}
-        msg = fb_msg.Message(
-            topic=topic,
-            notification=fb_msg.Notification(title=title, body=body, image=image_url or None),
-            android=fb_msg.AndroidConfig(
-                priority="high",
-                notification=fb_msg.AndroidNotification(
-                    title=title, body=body,
-                    image=image_url or None,
-                    sound="default",
-                ),
-            ),
-            apns=fb_msg.APNSConfig(
-                payload=fb_msg.APNSPayload(aps=fb_msg.Aps(sound="default", badge=1))
-            ),
-            data={**{k: str(v) for k, v in extra_data.items()},
-                  "image_url": image_url or "",
-                  "title": title, "body": body},
-        )
-        msg_id = fb_msg.send(msg, app=app)
-        print(f"[FCM] Topic '{topic}' message sent: {msg_id}")
-        return True
-    except Exception as e:
-        print(f"[FCM] Topic '{topic}' send failed: {e}")
-        return False
+@router.get("/promo-sliders")
+def list_promo_sliders(a=Depends(get_current_admin)):
+    docs = list(db.promo_sliders.find().sort("sort_order", 1))
+    return [{"id": str(d["_id"]), "title": d.get("title",""), "image_url": d.get("image_url",""),
+             "link_url": d.get("link_url",""), "sort_order": d.get("sort_order",0),
+             "is_active": d.get("is_active", True)} for d in docs]
 
+@router.post("/promo-sliders")
+def create_promo_slider(data: dict, a=Depends(get_current_admin)):
+    if not data.get("image_url"):
+        raise HTTPException(400, "image_url required")
+    doc = {"title": data.get("title",""), "image_url": data["image_url"],
+           "link_url": data.get("link_url",""), "sort_order": int(data.get("sort_order",0)),
+           "is_active": bool(data.get("is_active", True)), "created_at": datetime.utcnow()}
+    r = db.promo_sliders.insert_one(doc)
+    return {"message": "Slider created", "id": str(r.inserted_id)}
+
+@router.put("/promo-sliders/{sid}")
+def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
+    upd = {}
+    for f in ["title","image_url","link_url"]:
+        if f in data: upd[f] = data[f]
+    if "sort_order" in data: upd["sort_order"] = int(data["sort_order"])
+    if "is_active"  in data: upd["is_active"]  = bool(data["is_active"])
+    if not upd: raise HTTPException(400, "Nothing to update")
+    db.promo_sliders.update_one({"_id": ObjectId(sid)}, {"$set": upd})
+    return {"message": "Updated"}
+
+@router.delete("/promo-sliders/{sid}")
+def delete_promo_slider(sid: str, a=Depends(get_current_admin)):
+    db.promo_sliders.delete_one({"_id": ObjectId(sid)})
+    return {"message": "Deleted"}
+
+
+# ===================== NOTIFICATIONS =====================
 
 @router.get("/notifications")
-def get_notifications(a=Depends(get_current_admin)):
-    """Get notification history — sorted newest first."""
-    docs = list(db.notifications.find({}).sort("created_at", -1).limit(200))
+def list_notifications(a=Depends(get_current_admin)):
+    docs = list(db.notifications.find().sort("_id", -1).limit(100))
     result = []
     for d in docs:
-        d["_id"] = str(d["_id"])
-        result.append(d)
+        result.append({
+            "_id": str(d["_id"]),   # JS deleteNotif() uses n._id
+            "id": str(d["_id"]),
+            "title": d.get("title",""),
+            "body": d.get("body",""),
+            "target": d.get("target","all"),
+            "target_phone": d.get("target_phone",""),
+            "target_city": d.get("target_city",""),
+            "image_url": d.get("image_url",""),
+            "status": d.get("status","sent"),
+            "sent_at": d.get("sent_at",""),
+            "created_at": d.get("created_at",""),
+            "processed": d.get("processed", 0),
+        })
     return result
 
 
 @router.delete("/notifications/{notif_id}")
 def delete_notification(notif_id: str, a=Depends(get_current_admin)):
-    """Delete a notification record by ID."""
+    """Delete a single notification record from history."""
     from bson import ObjectId
     try:
-        oid = ObjectId(notif_id)
-    except Exception:
-        raise HTTPException(400, "Invalid notification ID")
-    result = db.notifications.delete_one({"_id": oid})
-    if result.deleted_count == 0:
-        raise HTTPException(404, "Notification not found")
-    print(f"[ADMIN] Deleted notification {notif_id}")
-    return {"ok": True, "deleted": notif_id}
+        result = db.notifications.delete_one({"_id": ObjectId(notif_id)})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        return {"message": "Notification deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
+@router.delete("/notifications")
+def clear_all_notifications(a=Depends(get_current_admin)):
+    """Clear all notification records from history."""
+    result = db.notifications.delete_many({})
+    return {"message": f"Deleted {result.deleted_count} notifications"}
 
 @router.post("/notifications/send")
-def send_notification(body: dict, a=Depends(get_current_admin)):
-    """Send push notification.
-    target: "all_users" | "city" | "offers" | "specific"
-    target_city: city name when target="city" (e.g. "Ballari")
-    """
-    title      = body.get("title", "").strip()
-    msg        = body.get("body", "").strip()
-    target     = body.get("target", "all_users")
-    phone      = body.get("target_phone", "").strip()
-    city_raw   = body.get("target_city", "").strip()
-    img_url    = body.get("image_url", "").strip()
-    use_topic  = body.get("use_topic", True)   # default: use FCM topics
+def send_notification(data: dict, a=Depends(get_current_admin)):
+    title  = (data.get("title") or "").strip()
+    body   = (data.get("body")  or "").strip()
+    target = (data.get("target") or "all")
+    if not title or not body:
+        raise HTTPException(400, "title and body are required")
 
-    if not title or not msg:
-        raise HTTPException(400, "Title and body are required")
-    if target == "specific" and not phone:
-        raise HTTPException(400, "Phone required for specific target")
-    if target == "city" and not city_raw:
-        raise HTTPException(400, "City name required for city target")
+    sent_at = datetime.utcnow().strftime("%d %b %Y %H:%M")
 
-    # Determine FCM topic name
-    topic_map = {
-        "all_users": "all_users",
-        "offers":    "offers",
-        "city":      (city_raw.lower().strip().replace(" ", "_") + "_users") if city_raw else None,
-    }
-    topic = topic_map.get(target)
+    # ── FCM v1 send using service account credentials ──
+    sent_count = 0
+    fcm_error = ""
+    sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+    project_id = os.environ.get("FIREBASE_PROJECT_ID", "").strip()
+    status = "queued"
 
-    # Save to DB first
-    notif_doc = {
-        "title": title, "body": msg, "target": target,
-        "target_phone": phone if target == "specific" else "",
-        "target_city": city_raw if target == "city" else "",
-        "image_url": img_url,
-        "topic": topic or "",
-        "status": "queued",
-        "processed": 0, "failed": 0,
-        "created_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
-        "sent_at": None,
-    }
-    inserted = db.notifications.insert_one(notif_doc)
-    notif_id = inserted.inserted_id
+    if sa_json and project_id:
+        try:
+            import json as _json, time as _time, urllib.request as _ureq
+            import base64 as _b64, hashlib as _hl, hmac as _hm
 
-    sent = 0; failed = 0
+            # ── Build JWT for Google OAuth2 token ──
+            sa = _json.loads(sa_json)
+            _project_id = project_id or sa.get("project_id", "")
+            client_email = sa["client_email"]
+            private_key_pem = sa["private_key"]
 
-    # Debug: count total users + users with tokens in DB
-    total_users   = db.users.count_documents({})
-    users_w_token = db.users.count_documents({"fcm_token": {"$exists": True, "$ne": ""}})
-    print(f"[NOTIF] target={target} | total_users={total_users} | users_with_fcm_token={users_w_token}")
+            now = int(_time.time())
+            header = _b64.urlsafe_b64encode(_json.dumps({"alg":"RS256","typ":"JWT"}).encode()).rstrip(b"=")
+            payload_jwt = _b64.urlsafe_b64encode(_json.dumps({
+                "iss": client_email,
+                "scope": "https://www.googleapis.com/auth/firebase.messaging",
+                "aud": "https://oauth2.googleapis.com/token",
+                "iat": now, "exp": now + 3600
+            }).encode()).rstrip(b"=")
 
-    if target == "specific":
-        # Direct token send to individual user
-        # Normalize phone: admin may type "8105674906", DB may store "+918105674906" or "918105674906"
-        phone_variants = _phone_variants(phone)
-        print(f"[NOTIF] specific lookup phone={phone!r} variants={phone_variants}")
-        user = db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "name": 1, "phone": 1})
-        print(f"[NOTIF] specific user found: {bool(user)} | has_token: {bool(user and user.get('fcm_token'))} | db_phone={user.get('phone') if user else 'N/A'}")
-        tokens = [{"token": user["fcm_token"], "user_id": str(user["_id"])}] if user and user.get("fcm_token") else []
-        if tokens:
-            sent, failed = _send_via_firebase_admin(tokens, title, msg, img_url)
-        else:
-            failed = 1
-    elif topic and use_topic:
-        # Topic-based broadcast — sends to ALL subscribers of the topic
-        print(f"[NOTIF] Sending to topic: {topic}")
-        ok = _send_fcm_topic(topic, title, msg, img_url, data={"target": target, "city": city_raw})
-        if ok:
-            sent = 1; failed = 0   # topic sends don't have per-token counts
-        else:
-            failed = 1
-        # Also estimate reach from DB
-        if target == "city" and city_raw:
-            q = {"city": {"$regex": city_raw, "$options": "i"}, "fcm_token": {"$exists": True, "$ne": ""}}
-        else:
-            q = {"fcm_token": {"$exists": True, "$ne": ""}}
-        notif_doc["token_count"] = db.users.count_documents(q)
-        db.notifications.update_one({"_id": notif_id}, {"$set": {"token_count": notif_doc["token_count"]}})
-        print(f"[NOTIF] Topic send ok={ok} estimated_reach={notif_doc['token_count']}")
-    else:
-        # Fallback: direct token send to matching users
-        if target == "city" and city_raw:
-            query = {"city": {"$regex": city_raw, "$options": "i"}, "fcm_token": {"$exists": True, "$ne": ""}}
-        else:
-            query = {"fcm_token": {"$exists": True, "$ne": ""}}
-        users = list(db.users.find(query, {"fcm_token": 1}))
-        tokens = [{"token": u["fcm_token"], "user_id": str(u["_id"])} for u in users if u.get("fcm_token")]
-        print(f"[NOTIF] Direct send: found {len(tokens)} tokens from query={query}")
-        if tokens:
-            sent, failed = _send_via_firebase_admin(tokens, title, msg, img_url)
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import padding
+            from cryptography.hazmat.backends import default_backend
 
-    # Update status
-    status = "sent" if (sent > 0 and failed == 0) else ("partial" if sent > 0 else ("failed" if failed > 0 else "queued"))
-    db.notifications.update_one({"_id": notif_id}, {"$set": {
-        "status": status, "processed": sent, "failed": failed,
-        "sent_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
-    }})
+            private_key = serialization.load_pem_private_key(
+                private_key_pem.encode(), password=None, backend=default_backend())
+            sign_input = header + b"." + payload_jwt
+            signature = private_key.sign(sign_input, padding.PKCS1v15(), hashes.SHA256())
+            jwt_token = (sign_input + b"." + _b64.urlsafe_b64encode(signature).rstrip(b"=")).decode()
 
-    return {
-        "ok": True, "sent": sent, "failed": failed,
-        "status": status, "topic": topic or "",
-        "message": f"Notification {status} — topic: {topic or 'direct'}, delivered: {sent}, failed: {failed}"
-    }
+            # ── Exchange JWT for access token ──
+            token_data = f"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={jwt_token}".encode()
+            treq = _ureq.Request("https://oauth2.googleapis.com/token", data=token_data,
+                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
+            with _ureq.urlopen(treq, timeout=10) as tr:
+                access_token = _json.loads(tr.read())["access_token"]
 
-
-@router.post("/notifications/process-queue")
-def process_notification_queue(a=Depends(get_current_admin)):
-    """Retry all queued or failed notifications."""
-    pending = list(db.notifications.find({"status": {"$in": ["queued", "failed", "partial"]}}))
-    total_sent = 0; total_failed = 0; total_skipped = 0
-
-    for notif in pending:
-        title   = notif.get("title", "")
-        msg     = notif.get("body", "")
-        target  = notif.get("target", "all_users")
-        phone   = notif.get("target_phone", "")
-        city_raw= notif.get("target_city", "")
-        img     = notif.get("image_url", "")
-        topic   = notif.get("topic", "")
-
-        sent = 0; failed = 0
-
-        if target == "specific":
-            user = db.users.find_one({"phone": phone}, {"fcm_token": 1})
-            tokens = [{"token": user["fcm_token"], "user_id": str(user["_id"])}] if user and user.get("fcm_token") else []
-            if tokens:
-                sent, failed = _send_via_firebase_admin(tokens, title, msg, img)
+            # ── Collect FCM tokens ──
+            tokens = []
+            if target == "all":
+                users_cur = db.users.find({"fcm_token": {"$exists": True, "$ne": ""}}, {"fcm_token":1})
+                tokens = [u["fcm_token"] for u in users_cur if u.get("fcm_token")]
             else:
-                total_skipped += 1
-                db.notifications.update_one({"_id": notif["_id"]}, {"$set": {"status": "skipped_no_tokens"}})
-                continue
-        elif topic:
-            ok = _send_fcm_topic(topic, title, msg, img)
-            sent = 1 if ok else 0; failed = 0 if ok else 1
-        else:
-            if city_raw:
-                query = {"city": {"$regex": city_raw, "$options": "i"}, "fcm_token": {"$exists": True, "$ne": ""}}
-            else:
-                query = {"fcm_token": {"$exists": True, "$ne": ""}}
-            users = list(db.users.find(query, {"fcm_token": 1}))
-            tokens = [{"token": u["fcm_token"], "user_id": str(u["_id"])} for u in users if u.get("fcm_token")]
+                phone = (data.get("target_phone") or "").strip()
+                u = db.users.find_one({"phone": phone}, {"fcm_token":1})
+                specific_found = u is not None
+                has_token = bool(u and u.get("fcm_token"))
+                print(f"[FCM] specific user found={specific_found} has_token={has_token} phone={phone}")
+                if has_token: tokens = [u["fcm_token"]]
+
+            print(f"[FCM] target={target} tokens_found={len(tokens)}")
             if not tokens:
-                total_skipped += 1
-                db.notifications.update_one({"_id": notif["_id"]}, {"$set": {"status": "skipped_no_tokens"}})
-                continue
-            sent, failed = _send_via_firebase_admin(tokens, title, msg, img)
+                print("[FCM] no FCM tokens found for target")
+                status = "no_tokens"
+            else:
+                fcm_url = f"https://fcm.googleapis.com/v1/projects/{_project_id}/messages:send"
+                fail_count = 0
+                for tok in tokens:
+                    msg = {
+                        "message": {
+                            "token": tok,
+                            "notification": {"title": title, "body": body},
+                            "android": {
+                                "priority": "high",
+                                "notification": {
+                                    "channel_id": "offro_promo",
+                                    "click_action": "FLUTTER_NOTIFICATION_CLICK",
+                                    "sound": "default",
+                                    **({"image_url": data["image_url"]} if data.get("image_url") else {})
+                                }
+                            },
+                            "apns": {
+                                "payload": {"aps": {"sound": "default", "badge": 1}}
+                            },
+                            "data": {
+                                "type": "promo",
+                                "title": title,
+                                "body": body,
+                                "image_url": data.get("image_url", "")
+                            }
+                        }
+                    }
+                    freq = _ureq.Request(fcm_url, data=_json.dumps(msg).encode(),
+                        headers={"Authorization": f"Bearer {access_token}",
+                                 "Content-Type": "application/json"})
+                    try:
+                        with _ureq.urlopen(freq, timeout=10) as fr:
+                            resp_body = _json.loads(fr.read())
+                            message_id = resp_body.get("name", "unknown")
+                            print(f"[FCM] sent successfully message_id={message_id} token={tok[:20]}...")
+                            sent_count += 1
+                    except Exception as fe:
+                        fail_count += 1
+                        print(f"[FCM] send FAILED token={tok[:20]}... error={fe}")
+                        fcm_error = str(fe)
+                if sent_count > 0 and fail_count == 0:
+                    status = "sent"
+                elif sent_count > 0:
+                    status = "partial"
+                else:
+                    status = "failed"
+        except Exception as e:
+            status = "error"
+            fcm_error = str(e)
+    else:
+        fcm_error = "FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_PROJECT_ID env var not set"
 
-        total_sent += sent; total_failed += failed
-        new_status = "sent" if (sent > 0 and failed == 0) else ("partial" if sent > 0 else "failed")
-        db.notifications.update_one({"_id": notif["_id"]}, {"$set": {
-            "status": new_status, "processed": sent, "failed": failed,
-            "sent_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
-        }})
+    # Save to DB always
+    doc = {"title": title, "body": body, "target": target,
+           "target_phone": data.get("target_phone",""),
+           "image_url": data.get("image_url",""),
+           "status": status, "sent_at": sent_at,
+           "sent_count": sent_count, "created_at": datetime.utcnow()}
+    db.notifications.insert_one(doc)
 
-    return {"ok": True, "processed": total_sent, "failed": total_failed, "skipped": total_skipped}
-
+    return {"message": "Notification saved", "status": status, "sent_count": sent_count, "error": fcm_error if status not in ("sent","queued") else "", "note": "Set FCM_SERVER_KEY env var on Railway to enable push delivery" if not fcm_key else ""}
