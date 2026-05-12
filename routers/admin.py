@@ -1105,13 +1105,23 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
             else:
                 # Token-based send: used for specific user only
                 phone = (data.get("target_phone") or "").strip()
-                u = db.users.find_one({"phone": phone}, {"fcm_token": 1})
-                print(f"[FCM] specific: phone={phone} found={u is not None} has_token={bool(u and u.get('fcm_token'))}")
+                # ── Phone normalisation: try all common formats ──
+                # DB may store +91xxxxxxxxxx, users enter 10-digit numbers
+                digits = phone.lstrip("+").lstrip("91").lstrip("0") if len(phone.lstrip("+").lstrip("91")) >= 10 else phone
+                phone_variants = list({
+                    phone,
+                    f"+91{digits[-10:]}" if len(digits) >= 10 else phone,
+                    f"91{digits[-10:]}"  if len(digits) >= 10 else phone,
+                    digits[-10:]         if len(digits) >= 10 else phone,
+                })
+                u = db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1})
+                print(f"[FCM] specific: phone={phone} variants={phone_variants} found={u is not None} stored_phone={u.get('phone') if u else None} has_token={bool(u and u.get('fcm_token'))}")
                 tokens = [u["fcm_token"]] if (u and u.get("fcm_token")) else []
 
                 if not tokens:
                     status = "skipped_no_tokens"
-                    fcm_error = f"No FCM token for phone={phone}"
+                    matched_phone = u.get("phone","?") if u else "not_found"
+                    fcm_error = f"No FCM token for phone={phone} (matched_phone={matched_phone}, user_found={u is not None})"
                 else:
                     fail_count = 0
                     for tok in tokens:
