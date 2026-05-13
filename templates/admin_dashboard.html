@@ -304,8 +304,24 @@ tr:hover td{background:#f7faf8;}
           <input id="notif_phone" class="form-control" placeholder="e.g. 9876543210">
         </div>
         <div class="mb-3">
-          <label class="form-label">Image URL (optional)</label>
-          <input id="notif_image" class="form-control" placeholder="https://...">
+          <label class="form-label">Notification Image <span style="color:var(--muted);font-size:11px;">(optional)</span></label>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+            <button type="button" id="notif_img_mode_url" onclick="setImgMode('url')"
+              class="btn-o" style="font-size:12px;padding:4px 12px;background:var(--primary);color:white;">🔗 URL</button>
+            <button type="button" id="notif_img_mode_upload" onclick="setImgMode('upload')"
+              class="btn-o" style="font-size:12px;padding:4px 12px;">📤 Upload</button>
+          </div>
+          <div id="notif_img_url_box">
+            <input id="notif_image" class="form-control" placeholder="https://example.com/image.jpg">
+          </div>
+          <div id="notif_img_upload_box" style="display:none;">
+            <input type="file" id="notif_image_file" accept="image/*" class="form-control"
+              onchange="previewNotifImage(this)" style="font-size:13px;">
+            <div id="notif_img_preview" style="margin-top:8px;display:none;">
+              <img id="notif_img_preview_img" src="" style="max-height:120px;max-width:100%;border-radius:8px;border:1px solid var(--border);">
+              <div id="notif_img_upload_status" style="font-size:11px;color:var(--muted);margin-top:4px;"></div>
+            </div>
+          </div>
         </div>
         <div class="mb-3" id="notif_topic_preview_box" style="background:#f0f7f3;border-radius:8px;padding:10px 14px;font-size:12px;color:var(--primary);">
           📡 Will send to FCM topic: <strong id="notif_topic_label">all_users</strong>
@@ -1907,13 +1923,64 @@ async function processNotifQueue() {
   }
 }
 
+// ─── Image upload mode toggle ───
+let _notifImgMode = 'url'; // 'url' or 'upload'
+let _uploadedImageUrl = '';
+
+function setImgMode(mode) {
+  _notifImgMode = mode;
+  document.getElementById('notif_img_url_box').style.display    = mode === 'url'    ? '' : 'none';
+  document.getElementById('notif_img_upload_box').style.display = mode === 'upload' ? '' : 'none';
+  const btnUrl    = document.getElementById('notif_img_mode_url');
+  const btnUpload = document.getElementById('notif_img_mode_upload');
+  btnUrl.style.background    = mode === 'url'    ? 'var(--primary)' : '';
+  btnUrl.style.color         = mode === 'url'    ? 'white'          : '';
+  btnUpload.style.background = mode === 'upload' ? 'var(--primary)' : '';
+  btnUpload.style.color      = mode === 'upload' ? 'white'          : '';
+  if (mode === 'url') _uploadedImageUrl = '';
+}
+
+function previewNotifImage(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  const reader = new FileReader();
+  reader.onload = e => {
+    const prev = document.getElementById('notif_img_preview');
+    document.getElementById('notif_img_preview_img').src = e.target.result;
+    prev.style.display = '';
+    document.getElementById('notif_img_upload_status').innerText = '⏳ Image ready — will upload when you send';
+    _uploadedImageUrl = ''; // will be resolved on send
+  };
+  reader.readAsDataURL(file);
+}
+
+async function _uploadNotifImage() {
+  const fileInput = document.getElementById('notif_image_file');
+  if (!fileInput.files || !fileInput.files[0]) return '';
+  const statusEl = document.getElementById('notif_img_upload_status');
+  statusEl.innerText = '⬆️ Uploading image…';
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  try {
+    const r = await fetch('/admin/notifications/upload-image', {
+      method: 'POST', credentials: 'include', body: formData
+    });
+    if (!r.ok) { statusEl.innerText = '❌ Upload failed'; return ''; }
+    const d = await r.json();
+    statusEl.innerText = '✅ Uploaded';
+    return d.image_url || '';
+  } catch (e) {
+    statusEl.innerText = '❌ Upload error: ' + e.message;
+    return '';
+  }
+}
+
 async function sendNotification() {
   const title   = document.getElementById("notif_title").value.trim();
   const body    = document.getElementById("notif_body").value.trim();
   const target  = document.getElementById("notif_target").value;
   const phone   = document.getElementById("notif_phone").value.trim();
   const city    = document.getElementById("notif_city").value.trim();
-  const image   = document.getElementById("notif_image").value.trim();
   const msgEl   = document.getElementById("notif_msg");
   const btn     = document.getElementById("notif_send_btn");
 
@@ -1923,6 +1990,14 @@ async function sendNotification() {
 
   btn.disabled = true; btn.innerText = "Sending…";
   msgEl.style.color = "var(--muted)"; msgEl.innerText = "Sending notification…";
+
+  // Resolve image URL — either typed URL or uploaded file
+  let image = '';
+  if (_notifImgMode === 'url') {
+    image = document.getElementById("notif_image").value.trim();
+  } else {
+    image = await _uploadNotifImage();
+  }
 
   const data = { title, body, target, target_phone: target==="specific"?phone:"", target_city: target==="city"?city:"", image_url: image, use_topic: target !== "specific" };
   try {
@@ -1935,6 +2010,11 @@ async function sendNotification() {
       document.getElementById("notif_title").value="";
       document.getElementById("notif_body").value="";
       document.getElementById("notif_image").value="";
+      const fi = document.getElementById("notif_image_file");
+      if (fi) { fi.value=""; }
+      const prev = document.getElementById("notif_img_preview");
+      if (prev) prev.style.display="none";
+      _uploadedImageUrl = "";
       loadNotifications();
     }
   } catch { msgEl.style.color="var(--danger)"; msgEl.innerText="Server error"; }

@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File
 from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
@@ -205,8 +205,8 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
     # paid_status = "paid"/"unpaid"/"expired" (what the HTML template reads)
     if sub:
         fd = sub.get("from_date"); ed = sub.get("end_date")
-        sub_from = fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or "")[:10]
-        sub_to   = ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or "")[:10]
+        sub_from = fd.strftime("%d %b %Y, %I:%M %p") if isinstance(fd, datetime) else str(fd or "")[:10]
+        sub_to   = ed.strftime("%d %b %Y, %I:%M %p") if isinstance(ed, datetime) else str(ed or "")[:10]
         sub_status = sub.get("status", "pending")
         if isinstance(ed, datetime) and ed < now:
             sub_status = "expired"
@@ -273,8 +273,8 @@ def _fmt_store(s):
     sub_to   = ""
     if sub:
         fd = sub.get("from_date"); ed = sub.get("end_date")
-        sub_from = fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or "")
-        sub_to   = ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or "")
+        sub_from = fd.strftime("%d %b %Y, %I:%M %p") if isinstance(fd, datetime) else str(fd or "")
+        sub_to   = ed.strftime("%d %b %Y, %I:%M %p") if isinstance(ed, datetime) else str(ed or "")
     return {
         "_id": sid, "store_name": s.get("store_name"), "category": s.get("category"),
         "city": s.get("city"), "area": s.get("area"), "address": s.get("address"),
@@ -504,7 +504,7 @@ def list_users(a=Depends(get_current_admin)):
             "redemption_count": db.redemptions.count_documents({"user_id": uid}) if "redemptions" in cols else 0,
             "withdraw_count": db.withdraw_requests.count_documents({"user_id": uid}) if "withdraw_requests" in cols else 0,
             "pending_withdraw": db.withdraw_requests.count_documents({"user_id": uid, "status": "pending"}) > 0 if "withdraw_requests" in cols else False,
-            "registered_on": u["_id"].generation_time.strftime("%d %b %Y") if hasattr(u["_id"],"generation_time") else ""
+            "registered_on": u["_id"].generation_time.strftime("%d %b %Y, %I:%M %p") if hasattr(u["_id"],"generation_time") else ""
         })
     return result
 
@@ -588,8 +588,8 @@ def list_subscriptions(a=Depends(get_current_admin)):
             "total":          s.get("total", 0),
             "gst":            s.get("gst", 0),
             "status":         s.get("status"),
-            "from_date":      fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
-            "end_date":       ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
+            "from_date":      fd.strftime("%d %b %Y, %I:%M %p") if isinstance(fd, datetime) else str(fd or ""),
+            "end_date":       ed.strftime("%d %b %Y, %I:%M %p") if isinstance(ed, datetime) else str(ed or ""),
             "created_at":     (s["created_at"] + __import__("datetime").timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if s.get("created_at") else "",
         })
     return result
@@ -613,8 +613,8 @@ def list_merchant_transactions(a=Depends(get_current_admin)):
             "gst":           inv.get("gst", 0),
             "total":         inv.get("total", 0),
             "razorpay_payment_id": inv.get("razorpay_payment_id", ""),
-            "from_date":     fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
-            "end_date":      ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
+            "from_date":     fd.strftime("%d %b %Y, %I:%M %p") if isinstance(fd, datetime) else str(fd or ""),
+            "end_date":      ed.strftime("%d %b %Y, %I:%M %p") if isinstance(ed, datetime) else str(ed or ""),
             "created_at":    (inv["created_at"] + timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if inv.get("created_at") else "",
         })
     return result
@@ -670,7 +670,7 @@ def list_discounts(a=Depends(get_current_admin)):
             "used_count":  d.get("used_count",0),
             "active":      d.get("active",True),
             "expiry_date": d["expiry_date"].strftime("%Y-%m-%d") if d.get("expiry_date") else None,
-            "created_at":  d["created_at"].strftime("%d %b %Y") if d.get("created_at") else "",
+            "created_at":  d["created_at"].strftime("%d %b %Y, %I:%M %p") if d.get("created_at") else "",
         })
     return result
 
@@ -988,6 +988,42 @@ def process_notification_queue(a=Depends(get_current_admin)):
             failed += 1
     return {"processed": processed, "failed": failed, "skipped": skipped, "total": len(queued)}
 
+
+@router.post("/notifications/upload-image")
+async def upload_notification_image(file: UploadFile = File(...), a=Depends(get_current_admin)):
+    """Upload an image for use in push notifications. Returns a publicly accessible URL."""
+    import os, base64, uuid as _uuid
+    ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+    if file.content_type not in ALLOWED:
+        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use JPEG/PNG/GIF/WebP.")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Image too large. Max 5 MB.")
+    ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else "jpg"
+    # Store as base64 in notifications_images collection and return a /admin/notif-image/{id} URL
+    doc = {
+        "filename": f"{_uuid.uuid4().hex}.{ext}",
+        "content_type": file.content_type,
+        "data": base64.b64encode(data).decode(),
+        "created_at": datetime.utcnow(),
+    }
+    result = db.notification_images.insert_one(doc)
+    image_url = f"/admin/notif-image/{result.inserted_id}"
+    return {"image_url": image_url, "message": "Image uploaded successfully"}
+
+@router.get("/notif-image/{image_id}")
+def get_notification_image(image_id: str):
+    """Serve a notification image by its DB id."""
+    import base64
+    from fastapi.responses import Response
+    try:
+        doc = db.notification_images.find_one({"_id": ObjectId(image_id)})
+    except Exception:
+        raise HTTPException(404, "Image not found")
+    if not doc:
+        raise HTTPException(404, "Image not found")
+    return Response(content=base64.b64decode(doc["data"]), media_type=doc.get("content_type", "image/jpeg"))
+
 @router.post("/notifications/send")
 def send_notification(data: dict, a=Depends(get_current_admin)):
     import json as _json, time as _time, urllib.request as _ureq, base64 as _b64
@@ -1001,7 +1037,7 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
     if not title or not body:
         raise HTTPException(400, "title and body are required")
 
-    sent_at   = datetime.utcnow().strftime("%d %b %Y %H:%M")
+    sent_at   = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d %b %Y, %I:%M %p")
     sent_count = 0
     fcm_error  = ""
     status     = "queued"
@@ -1111,20 +1147,25 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 # Token-based send: used for specific user only
                 phone = (data.get("target_phone") or "").strip()
                 # ── Phone normalisation: try all common formats ──
-                # DB may store +91xxxxxxxxxx, users enter 10-digit numbers
-                digits = phone.lstrip("+").lstrip("91").lstrip("0") if len(phone.lstrip("+").lstrip("91")) >= 10 else phone
-                phone_variants = list({
-                    phone,
-                    f"+91{digits[-10:]}" if len(digits) >= 10 else phone,
-                    f"91{digits[-10:]}"  if len(digits) >= 10 else phone,
-                    digits[-10:]         if len(digits) >= 10 else phone,
-                })
+                # Uses explicit prefix stripping (NOT lstrip which is greedy character-set)
+                def _norm(raw: str):
+                    raw = raw.strip()
+                    d = raw
+                    if d.startswith("+"):
+                        d = d[1:]
+                    if d.startswith("91") and len(d) == 12:
+                        d = d[2:]
+                    elif d.startswith("0") and len(d) == 11:
+                        d = d[1:]
+                    last10 = d[-10:] if len(d) >= 10 else d
+                    return list({raw, f"+91{last10}", f"91{last10}", last10, f"0{last10}"})
+                phone_variants = _norm(phone)
                 u = db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1})
                 print(f"[FCM] specific: phone={phone} variants={phone_variants} found={u is not None} stored_phone={u.get('phone') if u else None} has_token={bool(u and u.get('fcm_token'))}")
                 tokens = [u["fcm_token"]] if (u and u.get("fcm_token")) else []
 
                 if not tokens:
-                    status = "skipped_no_tokens"
+                    status = "failed"
                     matched_phone = u.get("phone","?") if u else "not_found"
                     fcm_error = f"No FCM token for phone={phone} (matched_phone={matched_phone}, user_found={u is not None})"
                 else:
