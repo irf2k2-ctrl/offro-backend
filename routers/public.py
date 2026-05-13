@@ -421,13 +421,10 @@ def get_about_public():
 @router.get("/promo-sliders")
 def get_promo_sliders_public():
     """Returns active promo slider banners for the app home screen."""
-    # FIX 4: Only return sliders that are active AND have a valid image
     docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
-        if not img:
-            continue  # FIX 4: skip sliders with no image
         result.append({
             "id": str(d["_id"]),
             "title": d.get("title", ""),
@@ -435,7 +432,6 @@ def get_promo_sliders_public():
             "image": img,
             "image_url": img,
             "link_url": d.get("link_url", ""),
-            "store_id": d.get("store_id", ""),   # FIX 8: expose store_id for banner tap
             "bg_color": d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
         })
@@ -471,61 +467,3 @@ def get_gift_vouchers_public():
             except: pass
         result.append({"id": vid, **d})
     return result
-
-
-# ── Alias routes (short form for app compatibility) ──
-@router.get("/sliders")
-def get_sliders_alias():
-    """Alias for /promo-sliders — returns active banners."""
-    return get_promo_sliders_public()
-
-@router.get("/gift-vouchers")
-def get_gift_vouchers_alias():
-    """Alias for /gift-vouchers-public — returns active vouchers."""
-    return get_gift_vouchers_public()
-
-
-# =================== FCM TOKEN REGISTRATION (FIX 7) ===================
-@router.post("/register-fcm-token")
-def register_fcm_token(body: dict, request: _Req):
-    """Register or update FCM push token for a user device."""
-    import datetime as _dt
-    token   = (body.get("token", "") or "").strip()
-    phone   = (body.get("phone", "") or "").strip()
-    user_id = (body.get("user_id", "") or "").strip()
-
-    print(f"[FCM-REG] token={token[:30]}... phone={phone!r} user_id={user_id!r}")
-
-    if not token:
-        raise HTTPException(400, "Token required")
-
-    # Build query — prefer user_id (most reliable), fallback to phone with normalization
-    query = {}
-    if user_id:
-        try:
-            from bson import ObjectId as OId2
-            query = {"_id": OId2(user_id)}
-        except Exception as e:
-            print(f"[FCM-REG] invalid user_id={user_id!r}: {e}")
-
-    if not query and phone:
-        # Normalize phone — try all variants in case DB stores different format
-        p = phone.strip().replace(" ","").replace("-","")
-        digits = p.lstrip("+0")
-        last10 = digits[-10:] if len(digits) >= 10 else digits
-        phone_variants = list({p, last10, "+91"+last10, "91"+last10, "0"+last10})
-        print(f"[FCM-REG] phone variants: {phone_variants}")
-        query = {"phone": {"$in": phone_variants}}
-
-    if not query:
-        raise HTTPException(400, "user_id or phone required")
-
-    result = db.users.update_one(
-        query,
-        {"$set": {"fcm_token": token, "fcm_updated": _dt.datetime.utcnow().isoformat()}}
-    )
-    print(f"[FCM-REG] matched={result.matched_count} modified={result.modified_count}")
-    if result.matched_count == 0:
-        print(f"[FCM-REG] ⚠️ No user found with query={query}")
-        return {"ok": False, "error": "user not found"}
-    return {"ok": True, "matched": result.matched_count, "modified": result.modified_count}
