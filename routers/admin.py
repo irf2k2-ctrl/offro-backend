@@ -250,6 +250,10 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "about":          s.get("about", ""),
         "logo":           s.get("logo") or "",
         "image2":         s.get("store_image2") or s.get("image2") or "",
+        "rating":         round(float(s.get("rating") or 0), 1),
+        "user_rating":    round(float(s.get("user_rating") or 0), 1),
+        "rating_count":   int(s.get("rating_count") or 0),
+        "admin_rating":   round(float(s.get("admin_rating") or 0), 1) if s.get("admin_rating") else None,
     }
 
 def _fmt_store(s):
@@ -586,7 +590,7 @@ def list_subscriptions(a=Depends(get_current_admin)):
             "status":         s.get("status"),
             "from_date":      fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
             "end_date":       ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
-            "created_at":     s["created_at"].strftime("%d %b %Y") if s.get("created_at") else "",
+            "created_at":     (s["created_at"] + __import__("datetime").timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if s.get("created_at") else "",
         })
     return result
 
@@ -611,7 +615,7 @@ def list_merchant_transactions(a=Depends(get_current_admin)):
             "razorpay_payment_id": inv.get("razorpay_payment_id", ""),
             "from_date":     fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
             "end_date":      ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
-            "created_at":    (inv["created_at"] + timedelta(hours=5,minutes=30)).strftime("%d %b %Y %H:%M IST") if inv.get("created_at") else "",
+            "created_at":    (inv["created_at"] + timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if inv.get("created_at") else "",
         })
     return result
 
