@@ -53,15 +53,32 @@ def login_user(data: dict):
 
     # Normalise: try +91XXXXXXXXXX, 91XXXXXXXXXX, XXXXXXXXXX, 0XXXXXXXXXX
     def _variants(raw):
-        d = raw
+        raw = str(raw).strip()
+
+        d = raw.replace(" ", "").replace("-", "")
+
+        # Remove leading +
         if d.startswith("+"):
             d = d[1:]
-        if len(d) == 12 and d.startswith("91"):
+
+        # Remove India code if present
+        if d.startswith("91") and len(d) >= 12:
             d = d[2:]
-        elif len(d) == 11 and d.startswith("0"):
+
+        # Remove leading zero
+        if d.startswith("0") and len(d) >= 11:
             d = d[1:]
-        last10 = d[-10:] if len(d) >= 10 else d
-        return list({raw, f"+91{last10}", f"91{last10}", last10, f"0{last10}"})
+
+        # Final normalized 10-digit number
+        last10 = d[-10:]
+
+        return [
+            last10,
+            f"+91{last10}",
+            f"91{last10}",
+            f"0{last10}",
+            raw,
+        ]
 
     user = db.users.find_one({"phone": {"$in": _variants(phone)}})
     if not user:
