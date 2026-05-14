@@ -205,8 +205,8 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
     # paid_status = "paid"/"unpaid"/"expired" (what the HTML template reads)
     if sub:
         fd = sub.get("from_date"); ed = sub.get("end_date")
-        sub_from = fd.strftime("%d %b %Y, %I:%M %p") if isinstance(fd, datetime) else str(fd or "")[:10]
-        sub_to   = ed.strftime("%d %b %Y, %I:%M %p") if isinstance(ed, datetime) else str(ed or "")[:10]
+        sub_from = fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or "")[:10]
+        sub_to   = ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or "")[:10]
         sub_status = sub.get("status", "pending")
         if isinstance(ed, datetime) and ed < now:
             sub_status = "expired"
@@ -273,8 +273,8 @@ def _fmt_store(s):
     sub_to   = ""
     if sub:
         fd = sub.get("from_date"); ed = sub.get("end_date")
-        sub_from = fd.strftime("%d %b %Y, %I:%M %p") if isinstance(fd, datetime) else str(fd or "")
-        sub_to   = ed.strftime("%d %b %Y, %I:%M %p") if isinstance(ed, datetime) else str(ed or "")
+        sub_from = fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or "")
+        sub_to   = ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or "")
     return {
         "_id": sid, "store_name": s.get("store_name"), "category": s.get("category"),
         "city": s.get("city"), "area": s.get("area"), "address": s.get("address"),
@@ -504,7 +504,7 @@ def list_users(a=Depends(get_current_admin)):
             "redemption_count": db.redemptions.count_documents({"user_id": uid}) if "redemptions" in cols else 0,
             "withdraw_count": db.withdraw_requests.count_documents({"user_id": uid}) if "withdraw_requests" in cols else 0,
             "pending_withdraw": db.withdraw_requests.count_documents({"user_id": uid, "status": "pending"}) > 0 if "withdraw_requests" in cols else False,
-            "registered_on": u["_id"].generation_time.strftime("%d %b %Y, %I:%M %p") if hasattr(u["_id"],"generation_time") else ""
+            "registered_on": u["_id"].generation_time.strftime("%d %b %Y") if hasattr(u["_id"],"generation_time") else ""
         })
     return result
 
@@ -588,8 +588,8 @@ def list_subscriptions(a=Depends(get_current_admin)):
             "total":          s.get("total", 0),
             "gst":            s.get("gst", 0),
             "status":         s.get("status"),
-            "from_date":      fd.strftime("%d %b %Y, %I:%M %p") if isinstance(fd, datetime) else str(fd or ""),
-            "end_date":       ed.strftime("%d %b %Y, %I:%M %p") if isinstance(ed, datetime) else str(ed or ""),
+            "from_date":      fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
+            "end_date":       ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
             "created_at":     (s["created_at"] + __import__("datetime").timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if s.get("created_at") else "",
         })
     return result
@@ -613,8 +613,8 @@ def list_merchant_transactions(a=Depends(get_current_admin)):
             "gst":           inv.get("gst", 0),
             "total":         inv.get("total", 0),
             "razorpay_payment_id": inv.get("razorpay_payment_id", ""),
-            "from_date":     fd.strftime("%d %b %Y, %I:%M %p") if isinstance(fd, datetime) else str(fd or ""),
-            "end_date":      ed.strftime("%d %b %Y, %I:%M %p") if isinstance(ed, datetime) else str(ed or ""),
+            "from_date":     fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
+            "end_date":      ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
             "created_at":    (inv["created_at"] + timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if inv.get("created_at") else "",
         })
     return result
@@ -670,7 +670,7 @@ def list_discounts(a=Depends(get_current_admin)):
             "used_count":  d.get("used_count",0),
             "active":      d.get("active",True),
             "expiry_date": d["expiry_date"].strftime("%Y-%m-%d") if d.get("expiry_date") else None,
-            "created_at":  d["created_at"].strftime("%d %b %Y, %I:%M %p") if d.get("created_at") else "",
+            "created_at":  d["created_at"].strftime("%d %b %Y") if d.get("created_at") else "",
         })
     return result
 
@@ -1042,13 +1042,15 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
     def _build_fcm_message(*, token=None, topic=None):
         """Build FCM v1 message body for a token or topic."""
         dest = {"token": token} if token else {"topic": topic}
+        # FCM only accepts https:// image URLs — strip base64 data URLs silently
+        _fcm_image = image_url if (image_url and image_url.startswith("https://")) else ""
         notif_android = {
             "channel_id": "offro_high_importance",
             "click_action": "FLUTTER_NOTIFICATION_CLICK",
             "sound": "default",
         }
-        if image_url:
-            notif_android["image"] = image_url
+        if _fcm_image:
+            notif_android["image"] = _fcm_image
         return {
             "message": {
                 **dest,
@@ -1062,7 +1064,7 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                     "type": "promo",
                     "title": title,
                     "body": body,
-                    "image_url": image_url,
+                    "image_url": image_url,  # full value in data payload (app reads it)
                 },
             }
         }
@@ -1112,14 +1114,18 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 phone = (data.get("target_phone") or "").strip()
                 # ── Phone normalisation: try all common formats ──
                 # DB may store +91xxxxxxxxxx, users enter 10-digit numbers
-                # Safe prefix stripping (NOT lstrip which strips chars greedily)
-                _d = phone
-                if _d.startswith("+"): _d = _d[1:]
-                if len(_d) == 12 and _d.startswith("91"): _d = _d[2:]
-                elif len(_d) == 11 and _d.startswith("0"): _d = _d[1:]
-                _last10 = _d[-10:] if len(_d) >= 10 else _d
+                # Safe prefix strip — lstrip("91") is buggy (strips chars not prefix)
+                _pd = phone.strip().replace(" ", "")
+                if _pd.startswith("+"): _pd = _pd[1:]
+                if len(_pd) == 12 and _pd.startswith("91"): _pd = _pd[2:]
+                elif len(_pd) == 11 and _pd.startswith("0"): _pd = _pd[1:]
+                _last10 = _pd[-10:] if len(_pd) >= 10 else _pd
                 phone_variants = list({
-                    phone, f"+91{_last10}", f"91{_last10}", _last10, f"0{_last10}"
+                    phone.strip(),
+                    f"+91{_last10}",
+                    f"91{_last10}",
+                    _last10,
+                    f"0{_last10}",
                 })
                 u = db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1})
                 print(f"[FCM] specific: phone={phone} variants={phone_variants} found={u is not None} stored_phone={u.get('phone') if u else None} has_token={bool(u and u.get('fcm_token'))}")

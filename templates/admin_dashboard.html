@@ -304,21 +304,24 @@ tr:hover td{background:#f7faf8;}
           <input id="notif_phone" class="form-control" placeholder="e.g. 9876543210">
         </div>
         <div class="mb-3">
-          <label class="form-label">Notification Image <small style="color:var(--muted)">(optional)</small></label>
-          <div style="display:flex;gap:6px;margin-bottom:8px;">
-            <button type="button" onclick="niMode('url')" id="ni_btn_url"
-              style="padding:4px 14px;border-radius:20px;border:1px solid var(--primary);background:var(--primary);color:#fff;font-size:12px;cursor:pointer;">🔗 URL</button>
-            <button type="button" onclick="niMode('file')" id="ni_btn_file"
-              style="padding:4px 14px;border-radius:20px;border:1px solid var(--border);background:#fff;color:var(--primary);font-size:12px;cursor:pointer;">📤 Upload</button>
+          <label class="form-label">Image <small style="color:var(--muted)">(optional — https:// URL only for push)</small></label>
+          <div style="display:flex;gap:6px;margin-bottom:6px;">
+            <button type="button" id="ni_btn_url"
+              onclick="niMode('url')"
+              style="padding:3px 14px;border-radius:20px;border:1px solid var(--primary);background:var(--primary);color:#fff;font-size:12px;cursor:pointer;">🔗 URL</button>
+            <button type="button" id="ni_btn_file"
+              onclick="niMode('file')"
+              style="padding:3px 14px;border-radius:20px;border:1px solid var(--border);background:#fff;color:var(--primary);font-size:12px;cursor:pointer;">📤 Upload</button>
           </div>
           <div id="ni_url_box">
             <input id="notif_image" class="form-control" placeholder="https://example.com/image.jpg">
           </div>
           <div id="ni_file_box" style="display:none;">
-            <input type="file" id="notif_img_file" accept="image/*" class="form-control" onchange="niPreview(this)">
-            <div id="ni_preview" style="display:none;margin-top:8px;">
-              <img id="ni_preview_img" src="" style="max-height:100px;border-radius:8px;border:1px solid var(--border);">
-              <span id="ni_upload_status" style="display:block;font-size:11px;color:var(--muted);margin-top:4px;"></span>
+            <input type="file" id="ni_file_input" accept="image/jpeg,image/png,image/webp" class="form-control"
+              onchange="niPreview(this)">
+            <div id="ni_preview_wrap" style="display:none;margin-top:6px;">
+              <img id="ni_preview_img" src="" style="max-height:80px;border-radius:8px;border:1px solid var(--border);">
+              <span id="ni_status" style="display:block;font-size:11px;color:var(--muted);margin-top:3px;"></span>
             </div>
           </div>
         </div>
@@ -1922,43 +1925,52 @@ async function processNotifQueue() {
   }
 }
 
-// ── Notification image mode helpers ──────────────────────────────────
+// ── Notification image helpers ────────────────────────────────────
 let _niMode = 'url';
 function niMode(m) {
   _niMode = m;
+  const ub = document.getElementById('ni_btn_url');
+  const fb = document.getElementById('ni_btn_file');
   document.getElementById('ni_url_box').style.display  = m === 'url'  ? '' : 'none';
   document.getElementById('ni_file_box').style.display = m === 'file' ? '' : 'none';
-  const bu = document.getElementById('ni_btn_url'), bf = document.getElementById('ni_btn_file');
-  bu.style.background = m==='url'  ? 'var(--primary)' : '#fff';
-  bu.style.color      = m==='url'  ? '#fff' : 'var(--primary)';
-  bf.style.background = m==='file' ? 'var(--primary)' : '#fff';
-  bf.style.color      = m==='file' ? '#fff' : 'var(--primary)';
+  ub.style.background = m==='url'  ? 'var(--primary)' : '#fff';
+  ub.style.color      = m==='url'  ? '#fff' : 'var(--primary)';
+  fb.style.background = m==='file' ? 'var(--primary)' : '#fff';
+  fb.style.color      = m==='file' ? '#fff' : 'var(--primary)';
 }
 function niPreview(input) {
   if (!input.files || !input.files[0]) return;
   const reader = new FileReader();
   reader.onload = e => {
     document.getElementById('ni_preview_img').src = e.target.result;
-    document.getElementById('ni_preview').style.display = '';
-    document.getElementById('ni_upload_status').innerText = '✅ Ready to upload';
+    document.getElementById('ni_preview_wrap').style.display = '';
+    document.getElementById('ni_status').innerText = '📎 Ready — will upload when you send';
   };
   reader.readAsDataURL(input.files[0]);
 }
 async function _niUpload() {
-  const fi = document.getElementById('notif_img_file');
-  if (!fi.files || !fi.files[0]) return '';
-  const st = document.getElementById('ni_upload_status');
-  st.innerText = '⬆️ Uploading…';
+  const fi = document.getElementById('ni_file_input');
+  if (!fi || !fi.files || !fi.files[0]) return '';
+  const st = document.getElementById('ni_status');
+  if (st) st.innerText = '⬆️ Uploading…';
   const fd = new FormData();
   fd.append('file', fi.files[0]);
   try {
-    // Reuse the existing /admin/upload-image endpoint (no auth needed, already in server.py)
+    // Uses the existing /admin/upload-image endpoint already in server.py — no auth required
     const r = await fetch('/admin/upload-image', { method: 'POST', body: fd });
     const d = await r.json();
-    if (!r.ok || d.error) { st.innerText = '❌ ' + (d.error || 'Upload failed'); return ''; }
-    st.innerText = '✅ Uploaded!';
-    return d.url || '';   // server returns {url: "data:image/jpeg;base64,..."} 
-  } catch(e) { st.innerText = '❌ ' + e.message; return ''; }
+    if (!r.ok || d.error) {
+      if (st) st.innerText = '❌ Upload failed: ' + (d.error || r.status);
+      return '';
+    }
+    if (st) st.innerText = '✅ Uploaded';
+    // NOTE: /admin/upload-image returns a base64 data URL — FCM won't display it as image
+    // but the notification payload data.image_url will carry it for in-app use
+    return d.url || '';
+  } catch(e) {
+    if (st) st.innerText = '❌ ' + e.message;
+    return '';
+  }
 }
 
 async function sendNotification() {
@@ -1974,34 +1986,54 @@ async function sendNotification() {
   if (target === "specific" && !phone) { msgEl.style.color="var(--danger)"; msgEl.innerText="Phone number required"; return; }
   if (target === "city" && !city) { msgEl.style.color="var(--danger)"; msgEl.innerText="City name required"; return; }
 
-  btn.disabled = true; btn.innerText = "Sending…";
-  msgEl.style.color = "var(--muted)"; msgEl.innerText = "Sending notification…";
+  btn.disabled = true;
+  msgEl.style.color = "var(--muted)"; msgEl.innerText = "Sending…";
 
-  // Resolve image URL (typed URL or uploaded file)
-  let _notifImg = '';
+  // Resolve image: upload file if needed, else use typed URL
+  let imageUrl = '';
   if (_niMode === 'file') {
-    _notifImg = await _niUpload();
+    imageUrl = await _niUpload();
   } else {
-    _notifImg = document.getElementById("notif_image").value.trim();
+    imageUrl = document.getElementById("notif_image").value.trim();
   }
 
-  const data = { title, body, target, target_phone: target==="specific"?phone:"", target_city: target==="city"?city:"", image_url: _notifImg, use_topic: target !== "specific" };
+  const data = {
+    title, body, target,
+    target_phone: target === "specific" ? phone : "",
+    target_city:  target === "city"     ? city  : "",
+    image_url: imageUrl,
+    use_topic: target !== "specific"
+  };
+
   try {
-    let r = await fetch("/admin/notifications/send", {method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
+    let r = await fetch("/admin/notifications/send", {
+      method: "POST", credentials: "include",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(data)
+    });
     let d = await r.json();
-    if (!r.ok) { msgEl.style.color="var(--danger)"; msgEl.innerText = d.detail||"Error sending"; }
-    else {
-      msgEl.style.color="var(--primary)";
-      msgEl.innerText = `✅ ${d.message||"Notification sent!"}`;
-      document.getElementById("notif_title").value="";
-      document.getElementById("notif_body").value="";
-      document.getElementById("notif_image").value="";
-      const _nif = document.getElementById("notif_img_file");
-      if (_nif) { _nif.value=""; document.getElementById("ni_preview").style.display="none"; }
+    if (!r.ok) {
+      msgEl.style.color="var(--danger)";
+      msgEl.innerText = d.detail || "Error: " + r.status;
+    } else {
+      msgEl.style.color = "var(--primary)";
+      msgEl.innerText = "✅ " + (d.message || "Notification sent!");
+      // Reset form
+      document.getElementById("notif_title").value = "";
+      document.getElementById("notif_body").value  = "";
+      if (document.getElementById("notif_image")) document.getElementById("notif_image").value = "";
+      const nif = document.getElementById("ni_file_input");
+      if (nif) { nif.value = ""; }
+      if (document.getElementById("ni_preview_wrap")) document.getElementById("ni_preview_wrap").style.display = "none";
       loadNotifications();
     }
-  } catch { msgEl.style.color="var(--danger)"; msgEl.innerText="Server error"; }
-  finally { btn.disabled=false; btn.innerText="📤 Send Notification"; btn.innerHTML='<i class="fas fa-paper-plane me-1"></i> Send Notification'; }
+  } catch(e) {
+    msgEl.style.color = "var(--danger)";
+    msgEl.innerText = "Server error: " + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-paper-plane me-1"></i> Send Notification';
+  }
 }
 
 
