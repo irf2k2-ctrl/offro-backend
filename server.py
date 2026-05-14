@@ -130,64 +130,65 @@ def get_home_data(
     }
 
 
-# ── Admin image upload — with size validation + compression ──
-@app.post("/admin/upload-image")
-async def upload_image(file: UploadFile = File(...)):
-    """
-    Upload image for admin use (gift cards, promo banners).
-    Enforces 2MB limit. Compresses and resizes to max 800px width.
-    Returns a hosted URL (Cloudinary) if configured, else compressed base64.
-    """
-    MAX_SIZE = 2 * 1024 * 1024  # 2MB
-
-    try:
-        contents = await file.read()
-
-        # Size validation
-        if len(contents) > MAX_SIZE:
-            size_mb = len(contents) / 1024 / 1024
-            return JSONResponse(
-                {"error": f"Image too large ({size_mb:.1f}MB). Max 2MB allowed."},
-                status_code=413
-            )
-
-        mime = file.content_type or "image/jpeg"
-
-        # Compress + resize with Pillow
-        try:
-            from PIL import Image as PILImage
-            img = PILImage.open(io.BytesIO(contents))
-
-            # Convert RGBA → RGB for JPEG
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-
-            # Resize if wider than 800px
-            if img.width > 800:
-                ratio  = 800 / img.width
-                new_h  = int(img.height * ratio)
-                img    = img.resize((800, new_h), PILImage.LANCZOS)
-
-            # Save as JPEG with 82% quality (good balance)
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=82, optimize=True)
-            contents = buf.getvalue()
-            mime     = "image/jpeg"
-
-        except ImportError:
-            pass  # Pillow not available — store as-is
-        except Exception:
-            pass  # Non-image file — store as-is
-
-        b64      = base64.b64encode(contents).decode()
-        data_url = f"data:{mime};base64,{b64}"
-        return JSONResponse({"url": data_url, "size_kb": round(len(contents)/1024, 1)})
-
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+# ── Admin image upload is handled by routers/admin.py (/admin/upload-image)
+# which returns a proper public https:// URL compatible with FCM push notifications.
+# The old base64 data URL approach is removed — FCM does not support data: URLs.
 
 
 # ── DB indexes — created once on startup ──
+@app.post("/register-fcm-token")
+async def register_fcm_token(request: Request):
+    """
+    Public endpoint — saves FCM device token for push notifications.
+    Called by Flutter after FCM init. No auth required (token lookup by phone/user_id).
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
+
+    fcm_token = (data.get("token") or data.get("fcm_token") or "").strip()
+    phone     = (data.get("phone") or "").strip()
+    user_id   = (data.get("user_id") or "").strip()
+
+    if not fcm_token:
+        return JSONResponse({"ok": False, "error": "no token"}, status_code=400)
+
+    from routers.users import _phone_variants
+    from bson import ObjectId
+    import datetime
+
+    user = None
+    # Try user_id first
+    if user_id:
+        try:
+            user = db.users.find_one({"_id": ObjectId(user_id)})
+        except Exception:
+            pass
+    # Fallback to phone variants
+    if not user and phone:
+        variants = _phone_variants(phone)
+        user = db.users.find_one({"phone": {"$in": variants}})
+
+    if user:
+        db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"fcm_token": fcm_token, "fcm_updated_at": datetime.datetime.utcnow()}}
+        )
+        print(f"[FCM] ✅ Token saved for user {user.get('phone','?')} id={user['_id']}")
+        return JSONResponse({"ok": True})
+    else:
+        # Save with phone key only — user may not be registered yet
+        if phone:
+            db.fcm_pending.update_one(
+                {"phone": phone},
+                {"$set": {"fcm_token": fcm_token, "updated_at": datetime.datetime.utcnow()}},
+                upsert=True,
+            )
+        print(f"[FCM] ⚠️ User not found for phone={phone} user_id={user_id} — token pending")
+        return JSONResponse({"ok": True, "note": "user not found, token queued"})
+
+
 @app.on_event("startup")
 def startup():
     admin.seed_admin()

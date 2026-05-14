@@ -1183,7 +1183,17 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 })
                 u = db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1})
                 print(f"[FCM] specific: phone={phone} variants={phone_variants} found={u is not None} stored_phone={u.get('phone') if u else None} has_token={bool(u and u.get('fcm_token'))}")
-                tokens = [u["fcm_token"]] if (u and u.get("fcm_token")) else []
+                
+                # Fallback: check fcm_pending if user found but token missing, or user not found
+                if not (u and u.get("fcm_token")):
+                    pending = db.fcm_pending.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1})
+                    if pending and pending.get("fcm_token"):
+                        print(f"[FCM] Found token in fcm_pending for phone={phone}")
+                        tokens = [pending["fcm_token"]]
+                    else:
+                        tokens = []
+                else:
+                    tokens = [u["fcm_token"]]
 
                 if not tokens:
                     status = "skipped_no_tokens"
