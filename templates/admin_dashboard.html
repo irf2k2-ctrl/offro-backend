@@ -106,7 +106,7 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
   <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <a href="#" onclick="showSection('voucher_zone',this)"><i class="fas fa-id-card fa-fw"></i> Voucher Zone</a>
-  <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Promo Sliders</a>
+  <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
@@ -252,7 +252,7 @@ tr:hover td{background:#f7faf8;}
 <div id="section-promo_sliders" class="section">
   <div class="section-header">
     <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🖼️ Promo Sliders</div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🖼️ Banners</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Banner images shown as a slideshow on the app home screen</div>
     </div>
     <button class="btn-p" onclick="openSliderModal()"><i class="fas fa-plus me-1"></i> Add Banner</button>
@@ -1734,6 +1734,46 @@ window.addEventListener("DOMContentLoaded", function() {
     sliderModalInst = new bootstrap.Modal(document.getElementById("sliderModal"));
 });
 
+// ── Banner image upload ──
+async function sliderUploadFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("sl_upload_status");
+  const previewWrap = document.getElementById("sl_preview_wrap");
+  const previewImg  = document.getElementById("sl_preview_img");
+  const labelEl     = document.getElementById("sl_upload_label");
+
+  statusEl.style.color = "var(--muted)";
+  statusEl.innerText = "⏳ Uploading...";
+
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/admin/upload-image", {
+      method: "POST",
+      credentials: "include",
+      body: fd
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      statusEl.style.color = "var(--danger)";
+      statusEl.innerText = "✗ " + (data.error || "Upload failed");
+      return;
+    }
+    // Store URL in hidden field
+    document.getElementById("sl_image_url").value = data.url;
+    // Show preview
+    previewImg.src = data.url;
+    previewWrap.style.display = "block";
+    labelEl.style.display = "none";
+    statusEl.style.color = "var(--primary)";
+    statusEl.innerText = "✓ Image uploaded successfully";
+  } catch(e) {
+    statusEl.style.color = "var(--danger)";
+    statusEl.innerText = "✗ Upload error: " + e.message;
+  }
+}
+
 async function loadSliders() {
   try {
     let r = await fetch("/admin/promo-sliders", {credentials:"include"});
@@ -1765,6 +1805,12 @@ function openSliderModal() {
   document.getElementById("sl_order").value = "0";
   document.getElementById("sl_active").checked = true;
   document.getElementById("sl_msg").innerText = "";
+  // Reset upload UI
+  document.getElementById("sl_preview_wrap").style.display = "none";
+  document.getElementById("sl_preview_img").src = "";
+  document.getElementById("sl_upload_label").style.display = "";
+  document.getElementById("sl_upload_status").innerText = "";
+  document.getElementById("sl_file_input").value = "";
   sliderModalInst.show();
 }
 
@@ -1776,13 +1822,26 @@ function editSlider(s) {
   document.getElementById("sl_order").value = s.sort_order||0;
   document.getElementById("sl_active").checked = s.is_active!==false;
   document.getElementById("sl_msg").innerText = "";
+  document.getElementById("sl_file_input").value = "";
+  document.getElementById("sl_upload_status").innerText = "";
+  // If existing image, show preview
+  if (s.image_url) {
+    document.getElementById("sl_preview_img").src = s.image_url;
+    document.getElementById("sl_preview_wrap").style.display = "block";
+    document.getElementById("sl_upload_label").style.display = "none";
+    document.getElementById("sl_upload_status").innerText = "✓ Image loaded — upload new to replace";
+  } else {
+    document.getElementById("sl_preview_wrap").style.display = "none";
+    document.getElementById("sl_preview_img").src = "";
+    document.getElementById("sl_upload_label").style.display = "";
+  }
   sliderModalInst.show();
 }
 
 async function saveSlider() {
   const sid = document.getElementById("sl_id").value;
   const img = document.getElementById("sl_image_url").value.trim();
-  if (!img) { document.getElementById("sl_msg").innerText = "Image URL is required"; return; }
+  if (!img) { document.getElementById("sl_msg").innerText = "Please upload a banner image first"; return; }
   const data = {
     title:      document.getElementById("sl_title").value.trim(),
     image_url:  img,
@@ -2481,9 +2540,23 @@ async function saveStore() {
           <input id="sl_title" class="form-control" placeholder="e.g. Summer Sale">
         </div>
         <div class="mb-3">
-          <label class="form-label">Banner Image URL *</label>
-          <input id="sl_image_url" class="form-control" placeholder="https://...">
-          <small class="text-muted">Recommended: 1200×450px or 16:6 ratio</small>
+          <label class="form-label">Banner Image <span style="color:var(--danger)">*</span></label>
+          <!-- Hidden: stores the final image URL (uploaded or existing) -->
+          <input type="hidden" id="sl_image_url">
+          <!-- Upload button -->
+          <div id="sl_upload_area" style="border:2px dashed var(--border);border-radius:10px;padding:18px;text-align:center;cursor:pointer;background:#fafffe;transition:border-color .2s;"
+               onclick="document.getElementById('sl_file_input').click()">
+            <div id="sl_preview_wrap" style="display:none;margin-bottom:8px;">
+              <img id="sl_preview_img" src="" style="max-height:90px;max-width:100%;border-radius:7px;object-fit:cover;">
+            </div>
+            <div id="sl_upload_label">
+              <i class="fas fa-cloud-upload-alt" style="font-size:22px;color:var(--accent);"></i>
+              <div style="font-size:13px;color:var(--muted);margin-top:4px;">Click to upload banner image</div>
+            </div>
+            <input type="file" id="sl_file_input" accept="image/*" style="display:none" onchange="sliderUploadFile(this)">
+          </div>
+          <div id="sl_upload_status" style="font-size:12px;color:var(--muted);margin-top:4px;"></div>
+          <small class="text-muted">📐 Recommended size: <strong>1200 × 450 px</strong> &nbsp;|&nbsp; Ratio: 16:6 &nbsp;|&nbsp; Max 2 MB</small>
         </div>
         <div class="mb-3">
           <label class="form-label">Link / Action (optional)</label>
