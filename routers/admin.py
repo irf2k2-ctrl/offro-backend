@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import UploadFile, File, APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
@@ -930,6 +930,58 @@ def delete_promo_slider(sid: str, a=Depends(get_current_admin)):
 
 # ===================== NOTIFICATIONS =====================
 
+@router.post("/upload-image")
+async def upload_notification_image(file: UploadFile = File(...), a=Depends(get_current_admin)):
+    """Upload an image for use in notifications. Returns a public URL."""
+    import base64, mimetypes, time
+    try:
+        if not file.content_type or not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="Only image files are allowed")
+
+        contents = await file.read()
+        if len(contents) > 2 * 1024 * 1024:  # 2 MB max
+            raise HTTPException(status_code=400, detail="Image too large (max 2 MB)")
+
+        # Store in MongoDB GridFS-style as a document with base64 content
+        # And return a URL that serves it via a GET endpoint
+        ext = mimetypes.guess_extension(file.content_type) or ".jpg"
+        ext = ext.replace(".jpe", ".jpg")
+        img_id = str(int(time.time() * 1000))
+        doc = {
+            "_id": img_id,
+            "content_type": file.content_type,
+            "data": base64.b64encode(contents).decode(),
+            "filename": file.filename or f"notif_{img_id}{ext}",
+            "created": time.time(),
+        }
+        db.notification_images.replace_one({"_id": img_id}, doc, upsert=True)
+
+        # Return public serving URL
+        base_url = os.environ.get("BASE_URL", "https://offro-backend-production.up.railway.app")
+        url = f"{base_url}/admin/notification-image/{img_id}{ext}"
+        return {"url": url, "id": img_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[UPLOAD] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/notification-image/{img_id}")
+def serve_notification_image(img_id: str):
+    """Serve a previously uploaded notification image."""
+    from fastapi.responses import Response
+    # Strip extension from img_id
+    bare_id = img_id.split(".")[0]
+    doc = db.notification_images.find_one({"_id": bare_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Image not found")
+    import base64
+    data = base64.b64decode(doc["data"])
+    return Response(content=data, media_type=doc.get("content_type", "image/jpeg"),
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
 @router.get("/notifications")
 def list_notifications(a=Depends(get_current_admin)):
     docs = list(db.notifications.find().sort("_id", -1).limit(100))
@@ -1115,13 +1167,19 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 # ── Phone normalisation: try all common formats ──
                 # DB may store +91xxxxxxxxxx, users enter 10-digit numbers
                 # Safe phone normalisation (lstrip is buggy — strips chars not prefixes)
-                _pd = phone.strip().replace(" ", "").replace("-", "")
-                if _pd.startswith("+"): _pd = _pd[1:]
+                _pd = phone.strip().replace(" ", "").replace("-", "").replace("+", "")
+                # Normalise to bare 10-digit number
                 if len(_pd) == 12 and _pd.startswith("91"): _pd = _pd[2:]
                 elif len(_pd) == 11 and _pd.startswith("0"): _pd = _pd[1:]
+                elif len(_pd) == 13 and _pd.startswith("091"): _pd = _pd[3:]
                 _last10 = _pd[-10:] if len(_pd) >= 10 else _pd
                 phone_variants = list({
-                    phone.strip(), f"+91{_last10}", f"91{_last10}", _last10, f"0{_last10}"
+                    phone.strip(),          # as-typed by admin
+                    f"+91{_last10}",        # E.164 international
+                    f"91{_last10}",         # without +
+                    _last10,                # 10-digit bare
+                    f"0{_last10}",          # with leading 0
+                    f"+{_last10}",          # with + only (edge case)
                 })
                 u = db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1})
                 print(f"[FCM] specific: phone={phone} variants={phone_variants} found={u is not None} stored_phone={u.get('phone') if u else None} has_token={bool(u and u.get('fcm_token'))}")

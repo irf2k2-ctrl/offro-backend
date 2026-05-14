@@ -317,7 +317,7 @@ tr:hover td{background:#f7faf8;}
           </div>
           <div id="ni_file_box" style="display:none;">
             <input type="file" id="ni_file_input" accept="image/jpeg,image/png,image/webp" class="form-control" onchange="niPreview(this)">
-            <small style="color:var(--muted);font-size:11px;">Note: uploaded images appear in-app only (not in push banner)</small>
+            <small style="color:var(--muted);font-size:11px;">Uploaded image will be served as a public URL — visible in push banner</small>
             <div id="ni_preview_wrap" style="display:none;margin-top:6px;">
               <img id="ni_preview_img" src="" style="max-height:80px;border-radius:8px;border:1px solid var(--border);">
               <span id="ni_status" style="display:block;font-size:11px;color:var(--muted);margin-top:3px;"></span>
@@ -1956,10 +1956,16 @@ async function _niUpload() {
   fd.append('file', fi.files[0]);
   try {
     const r = await fetch('/admin/upload-image', { method: 'POST', body: fd });
-    const d = await r.json();
-    if (!r.ok || d.error) { if (st) st.innerText = '❌ Upload failed'; return ''; }
+    let d = {};
+    try { d = await r.json(); } catch(_) {}
+    if (!r.ok) {
+      const errMsg = d.detail || ('HTTP ' + r.status);
+      if (st) st.innerText = '❌ ' + errMsg;
+      return '';
+    }
+    if (!d.url) { if (st) st.innerText = '❌ No URL returned'; return ''; }
     if (st) st.innerText = '✅ Uploaded';
-    return d.url || '';
+    return d.url;
   } catch(e) {
     if (st) st.innerText = '❌ ' + e.message;
     return '';
