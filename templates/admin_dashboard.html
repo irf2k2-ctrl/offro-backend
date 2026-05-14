@@ -2014,7 +2014,7 @@ async function _niUpload() {
   const fd = new FormData();
   fd.append('file', fi.files[0]);
   try {
-    const r = await fetch('/admin/upload-image', { method: 'POST', body: fd });
+    const r = await fetch('/admin/upload-image', { method: 'POST', credentials: 'include', body: fd });
     let d = {};
     try { d = await r.json(); } catch(_) {}
     if (!r.ok) {

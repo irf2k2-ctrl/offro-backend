@@ -1103,6 +1103,14 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         }
         if _fcm_image:
             notif_android["image"] = _fcm_image
+        # Build APNS section with image support for iOS
+        _apns = {
+            "payload": {"aps": {"sound": "default", "badge": 1, "mutable-content": 1}},
+        }
+        if _fcm_image:
+            # iOS image in FCM notification: needs fcm_options.image
+            _apns["fcm_options"] = {"image": _fcm_image}
+
         return {
             "message": {
                 **dest,
@@ -1111,7 +1119,7 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                     "priority": "high",
                     "notification": notif_android,
                 },
-                "apns": {"payload": {"aps": {"sound": "default", "badge": 1}}},
+                "apns": _apns,
                 "data": {
                     "type": "promo",
                     "title": title,
