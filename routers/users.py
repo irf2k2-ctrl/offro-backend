@@ -22,7 +22,14 @@ def get_current_user(request: Request):
 # =================== REGISTER ===================
 @router.post("/register")
 def register_user(data: dict):
-    phone = str(data.get("phone", "")).strip()
+    raw_phone = str(data.get("phone", "")).strip()
+    # Normalise to +91XXXXXXXXXX format
+    d = raw_phone[1:] if raw_phone.startswith("+") else raw_phone
+    if len(d) == 12 and d.startswith("91"):
+        d = d[2:]
+    elif len(d) == 11 and d.startswith("0"):
+        d = d[1:]
+    phone = f"+91{d[-10:]}" if len(d) >= 10 else raw_phone
     name = data.get("name", "").strip()
     if not phone or not name:
         raise HTTPException(status_code=400, detail="Name and phone are required")
@@ -44,24 +51,21 @@ def register_user(data: dict):
 def login_user(data: dict):
     phone = str(data.get("phone", "")).strip()
 
-    # ─── Normalise phone to try every common format stored in DB ───
-    def _phone_variants(raw: str):
-        raw = raw.strip()
-        # Strip leading + and country code 91 carefully (not with lstrip which is greedy)
-        digits = raw
-        if digits.startswith("+"):
-            digits = digits[1:]
-        if digits.startswith("91") and len(digits) == 12:
-            digits = digits[2:]
-        elif digits.startswith("0") and len(digits) == 11:
-            digits = digits[1:]
-        # digits should now be 10-digit local number
-        last10 = digits[-10:] if len(digits) >= 10 else digits
+    # Normalise: try +91XXXXXXXXXX, 91XXXXXXXXXX, XXXXXXXXXX, 0XXXXXXXXXX
+    def _variants(raw):
+        d = raw
+        if d.startswith("+"):
+            d = d[1:]
+        if len(d) == 12 and d.startswith("91"):
+            d = d[2:]
+        elif len(d) == 11 and d.startswith("0"):
+            d = d[1:]
+        last10 = d[-10:] if len(d) >= 10 else d
         return list({raw, f"+91{last10}", f"91{last10}", last10, f"0{last10}"})
 
-    user = db.users.find_one({"phone": {"$in": _phone_variants(phone)}})
+    user = db.users.find_one({"phone": {"$in": _variants(phone)}})
     if not user:
-        raise HTTPException(status_code=401, detail="Phone not registered. Please register first.")
+        raise HTTPException(status_code=401, detail="Phone not registered")
     token = str(uuid.uuid4())
     db.users.update_one({"_id": user["_id"]}, {"$set": {"token": token}})
     response = JSONResponse(content={

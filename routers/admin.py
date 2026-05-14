@@ -1,9 +1,9 @@
 import os
-from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid, qrcode, io, base64
 import time as _time
 
@@ -988,42 +988,6 @@ def process_notification_queue(a=Depends(get_current_admin)):
             failed += 1
     return {"processed": processed, "failed": failed, "skipped": skipped, "total": len(queued)}
 
-
-@router.post("/notifications/upload-image")
-async def upload_notification_image(file: UploadFile = File(...), a=Depends(get_current_admin)):
-    """Upload an image for use in push notifications. Returns a publicly accessible URL."""
-    import os, base64, uuid as _uuid
-    ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-    if file.content_type not in ALLOWED:
-        raise HTTPException(400, f"Unsupported file type: {file.content_type}. Use JPEG/PNG/GIF/WebP.")
-    data = await file.read()
-    if len(data) > 5 * 1024 * 1024:
-        raise HTTPException(400, "Image too large. Max 5 MB.")
-    ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else "jpg"
-    # Store as base64 in notifications_images collection and return a /admin/notif-image/{id} URL
-    doc = {
-        "filename": f"{_uuid.uuid4().hex}.{ext}",
-        "content_type": file.content_type,
-        "data": base64.b64encode(data).decode(),
-        "created_at": datetime.utcnow(),
-    }
-    result = db.notification_images.insert_one(doc)
-    image_url = f"/admin/notif-image/{result.inserted_id}"
-    return {"image_url": image_url, "message": "Image uploaded successfully"}
-
-@router.get("/notif-image/{image_id}")
-def get_notification_image(image_id: str):
-    """Serve a notification image by its DB id."""
-    import base64
-    from fastapi.responses import Response
-    try:
-        doc = db.notification_images.find_one({"_id": ObjectId(image_id)})
-    except Exception:
-        raise HTTPException(404, "Image not found")
-    if not doc:
-        raise HTTPException(404, "Image not found")
-    return Response(content=base64.b64decode(doc["data"]), media_type=doc.get("content_type", "image/jpeg"))
-
 @router.post("/notifications/send")
 def send_notification(data: dict, a=Depends(get_current_admin)):
     import json as _json, time as _time, urllib.request as _ureq, base64 as _b64
@@ -1147,25 +1111,22 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 # Token-based send: used for specific user only
                 phone = (data.get("target_phone") or "").strip()
                 # ── Phone normalisation: try all common formats ──
-                # Uses explicit prefix stripping (NOT lstrip which is greedy character-set)
-                def _norm(raw: str):
-                    raw = raw.strip()
-                    d = raw
-                    if d.startswith("+"):
-                        d = d[1:]
-                    if d.startswith("91") and len(d) == 12:
-                        d = d[2:]
-                    elif d.startswith("0") and len(d) == 11:
-                        d = d[1:]
-                    last10 = d[-10:] if len(d) >= 10 else d
-                    return list({raw, f"+91{last10}", f"91{last10}", last10, f"0{last10}"})
-                phone_variants = _norm(phone)
+                # DB may store +91xxxxxxxxxx, users enter 10-digit numbers
+                # Safe prefix stripping (NOT lstrip which strips chars greedily)
+                _d = phone
+                if _d.startswith("+"): _d = _d[1:]
+                if len(_d) == 12 and _d.startswith("91"): _d = _d[2:]
+                elif len(_d) == 11 and _d.startswith("0"): _d = _d[1:]
+                _last10 = _d[-10:] if len(_d) >= 10 else _d
+                phone_variants = list({
+                    phone, f"+91{_last10}", f"91{_last10}", _last10, f"0{_last10}"
+                })
                 u = db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1})
                 print(f"[FCM] specific: phone={phone} variants={phone_variants} found={u is not None} stored_phone={u.get('phone') if u else None} has_token={bool(u and u.get('fcm_token'))}")
                 tokens = [u["fcm_token"]] if (u and u.get("fcm_token")) else []
 
                 if not tokens:
-                    status = "failed"
+                    status = "skipped_no_tokens"
                     matched_phone = u.get("phone","?") if u else "not_found"
                     fcm_error = f"No FCM token for phone={phone} (matched_phone={matched_phone}, user_found={u is not None})"
                 else:

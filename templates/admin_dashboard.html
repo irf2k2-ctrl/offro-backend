@@ -304,22 +304,21 @@ tr:hover td{background:#f7faf8;}
           <input id="notif_phone" class="form-control" placeholder="e.g. 9876543210">
         </div>
         <div class="mb-3">
-          <label class="form-label">Notification Image <span style="color:var(--muted);font-size:11px;">(optional)</span></label>
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
-            <button type="button" id="notif_img_mode_url" onclick="setImgMode('url')"
-              class="btn-o" style="font-size:12px;padding:4px 12px;background:var(--primary);color:white;">🔗 URL</button>
-            <button type="button" id="notif_img_mode_upload" onclick="setImgMode('upload')"
-              class="btn-o" style="font-size:12px;padding:4px 12px;">📤 Upload</button>
+          <label class="form-label">Notification Image <small style="color:var(--muted)">(optional)</small></label>
+          <div style="display:flex;gap:6px;margin-bottom:8px;">
+            <button type="button" onclick="niMode('url')" id="ni_btn_url"
+              style="padding:4px 14px;border-radius:20px;border:1px solid var(--primary);background:var(--primary);color:#fff;font-size:12px;cursor:pointer;">🔗 URL</button>
+            <button type="button" onclick="niMode('file')" id="ni_btn_file"
+              style="padding:4px 14px;border-radius:20px;border:1px solid var(--border);background:#fff;color:var(--primary);font-size:12px;cursor:pointer;">📤 Upload</button>
           </div>
-          <div id="notif_img_url_box">
+          <div id="ni_url_box">
             <input id="notif_image" class="form-control" placeholder="https://example.com/image.jpg">
           </div>
-          <div id="notif_img_upload_box" style="display:none;">
-            <input type="file" id="notif_image_file" accept="image/*" class="form-control"
-              onchange="previewNotifImage(this)" style="font-size:13px;">
-            <div id="notif_img_preview" style="margin-top:8px;display:none;">
-              <img id="notif_img_preview_img" src="" style="max-height:120px;max-width:100%;border-radius:8px;border:1px solid var(--border);">
-              <div id="notif_img_upload_status" style="font-size:11px;color:var(--muted);margin-top:4px;"></div>
+          <div id="ni_file_box" style="display:none;">
+            <input type="file" id="notif_img_file" accept="image/*" class="form-control" onchange="niPreview(this)">
+            <div id="ni_preview" style="display:none;margin-top:8px;">
+              <img id="ni_preview_img" src="" style="max-height:100px;border-radius:8px;border:1px solid var(--border);">
+              <span id="ni_upload_status" style="display:block;font-size:11px;color:var(--muted);margin-top:4px;"></span>
             </div>
           </div>
         </div>
@@ -1923,56 +1922,43 @@ async function processNotifQueue() {
   }
 }
 
-// ─── Image upload mode toggle ───
-let _notifImgMode = 'url'; // 'url' or 'upload'
-let _uploadedImageUrl = '';
-
-function setImgMode(mode) {
-  _notifImgMode = mode;
-  document.getElementById('notif_img_url_box').style.display    = mode === 'url'    ? '' : 'none';
-  document.getElementById('notif_img_upload_box').style.display = mode === 'upload' ? '' : 'none';
-  const btnUrl    = document.getElementById('notif_img_mode_url');
-  const btnUpload = document.getElementById('notif_img_mode_upload');
-  btnUrl.style.background    = mode === 'url'    ? 'var(--primary)' : '';
-  btnUrl.style.color         = mode === 'url'    ? 'white'          : '';
-  btnUpload.style.background = mode === 'upload' ? 'var(--primary)' : '';
-  btnUpload.style.color      = mode === 'upload' ? 'white'          : '';
-  if (mode === 'url') _uploadedImageUrl = '';
+// ── Notification image mode helpers ──────────────────────────────────
+let _niMode = 'url';
+function niMode(m) {
+  _niMode = m;
+  document.getElementById('ni_url_box').style.display  = m === 'url'  ? '' : 'none';
+  document.getElementById('ni_file_box').style.display = m === 'file' ? '' : 'none';
+  const bu = document.getElementById('ni_btn_url'), bf = document.getElementById('ni_btn_file');
+  bu.style.background = m==='url'  ? 'var(--primary)' : '#fff';
+  bu.style.color      = m==='url'  ? '#fff' : 'var(--primary)';
+  bf.style.background = m==='file' ? 'var(--primary)' : '#fff';
+  bf.style.color      = m==='file' ? '#fff' : 'var(--primary)';
 }
-
-function previewNotifImage(input) {
+function niPreview(input) {
   if (!input.files || !input.files[0]) return;
-  const file = input.files[0];
   const reader = new FileReader();
   reader.onload = e => {
-    const prev = document.getElementById('notif_img_preview');
-    document.getElementById('notif_img_preview_img').src = e.target.result;
-    prev.style.display = '';
-    document.getElementById('notif_img_upload_status').innerText = '⏳ Image ready — will upload when you send';
-    _uploadedImageUrl = ''; // will be resolved on send
+    document.getElementById('ni_preview_img').src = e.target.result;
+    document.getElementById('ni_preview').style.display = '';
+    document.getElementById('ni_upload_status').innerText = '✅ Ready to upload';
   };
-  reader.readAsDataURL(file);
+  reader.readAsDataURL(input.files[0]);
 }
-
-async function _uploadNotifImage() {
-  const fileInput = document.getElementById('notif_image_file');
-  if (!fileInput.files || !fileInput.files[0]) return '';
-  const statusEl = document.getElementById('notif_img_upload_status');
-  statusEl.innerText = '⬆️ Uploading image…';
-  const formData = new FormData();
-  formData.append('file', fileInput.files[0]);
+async function _niUpload() {
+  const fi = document.getElementById('notif_img_file');
+  if (!fi.files || !fi.files[0]) return '';
+  const st = document.getElementById('ni_upload_status');
+  st.innerText = '⬆️ Uploading…';
+  const fd = new FormData();
+  fd.append('file', fi.files[0]);
   try {
-    const r = await fetch('/admin/notifications/upload-image', {
-      method: 'POST', credentials: 'include', body: formData
-    });
-    if (!r.ok) { statusEl.innerText = '❌ Upload failed'; return ''; }
+    // Reuse the existing /admin/upload-image endpoint (no auth needed, already in server.py)
+    const r = await fetch('/admin/upload-image', { method: 'POST', body: fd });
     const d = await r.json();
-    statusEl.innerText = '✅ Uploaded';
-    return d.image_url || '';
-  } catch (e) {
-    statusEl.innerText = '❌ Upload error: ' + e.message;
-    return '';
-  }
+    if (!r.ok || d.error) { st.innerText = '❌ ' + (d.error || 'Upload failed'); return ''; }
+    st.innerText = '✅ Uploaded!';
+    return d.url || '';   // server returns {url: "data:image/jpeg;base64,..."} 
+  } catch(e) { st.innerText = '❌ ' + e.message; return ''; }
 }
 
 async function sendNotification() {
@@ -1991,15 +1977,15 @@ async function sendNotification() {
   btn.disabled = true; btn.innerText = "Sending…";
   msgEl.style.color = "var(--muted)"; msgEl.innerText = "Sending notification…";
 
-  // Resolve image URL — either typed URL or uploaded file
-  let image = '';
-  if (_notifImgMode === 'url') {
-    image = document.getElementById("notif_image").value.trim();
+  // Resolve image URL (typed URL or uploaded file)
+  let _notifImg = '';
+  if (_niMode === 'file') {
+    _notifImg = await _niUpload();
   } else {
-    image = await _uploadNotifImage();
+    _notifImg = document.getElementById("notif_image").value.trim();
   }
 
-  const data = { title, body, target, target_phone: target==="specific"?phone:"", target_city: target==="city"?city:"", image_url: image, use_topic: target !== "specific" };
+  const data = { title, body, target, target_phone: target==="specific"?phone:"", target_city: target==="city"?city:"", image_url: _notifImg, use_topic: target !== "specific" };
   try {
     let r = await fetch("/admin/notifications/send", {method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
     let d = await r.json();
@@ -2010,11 +1996,8 @@ async function sendNotification() {
       document.getElementById("notif_title").value="";
       document.getElementById("notif_body").value="";
       document.getElementById("notif_image").value="";
-      const fi = document.getElementById("notif_image_file");
-      if (fi) { fi.value=""; }
-      const prev = document.getElementById("notif_img_preview");
-      if (prev) prev.style.display="none";
-      _uploadedImageUrl = "";
+      const _nif = document.getElementById("notif_img_file");
+      if (_nif) { _nif.value=""; document.getElementById("ni_preview").style.display="none"; }
       loadNotifications();
     }
   } catch { msgEl.style.color="var(--danger)"; msgEl.innerText="Server error"; }
