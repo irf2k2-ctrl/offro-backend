@@ -4,6 +4,33 @@ from database import db
 from bson import ObjectId
 import uuid
 
+# ── Phone normalisation helper ─────────────────────────────────
+def _phone_variants(raw: str) -> list:
+    """Return all plausible stored formats for a given phone input.
+    Handles: +91XXXXXXXXXX, 91XXXXXXXXXX, XXXXXXXXXX, 0XXXXXXXXXX, spaces."""
+    p = str(raw).strip().replace(" ", "").replace("-", "")
+    # Strip leading +
+    d = p[1:] if p.startswith("+") else p
+    # Strip country code if present
+    if len(d) == 12 and d.startswith("91"):
+        d = d[2:]
+    elif len(d) == 11 and d.startswith("0"):
+        d = d[1:]
+    last10 = d[-10:] if len(d) >= 10 else d
+    return list({p, f"+91{last10}", f"91{last10}", last10, f"0{last10}"})
+
+def _normalise_phone(raw: str) -> str:
+    """Normalise any phone input to canonical +91XXXXXXXXXX format."""
+    p = str(raw).strip().replace(" ", "").replace("-", "")
+    d = p[1:] if p.startswith("+") else p
+    if len(d) == 12 and d.startswith("91"):
+        d = d[2:]
+    elif len(d) == 11 and d.startswith("0"):
+        d = d[1:]
+    last10 = d[-10:] if len(d) >= 10 else d
+    return f"+91{last10}" if len(last10) == 10 else p
+
+
 router = APIRouter(tags=["Users"])
 
 def get_current_user(request: Request):
@@ -23,17 +50,13 @@ def get_current_user(request: Request):
 @router.post("/register")
 def register_user(data: dict):
     raw_phone = str(data.get("phone", "")).strip()
-    # Normalise to +91XXXXXXXXXX format
-    d = raw_phone[1:] if raw_phone.startswith("+") else raw_phone
-    if len(d) == 12 and d.startswith("91"):
-        d = d[2:]
-    elif len(d) == 11 and d.startswith("0"):
-        d = d[1:]
-    phone = f"+91{d[-10:]}" if len(d) >= 10 else raw_phone
     name = data.get("name", "").strip()
-    if not phone or not name:
+    if not raw_phone or not name:
         raise HTTPException(status_code=400, detail="Name and phone are required")
-    if db.users.find_one({"phone": phone}):
+    # Always normalise to +91XXXXXXXXXX format before saving
+    phone = _normalise_phone(raw_phone)
+    # Check all variants so we don't create duplicates
+    if db.users.find_one({"phone": {"$in": _phone_variants(raw_phone)}}):
         raise HTTPException(status_code=400, detail="Phone already registered")
     user = {
         "name": name,
@@ -49,46 +72,17 @@ def register_user(data: dict):
 # =================== LOGIN ===================
 @router.post("/login")
 def login_user(data: dict):
-    phone = str(data.get("phone", "")).strip()
-
-    # Normalise: try +91XXXXXXXXXX, 91XXXXXXXXXX, XXXXXXXXXX, 0XXXXXXXXXX
-    def _variants(raw):
-        raw = str(raw).strip()
-
-        d = raw.replace(" ", "").replace("-", "")
-
-        # Remove leading +
-        if d.startswith("+"):
-            d = d[1:]
-
-        # Remove India code if present
-        if d.startswith("91") and len(d) >= 12:
-            d = d[2:]
-
-        # Remove leading zero
-        if d.startswith("0") and len(d) >= 11:
-            d = d[1:]
-
-        # Final normalized 10-digit number
-        last10 = d[-10:]
-
-        return [
-            last10,
-            f"+91{last10}",
-            f"91{last10}",
-            f"0{last10}",
-            raw,
-        ]
-
-    user = db.users.find_one({"phone": {"$in": _variants(phone)}})
+    raw_phone = str(data.get("phone", "")).strip()
+    # Try all common phone formats so existing users always match
+    user = db.users.find_one({"phone": {"$in": _phone_variants(raw_phone)}})
     if not user:
-        raise HTTPException(status_code=401, detail="Phone not registered")
+        raise HTTPException(status_code=401, detail="Phone not registered. Please register first.")
     token = str(uuid.uuid4())
     db.users.update_one({"_id": user["_id"]}, {"$set": {"token": token}})
     response = JSONResponse(content={
         "user_id": str(user["_id"]),
-        "name": user.get("name"),
-        "phone": user.get("phone"),
+        "name": user.get("name", ""),
+        "phone": user.get("phone", raw_phone),
         "token": token,
         "visit_points": user.get("visit_points", 0),
         "pool_points": user.get("pool_points", 0)
@@ -109,11 +103,12 @@ def logout_user():
 def get_profile(user=Depends(get_current_user)):
     return {
         "user_id": str(user["_id"]),
-        "name": user.get("name"),
-        "phone": user.get("phone"),
-        "city": user.get("city", ""),
+        "_id":     str(user["_id"]),   # Flutter uses both keys
+        "name":    user.get("name", ""),
+        "phone":   user.get("phone", ""),
+        "city":    user.get("city", ""),
         "visit_points": user.get("visit_points", 0),
-        "pool_points": user.get("pool_points", 0),
+        "pool_points":  user.get("pool_points", 0),
         "total_points": user.get("visit_points", 0) + user.get("pool_points", 0)
     }
 

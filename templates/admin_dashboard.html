@@ -304,21 +304,20 @@ tr:hover td{background:#f7faf8;}
           <input id="notif_phone" class="form-control" placeholder="e.g. 9876543210">
         </div>
         <div class="mb-3">
-          <label class="form-label">Image <small style="color:var(--muted)">(optional — https:// URL only for push)</small></label>
+          <label class="form-label">Image <small style="color:var(--muted)">(optional)</small></label>
           <div style="display:flex;gap:6px;margin-bottom:6px;">
-            <button type="button" id="ni_btn_url"
-              onclick="niMode('url')"
+            <button type="button" id="ni_btn_url" onclick="niMode('url')"
               style="padding:3px 14px;border-radius:20px;border:1px solid var(--primary);background:var(--primary);color:#fff;font-size:12px;cursor:pointer;">🔗 URL</button>
-            <button type="button" id="ni_btn_file"
-              onclick="niMode('file')"
+            <button type="button" id="ni_btn_file" onclick="niMode('file')"
               style="padding:3px 14px;border-radius:20px;border:1px solid var(--border);background:#fff;color:var(--primary);font-size:12px;cursor:pointer;">📤 Upload</button>
           </div>
           <div id="ni_url_box">
             <input id="notif_image" class="form-control" placeholder="https://example.com/image.jpg">
+            <small style="color:var(--muted);font-size:11px;">⚠️ Must be a public https:// URL for push image to work</small>
           </div>
           <div id="ni_file_box" style="display:none;">
-            <input type="file" id="ni_file_input" accept="image/jpeg,image/png,image/webp" class="form-control"
-              onchange="niPreview(this)">
+            <input type="file" id="ni_file_input" accept="image/jpeg,image/png,image/webp" class="form-control" onchange="niPreview(this)">
+            <small style="color:var(--muted);font-size:11px;">Note: uploaded images appear in-app only (not in push banner)</small>
             <div id="ni_preview_wrap" style="display:none;margin-top:6px;">
               <img id="ni_preview_img" src="" style="max-height:80px;border-radius:8px;border:1px solid var(--border);">
               <span id="ni_status" style="display:block;font-size:11px;color:var(--muted);margin-top:3px;"></span>
@@ -1925,18 +1924,18 @@ async function processNotifQueue() {
   }
 }
 
-// ── Notification image helpers ────────────────────────────────────
+// ── Notification image helpers ────────────────────────────────
 let _niMode = 'url';
 function niMode(m) {
   _niMode = m;
-  const ub = document.getElementById('ni_btn_url');
-  const fb = document.getElementById('ni_btn_file');
   document.getElementById('ni_url_box').style.display  = m === 'url'  ? '' : 'none';
   document.getElementById('ni_file_box').style.display = m === 'file' ? '' : 'none';
+  const ub = document.getElementById('ni_btn_url');
+  const fb = document.getElementById('ni_btn_file');
   ub.style.background = m==='url'  ? 'var(--primary)' : '#fff';
-  ub.style.color      = m==='url'  ? '#fff' : 'var(--primary)';
+  ub.style.color      = m==='url'  ? '#fff'           : 'var(--primary)';
   fb.style.background = m==='file' ? 'var(--primary)' : '#fff';
-  fb.style.color      = m==='file' ? '#fff' : 'var(--primary)';
+  fb.style.color      = m==='file' ? '#fff'           : 'var(--primary)';
 }
 function niPreview(input) {
   if (!input.files || !input.files[0]) return;
@@ -1944,7 +1943,7 @@ function niPreview(input) {
   reader.onload = e => {
     document.getElementById('ni_preview_img').src = e.target.result;
     document.getElementById('ni_preview_wrap').style.display = '';
-    document.getElementById('ni_status').innerText = '📎 Ready — will upload when you send';
+    document.getElementById('ni_status').innerText = '📎 Ready';
   };
   reader.readAsDataURL(input.files[0]);
 }
@@ -1956,16 +1955,10 @@ async function _niUpload() {
   const fd = new FormData();
   fd.append('file', fi.files[0]);
   try {
-    // Uses the existing /admin/upload-image endpoint already in server.py — no auth required
     const r = await fetch('/admin/upload-image', { method: 'POST', body: fd });
     const d = await r.json();
-    if (!r.ok || d.error) {
-      if (st) st.innerText = '❌ Upload failed: ' + (d.error || r.status);
-      return '';
-    }
+    if (!r.ok || d.error) { if (st) st.innerText = '❌ Upload failed'; return ''; }
     if (st) st.innerText = '✅ Uploaded';
-    // NOTE: /admin/upload-image returns a base64 data URL — FCM won't display it as image
-    // but the notification payload data.image_url will carry it for in-app use
     return d.url || '';
   } catch(e) {
     if (st) st.innerText = '❌ ' + e.message;
@@ -1974,13 +1967,13 @@ async function _niUpload() {
 }
 
 async function sendNotification() {
-  const title   = document.getElementById("notif_title").value.trim();
-  const body    = document.getElementById("notif_body").value.trim();
-  const target  = document.getElementById("notif_target").value;
-  const phone   = document.getElementById("notif_phone").value.trim();
-  const city    = document.getElementById("notif_city").value.trim();
-  const msgEl   = document.getElementById("notif_msg");
-  const btn     = document.getElementById("notif_send_btn");
+  const title  = document.getElementById("notif_title").value.trim();
+  const body   = document.getElementById("notif_body").value.trim();
+  const target = document.getElementById("notif_target").value;
+  const phone  = document.getElementById("notif_phone").value.trim();
+  const city   = document.getElementById("notif_city").value.trim();
+  const msgEl  = document.getElementById("notif_msg");
+  const btn    = document.getElementById("notif_send_btn");
 
   if (!title || !body) { msgEl.style.color="var(--danger)"; msgEl.innerText="Title and message are required"; return; }
   if (target === "specific" && !phone) { msgEl.style.color="var(--danger)"; msgEl.innerText="Phone number required"; return; }
@@ -1989,12 +1982,12 @@ async function sendNotification() {
   btn.disabled = true;
   msgEl.style.color = "var(--muted)"; msgEl.innerText = "Sending…";
 
-  // Resolve image: upload file if needed, else use typed URL
+  // Resolve image
   let imageUrl = '';
   if (_niMode === 'file') {
     imageUrl = await _niUpload();
   } else {
-    imageUrl = document.getElementById("notif_image").value.trim();
+    imageUrl = (document.getElementById("notif_image")||{value:""}).value.trim();
   }
 
   const data = {
@@ -2006,30 +1999,31 @@ async function sendNotification() {
   };
 
   try {
-    let r = await fetch("/admin/notifications/send", {
+    const r = await fetch("/admin/notifications/send", {
       method: "POST", credentials: "include",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(data)
     });
-    let d = await r.json();
+    const d = await r.json();
     if (!r.ok) {
-      msgEl.style.color="var(--danger)";
-      msgEl.innerText = d.detail || "Error: " + r.status;
+      msgEl.style.color = "var(--danger)";
+      msgEl.innerText = d.detail || ("Error " + r.status);
     } else {
       msgEl.style.color = "var(--primary)";
       msgEl.innerText = "✅ " + (d.message || "Notification sent!");
-      // Reset form
       document.getElementById("notif_title").value = "";
       document.getElementById("notif_body").value  = "";
-      if (document.getElementById("notif_image")) document.getElementById("notif_image").value = "";
+      const ni = document.getElementById("notif_image");
+      if (ni) ni.value = "";
       const nif = document.getElementById("ni_file_input");
       if (nif) { nif.value = ""; }
-      if (document.getElementById("ni_preview_wrap")) document.getElementById("ni_preview_wrap").style.display = "none";
+      const npw = document.getElementById("ni_preview_wrap");
+      if (npw) npw.style.display = "none";
       loadNotifications();
     }
   } catch(e) {
     msgEl.style.color = "var(--danger)";
-    msgEl.innerText = "Server error: " + e.message;
+    msgEl.innerText = "Error: " + e.message;
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-paper-plane me-1"></i> Send Notification';

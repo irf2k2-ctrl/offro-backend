@@ -1001,7 +1001,7 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
     if not title or not body:
         raise HTTPException(400, "title and body are required")
 
-    sent_at   = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d %b %Y, %I:%M %p")
+    sent_at = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d %b %Y, %I:%M %p")
     sent_count = 0
     fcm_error  = ""
     status     = "queued"
@@ -1042,7 +1042,7 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
     def _build_fcm_message(*, token=None, topic=None):
         """Build FCM v1 message body for a token or topic."""
         dest = {"token": token} if token else {"topic": topic}
-        # FCM only accepts https:// image URLs — strip base64 data URLs silently
+        # FCM v1 API only accepts https:// image URLs — reject base64/data URIs
         _fcm_image = image_url if (image_url and image_url.startswith("https://")) else ""
         notif_android = {
             "channel_id": "offro_high_importance",
@@ -1064,7 +1064,7 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                     "type": "promo",
                     "title": title,
                     "body": body,
-                    "image_url": image_url,  # full value in data payload (app reads it)
+                    "image_url": image_url,
                 },
             }
         }
@@ -1114,18 +1114,14 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 phone = (data.get("target_phone") or "").strip()
                 # ── Phone normalisation: try all common formats ──
                 # DB may store +91xxxxxxxxxx, users enter 10-digit numbers
-                # Safe prefix strip — lstrip("91") is buggy (strips chars not prefix)
-                _pd = phone.strip().replace(" ", "")
+                # Safe phone normalisation (lstrip is buggy — strips chars not prefixes)
+                _pd = phone.strip().replace(" ", "").replace("-", "")
                 if _pd.startswith("+"): _pd = _pd[1:]
                 if len(_pd) == 12 and _pd.startswith("91"): _pd = _pd[2:]
                 elif len(_pd) == 11 and _pd.startswith("0"): _pd = _pd[1:]
                 _last10 = _pd[-10:] if len(_pd) >= 10 else _pd
                 phone_variants = list({
-                    phone.strip(),
-                    f"+91{_last10}",
-                    f"91{_last10}",
-                    _last10,
-                    f"0{_last10}",
+                    phone.strip(), f"+91{_last10}", f"91{_last10}", _last10, f"0{_last10}"
                 })
                 u = db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1})
                 print(f"[FCM] specific: phone={phone} variants={phone_variants} found={u is not None} stored_phone={u.get('phone') if u else None} has_token={bool(u and u.get('fcm_token'))}")
