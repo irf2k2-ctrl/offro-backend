@@ -193,6 +193,12 @@ async def register_fcm_token(request: Request):
 def startup():
     admin.seed_admin()
     _ensure_indexes()
+    # Ensure OTP TTL index for auto-expiry of otp_sessions collection
+    try:
+        from routers.otp_service import _ensure_otp_indexes
+        _ensure_otp_indexes()
+    except Exception as e:
+        print(f"⚠️  OTP index warning: {e}")
 
 
 def _ensure_indexes():
