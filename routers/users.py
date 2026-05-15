@@ -49,31 +49,10 @@ def get_current_user(request: Request):
 @router.post("/send-otp")
 def send_otp_endpoint(data: dict):
     """
-    Step 1 of login/register flow.
-    Generates OTP, stores it in otp_sessions, sends via MSG91.
-    Rate-limited: max 5 per hour, 30s cooldown between resends.
+    DEPRECATED — OTP is now handled by MSG91 Widget SDK on the Flutter side.
+    Kept for backward compatibility only. Not called by current app version.
     """
-    raw_phone = str(data.get("phone", "")).strip()
-    if not raw_phone:
-        raise HTTPException(status_code=400, detail="Phone number is required.")
-
-    phone = _normalise_phone(raw_phone)
-    if len(phone) < 10:
-        raise HTTPException(status_code=400, detail="Invalid phone number.")
-
-    from routers.otp_service import send_otp
-    result = send_otp(phone)
-
-    if not result.get("ok"):
-        raise HTTPException(status_code=429, detail=result.get("error", "Failed to send OTP."))
-
-    resp = {"message": "OTP sent successfully.", "phone": phone}
-
-    # Dev/unconfigured mode — include OTP in response so testing works
-    if result.get("mode") == "dev" and result.get("dev_otp"):
-        resp["dev_otp"] = result["dev_otp"]
-
-    return resp
+    return {"message": "OTP is now handled by MSG91 Widget SDK.", "deprecated": True}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -85,52 +64,10 @@ def send_otp_endpoint(data: dict):
 @router.post("/verify-otp")
 def verify_otp_endpoint(data: dict):
     """
-    Step 2 of login/register flow.
-    Verifies OTP, then issues session token.
-    The user must already exist (registered) — otherwise returns 404.
-    For new users: register first, then send-otp → verify-otp.
+    DEPRECATED — OTP verification is now handled by MSG91 Widget SDK on the Flutter side.
+    Kept for backward compatibility only. Not called by current app version.
     """
-    raw_phone = str(data.get("phone", "")).strip()
-    otp_input = str(data.get("otp",   "")).strip()
-
-    if not raw_phone or not otp_input:
-        raise HTTPException(status_code=400, detail="Phone and OTP are required.")
-
-    phone = _normalise_phone(raw_phone)
-
-    from routers.otp_service import verify_otp
-    result = verify_otp(phone, otp_input)
-
-    if not result.get("ok"):
-        status = 429 if result.get("locked") else 400
-        raise HTTPException(status_code=status, detail=result.get("error", "Invalid OTP."))
-
-    # OTP valid — look up user and issue token
-    user = db.users.find_one({"phone": {"$in": _phone_variants(raw_phone)}})
-    if not user:
-        raise HTTPException(
-            status_code=404,
-            detail="Phone not registered. Please register first."
-        )
-
-    token = str(uuid.uuid4())
-    db.users.update_one({"_id": user["_id"]}, {"$set": {"token": token}})
-
-    response = JSONResponse(content={
-        "user_id":      str(user["_id"]),
-        "name":         user.get("name", ""),
-        "phone":        user.get("phone", phone),
-        "token":        token,
-        "visit_points": user.get("visit_points", 0),
-        "pool_points":  user.get("pool_points", 0),
-    })
-    response.set_cookie(
-        key="user_token", value=token, httponly=True,
-        samesite="Lax", secure=False, max_age=3600 * 24 * 30,
-    )
-    return response
-
-
+    return {"message": "OTP verification is now handled by MSG91 Widget SDK.", "deprecated": True}
 # ══════════════════════════════════════════════════════════════════════════════
 # REGISTER  (unchanged — register first, then OTP flow)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -163,9 +100,9 @@ def register_user(data: dict):
 @router.post("/login")
 def login_user(data: dict):
     """
-    Backward-compatible login trigger.
-    Checks phone exists, then sends OTP via MSG91.
-    Flutter must call /user/verify-otp after user enters OTP to get session token.
+    MSG91 Widget flow — OTP is verified entirely on the Flutter side via MSG91 SDK.
+    This endpoint is called AFTER MSG91 verifyOTP succeeds on device.
+    Validates phone exists → issues OFFRO session token.
     """
     raw_phone = str(data.get("phone", "")).strip()
     user = db.users.find_one({"phone": {"$in": _phone_variants(raw_phone)}})
@@ -175,18 +112,23 @@ def login_user(data: dict):
             detail="Phone not registered. Please register first."
         )
 
-    phone = _normalise_phone(raw_phone)
-    from routers.otp_service import send_otp
-    result = send_otp(phone)
+    token = str(uuid.uuid4())
+    db.users.update_one({"_id": user["_id"]}, {"$set": {"token": token}})
+    print(f"[LOGIN] ✅ Session issued for {raw_phone} — user_id={str(user['_id'])}")
 
-    if not result.get("ok"):
-        raise HTTPException(status_code=429, detail=result.get("error", "Failed to send OTP."))
-
-    resp = {"message": "OTP sent. Please verify.", "phone": phone}
-    if result.get("mode") == "dev" and result.get("dev_otp"):
-        resp["dev_otp"] = result["dev_otp"]
-
-    return resp
+    response = JSONResponse(content={
+        "user_id":      str(user["_id"]),
+        "name":         user.get("name", ""),
+        "phone":        user.get("phone", raw_phone),
+        "token":        token,
+        "visit_points": user.get("visit_points", 0),
+        "pool_points":  user.get("pool_points", 0),
+    })
+    response.set_cookie(
+        key="user_token", value=token, httponly=True,
+        samesite="Lax", secure=False, max_age=3600 * 24 * 30,
+    )
+    return response
 
 
 # ══════════════════════════════════════════════════════════════════════════════
