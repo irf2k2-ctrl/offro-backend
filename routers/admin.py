@@ -428,6 +428,24 @@ def get_store_detail(id: str, a=Depends(get_current_admin)):
         "merchant_id":    s.get("merchant_id", ""),
     }
 
+@router.get("/stores/{id}/qr")
+def get_store_qr(id: str, a=Depends(get_current_admin)):
+    """Fetch or generate QR code for a store. Called by dashboard showQR()."""
+    try:
+        store = db.stores.find_one({"_id": ObjectId(id)})
+        if not store:
+            raise HTTPException(404, "Store not found")
+        qr = store.get("qr_code", "")
+        # Generate if missing
+        if not qr:
+            qr = generate_qr_base64(id)
+            db.stores.update_one({"_id": ObjectId(id)}, {"$set": {"qr_code": qr}})
+        return {"qr_code": qr, "store_name": store.get("store_name", "")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"QR generation failed: {str(e)}")
+
 @router.put("/stores/{id}")
 def update_store(id: str, data: dict, a=Depends(get_current_admin)):
     global _store_cache; _store_cache["data"] = None

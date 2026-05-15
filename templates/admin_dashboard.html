@@ -636,6 +636,8 @@ tr:hover td{background:#f7faf8;}
             <input id="store_phone" class="form-control" placeholder="Phone"></div>
           <div class="col-md-6"><label class="form-label">Visit Points per Scan</label>
             <input id="store_points" class="form-control" type="number" value="10" min="0"></div>
+          <div class="mb-3"><label class="form-label">Visit Points (per check-in)</label>
+            <input id="store_visit_points_primary" class="form-control" type="number" value="0" min="0" placeholder="Points earned per store visit"></div>
           <div class="col-md-6"><label class="form-label">Latitude</label>
             <input id="store_lat" class="form-control" placeholder="17.3850"></div>
           <div class="col-md-6"><label class="form-label">Longitude</label>
@@ -1333,6 +1335,7 @@ async function openCreateStore(){
   sel.onchange=function(){let m=merchantsList.find(x=>x._id===this.value);if(m){document.getElementById("store_city").value=m.city||"";document.getElementById("store_area").value=m.area||"";document.getElementById("store_phone").value=m.phone||"";}};
   ["store_name","store_city","store_area","store_address","store_phone","store_lat","store_lng"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("store_points").value="10";
+  document.getElementById("store_visit_points_primary").value="0";
   document.getElementById("store_image_b64").value="";
   document.getElementById("store_image_preview").style.display="none";
   document.getElementById("store_new_in_town").checked=false;
@@ -1364,6 +1367,7 @@ async function openEditStore(id){
   document.getElementById("store_address").value=s.address||"";
   document.getElementById("store_phone").value=s.phone||"";
   document.getElementById("store_points").value=(s.points_per_scan!=null&&s.points_per_scan!==undefined)?s.points_per_scan:10;
+  document.getElementById("store_visit_points_primary").value=s.visit_points||0;
   document.getElementById("store_lat").value=s.lat||"";
   document.getElementById("store_lng").value=s.lng||"";
   document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
@@ -1393,6 +1397,7 @@ async function submitStore(){
     city:document.getElementById("store_city").value,area:document.getElementById("store_area").value,
     address:document.getElementById("store_address").value,phone:document.getElementById("store_phone").value,
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
+    visit_points:document.getElementById("store_visit_points_primary").value===""?0:parseInt(document.getElementById("store_visit_points_primary").value),
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
     is_new_in_town:document.getElementById("store_new_in_town").checked,
