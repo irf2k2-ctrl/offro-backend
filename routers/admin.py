@@ -1266,3 +1266,178 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         "sent_count": sent_count,
         "error": fcm_error if status not in ("sent", "queued") else "",
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# ADMIN — MERCHANT BANNER APPROVAL
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/merchant-banners")
+def list_merchant_banners(a=Depends(get_current_admin)):
+    """All merchant-submitted banners with approval status."""
+    result = []
+    for b in db.merchant_banners.find().sort("created_at", -1):
+        result.append({
+            "_id":        str(b["_id"]),
+            "merchant_name": b.get("merchant_name",""),
+            "title":      b.get("title",""),
+            "image_url":  b.get("image_url",""),
+            "duration":   b.get("duration",30),
+            "plan":       b.get("plan",""),
+            "status":     b.get("approval_status","pending_approval"),
+            "start_date": b.get("start_date",""),
+            "end_date":   b.get("end_date",""),
+            "invoice_no": b.get("invoice_no",""),
+            "amount":     b.get("total",0),
+            "created_at": b["created_at"].strftime("%d %b %Y %H:%M") if b.get("created_at") else "",
+        })
+    return result
+
+@router.put("/merchant-banners/{bid}/approve")
+def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
+    """Approve a merchant banner — publishes it as a promo slider."""
+    b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
+    if not b: raise HTTPException(404, "Banner not found")
+    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"approval_status":"approved","approved_at":datetime.utcnow()}})
+    # Publish to promo_sliders so it appears in app
+    existing = db.promo_sliders.find_one({"source_banner_id": bid})
+    if not existing:
+        db.promo_sliders.insert_one({
+            "title":       b.get("title",""),
+            "image_url":   b.get("image_url",""),
+            "is_active":   True,
+            "sort_order":  50,
+            "source":      "merchant",
+            "source_banner_id": bid,
+            "merchant_name": b.get("merchant_name",""),
+            "expires_at":  b.get("end_date",""),
+            "created_at":  datetime.utcnow(),
+        })
+    return {"ok": True, "message": "Banner approved and published to app."}
+
+@router.put("/merchant-banners/{bid}/reject")
+def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admin)):
+    reason = body.get("reason","")
+    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
+        "approval_status":"rejected",
+        "rejection_reason": reason,
+        "rejected_at": datetime.utcnow()
+    }})
+    # Remove from promo_sliders if it was previously approved
+    db.promo_sliders.delete_many({"source_banner_id": bid})
+    return {"ok": True, "message": "Banner rejected."}
+
+@router.delete("/merchant-banners/{bid}")
+def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
+    db.merchant_banners.delete_one({"_id": ObjectId(bid)})
+    db.promo_sliders.delete_many({"source_banner_id": bid})
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════
+# ADMIN — MERCHANT VOUCHER APPROVAL
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/merchant-vouchers")
+def list_merchant_vouchers(a=Depends(get_current_admin)):
+    result = []
+    for v in db.merchant_vouchers.find().sort("created_at", -1):
+        result.append({
+            "_id":         str(v["_id"]),
+            "merchant_name": v.get("merchant_name",""),
+            "title":       v.get("title",""),
+            "offer_text":  v.get("offer_text",""),
+            "logo_url":    v.get("logo_url",""),
+            "validity":    v.get("validity",""),
+            "duration":    v.get("duration",30),
+            "status":      v.get("approval_status","pending_approval"),
+            "invoice_no":  v.get("invoice_no",""),
+            "amount":      v.get("total",0),
+            "created_at":  v["created_at"].strftime("%d %b %Y %H:%M") if v.get("created_at") else "",
+        })
+    return result
+
+@router.put("/merchant-vouchers/{vid}/approve")
+def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
+    v = db.merchant_vouchers.find_one({"_id": ObjectId(vid)})
+    if not v: raise HTTPException(404, "Voucher not found")
+    db.merchant_vouchers.update_one({"_id": ObjectId(vid)}, {"$set":{"approval_status":"approved","approved_at":datetime.utcnow()}})
+    # Publish to gift_vouchers so it appears in Voucher Zone
+    existing = db.gift_vouchers.find_one({"source_voucher_id": vid})
+    if not existing:
+        db.gift_vouchers.insert_one({
+            "title":      v.get("title",""),
+            "text":       v.get("offer_text",""),
+            "logo":       v.get("logo_url",""),
+            "validity":   v.get("validity","30 days"),
+            "is_active":  True,
+            "price":      "",
+            "source":     "merchant",
+            "source_voucher_id": vid,
+            "merchant_name": v.get("merchant_name",""),
+            "created_at": datetime.utcnow(),
+        })
+    return {"ok": True, "message": "Voucher approved and published to Voucher Zone."}
+
+@router.put("/merchant-vouchers/{vid}/reject")
+def reject_merchant_voucher(vid: str, body: dict = {}, a=Depends(get_current_admin)):
+    reason = body.get("reason","")
+    db.merchant_vouchers.update_one({"_id": ObjectId(vid)}, {"$set":{
+        "approval_status":"rejected","rejection_reason":reason,"rejected_at":datetime.utcnow()
+    }})
+    db.gift_vouchers.delete_many({"source_voucher_id": vid})
+    return {"ok": True, "message": "Voucher rejected."}
+
+@router.delete("/merchant-vouchers/{vid}")
+def delete_merchant_voucher(vid: str, a=Depends(get_current_admin)):
+    db.merchant_vouchers.delete_one({"_id": ObjectId(vid)})
+    db.gift_vouchers.delete_many({"source_voucher_id": vid})
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════
+# ADMIN — FULL INVOICE VIEW (store + banner + voucher)
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/invoices/full")
+def list_all_invoices(a=Depends(get_current_admin)):
+    """All merchant invoices: stores, banners, and vouchers with line items."""
+    result = []
+    for inv in db.invoices.find().sort("created_at", -1):
+        fd = inv.get("from_date"); ed = inv.get("end_date")
+        result.append({
+            "invoice_no":    inv.get("invoice_no",""),
+            "merchant_name": inv.get("merchant_name",""),
+            "merchant_phone":inv.get("merchant_phone",""),
+            "type":          inv.get("type","store"),
+            "item_label":    inv.get("item_label") or f"Store – {inv.get('plan','')}",
+            "store_name":    inv.get("store_name",""),
+            "base_price":    inv.get("base_price",0),
+            "gst":           inv.get("gst",0),
+            "total":         inv.get("total",0),
+            "from_date":     fd.strftime("%d %b %Y") if isinstance(fd,datetime) else str(fd or ""),
+            "end_date":      ed.strftime("%d %b %Y") if isinstance(ed,datetime) else str(ed or ""),
+            "created_at":    inv["created_at"].strftime("%d %b %Y %H:%M") if inv.get("created_at") else "",
+        })
+    return result
+
+@router.get("/banner-pricing")
+def get_banner_pricing(a=Depends(get_current_admin)):
+    doc = db.pricing.find_one({}) or {}
+    return {
+        "banner_price_7":   doc.get("banner_price_7",  149),
+        "banner_price_14":  doc.get("banner_price_14", 249),
+        "banner_price_30":  doc.get("banner_price_30", 399),
+        "voucher_price_30": doc.get("voucher_price_30",199),
+        "voucher_price_60": doc.get("voucher_price_60",349),
+        "voucher_price_90": doc.get("voucher_price_90",499),
+    }
+
+@router.put("/banner-pricing")
+def update_banner_pricing(data: dict, a=Depends(get_current_admin)):
+    fields = ["banner_price_7","banner_price_14","banner_price_30","voucher_price_30","voucher_price_60","voucher_price_90"]
+    upd = {f: float(data[f]) for f in fields if f in data}
+    doc = db.pricing.find_one({})
+    if doc: db.pricing.update_one({"_id":doc["_id"]},{"$set":upd})
+    else: db.pricing.insert_one(upd)
+    return {"ok":True}

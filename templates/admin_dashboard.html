@@ -106,6 +106,9 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
   <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <a href="#" onclick="showSection('voucher_zone',this)"><i class="fas fa-id-card fa-fw"></i> Voucher Zone</a>
+      <a href="#" class="nav-link" onclick="showSection('merchant-banners')"><i class="fas fa-image"></i> Merchant Banners</a>
+      <a href="#" class="nav-link" onclick="showSection('merchant-vouchers')"><i class="fas fa-tags"></i> Merchant Vouchers</a>
+      <a href="#" class="nav-link" onclick="showSection('invoices-full')"><i class="fas fa-file-invoice-dollar"></i> All Invoices</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <div class="sep"></div>
@@ -2640,5 +2643,426 @@ async function saveStore() {
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════
+     MERCHANT BANNERS SECTION
+═══════════════════════════════════════════════════════ -->
+<div id="section-merchant-banners" class="section" style="display:none">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0"><i class="fas fa-image me-2" style="color:var(--primary)"></i>Merchant Banners</h4>
+    <span class="badge" style="background:var(--accent);color:var(--text);font-size:12px" id="mbanner-count">Loading...</span>
+  </div>
+  <div class="card p-0 overflow-hidden">
+    <table class="table table-hover mb-0" id="merchant-banners-table">
+      <thead style="background:var(--primary);color:#fff">
+        <tr>
+          <th>Preview</th><th>Merchant</th><th>Title</th><th>Plan</th>
+          <th>Amount</th><th>Status</th><th>Submitted</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="merchant-banners-body"><tr><td colspan="8" class="text-center py-4 text-muted">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     MERCHANT VOUCHERS SECTION
+═══════════════════════════════════════════════════════ -->
+<div id="section-merchant-vouchers" class="section" style="display:none">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0"><i class="fas fa-tags me-2" style="color:var(--primary)"></i>Merchant Vouchers</h4>
+    <span class="badge" style="background:var(--accent);color:var(--text);font-size:12px" id="mvoucher-count">Loading...</span>
+  </div>
+  <div class="card p-0 overflow-hidden">
+    <table class="table table-hover mb-0" id="merchant-vouchers-table">
+      <thead style="background:var(--primary);color:#fff">
+        <tr>
+          <th>Logo</th><th>Merchant</th><th>Title</th><th>Offer</th>
+          <th>Validity</th><th>Amount</th><th>Status</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="merchant-vouchers-body"><tr><td colspan="8" class="text-center py-4 text-muted">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     ALL INVOICES SECTION
+═══════════════════════════════════════════════════════ -->
+<div id="section-invoices-full" class="section" style="display:none">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0"><i class="fas fa-file-invoice-dollar me-2" style="color:var(--primary)"></i>All Invoices</h4>
+    <div class="d-flex gap-2">
+      <input type="text" class="form-control form-control-sm" id="invoice-search" placeholder="Search merchant..." style="width:200px" oninput="filterInvoices()">
+      <button class="btn btn-sm" style="background:var(--primary);color:#fff" onclick="exportInvoiceCSV()"><i class="fas fa-download me-1"></i>Export CSV</button>
+    </div>
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="row g-3 mb-4" id="invoice-summary-cards">
+    <div class="col-md-3">
+      <div class="card p-3 text-center">
+        <div class="text-muted mb-1" style="font-size:12px">Total Revenue</div>
+        <div class="fw-bold" style="font-size:22px;color:var(--primary)" id="inv-total-rev">₹0</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card p-3 text-center">
+        <div class="text-muted mb-1" style="font-size:12px">Store Subscriptions</div>
+        <div class="fw-bold" style="font-size:22px;color:var(--primary)" id="inv-store-rev">₹0</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card p-3 text-center">
+        <div class="text-muted mb-1" style="font-size:12px">Banner Revenue</div>
+        <div class="fw-bold" style="font-size:22px;color:#c0392b" id="inv-banner-rev">₹0</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card p-3 text-center">
+        <div class="text-muted mb-1" style="font-size:12px">Voucher Revenue</div>
+        <div class="fw-bold" style="font-size:22px;color:#856404" id="inv-voucher-rev">₹0</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card p-0 overflow-hidden">
+    <table class="table table-hover mb-0" id="invoices-full-table">
+      <thead style="background:var(--primary);color:#fff">
+        <tr>
+          <th>Invoice #</th><th>Merchant</th><th>Type</th><th>Item</th>
+          <th>Base</th><th>GST</th><th>Total</th><th>Date</th><th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="invoices-full-body"><tr><td colspan="9" class="text-center py-4 text-muted">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Print Invoice Modal -->
+<div class="modal fade" id="invoiceModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header" style="background:var(--primary);color:#fff">
+        <h5 class="modal-title"><i class="fas fa-file-invoice me-2"></i>Invoice</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="invoice-print-area"><!-- filled by JS --></div>
+      <div class="modal-footer">
+        <button class="btn btn-sm" style="background:var(--primary);color:#fff" onclick="printInvoice()">
+          <i class="fas fa-print me-1"></i>Print / Save PDF
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Rejection Reason Modal -->
+<div class="modal fade" id="rejectModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header" style="background:var(--danger);color:#fff">
+        <h5 class="modal-title">Reject — Add Reason</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label fw-semibold">Reason (optional)</label>
+        <textarea id="reject-reason-input" class="form-control" rows="3" placeholder="e.g. Image quality too low, misleading content..."></textarea>
+        <input type="hidden" id="reject-type">
+        <input type="hidden" id="reject-id">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger text-white" onclick="confirmReject()">Reject</button>
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// MERCHANT BANNERS
+// ═══════════════════════════════════════════════
+let _allInvoices = [];
+
+async function loadMerchantBanners() {
+  const el = document.getElementById('merchant-banners-body');
+  if (!el) return;
+  el.innerHTML = '<tr><td colspan="8" class="text-center py-3 text-muted">Loading...</td></tr>';
+  try {
+    const res = await fetch('/admin/merchant-banners', {credentials:'include'});
+    const data = await res.json();
+    const cnt = document.getElementById('mbanner-count');
+    if (cnt) cnt.textContent = `${data.length} total`;
+    if (!data.length) { el.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted">No banners submitted yet.</td></tr>'; return; }
+    el.innerHTML = data.map(b => {
+      const statusBadge = b.status === 'approved'
+        ? `<span class="badge" style="background:#d1f0e0;color:#1a6640">✅ Approved</span>`
+        : b.status === 'rejected'
+        ? `<span class="badge" style="background:#fde8e8;color:#c0392b">❌ Rejected</span>`
+        : `<span class="badge" style="background:#fff3cd;color:#856404">⏳ Pending</span>`;
+
+      const thumb = b.image_url
+        ? `<img src="${b.image_url.startsWith('data:') ? b.image_url : b.image_url}" style="width:80px;height:30px;object-fit:cover;border-radius:5px;border:1px solid var(--border)">`
+        : `<span class="text-muted" style="font-size:11px">No image</span>`;
+
+      const actions = b.status === 'pending_approval' || b.status === 'pending'
+        ? `<button class="btn btn-sm me-1 text-white" style="background:var(--primary);font-size:11px" onclick="approveBanner('${b._id}')"><i class="fas fa-check"></i> Approve</button>
+           <button class="btn btn-sm text-white" style="background:var(--danger);font-size:11px" onclick="openReject('banner','${b._id}')"><i class="fas fa-times"></i> Reject</button>`
+        : `<button class="btn btn-sm btn-outline-danger" style="font-size:11px" onclick="deleteMerchantBanner('${b._id}')"><i class="fas fa-trash"></i></button>`;
+
+      return `<tr>
+        <td>${thumb}</td>
+        <td style="font-size:13px">${b.merchant_name||'-'}</td>
+        <td style="font-size:13px;font-weight:600">${b.title}</td>
+        <td style="font-size:12px">${b.duration||30} days</td>
+        <td style="font-size:13px">₹${b.amount||0}</td>
+        <td>${statusBadge}</td>
+        <td style="font-size:11px;color:var(--muted)">${b.created_at}</td>
+        <td>${actions}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { el.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Error: ${e.message}</td></tr>`; }
+}
+
+async function approveBanner(id) {
+  if (!confirm('Approve this banner? It will appear as a promo slider in the app.')) return;
+  try {
+    await fetch(`/admin/merchant-banners/${id}/approve`, {method:'PUT',credentials:'include'});
+    showToast('Banner approved ✅ — now live in app','success'); loadMerchantBanners();
+  } catch(e) { showToast('Error: '+e.message,'error'); }
+}
+
+function openReject(type, id) {
+  document.getElementById('reject-type').value = type;
+  document.getElementById('reject-id').value = id;
+  document.getElementById('reject-reason-input').value = '';
+  new bootstrap.Modal(document.getElementById('rejectModal')).show();
+}
+
+async function confirmReject() {
+  const type = document.getElementById('reject-type').value;
+  const id   = document.getElementById('reject-id').value;
+  const reason = document.getElementById('reject-reason-input').value.trim();
+  const url = type === 'banner' ? `/admin/merchant-banners/${id}/reject` : `/admin/merchant-vouchers/${id}/reject`;
+  try {
+    await fetch(url, {method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason})});
+    bootstrap.Modal.getInstance(document.getElementById('rejectModal')).hide();
+    showToast('Rejected ❌','success');
+    if (type==='banner') loadMerchantBanners(); else loadMerchantVouchers();
+  } catch(e) { showToast('Error: '+e.message,'error'); }
+}
+
+async function deleteMerchantBanner(id) {
+  if (!confirm('Delete this banner permanently?')) return;
+  await fetch(`/admin/merchant-banners/${id}`, {method:'DELETE',credentials:'include'});
+  loadMerchantBanners();
+}
+
+// ═══════════════════════════════════════════════
+// MERCHANT VOUCHERS
+// ═══════════════════════════════════════════════
+async function loadMerchantVouchers() {
+  const el = document.getElementById('merchant-vouchers-body');
+  if (!el) return;
+  el.innerHTML = '<tr><td colspan="8" class="text-center py-3 text-muted">Loading...</td></tr>';
+  try {
+    const res = await fetch('/admin/merchant-vouchers', {credentials:'include'});
+    const data = await res.json();
+    const cnt = document.getElementById('mvoucher-count');
+    if (cnt) cnt.textContent = `${data.length} total`;
+    if (!data.length) { el.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted">No vouchers submitted yet.</td></tr>'; return; }
+    el.innerHTML = data.map(v => {
+      const statusBadge = v.status === 'approved'
+        ? `<span class="badge" style="background:#d1f0e0;color:#1a6640">✅ Approved</span>`
+        : v.status === 'rejected'
+        ? `<span class="badge" style="background:#fde8e8;color:#c0392b">❌ Rejected</span>`
+        : `<span class="badge" style="background:#fff3cd;color:#856404">⏳ Pending</span>`;
+
+      const logo = v.logo_url
+        ? `<img src="${v.logo_url}" style="width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">`
+        : `<div style="width:40px;height:40px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center"><i class="fas fa-ticket-alt" style="color:var(--primary);font-size:14px"></i></div>`;
+
+      const actions = v.status === 'pending_approval' || v.status === 'pending'
+        ? `<button class="btn btn-sm me-1 text-white" style="background:var(--primary);font-size:11px" onclick="approveVoucher('${v._id}')"><i class="fas fa-check"></i> Approve</button>
+           <button class="btn btn-sm text-white" style="background:var(--danger);font-size:11px" onclick="openReject('voucher','${v._id}')"><i class="fas fa-times"></i> Reject</button>`
+        : `<button class="btn btn-sm btn-outline-danger" style="font-size:11px" onclick="deleteMerchantVoucher('${v._id}')"><i class="fas fa-trash"></i></button>`;
+
+      return `<tr>
+        <td>${logo}</td>
+        <td style="font-size:13px">${v.merchant_name||'-'}</td>
+        <td style="font-size:13px;font-weight:600">${v.title}</td>
+        <td style="font-size:12px;color:var(--muted)">${v.offer_text||'-'}</td>
+        <td style="font-size:12px">${v.validity||'-'}</td>
+        <td style="font-size:13px">₹${v.amount||0}</td>
+        <td>${statusBadge}</td>
+        <td>${actions}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { el.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Error: ${e.message}</td></tr>`; }
+}
+
+async function approveVoucher(id) {
+  if (!confirm('Approve this voucher? It will appear in the Voucher Zone.')) return;
+  try {
+    await fetch(`/admin/merchant-vouchers/${id}/approve`, {method:'PUT',credentials:'include'});
+    showToast('Voucher approved ✅ — now live in Voucher Zone','success'); loadMerchantVouchers();
+  } catch(e) { showToast('Error: '+e.message,'error'); }
+}
+
+async function deleteMerchantVoucher(id) {
+  if (!confirm('Delete this voucher permanently?')) return;
+  await fetch(`/admin/merchant-vouchers/${id}`, {method:'DELETE',credentials:'include'});
+  loadMerchantVouchers();
+}
+
+// ═══════════════════════════════════════════════
+// ALL INVOICES
+// ═══════════════════════════════════════════════
+async function loadAllInvoices() {
+  const el = document.getElementById('invoices-full-body');
+  if (!el) return;
+  try {
+    const res = await fetch('/admin/invoices/full', {credentials:'include'});
+    _allInvoices = await res.json();
+    renderInvoices(_allInvoices);
+    // Summary
+    const tot = _allInvoices.reduce((s,i)=>s+(i.total||0),0);
+    const storeRev = _allInvoices.filter(i=>i.type==='store'||!i.type).reduce((s,i)=>s+(i.total||0),0);
+    const bannerRev = _allInvoices.filter(i=>i.type==='banner').reduce((s,i)=>s+(i.total||0),0);
+    const voucherRev = _allInvoices.filter(i=>i.type==='voucher').reduce((s,i)=>s+(i.total||0),0);
+    const safeEl = id => document.getElementById(id);
+    if(safeEl('inv-total-rev'))  safeEl('inv-total-rev').textContent  = '₹'+tot.toFixed(2);
+    if(safeEl('inv-store-rev'))  safeEl('inv-store-rev').textContent  = '₹'+storeRev.toFixed(2);
+    if(safeEl('inv-banner-rev')) safeEl('inv-banner-rev').textContent = '₹'+bannerRev.toFixed(2);
+    if(safeEl('inv-voucher-rev'))safeEl('inv-voucher-rev').textContent= '₹'+voucherRev.toFixed(2);
+  } catch(e) { if(el) el.innerHTML = `<tr><td colspan="9" class="text-danger text-center">Error: ${e.message}</td></tr>`; }
+}
+
+function renderInvoices(data) {
+  const el = document.getElementById('invoices-full-body');
+  if (!el) return;
+  if (!data.length) { el.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">No invoices found.</td></tr>'; return; }
+  const typeColor = {store:'#3E5F55', banner:'#c0392b', voucher:'#856404'};
+  el.innerHTML = data.map(inv => {
+    const tc = typeColor[inv.type] || '#3E5F55';
+    const typeBadge = `<span class="badge" style="background:${tc}20;color:${tc};font-size:11px;text-transform:capitalize">${inv.type||'store'}</span>`;
+    return `<tr>
+      <td style="font-size:12px;font-weight:600;color:var(--primary)">${inv.invoice_no}</td>
+      <td style="font-size:13px">${inv.merchant_name||'-'}</td>
+      <td>${typeBadge}</td>
+      <td style="font-size:12px">${inv.item_label||'-'}</td>
+      <td style="font-size:13px">₹${(inv.base_price||0).toFixed?.(2)}</td>
+      <td style="font-size:13px">₹${(inv.gst||0).toFixed?.(2)}</td>
+      <td style="font-size:13px;font-weight:700;color:var(--primary)">₹${(inv.total||0).toFixed?.(2)}</td>
+      <td style="font-size:11px;color:var(--muted)">${inv.created_at||''}</td>
+      <td><button class="btn btn-sm" style="background:var(--light);color:var(--primary);font-size:11px" onclick='showInvoicePrint(${JSON.stringify(inv)})'>
+        <i class="fas fa-print"></i> Print
+      </button></td>
+    </tr>`;
+  }).join('');
+}
+
+function filterInvoices() {
+  const q = (document.getElementById('invoice-search')?.value||'').toLowerCase();
+  const filtered = q ? _allInvoices.filter(i=>(i.merchant_name||'').toLowerCase().includes(q)||(i.invoice_no||'').toLowerCase().includes(q)) : _allInvoices;
+  renderInvoices(filtered);
+}
+
+function showInvoicePrint(inv) {
+  const area = document.getElementById('invoice-print-area');
+  area.innerHTML = `
+    <div style="font-family:'Segoe UI',sans-serif;padding:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #3E5F55;padding-bottom:16px">
+        <div>
+          <div style="font-size:24px;font-weight:900;color:#3E5F55">OFFRO</div>
+          <div style="font-size:11px;color:#6b8c7e">Tax Invoice</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:#2c3e35">${inv.invoice_no}</div>
+          <div style="font-size:12px;color:#6b8c7e">${inv.created_at}</div>
+        </div>
+      </div>
+      <div style="margin-bottom:20px">
+        <div style="font-size:12px;color:#6b8c7e;margin-bottom:4px">BILLED TO</div>
+        <div style="font-weight:700;color:#2c3e35">${inv.merchant_name||'—'}</div>
+        <div style="font-size:12px;color:#6b8c7e">${inv.merchant_phone||''}</div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <thead>
+          <tr style="background:#3E5F55;color:#fff">
+            <th style="padding:10px 12px;text-align:left;font-size:12px">Item</th>
+            <th style="padding:10px 12px;text-align:right;font-size:12px">Qty</th>
+            <th style="padding:10px 12px;text-align:right;font-size:12px">Unit Price</th>
+            <th style="padding:10px 12px;text-align:right;font-size:12px">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid #d4e8de">
+            <td style="padding:10px 12px;font-size:13px">${inv.item_label||inv.type||'Store Subscription'}</td>
+            <td style="padding:10px 12px;text-align:right;font-size:13px">1</td>
+            <td style="padding:10px 12px;text-align:right;font-size:13px">₹${(inv.base_price||0).toFixed(2)}</td>
+            <td style="padding:10px 12px;text-align:right;font-size:13px">₹${(inv.base_price||0).toFixed(2)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-left:auto;width:260px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:13px;color:#6b8c7e">Subtotal</span>
+          <span style="font-size:13px">₹${(inv.base_price||0).toFixed(2)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:13px;color:#6b8c7e">GST (18%)</span>
+          <span style="font-size:13px">₹${(inv.gst||0).toFixed(2)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:10px;background:#3E5F55;border-radius:8px;margin-top:8px">
+          <span style="font-weight:700;color:#fff">Total Paid</span>
+          <span style="font-weight:900;color:#fff;font-size:16px">₹${(inv.total||0).toFixed(2)}</span>
+        </div>
+      </div>
+      <div style="margin-top:24px;padding:12px;background:#FDFBF6;border-radius:8px;border:1px solid #d4e8de;font-size:11px;color:#6b8c7e">
+        Period: ${inv.from_date||'—'} → ${inv.end_date||'—'} &nbsp;|&nbsp; This is a system-generated invoice.
+      </div>
+    </div>`;
+  new bootstrap.Modal(document.getElementById('invoiceModal')).show();
+}
+
+function printInvoice() {
+  const content = document.getElementById('invoice-print-area').innerHTML;
+  const win = window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>OFFRO Invoice</title>
+    <style>body{font-family:'Segoe UI',sans-serif;margin:0;padding:20px}@media print{button{display:none}}</style>
+    </head><body>${content}<script>setTimeout(()=>{window.print();window.close();},400);<\/script></body></html>`);
+  win.document.close();
+}
+
+function exportInvoiceCSV() {
+  const rows = [['Invoice No','Merchant','Type','Item','Base Price','GST','Total','Date']];
+  _allInvoices.forEach(i=>rows.push([i.invoice_no,i.merchant_name,i.type,i.item_label,i.base_price,i.gst,i.total,i.created_at]));
+  const csv = rows.map(r=>r.map(v=>`"${String(v??'').replace(/"/g,''')}"`).join(',')).join('\n');
+  const blob = new Blob([csv],{type:'text/csv'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='offro_invoices.csv'; a.click();
+}
+
+// ═══════════════════════════════════════════════
+// Hook into showSection
+// ═══════════════════════════════════════════════
+const _origShowSection = typeof showSection === 'function' ? showSection : null;
+function showSection(name) {
+  if (_origShowSection) _origShowSection(name);
+  else {
+    document.querySelectorAll('.section').forEach(s=>s.style.display='none');
+    const el = document.getElementById('section-'+name);
+    if (el) el.style.display='block';
+    document.querySelectorAll('.nav-link').forEach(l=>l.classList.remove('active'));
+    document.querySelectorAll('.nav-link').forEach(l=>{if(l.getAttribute('onclick')?.includes(name))l.classList.add('active')});
+  }
+  if (name === 'merchant-banners') loadMerchantBanners();
+  else if (name === 'merchant-vouchers') loadMerchantVouchers();
+  else if (name === 'invoices-full') loadAllInvoices();
+}
+</script>
 </body>
 </html>
