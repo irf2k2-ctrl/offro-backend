@@ -474,39 +474,27 @@ tr:hover td{background:#f7faf8;}
       <p id="pricing_msg" class="mt-2" style="font-size:13px;color:var(--primary);"></p>
     </div>
 
-    <!-- ── Banner & Voucher Pricing ── -->
+    <!-- ── Banner & Voucher Pricing (Per-Day Model) ── -->
     <div style="margin-top:20px;background:#fff8f0;border-radius:12px;padding:20px;border:1px solid #e8d5c0;max-width:640px;">
-      <div class="fw-bold mb-3" style="color:#856404;font-size:15px;">🖼️ Banner Pricing (Merchant Paid)</div>
+      <div class="fw-bold mb-3" style="color:#856404;font-size:15px;">🖼️ Banner Pricing — Per Day</div>
+      <p style="font-size:12px;color:#856404;margin-bottom:14px;">Merchant selects any number of days + start date. Total = days × rate + GST</p>
       <div class="row g-3 mb-2">
         <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">7-Day Banner (₹)</label>
-          <input id="banner_price_7" class="form-control" type="number" min="0" placeholder="149">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">14-Day Banner (₹)</label>
-          <input id="banner_price_14" class="form-control" type="number" min="0" placeholder="249">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">30-Day Banner (₹)</label>
-          <input id="banner_price_30" class="form-control" type="number" min="0" placeholder="399">
+          <label class="form-label" style="font-size:13px">Banner Price per Day (₹)</label>
+          <input id="banner_price_per_day" class="form-control" type="number" min="0" step="0.50" placeholder="15">
+          <small class="text-muted">e.g. 30 days × ₹15 = ₹450 base</small>
         </div>
       </div>
     </div>
 
     <div style="margin-top:16px;background:#f0f8ff;border-radius:12px;padding:20px;border:1px solid #c0d8f0;max-width:640px;">
-      <div class="fw-bold mb-3" style="color:#0d47a1;font-size:15px;">🎁 Voucher Pricing (Merchant Paid)</div>
+      <div class="fw-bold mb-3" style="color:#0d47a1;font-size:15px;">🎁 Voucher Pricing — Per Day</div>
+      <p style="font-size:12px;color:#0d47a1;margin-bottom:14px;">Merchant selects number of days + start date. Total = days × rate + GST</p>
       <div class="row g-3 mb-2">
         <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">30-Day Voucher (₹)</label>
-          <input id="voucher_price_30" class="form-control" type="number" min="0" placeholder="199">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">60-Day Voucher (₹)</label>
-          <input id="voucher_price_60" class="form-control" type="number" min="0" placeholder="349">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">90-Day Voucher (₹)</label>
-          <input id="voucher_price_90" class="form-control" type="number" min="0" placeholder="499">
+          <label class="form-label" style="font-size:13px">Voucher Price per Day (₹)</label>
+          <input id="voucher_price_per_day" class="form-control" type="number" min="0" step="0.50" placeholder="10">
+          <small class="text-muted">e.g. 45 days × ₹10 = ₹450 base</small>
         </div>
       </div>
       <button class="btn-p mt-2" onclick="saveBannerVoucherPricing()" style="font-size:13px;padding:6px 18px;">
@@ -1620,6 +1608,52 @@ async function loadMerchantTxns() {
     let sr = await fetch("/admin/subscriptions", {credentials:"include"});
     let subs = sr.ok ? await sr.json() : [];
 
+    // Get merchant banner invoices
+    let br = await fetch("/admin/merchant-banners", {credentials:"include"});
+    let bannerInvs = br.ok ? await br.json() : [];
+    bannerInvs.forEach(b => {
+      invoices.push({
+        invoice_no:     (b._id||'').slice(-8).toUpperCase(),
+        merchant_name:  b.merchant_name||'',
+        merchant_phone: b.merchant_phone||'',
+        store_name:     '',
+        item_label:     `${b.duration_days||0}-Day Banner`,
+        type:           'banner',
+        plan:           `${b.from_date||''} → ${b.end_date||''}`,
+        base_price:     parseFloat(b.base_price||0),
+        gst:            parseFloat(b.gst_amount||0),
+        gst_percent:    parseFloat(b.gst_percent||18),
+        total:          parseFloat(b.total||0),
+        razorpay_payment_id: b.razorpay_payment_id||'',
+        created_at:     b.created_at||'',
+        _txn_status:    b.payment_status==='paid'?'paid':'free',
+        approval_status: b.approval_status||'pending',
+      });
+    });
+
+    // Get merchant voucher invoices
+    let vr = await fetch("/admin/merchant-vouchers", {credentials:"include"});
+    let voucherInvs = vr.ok ? await vr.json() : [];
+    voucherInvs.forEach(v => {
+      invoices.push({
+        invoice_no:     (v._id||'').slice(-8).toUpperCase(),
+        merchant_name:  v.merchant_name||'',
+        merchant_phone: v.merchant_phone||'',
+        store_name:     '',
+        item_label:     `${v.duration_days||0}-Day Voucher`,
+        type:           'voucher',
+        plan:           `${v.from_date||''} → ${v.end_date||''}`,
+        base_price:     parseFloat(v.base_price||0),
+        gst:            parseFloat(v.gst_amount||0),
+        gst_percent:    parseFloat(v.gst_percent||18),
+        total:          parseFloat(v.total||0),
+        razorpay_payment_id: v.razorpay_payment_id||'',
+        created_at:     v.created_at||'',
+        _txn_status:    v.payment_status==='paid'?'paid':'free',
+        approval_status: v.approval_status||'pending',
+      });
+    });
+
     // Subscriptions with total=0 are FREE/activated plans — treat as successful
     // Build combined list: invoices (paid) + pending subs with total > 0
     let pendingRows = [];
@@ -1667,7 +1701,7 @@ async function loadMerchantTxns() {
 
     // Stats
     let realPending = pendingRows.length;
-    let revenue = invoices.filter(i=>i._txn_status==="paid").reduce((s,t)=>s+(t.total||0),0);
+    let revenue = invoices.filter(i=>i._txn_status==="paid"||i._txn_status==="free").reduce((s,t)=>s+(t.total||0),0);
     document.getElementById("txn_total_merchants").innerText = merchantsList.length;
     document.getElementById("txn_total_subs").innerText = invoices.length;
     document.getElementById("txn_pending_subs").innerText = realPending + " stores";
@@ -2860,24 +2894,16 @@ async function loadBannerVoucherPricing() {
     if (!r.ok) return;
     const d = await r.json();
     const safe = (id, val) => { const el = document.getElementById(id); if(el) el.value = val ?? ''; };
-    safe('banner_price_7',   d.banner_price_7   ?? 149);
-    safe('banner_price_14',  d.banner_price_14  ?? 249);
-    safe('banner_price_30',  d.banner_price_30  ?? 399);
-    safe('voucher_price_30', d.voucher_price_30 ?? 199);
-    safe('voucher_price_60', d.voucher_price_60 ?? 349);
-    safe('voucher_price_90', d.voucher_price_90 ?? 499);
+    safe('banner_price_per_day',  d.banner_price_per_day  ?? 15);
+    safe('voucher_price_per_day', d.voucher_price_per_day ?? 10);
   } catch(_) {}
 }
 
 async function saveBannerVoucherPricing() {
   const gv = id => parseFloat(document.getElementById(id)?.value) || 0;
   const body = {
-    banner_price_7:   gv('banner_price_7'),
-    banner_price_14:  gv('banner_price_14'),
-    banner_price_30:  gv('banner_price_30'),
-    voucher_price_30: gv('voucher_price_30'),
-    voucher_price_60: gv('voucher_price_60'),
-    voucher_price_90: gv('voucher_price_90'),
+    banner_price_per_day:  gv('banner_price_per_day'),
+    voucher_price_per_day: gv('voucher_price_per_day'),
   };
   try {
     const r = await fetch('/admin/banner-pricing', {method:'PUT', credentials:'include',
@@ -2965,7 +2991,7 @@ function renderTxnRows(rows) {
       <td>${typeBadge}</td>
       <td style="font-size:12px">${inv.plan||'—'}</td>
       <td style="font-size:13px">₹${parseFloat(inv.base_price||0).toFixed(2)}</td>
-      <td style="font-size:13px">₹${parseFloat(inv.gst||0).toFixed(2)}</td>
+      <td style="font-size:13px">₹${parseFloat(inv.gst||0).toFixed(2)}<br><span style="font-size:10px;color:var(--muted)">${inv.gst_percent?inv.gst_percent+'%':''}</span></td>
       <td style="font-size:13px;font-weight:700;color:var(--primary)">₹${parseFloat(inv.total||0).toFixed(2)}</td>
       <td>${statusBadge}</td>
     </tr>`;
@@ -2986,7 +3012,7 @@ function filterTxns() {
 }
 
 function exportPaymentsCSV() {
-  const rows = [['Date','Invoice No','Merchant','Phone','Item','Type','Plan','Base','GST','Total','Status']];
+  const rows = [['Date','Invoice No','Merchant','Phone','Item','Type','Plan','Base','GST%','GST Amt','Total','Status']];
   _allTxnRows.forEach(i=>rows.push([i.created_at,i.invoice_no,i.merchant_name,i.merchant_phone,
     i.item_label||i.store_name,i.type||'store',i.plan,i.base_price,i.gst,i.total,
     i._status||(i.invoice_no==='PENDING'?'pending':'paid')]));

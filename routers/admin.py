@@ -1424,7 +1424,13 @@ def list_all_invoices(a=Depends(get_current_admin)):
 @router.get("/banner-pricing")
 def get_banner_pricing(a=Depends(get_current_admin)):
     doc = db.pricing.find_one({}) or {}
+    gst = float(doc.get("gst_percent", 18))
     return {
+        # Per-day pricing (Issue 4)
+        "banner_price_per_day":  float(doc.get("banner_price_per_day",  15)),
+        "voucher_price_per_day": float(doc.get("voucher_price_per_day", 10)),
+        "gst_percent": gst,
+        # Legacy fields kept for backward compat
         "banner_price_7":   doc.get("banner_price_7",  149),
         "banner_price_14":  doc.get("banner_price_14", 249),
         "banner_price_30":  doc.get("banner_price_30", 399),
@@ -1435,7 +1441,9 @@ def get_banner_pricing(a=Depends(get_current_admin)):
 
 @router.put("/banner-pricing")
 def update_banner_pricing(data: dict, a=Depends(get_current_admin)):
-    fields = ["banner_price_7","banner_price_14","banner_price_30","voucher_price_30","voucher_price_60","voucher_price_90"]
+    fields = ["banner_price_per_day","voucher_price_per_day",
+              "banner_price_7","banner_price_14","banner_price_30",
+              "voucher_price_30","voucher_price_60","voucher_price_90"]
     upd = {f: float(data[f]) for f in fields if f in data}
     doc = db.pricing.find_one({})
     if doc: db.pricing.update_one({"_id":doc["_id"]},{"$set":upd})
