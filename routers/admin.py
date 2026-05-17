@@ -1327,6 +1327,23 @@ def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admi
     db.promo_sliders.delete_many({"source_banner_id": bid})
     return {"ok": True, "message": "Banner rejected."}
 
+@router.put("/merchant-banners/{bid}")
+def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
+    """FIX 9: Admin edit merchant banner fields + status."""
+    allowed = {"title", "image_url", "from_date", "end_date", "status"}
+    update_data = {k: v for k, v in data.items() if k in allowed}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    update_data["updated_at"] = datetime.utcnow().isoformat()
+    result = db.merchant_banners.update_one(
+        {"_id": ObjectId(bid)},
+        {"$set": update_data}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Banner not found")
+    return {"ok": True, "updated": update_data}
+
+
 @router.delete("/merchant-banners/{bid}")
 def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
     db.merchant_banners.delete_one({"_id": ObjectId(bid)})
@@ -1389,6 +1406,23 @@ def reject_merchant_voucher(vid: str, body: dict = {}, a=Depends(get_current_adm
     }})
     db.gift_vouchers.delete_many({"source_voucher_id": vid})
     return {"ok": True, "message": "Voucher rejected."}
+
+@router.put("/merchant-vouchers/{vid}")
+def update_merchant_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
+    """FIX 10: Admin edit merchant voucher fields + status."""
+    allowed = {"title", "offer_text", "validity", "logo", "status"}
+    update_data = {k: v for k, v in data.items() if k in allowed}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    update_data["updated_at"] = datetime.utcnow().isoformat()
+    result = db.merchant_vouchers.update_one(
+        {"_id": ObjectId(vid)},
+        {"$set": update_data}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Voucher not found")
+    return {"ok": True, "updated": update_data}
+
 
 @router.delete("/merchant-vouchers/{vid}")
 def delete_merchant_voucher(vid: str, a=Depends(get_current_admin)):

@@ -2174,7 +2174,104 @@ function openBnEdit(id, source) {
   const row = _allBannerRows.find(r=>r._id===id);
   if (!row) return;
   if (source==='admin') { editSlider(row._raw); }
-  else { alert('To edit a merchant banner, update it via the Merchant Banner form.'); }
+  else {
+    // FIX 9: Admin can now edit merchant banners directly
+    openBnMerchantEditModal(row);
+  }
+}
+
+// FIX 9: Merchant banner edit modal (admin side)
+let _bnMerchantEditCurrent = null;
+function openBnMerchantEditModal(row) {
+  _bnMerchantEditCurrent = row;
+  const el = id => document.getElementById(id);
+  if (!el('bn_merchant_edit_modal')) {
+    // Create modal dynamically
+    const modal = document.createElement('div');
+    modal.id = 'bn_merchant_edit_modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+    modal.innerHTML = `
+      <div style="background:#fff;border-radius:16px;padding:28px;width:440px;max-height:90vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+          <h5 style="margin:0;color:var(--primary)">Edit Merchant Banner</h5>
+          <button onclick="document.getElementById('bn_merchant_edit_modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">&times;</button>
+        </div>
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Banner Title</label>
+          <input id="bn_edit_title" type="text" class="form-control" style="margin-top:4px">
+        </div>
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Image URL</label>
+          <input id="bn_edit_image" type="text" class="form-control" style="margin-top:4px" placeholder="https://...">
+          <img id="bn_edit_preview" src="" style="margin-top:8px;width:100%;height:80px;object-fit:cover;border-radius:8px;display:none">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">Start Date</label>
+            <input id="bn_edit_from" type="text" class="form-control" style="margin-top:4px" placeholder="DD Mon YYYY">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">End Date</label>
+            <input id="bn_edit_end" type="text" class="form-control" style="margin-top:4px" placeholder="DD Mon YYYY">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Status</label>
+          <select id="bn_edit_status" class="form-select" style="margin-top:4px">
+            <option value="pending">Pending Approval</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="expired">Expired</option>
+          </select>
+        </div>
+        <div id="bn_edit_msg" style="font-size:12px;margin-bottom:8px"></div>
+        <div style="display:flex;gap:10px">
+          <button class="btn-o" style="flex:1" onclick="document.getElementById('bn_merchant_edit_modal').remove()">Cancel</button>
+          <button class="btn-approve" style="flex:2" onclick="saveBnMerchantEdit()">Save Changes</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    // Live preview for image URL
+    document.getElementById('bn_edit_image').addEventListener('input', function(){
+      const img = document.getElementById('bn_edit_preview');
+      img.src = this.value; img.style.display = this.value ? 'block' : 'none';
+    });
+  }
+  // Populate fields
+  const el2 = id => document.getElementById(id);
+  if(el2('bn_edit_title'))  el2('bn_edit_title').value  = row.title||'';
+  if(el2('bn_edit_image'))  { el2('bn_edit_image').value = row.image_url||''; const img=el2('bn_edit_preview'); if(row.image_url){img.src=row.image_url;img.style.display='block';} else {img.style.display='none';} }
+  if(el2('bn_edit_from'))   el2('bn_edit_from').value   = row.from_date||'';
+  if(el2('bn_edit_end'))    el2('bn_edit_end').value    = row.end_date||'';
+  if(el2('bn_edit_status')) el2('bn_edit_status').value = row.status||'pending';
+  if(el2('bn_edit_msg'))    el2('bn_edit_msg').textContent = '';
+  el2('bn_merchant_edit_modal').style.display = 'flex';
+}
+
+async function saveBnMerchantEdit() {
+  const row = _bnMerchantEditCurrent;
+  if (!row) return;
+  const el = id => document.getElementById(id);
+  const payload = {
+    title:      el('bn_edit_title')?.value?.trim() || row.title,
+    image_url:  el('bn_edit_image')?.value?.trim() || row.image_url,
+    from_date:  el('bn_edit_from')?.value?.trim()  || row.from_date,
+    end_date:   el('bn_edit_end')?.value?.trim()   || row.end_date,
+    status:     el('bn_edit_status')?.value        || row.status,
+  };
+  try {
+    const res = await fetch(`/admin/merchant-banners/${row._id}`, {
+      method:'PUT', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Error');
+    if(el('bn_edit_msg')) { el('bn_edit_msg').style.color='#1a6640'; el('bn_edit_msg').textContent = '✅ Banner updated!'; }
+    setTimeout(()=>{ document.getElementById('bn_merchant_edit_modal')?.remove(); loadSliders(); }, 800);
+  } catch(e) {
+    if(el('bn_edit_msg')) { el('bn_edit_msg').style.color='red'; el('bn_edit_msg').textContent = e.message; }
+  }
 }
 
 async function deleteBnBanner(id, source) {
@@ -2764,7 +2861,103 @@ function openVZEdit(id, source) {
   const row = _allVoucherRows.find(r=>r._id===id);
   if (!row) return;
   if (source==='admin') { editGiftCard(row._raw); }
-  else { alert('Edit merchant vouchers via the Merchant Voucher form.'); }
+  else {
+    // FIX 10: Admin can now edit merchant vouchers directly
+    openVZMerchantEditModal(row);
+  }
+}
+
+// FIX 10: Merchant voucher edit modal (admin side)
+let _vzMerchantEditCurrent = null;
+function openVZMerchantEditModal(row) {
+  _vzMerchantEditCurrent = row;
+  const el = id => document.getElementById(id);
+  if (!el('vz_merchant_edit_modal')) {
+    const modal = document.createElement('div');
+    modal.id = 'vz_merchant_edit_modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+    modal.innerHTML = `
+      <div style="background:#fff;border-radius:16px;padding:28px;width:440px;max-height:90vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+          <h5 style="margin:0;color:var(--primary)">Edit Merchant Voucher</h5>
+          <button onclick="document.getElementById('vz_merchant_edit_modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">&times;</button>
+        </div>
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Voucher Title</label>
+          <input id="vz_edit_title" type="text" class="form-control" style="margin-top:4px">
+        </div>
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Offer Text</label>
+          <input id="vz_edit_offer" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 20% off on all items">
+        </div>
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Validity</label>
+          <input id="vz_edit_validity" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 31 May 2025">
+        </div>
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Logo URL</label>
+          <input id="vz_edit_logo" type="text" class="form-control" style="margin-top:4px" placeholder="https://...">
+          <img id="vz_edit_logo_preview" src="" style="margin-top:8px;width:60px;height:60px;object-fit:cover;border-radius:10px;display:none;border:1px solid var(--border)">
+        </div>
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Status</label>
+          <select id="vz_edit_status" class="form-select" style="margin-top:4px">
+            <option value="pending">Pending Approval</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="expired">Expired</option>
+          </select>
+        </div>
+        <div id="vz_edit_msg" style="font-size:12px;margin-bottom:8px"></div>
+        <div style="display:flex;gap:10px">
+          <button class="btn-o" style="flex:1" onclick="document.getElementById('vz_merchant_edit_modal').remove()">Cancel</button>
+          <button class="btn-approve" style="flex:2" onclick="saveVZMerchantEdit()">Save Changes</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    document.getElementById('vz_edit_logo').addEventListener('input', function(){
+      const img = document.getElementById('vz_edit_logo_preview');
+      img.src = this.value; img.style.display = this.value ? 'block' : 'none';
+    });
+  }
+  const el2 = id => document.getElementById(id);
+  if(el2('vz_edit_title'))    el2('vz_edit_title').value    = row.title||'';
+  if(el2('vz_edit_offer'))    el2('vz_edit_offer').value    = row.offer_text||'';
+  if(el2('vz_edit_validity')) el2('vz_edit_validity').value = row.validity||'';
+  if(el2('vz_edit_logo')) {
+    el2('vz_edit_logo').value = row.logo||'';
+    const img = el2('vz_edit_logo_preview');
+    if(row.logo){ img.src=row.logo; img.style.display='block'; } else { img.style.display='none'; }
+  }
+  if(el2('vz_edit_status'))   el2('vz_edit_status').value   = row.status||'pending';
+  if(el2('vz_edit_msg'))      el2('vz_edit_msg').textContent = '';
+  el2('vz_merchant_edit_modal').style.display = 'flex';
+}
+
+async function saveVZMerchantEdit() {
+  const row = _vzMerchantEditCurrent;
+  if (!row) return;
+  const el = id => document.getElementById(id);
+  const payload = {
+    title:      el('vz_edit_title')?.value?.trim()    || row.title,
+    offer_text: el('vz_edit_offer')?.value?.trim()    || row.offer_text,
+    validity:   el('vz_edit_validity')?.value?.trim() || row.validity,
+    logo:       el('vz_edit_logo')?.value?.trim()     || row.logo,
+    status:     el('vz_edit_status')?.value           || row.status,
+  };
+  try {
+    const res = await fetch(`/admin/merchant-vouchers/${row._id}`, {
+      method:'PUT', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Error');
+    if(el('vz_edit_msg')) { el('vz_edit_msg').style.color='#1a6640'; el('vz_edit_msg').textContent = '✅ Voucher updated!'; }
+    setTimeout(()=>{ document.getElementById('vz_merchant_edit_modal')?.remove(); loadGiftCards(); }, 800);
+  } catch(e) {
+    if(el('vz_edit_msg')) { el('vz_edit_msg').style.color='red'; el('vz_edit_msg').textContent = e.message; }
+  }
 }
 
 async function deleteVZVoucher(id, source) {

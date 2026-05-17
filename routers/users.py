@@ -103,8 +103,12 @@ def login_user(data: dict):
     MSG91 Widget flow — OTP is verified entirely on the Flutter side via MSG91 SDK.
     This endpoint is called AFTER MSG91 verifyOTP succeeds on device.
     Validates phone exists → issues OFFRO session token.
+    FIX 8: Always regenerate token to prevent stale merchant/user session collision.
     """
     raw_phone = str(data.get("phone", "")).strip()
+    if not raw_phone:
+        raise HTTPException(status_code=400, detail="Phone is required")
+
     user = db.users.find_one({"phone": {"$in": _phone_variants(raw_phone)}})
     if not user:
         raise HTTPException(
@@ -112,9 +116,13 @@ def login_user(data: dict):
             detail="Phone not registered. Please register first."
         )
 
+    # FIX 8: Always issue a fresh token — clears any cross-app session confusion
     token = str(uuid.uuid4())
-    db.users.update_one({"_id": user["_id"]}, {"$set": {"token": token}})
-    print(f"[LOGIN] ✅ Session issued for {raw_phone} — user_id={str(user['_id'])}")
+    db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"token": token, "last_login": __import__("datetime").datetime.utcnow().isoformat()}}
+    )
+    print(f"[LOGIN] ✅ Fresh session issued for {raw_phone} — user_id={str(user['_id'])}")
 
     response = JSONResponse(content={
         "user_id":      str(user["_id"]),
@@ -129,6 +137,19 @@ def login_user(data: dict):
         samesite="Lax", secure=False, max_age=3600 * 24 * 30,
     )
     return response
+
+
+@router.post("/check-phone")
+def check_phone(data: dict):
+    """
+    FIX 8: Check if phone is registered before OTP widget launch.
+    Returns {"registered": bool} — lets Flutter decide to show Register or Login.
+    """
+    raw_phone = str(data.get("phone", "")).strip()
+    if not raw_phone:
+        raise HTTPException(status_code=400, detail="Phone is required")
+    user = db.users.find_one({"phone": {"$in": _phone_variants(raw_phone)}})
+    return {"registered": user is not None}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
