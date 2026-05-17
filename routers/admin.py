@@ -1278,18 +1278,18 @@ def list_merchant_banners(a=Depends(get_current_admin)):
     result = []
     for b in db.merchant_banners.find().sort("created_at", -1):
         result.append({
-            "_id":        str(b["_id"]),
+            "_id":          str(b["_id"]),
             "merchant_name": b.get("merchant_name",""),
-            "title":      b.get("title",""),
-            "image_url":  b.get("image_url",""),
-            "duration":   b.get("duration",30),
-            "plan":       b.get("plan",""),
-            "status":     b.get("approval_status","pending_approval"),
-            "start_date": b.get("start_date",""),
-            "end_date":   b.get("end_date",""),
-            "invoice_no": b.get("invoice_no",""),
-            "amount":     b.get("total",0),
-            "created_at": b["created_at"].strftime("%d %b %Y %H:%M") if b.get("created_at") else "",
+            "title":        b.get("title",""),
+            "image_url":    b.get("image_url",""),
+            "duration_days": b.get("duration_days", b.get("duration", 30)),
+            "plan":         b.get("plan",""),
+            "status":       b.get("approval_status","pending_approval"),
+            "from_date":    b.get("from_date", b.get("start_date","")),
+            "end_date":     b.get("end_date",""),
+            "invoice_no":   b.get("invoice_no",""),
+            "amount":       b.get("total",0),
+            "created_at":   b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at",""))[:16],
         })
     return result
 
@@ -1343,17 +1343,19 @@ def list_merchant_vouchers(a=Depends(get_current_admin)):
     result = []
     for v in db.merchant_vouchers.find().sort("created_at", -1):
         result.append({
-            "_id":         str(v["_id"]),
+            "_id":          str(v["_id"]),
             "merchant_name": v.get("merchant_name",""),
-            "title":       v.get("title",""),
-            "offer_text":  v.get("offer_text",""),
-            "logo_url":    v.get("logo_url",""),
-            "validity":    v.get("validity",""),
-            "duration":    v.get("duration",30),
-            "status":      v.get("approval_status","pending_approval"),
-            "invoice_no":  v.get("invoice_no",""),
-            "amount":      v.get("total",0),
-            "created_at":  v["created_at"].strftime("%d %b %Y %H:%M") if v.get("created_at") else "",
+            "title":        v.get("title",""),
+            "offer_text":   v.get("offer_text",""),
+            "logo_url":     v.get("logo_url",""),
+            "validity":     v.get("validity", f"{v.get('from_date','')} → {v.get('end_date','')}" if v.get("from_date") else ""),
+            "duration_days": v.get("duration_days", v.get("duration",30)),
+            "from_date":    v.get("from_date",""),
+            "end_date":     v.get("end_date",""),
+            "status":       v.get("approval_status","pending_approval"),
+            "invoice_no":   v.get("invoice_no",""),
+            "amount":       v.get("total",0),
+            "created_at":   v["created_at"].strftime("%d %b %Y %H:%M") if isinstance(v.get("created_at"), datetime) else str(v.get("created_at",""))[:16],
         })
     return result
 
@@ -1369,7 +1371,7 @@ def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
             "title":      v.get("title",""),
             "text":       v.get("offer_text",""),
             "logo":       v.get("logo_url",""),
-            "validity":   v.get("validity","30 days"),
+            "validity":   v.get("validity") or (f"{v.get('from_date','')} → {v.get('end_date','')}" if v.get("from_date") else "30 days"),
             "is_active":  True,
             "price":      "",
             "source":     "merchant",

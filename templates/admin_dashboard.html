@@ -233,76 +233,141 @@ tr:hover td{background:#f7faf8;}
   <!-- CATEGORIES -->
   
 <div id="section-voucher_zone" class="section">
-  <!-- ── ADMIN-MANAGED VOUCHER CARDS ── -->
+  <!-- ── Stat bar ── -->
   <div class="section-header">
     <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🎁 Voucher Zone (App Display)</div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-id-card me-2"></i>Voucher Zone (App Display)</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage the voucher cards shown on the app home screen</div>
     </div>
     <button class="btn-p" onclick="openGiftCardModal()"><i class="fas fa-plus me-1"></i> Add Card</button>
   </div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Logo</th><th>Title</th><th>Offer Text</th><th>Validity</th><th>Merchant</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody id="voucher_zone_list"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
-    </table>
+
+  <!-- Stats row -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="vz_total">—</h3><p>Total Cards</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="vz_approved" style="color:#1a6640">—</h3><p>Approved</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat warn"><h3 id="vz_pending">—</h3><p>Pending</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="vz_expired" style="color:var(--danger)">—</h3><p>Expired</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="vz_active" style="color:var(--primary)">—</h3><p>Active</p></div></div>
   </div>
 
-  <!-- ── MERCHANT VOUCHER SUBMISSIONS ── -->
-  <div style="margin-top:28px;">
-    <div class="d-flex align-items-center justify-content-between mb-2" style="flex-wrap:wrap;gap:8px;">
-      <div>
-        <div class="fw-bold" style="font-size:15px;color:var(--primary)">📬 Merchant Voucher Submissions</div>
-        <div style="color:var(--muted);font-size:12px;">Review and approve voucher cards submitted by merchants</div>
-      </div>
-      <span id="mvoucher_count" class="badge" style="background:var(--light);color:var(--primary);font-size:12px;padding:5px 12px;border-radius:20px;">Loading...</span>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead style="background:var(--primary);color:#fff">
-          <tr><th>Logo</th><th>Merchant</th><th>Title</th><th>Offer</th><th>Validity</th><th>Amount</th><th>Status</th><th>Actions</th></tr>
-        </thead>
-        <tbody id="merchant_vouchers_body"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
-      </table>
-    </div>
+  <!-- Filters -->
+  <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+    <input id="vz_search" class="form-control" style="max-width:240px;font-size:13px" placeholder="Search by title or offer text..." oninput="filterVoucherZone()">
+    <select id="vz_merchant_filter" class="form-select" style="max-width:180px;font-size:13px" onchange="filterVoucherZone()">
+      <option value="">All Merchants</option>
+      <option value="admin">Admin</option>
+      <option value="merchant">Merchant</option>
+    </select>
+    <select id="vz_status_filter" class="form-select" style="max-width:160px;font-size:13px" onchange="filterVoucherZone()">
+      <option value="">All Status</option>
+      <option value="approved">Approved</option>
+      <option value="pending">Pending</option>
+      <option value="expired">Expired</option>
+    </select>
+    <input id="vz_date_from" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterVoucherZone()" placeholder="From">
+    <input id="vz_date_to" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterVoucherZone()" placeholder="To">
   </div>
+
+  <!-- Unified table -->
+  <div class="table-wrap">
+    <table id="vz_table">
+      <thead><tr>
+        <th style="width:60px">Preview</th>
+        <th>Title</th>
+        <th>Created By</th>
+        <th>Validity</th>
+        <th>Status</th>
+        <th>Actions</th>
+        <th>Created On</th>
+      </tr></thead>
+      <tbody id="vz_unified_body"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+    </table>
+  </div>
+  <div style="margin-top:10px;font-size:12px;color:var(--muted)" id="vz_showing"></div>
+
+  <!-- ℹ️ What is View? -->
+  <div style="margin-top:16px;background:#f7faf8;border-radius:8px;padding:12px 16px;border:1px solid var(--border)">
+    <i class="fas fa-info-circle" style="color:var(--primary)"></i>
+    <strong style="font-size:12px;color:var(--primary)"> What is "View"?</strong>
+    <span style="font-size:12px;color:var(--muted)"> View option allows you to see full voucher details including logo, title, offer text, validity, merchant type and status. From there you can edit or delete the voucher card.</span>
+  </div>
+
+  <!-- hidden spans kept for JS back-compat -->
+  <span id="mvoucher_count" style="display:none"></span>
+  <tbody id="merchant_vouchers_body" style="display:none"></tbody>
 </div>
 
 <!-- PROMO SLIDERS -->
 <div id="section-promo_sliders" class="section">
-  <!-- ── ADMIN-MANAGED BANNERS ── -->
   <div class="section-header">
     <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)">🖼️ Banners</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Banner images shown as a slideshow on the app home screen</div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-images me-2"></i>Banners</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage all banners created by admin and merchants</div>
     </div>
     <button class="btn-p" onclick="openSliderModal()"><i class="fas fa-plus me-1"></i> Add Banner</button>
   </div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Preview</th><th>Title</th><th>Link / Action</th><th>Order</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody id="sliders_table"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
-    </table>
+
+  <!-- Stats row -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="bn_total">—</h3><p>Total Banners</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="bn_approved" style="color:#1a6640">—</h3><p>Approved</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat warn"><h3 id="bn_pending">—</h3><p>Pending Approval</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="bn_merchant" style="color:var(--primary)">—</h3><p>Merchant Banners</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="bn_admin" style="color:var(--muted)">—</h3><p>Admin Banners</p></div></div>
   </div>
 
-  <!-- ── MERCHANT BANNER SUBMISSIONS ── -->
-  <div style="margin-top:28px;">
-    <div class="d-flex align-items-center justify-content-between mb-2" style="flex-wrap:wrap;gap:8px;">
-      <div>
-        <div class="fw-bold" style="font-size:15px;color:var(--primary)">📬 Merchant Banner Submissions</div>
-        <div style="color:var(--muted);font-size:12px;">Review and approve banners submitted by merchants</div>
-      </div>
-      <span id="mbanner_count" class="badge" style="background:var(--light);color:var(--primary);font-size:12px;padding:5px 12px;border-radius:20px;">Loading...</span>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead style="background:var(--primary);color:#fff">
-          <tr><th>Preview</th><th>Merchant</th><th>Title</th><th>Duration</th><th>Amount</th><th>Status</th><th>Submitted</th><th>Actions</th></tr>
-        </thead>
-        <tbody id="merchant_banners_body"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
-      </table>
-    </div>
+  <!-- Filters -->
+  <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+    <input id="bn_search" class="form-control" style="max-width:260px;font-size:13px" placeholder="Search banner title or merchant..." oninput="filterBanners()">
+    <select id="bn_merchant_filter" class="form-select" style="max-width:180px;font-size:13px" onchange="filterBanners()">
+      <option value="">All Merchants</option>
+      <option value="admin">Admin</option>
+      <option value="merchant">Merchant</option>
+    </select>
+    <select id="bn_status_filter" class="form-select" style="max-width:160px;font-size:13px" onchange="filterBanners()">
+      <option value="">All Status</option>
+      <option value="approved">Approved</option>
+      <option value="pending">Pending Approval</option>
+      <option value="expired">Expired</option>
+    </select>
+    <select id="bn_type_filter" class="form-select" style="max-width:140px;font-size:13px" onchange="filterBanners()">
+      <option value="">All Types</option>
+      <option value="admin">Admin Created</option>
+      <option value="merchant">Merchant Created</option>
+    </select>
+    <input id="bn_date_from" type="date" class="form-control" style="max-width:155px;font-size:13px" onchange="filterBanners()">
+    <input id="bn_date_to" type="date" class="form-control" style="max-width:155px;font-size:13px" onchange="filterBanners()">
   </div>
+
+  <!-- Unified table -->
+  <div class="table-wrap">
+    <table id="bn_table">
+      <thead><tr>
+        <th style="width:110px">Preview</th>
+        <th>Title</th>
+        <th>Merchant / Type</th>
+        <th>Duration</th>
+        <th>Status</th>
+        <th>Created On</th>
+        <th>Actions</th>
+      </tr></thead>
+      <tbody id="bn_unified_body"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+    </table>
+  </div>
+  <div style="margin-top:10px;font-size:12px;color:var(--muted)" id="bn_showing"></div>
+
+  <!-- ℹ️ What is View? -->
+  <div style="margin-top:16px;background:#f7faf8;border-radius:8px;padding:12px 16px;border:1px solid var(--border)">
+    <i class="fas fa-info-circle" style="color:var(--primary)"></i>
+    <strong style="font-size:12px;color:var(--primary)"> What is "View"?</strong>
+    <span style="font-size:12px;color:var(--muted)"> View option allows you to see full banner details including image, title, description, merchant/type, duration, status, and other information in a detailed view.</span>
+  </div>
+
+  <!-- hidden stubs for back-compat -->
+  <span id="mbanner_count" style="display:none"></span>
+  <tbody id="merchant_banners_body" style="display:none"></tbody>
+  <tbody id="sliders_table" style="display:none"></tbody>
 </div>
 
 <!-- NOTIFICATIONS -->
@@ -1027,6 +1092,8 @@ window.onload = () => {
   adjustModal_inst  = safeModal("adjustModal");
   fulfillModal_inst = safeModal("fulfillModal");
   sliderModal_inst  = safeModal("sliderModal");
+  vzViewModalInst   = safeModal("vzViewModal");
+  bnViewModalInst   = safeModal("bnViewModal");
 
   try { loadStats(); }      catch(e) { console.error("loadStats:", e); }
   try { loadCategories(); } catch(e) { console.error("loadCategories:", e); }
@@ -1114,7 +1181,7 @@ function showSection(name, el){
   if(name==="about") loadAbout();
   if(name==="ratings") loadRatings();
   if(name==="voucher_zone") loadGiftCards();
-  if(name==="promo_sliders") loadSliders();
+  if(name==="promo_sliders") { loadSliders(); }
   if(name==="notifications") loadNotifications();
 }
 
@@ -1900,27 +1967,221 @@ async function sliderUploadFile(input) {
   }
 }
 
+// ── All banner data cache ──
+let _allBannerRows = [];
+
 async function loadSliders() {
+  const tbody = document.getElementById('bn_unified_body');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
   try {
-    let r = await fetch("/admin/promo-sliders", {credentials:"include"});
-    let sliders = r.ok ? await r.json() : [];
-    const tbody = document.getElementById("sliders_table");
-    if (!sliders.length) {
-      tbody.innerHTML = "<tr><td colspan='6' style='text-align:center;padding:24px;color:var(--muted)'>No banners yet. Click + Add Banner to create one.</td></tr>";
-      return;
+    const [slidersR, merchantR] = await Promise.all([
+      fetch('/admin/promo-sliders', {credentials:'include'}),
+      fetch('/admin/merchant-banners', {credentials:'include'}),
+    ]);
+    const sliders  = slidersR.ok  ? await slidersR.json()  : [];
+    const mbanners = merchantR.ok ? await merchantR.json() : [];
+
+    // Normalize admin sliders (auto approved)
+    const now = new Date();
+    const adminRows = sliders.map(s => {
+      const expiry = s.expires_at ? new Date(s.expires_at) : null;
+      const isExpired = expiry && expiry < now;
+      return {
+        _id:        s.id || s._id,
+        _source:    'admin',
+        image_url:  s.image_url || '',
+        title:      s.title || '',
+        subtitle:   s.link_url || '',
+        merchant_name: s.merchant_name || 'Offro (Admin)',
+        duration_days: '',
+        from_date:  '',
+        end_date:   s.expires_at || '',
+        status:     isExpired ? 'expired' : (s.is_active!==false ? 'approved' : 'hidden'),
+        sort_order: s.sort_order || 0,
+        created_at: s.created_at || '',
+        _raw: s,
+      };
+    });
+
+    // Normalize merchant banners
+    const merchantRows = mbanners.map(b => {
+      const st = b.status || 'pending_approval';
+      const endDt = b.end_date ? new Date(b.end_date) : null;
+      const isExpired = endDt && endDt < now;
+      return {
+        _id:        b._id,
+        _source:    'merchant',
+        image_url:  b.image_url || '',
+        title:      b.title || '',
+        subtitle:   '',
+        merchant_name: b.merchant_name || '',
+        duration_days: b.duration_days || b.duration || '',
+        from_date:  b.from_date || b.start_date || '',
+        end_date:   b.end_date || '',
+        status:     isExpired ? 'expired' : (st==='approved' ? 'approved' : (st==='rejected' ? 'rejected' : 'pending')),
+        sort_order: 99,
+        created_at: b.created_at || '',
+        _raw: b,
+      };
+    });
+
+    _allBannerRows = [...adminRows, ...merchantRows]
+      .sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+
+    // Stats
+    const approved = _allBannerRows.filter(r=>r.status==='approved').length;
+    const pending  = _allBannerRows.filter(r=>r.status==='pending').length;
+    const merchant = _allBannerRows.filter(r=>r._source==='merchant').length;
+    const admin    = _allBannerRows.filter(r=>r._source==='admin').length;
+    const _set = (id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+    _set('bn_total',    _allBannerRows.length);
+    _set('bn_approved', approved);
+    _set('bn_pending',  pending);
+    _set('bn_merchant', merchant);
+    _set('bn_admin',    admin);
+
+    filterBanners();
+  } catch(e) { console.error('loadSliders error', e); }
+}
+
+function filterBanners() {
+  const q       = (document.getElementById('bn_search')?.value||'').toLowerCase();
+  const byWho   = document.getElementById('bn_merchant_filter')?.value||'';
+  const bySt    = document.getElementById('bn_status_filter')?.value||'';
+  const byType  = document.getElementById('bn_type_filter')?.value||'';
+  const dateFrom= document.getElementById('bn_date_from')?.value||'';
+  const dateTo  = document.getElementById('bn_date_to')?.value||'';
+
+  let rows = _allBannerRows;
+  if (q)       rows = rows.filter(r=>(r.title||'').toLowerCase().includes(q)||(r.merchant_name||'').toLowerCase().includes(q));
+  if (byWho)   rows = rows.filter(r=>r._source===byWho);
+  if (byType)  rows = rows.filter(r=>r._source===byType);
+  if (bySt)    rows = rows.filter(r=>r.status===bySt);
+  if (dateFrom)rows = rows.filter(r=>(r.created_at||'')>=dateFrom);
+  if (dateTo)  rows = rows.filter(r=>(r.created_at||'')<=dateTo+'z');
+
+  renderBanners(rows);
+}
+
+function renderBanners(rows) {
+  const tbody   = document.getElementById('bn_unified_body');
+  const showing = document.getElementById('bn_showing');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted)">No banners found.</td></tr>';
+    if(showing) showing.textContent='';
+    return;
+  }
+  if(showing) showing.textContent=`Showing 1 to ${rows.length} of ${rows.length} results`;
+
+  tbody.innerHTML = rows.map(r => {
+    const thumb = r.image_url
+      ? `<img src="${r.image_url}" style="width:100px;height:50px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=0.2">`
+      : `<div style="width:100px;height:50px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center"><i class="fas fa-image" style="color:var(--muted)"></i></div>`;
+
+    const isAdmin = r._source==='admin';
+    const creatorBadge = isAdmin
+      ? `<div style="font-weight:600;font-size:13px">${r.merchant_name||'Offro (Admin)'}</div>
+         <span style="background:#e8f4ef;color:#3E5F55;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Admin</span>`
+      : `<div style="font-weight:600;font-size:13px">${r.merchant_name||'—'}</div>
+         <span style="background:#e8f0fe;color:#1a56db;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant</span>`;
+
+    let durationHtml = '—';
+    if (r.from_date && r.end_date) {
+      const days = r.duration_days ? `<br><span style="background:var(--light);color:var(--primary);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700">${r.duration_days} Days</span>` : '';
+      durationHtml = `<div style="font-size:12px">${r.from_date}<br>to<br>${r.end_date}${days}</div>`;
+    } else if (r.end_date) {
+      durationHtml = `<div style="font-size:12px">Until ${r.end_date}</div>`;
     }
-    tbody.innerHTML = sliders.map(s => `<tr>
-      <td>${s.image_url ? `<img src="${s.image_url}" style="width:90px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);" onerror="this.outerHTML='<span style=color:var(--muted);font-size:11px>No image</span>'">` : '<span style="color:var(--muted);font-size:11px;">—</span>'}</td>
-      <td><strong>${s.title||"—"}</strong></td>
-      <td style="font-size:12px;color:var(--muted)">${s.link_url||s.action||"—"}</td>
-      <td style="font-size:12px">${s.sort_order||0}</td>
-      <td>${s.is_active!==false?'<span class="badge-active">● Active</span>':'<span class="badge-inactive">○ Hidden</span>'}</td>
+
+    const st = r.status;
+    const statusBadge = st==='approved'
+      ? `<div><span style="background:#d1f0e0;color:#1a6640;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Approved</span>
+         <div style="font-size:10px;color:var(--muted);margin-top:3px">(${isAdmin?'Admin':'Merchant'})</div></div>`
+      : st==='pending'
+      ? `<div><span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600"><i class="fas fa-clock" style="font-size:9px"></i> Pending Approval</span>
+         <div style="font-size:10px;color:var(--muted);margin-top:3px">(Merchant)</div></div>`
+      : st==='expired'
+      ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Expired</span>`
+      : `<span style="background:#f8f9fa;color:#6c757d;padding:3px 10px;border-radius:20px;font-size:11px">○ Hidden</span>`;
+
+    const createdFmt = (r.created_at||'').replace('T',' ').slice(0,16);
+
+    const isPending = st==='pending';
+    const approveBtn = (!isAdmin && isPending)
+      ? `<button class="btn-approve" style="font-size:12px;padding:5px 14px;margin-left:4px" onclick="approveBnBanner('${r._id}')">Approve</button>`
+      : '';
+
+    const viewJson = JSON.stringify({...r, _raw:undefined}).replace(/"/g,'&quot;');
+    return `<tr>
+      <td>${thumb}</td>
       <td>
-        <button class="btn-o me-1" onclick='editSlider(${JSON.stringify(s).replace(/"/g,"&quot;")})'>Edit</button>
-        <button class="btn-d" onclick="deleteSlider('${s.id||s._id}')">Del</button>
+        <div style="font-weight:700;font-size:13px">${r.title||'—'}</div>
+        ${r.subtitle?`<div style="font-size:11px;color:var(--muted)">${r.subtitle}</div>`:''}
       </td>
-    </tr>`).join("");
-  } catch(e) { console.error(e); }
+      <td>${creatorBadge}</td>
+      <td>${durationHtml}</td>
+      <td>${statusBadge}</td>
+      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${createdFmt}</td>
+      <td>
+        <button class="btn-o me-1" onclick='openBnViewModal(${viewJson})'>View</button>
+        ${approveBtn}
+        <button class="btn-o" style="border:none;padding:4px 8px" onclick='openBnMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+let _bnViewCurrent = null;
+function openBnViewModal(r) {
+  _bnViewCurrent = r;
+  const isAdmin = r._source==='admin';
+  const isPending = r.status==='pending';
+  const el = id => document.getElementById(id);
+  if(el('bn_modal_img'))   { el('bn_modal_img').src=r.image_url||''; el('bn_modal_img').style.display=r.image_url?'block':'none'; }
+  if(el('bn_modal_title')) el('bn_modal_title').textContent = r.title||'—';
+  if(el('bn_modal_merchant')) el('bn_modal_merchant').textContent = isAdmin?'Offro (Admin)':r.merchant_name||'—';
+  if(el('bn_modal_type')) el('bn_modal_type').textContent = isAdmin?'Admin':'Merchant';
+  if(el('bn_modal_duration')) el('bn_modal_duration').textContent = r.duration_days ? `${r.duration_days} Days` : '—';
+  if(el('bn_modal_period')) el('bn_modal_period').textContent = (r.from_date&&r.end_date) ? `${r.from_date} to ${r.end_date}` : (r.end_date||'—');
+  if(el('bn_modal_status')) el('bn_modal_status').textContent = r.status;
+  const approveBtn = el('bn_modal_approve');
+  if(approveBtn) approveBtn.style.display = (!isAdmin&&isPending)?'inline-block':'none';
+  bnViewModalInst.show();
+}
+
+function approveBnBanner(id) { approveMerchantBanner(id); }
+
+function openBnMoreMenu(evt, id, source, status) {
+  const existing = document.getElementById('_bnCtxMenu');
+  if(existing) existing.remove();
+  const menu = document.createElement('div');
+  menu.id = '_bnCtxMenu';
+  menu.style.cssText = 'position:fixed;background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px 0;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:130px';
+  menu.innerHTML = `
+    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--text)" onmouseenter="this.style.background='#f7faf8'" onmouseleave="this.style.background=''" onclick="openBnEdit('${id}','${source}');this.closest('#_bnCtxMenu').remove()"><i class="fas fa-pen me-2" style="color:var(--primary)"></i>Edit</div>
+    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--danger)" onmouseenter="this.style.background='#fde8e6'" onmouseleave="this.style.background=''" onclick="deleteBnBanner('${id}','${source}');this.closest('#_bnCtxMenu').remove()"><i class="fas fa-trash me-2"></i>Delete</div>
+  `;
+  document.body.appendChild(menu);
+  const rect = evt.target.getBoundingClientRect();
+  menu.style.top  = (rect.bottom+4)+'px';
+  menu.style.left = Math.max(4,(rect.right-menu.offsetWidth))+'px';
+  setTimeout(()=>document.addEventListener('click',()=>menu.remove(),{once:true}),10);
+}
+
+function openBnEdit(id, source) {
+  const row = _allBannerRows.find(r=>r._id===id);
+  if (!row) return;
+  if (source==='admin') { editSlider(row._raw); }
+  else { alert('To edit a merchant banner, update it via the Merchant Banner form.'); }
+}
+
+async function deleteBnBanner(id, source) {
+  if (!confirm('Delete this banner?')) return;
+  if (source==='admin') await fetch(`/admin/promo-sliders/${id}`,{method:'DELETE',credentials:'include'});
+  else await fetch(`/admin/merchant-banners/${id}`,{method:'DELETE',credentials:'include'});
+  loadSliders();
 }
 
 function openSliderModal() {
@@ -2317,33 +2578,200 @@ window.addEventListener("DOMContentLoaded", function() {
     gcModalInst = new bootstrap.Modal(document.getElementById("giftCardModal"));
 });
 
+// ── All voucher zone data cache ──
+let _allVoucherRows = [];
+
 async function loadGiftCards() {
+  const tbody = document.getElementById('vz_unified_body');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
   try {
-    let r = await fetch("/admin/gift-vouchers", {credentials:"include"});
-    let cards = await r.json();
-    const el = document.getElementById("voucher_zone_list");
-    if (!cards.length) { el.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No voucher cards yet. Click + Add Card to create one.</td></tr>"; return; }
-    el.innerHTML = cards.map(v => {
-      let logoHtml = v.logo
-        ? `<img src="${v.logo}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;border:1px solid var(--border);" onerror="this.outerHTML='<i class=fas fa-gift style=color:var(--primary)></i>'">`
-        : `<div style="width:40px;height:40px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary)"></i></div>`;
-      let statusBadge = v.is_active
-        ? `<span class="badge-active">● Active</span>`
-        : `<span class="badge-inactive">○ Hidden</span>`;
-      return `<tr>
-        <td>${logoHtml}</td>
-        <td><strong>${v.title||"—"}</strong></td>
-        <td>${v.text||"—"}</td>
-        <td style="font-size:12px;color:var(--muted)">${v.validity||"—"}</td>
-        <td style="font-size:12px">${v.merchant_name||"—"}</td>
-        <td>${statusBadge}</td>
-        <td>
-          <button class="btn-o me-1" onclick='editGiftCard(${JSON.stringify(v).replace(/"/g,"&quot;")})'>Edit</button>
-          <button class="btn-d" onclick="deleteGiftCard('${v.id||v._id}')">Del</button>
-        </td>
-      </tr>`;
-    }).join("");
-  } catch(e) { console.error(e); }
+    // Fetch admin vouchers + merchant submissions in parallel
+    const [adminR, merchantR] = await Promise.all([
+      fetch("/admin/gift-vouchers", {credentials:"include"}),
+      fetch("/admin/merchant-vouchers", {credentials:"include"}),
+    ]);
+    const adminCards    = adminR.ok    ? await adminR.json()    : [];
+    const merchantCards = merchantR.ok ? await merchantR.json() : [];
+
+    // Normalize admin cards
+    const adminRows = adminCards.map(v => ({
+      _id:        v.id || v._id,
+      _source:    'admin',
+      logo:       v.logo || '',
+      title:      v.title || '',
+      offer_text: v.text || '',
+      validity:   v.validity || '',
+      is_active:  v.is_active !== false,
+      status:     v.is_active !== false ? 'approved' : 'hidden',
+      approval_status: 'approved',
+      merchant_name: v.merchant_name || '',
+      created_at: v.created_at || '',
+      _raw: v,
+    }));
+
+    // Normalize merchant cards
+    const merchantRows = merchantCards.map(v => {
+      const st = v.status || 'pending_approval';
+      return {
+        _id:        v._id,
+        _source:    'merchant',
+        logo:       v.logo_url || '',
+        title:      v.title || '',
+        offer_text: v.offer_text || '',
+        validity:   v.validity || v.end_date || '',
+        is_active:  st === 'approved',
+        status:     st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending'),
+        approval_status: st,
+        merchant_name: v.merchant_name || '',
+        created_at: v.created_at || '',
+        _raw: v,
+      };
+    });
+
+    _allVoucherRows = [...adminRows, ...merchantRows]
+      .sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+
+    // Update stats
+    const approved = _allVoucherRows.filter(r=>r.status==='approved').length;
+    const pending  = _allVoucherRows.filter(r=>r.status==='pending').length;
+    const expired  = _allVoucherRows.filter(r=>r.status==='expired').length;
+    const active   = _allVoucherRows.filter(r=>r.is_active).length;
+    const _s = id => { const el=document.getElementById(id); if(el) el.textContent=0; };
+    const _set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+    _set('vz_total',    _allVoucherRows.length);
+    _set('vz_approved', approved);
+    _set('vz_pending',  pending);
+    _set('vz_expired',  expired);
+    _set('vz_active',   active);
+
+    filterVoucherZone();
+  } catch(e) { console.error('loadGiftCards error', e); }
+}
+
+function filterVoucherZone() {
+  const q       = (document.getElementById('vz_search')?.value||'').toLowerCase();
+  const byWho   = document.getElementById('vz_merchant_filter')?.value||'';
+  const bySt    = document.getElementById('vz_status_filter')?.value||'';
+  const dateFrom= document.getElementById('vz_date_from')?.value||'';
+  const dateTo  = document.getElementById('vz_date_to')?.value||'';
+
+  let rows = _allVoucherRows;
+  if (q)       rows = rows.filter(r=>(r.title||'').toLowerCase().includes(q)||(r.offer_text||'').toLowerCase().includes(q));
+  if (byWho)   rows = rows.filter(r=>r._source===byWho);
+  if (bySt)    rows = rows.filter(r=>r.status===bySt);
+  if (dateFrom)rows = rows.filter(r=>(r.created_at||'')>=dateFrom);
+  if (dateTo)  rows = rows.filter(r=>(r.created_at||'')<=dateTo+'z');
+
+  renderVoucherZone(rows);
+}
+
+function renderVoucherZone(rows) {
+  const tbody = document.getElementById('vz_unified_body');
+  const showing = document.getElementById('vz_showing');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted)">No vouchers found.</td></tr>';
+    if(showing) showing.textContent = '';
+    return;
+  }
+  if(showing) showing.textContent = `Showing 1 to ${rows.length} of ${rows.length} results`;
+
+  tbody.innerHTML = rows.map(r => {
+    const logoHtml = r.logo
+      ? `<img src="${r.logo}" style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid var(--border);" onerror="this.style.display='none'">`
+      : `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`;
+
+    const isAdmin = r._source === 'admin';
+    const creatorBadge = isAdmin
+      ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>`
+      : `<span style="background:#e8f0fe;color:#1a56db;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-user" style="font-size:9px"></i> Merchant</span>
+         <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.merchant_name||''}</div>`;
+
+    const st = r.status;
+    const statusBadge = st==='approved'
+      ? `<span style="background:#d1f0e0;color:#1a6640;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Approved</span>`
+      : st==='pending'
+      ? `<span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600"><i class="fas fa-clock" style="font-size:9px"></i> Pending</span>`
+      : st==='expired'
+      ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Expired</span>`
+      : `<span style="background:#f8f9fa;color:#6c757d;padding:3px 10px;border-radius:20px;font-size:11px">○ Hidden</span>`;
+
+    const isPending = (st==='pending');
+    const approveBtn = (!isAdmin && isPending)
+      ? `<button class="btn-approve me-1" style="font-size:11px;padding:4px 10px" onclick="approveVZVoucher('${r._id}','${r._source}')">Approve</button>`
+      : '';
+
+    const viewJson = JSON.stringify(r).replace(/"/g,'&quot;');
+    return `<tr>
+      <td>${logoHtml}</td>
+      <td><strong style="font-size:13px">${r.title||'—'}</strong></td>
+      <td>${creatorBadge}</td>
+      <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
+      <td>${statusBadge}</td>
+      <td>
+        <button class="btn-o me-1" onclick='openVZViewModal(${viewJson})'>View</button>
+        ${approveBtn}
+        <button class="btn-o" style="border:none;padding:4px 8px" onclick='openVZMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>
+      </td>
+      <td style="font-size:11px;color:var(--muted)">${(r.created_at||'').slice(0,16)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── View Modal handler ──
+let _vzViewCurrent = null;
+function openVZViewModal(r) {
+  _vzViewCurrent = r;
+  const isAdmin = r._source==='admin';
+  const isPending = r.status==='pending';
+  document.getElementById('vz_modal_logo').src = r.logo||'';
+  document.getElementById('vz_modal_logo').style.display = r.logo?'block':'none';
+  document.getElementById('vz_modal_title').textContent = r.title||'—';
+  document.getElementById('vz_modal_offer').textContent = r.offer_text||'—';
+  document.getElementById('vz_modal_validity').textContent = r.validity||'—';
+  document.getElementById('vz_modal_creator').textContent = isAdmin ? 'Admin' : `Merchant — ${r.merchant_name||''}`;
+  document.getElementById('vz_modal_status').textContent = r.status;
+  // Approve button: only show for pending merchant vouchers
+  const approveBtn = document.getElementById('vz_modal_approve');
+  if (approveBtn) approveBtn.style.display = (!isAdmin && isPending) ? 'inline-block' : 'none';
+  vzViewModalInst.show();
+}
+
+function approveVZVoucher(id, source) {
+  if (source==='merchant') approveMerchantVoucher(id);
+  else if(confirm('Activate this voucher?')) loadGiftCards();
+}
+
+function openVZMoreMenu(evt, id, source, status) {
+  const existing = document.getElementById('_vzCtxMenu');
+  if(existing) existing.remove();
+  const menu = document.createElement('div');
+  menu.id = '_vzCtxMenu';
+  menu.style.cssText = 'position:fixed;background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px 0;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:130px';
+  menu.innerHTML = `
+    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--text)" onmouseenter="this.style.background='#f7faf8'" onmouseleave="this.style.background=''" onclick="openVZEdit('${id}','${source}');this.closest('#_vzCtxMenu').remove()"><i class="fas fa-pen me-2" style="color:var(--primary)"></i>Edit</div>
+    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--danger)" onmouseenter="this.style.background='#fde8e6'" onmouseleave="this.style.background=''" onclick="deleteVZVoucher('${id}','${source}');this.closest('#_vzCtxMenu').remove()"><i class="fas fa-trash me-2"></i>Delete</div>
+  `;
+  document.body.appendChild(menu);
+  const rect = evt.target.getBoundingClientRect();
+  menu.style.top  = (rect.bottom+4)+'px';
+  menu.style.left = Math.max(4,(rect.right-menu.offsetWidth))+'px';
+  setTimeout(()=>document.addEventListener('click',()=>menu.remove(),{once:true}),10);
+}
+
+function openVZEdit(id, source) {
+  const row = _allVoucherRows.find(r=>r._id===id);
+  if (!row) return;
+  if (source==='admin') { editGiftCard(row._raw); }
+  else { alert('Edit merchant vouchers via the Merchant Voucher form.'); }
+}
+
+async function deleteVZVoucher(id, source) {
+  if (!confirm('Delete this voucher?')) return;
+  const url = source==='admin' ? `/admin/gift-vouchers/${id}` : `/admin/merchant-vouchers/${id}`;
+  await fetch(url, {method:'DELETE', credentials:'include'});
+  loadGiftCards();
 }
 
 async function openGiftCardModal() {
@@ -2809,19 +3237,18 @@ async function loadMerchantBanners() {
 async function approveMerchantBanner(id) {
   if (!confirm('Approve this banner? It will appear as a promo slider in the app.')) return;
   await fetch(`/admin/merchant-banners/${id}/approve`, {method:'PUT', credentials:'include'});
-  loadMerchantBanners();
   loadSliders();
 }
 async function rejectMerchantBanner(id) {
   const reason = prompt('Rejection reason (optional):') || '';
   await fetch(`/admin/merchant-banners/${id}/reject`, {method:'PUT', credentials:'include',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason})});
-  loadMerchantBanners();
+  loadSliders();
 }
 async function deleteMerchantBanner(id) {
   if (!confirm('Delete this banner?')) return;
   await fetch(`/admin/merchant-banners/${id}`, {method:'DELETE', credentials:'include'});
-  loadMerchantBanners();
+  loadSliders();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2870,19 +3297,18 @@ async function loadMerchantVouchers() {
 async function approveMerchantVoucher(id) {
   if (!confirm('Approve this voucher? It will appear in the Voucher Zone.')) return;
   await fetch(`/admin/merchant-vouchers/${id}/approve`, {method:'PUT', credentials:'include'});
-  loadMerchantVouchers();
   loadGiftCards();
 }
 async function rejectMerchantVoucher(id) {
   const reason = prompt('Rejection reason (optional):') || '';
   await fetch(`/admin/merchant-vouchers/${id}/reject`, {method:'PUT', credentials:'include',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason})});
-  loadMerchantVouchers();
+  loadGiftCards();
 }
 async function deleteMerchantVoucher(id) {
   if (!confirm('Delete this voucher?')) return;
   await fetch(`/admin/merchant-vouchers/${id}`, {method:'DELETE', credentials:'include'});
-  loadMerchantVouchers();
+  loadGiftCards();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3043,5 +3469,66 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 
+
+<!-- ══ Voucher Zone View Modal ══ -->
+<div class="modal fade" id="vzViewModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-id-card me-2"></i>Voucher Details</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div style="text-align:center;margin-bottom:16px">
+          <img id="vz_modal_logo" src="" style="width:72px;height:72px;border-radius:14px;object-fit:cover;border:2px solid var(--border)" onerror="this.style.display='none'">
+        </div>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600;width:110px">Title</td><td id="vz_modal_title" style="font-weight:700;color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Offer</td><td id="vz_modal_offer" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Validity</td><td id="vz_modal_validity" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Created By</td><td id="vz_modal_creator" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Status</td><td id="vz_modal_status" style="text-transform:capitalize;color:var(--primary);font-weight:600"></td></tr>
+        </table>
+      </div>
+      <div class="modal-footer" style="gap:8px;flex-wrap:wrap">
+        <button id="vz_modal_approve" class="btn-approve" style="padding:7px 18px" onclick="approveVZVoucher(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()">Approve</button>
+        <button class="btn-o" onclick="openVZEdit(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()"><i class="fas fa-pen me-1"></i>Edit</button>
+        <button class="btn-d" onclick="deleteVZVoucher(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()"><i class="fas fa-trash me-1"></i>Delete</button>
+        <button class="btn-p ms-auto" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Banner View Modal ══ -->
+<div class="modal fade" id="bnViewModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-images me-2"></i>Banner Details</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div style="margin-bottom:16px;text-align:center">
+          <img id="bn_modal_img" src="" style="max-width:100%;max-height:180px;border-radius:10px;object-fit:cover;border:1px solid var(--border)" onerror="this.style.display='none'">
+        </div>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600;width:120px">Title</td><td id="bn_modal_title" style="font-weight:700;color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Merchant</td><td id="bn_modal_merchant" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Type</td><td id="bn_modal_type" style="color:var(--text);text-transform:capitalize;font-weight:600"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Duration</td><td id="bn_modal_duration" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Active Period</td><td id="bn_modal_period" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Status</td><td id="bn_modal_status" style="text-transform:capitalize;color:var(--primary);font-weight:600"></td></tr>
+        </table>
+      </div>
+      <div class="modal-footer" style="gap:8px;flex-wrap:wrap">
+        <button id="bn_modal_approve" class="btn-approve" style="padding:7px 18px" onclick="approveBnBanner(_bnViewCurrent?._id);bnViewModalInst.hide()">Approve</button>
+        <button class="btn-o" onclick="openBnEdit(_bnViewCurrent?._id,_bnViewCurrent?._source);bnViewModalInst.hide()"><i class="fas fa-pen me-1"></i>Edit</button>
+        <button class="btn-d" onclick="deleteBnBanner(_bnViewCurrent?._id,_bnViewCurrent?._source);bnViewModalInst.hide()"><i class="fas fa-trash me-1"></i>Delete</button>
+        <button class="btn-p ms-auto" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
