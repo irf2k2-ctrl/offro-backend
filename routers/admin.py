@@ -1442,14 +1442,14 @@ def delete_merchant_voucher(vid: str, a=Depends(get_current_admin)):
 
 @router.get("/invoices/full")
 def list_all_invoices(a=Depends(get_current_admin)):
-    """All merchant invoices: store subscriptions + banner + voucher orders."""
+    """All merchant invoices: store subscriptions + banner + product orders."""
     result = []
-    def fmt_date(v, full=False):
+    def _fd(v, full=False):
         if isinstance(v, datetime):
             return v.strftime("%d %b %Y %H:%M") if full else v.strftime("%d %b %Y")
         return str(v or "")
 
-    # 1. Store subscriptions from invoices collection
+    # 1. Store invoices
     for inv in db.invoices.find().sort("created_at", -1):
         result.append({
             "invoice_no":    inv.get("invoice_no",""),
@@ -1463,13 +1463,13 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "gst":           inv.get("gst",0),
             "gst_percent":   inv.get("gst_percent",0),
             "total":         inv.get("total",0),
-            "from_date":     fmt_date(inv.get("from_date")),
-            "end_date":      fmt_date(inv.get("end_date")),
-            "created_at":    fmt_date(inv.get("created_at"), full=True),
+            "from_date":     _fd(inv.get("from_date")),
+            "end_date":      _fd(inv.get("end_date")),
+            "created_at":    _fd(inv.get("created_at"), full=True),
             "_status":       inv.get("status","paid"),
         })
 
-    # 2. Banner orders from merchant_banners collection
+    # 2. Banner orders
     for b in db.merchant_banners.find().sort("created_at", -1):
         ca = b.get("created_at","")
         result.append({
@@ -1490,7 +1490,7 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "_status":       b.get("payment_status","free"),
         })
 
-    # 3. Voucher/product orders from merchant_vouchers collection
+    # 3. Product (voucher) orders
     for v in db.merchant_vouchers.find().sort("created_at", -1):
         ca = v.get("created_at","")
         result.append({

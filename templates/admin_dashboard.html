@@ -105,7 +105,7 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
   <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
   <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
-  <a href="#" onclick="showSection('voucher_zone',this)"><i class="fas fa-id-card fa-fw"></i> Voucher Zone</a>
+  <a href="#" onclick="showSection('voucher_zone',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <div class="sep"></div>
@@ -236,7 +236,7 @@ tr:hover td{background:#f7faf8;}
   <!-- ── Stat bar ── -->
   <div class="section-header">
     <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-id-card me-2"></i>Voucher Zone (App Display)</div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-id-card me-2"></i>Products (App Display)</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage the voucher cards shown on the app home screen</div>
     </div>
     <button class="btn-p" onclick="openGiftCardModal()"><i class="fas fa-plus me-1"></i> Add Card</button>
@@ -2287,12 +2287,12 @@ function openSliderModal() {
   document.getElementById("sl_image_url").value = "";
   document.getElementById("sl_link_url").value = "";
   document.getElementById("sl_order").value = "0";
+  document.getElementById("sl_active").checked = true;
   // Date fields — default to today + 30 days
   const _today = new Date().toISOString().split("T")[0];
-  document.getElementById("sl_from_date").value = _today;
-  document.getElementById("sl_days").value = "30";
+  if (document.getElementById("sl_from_date")) { document.getElementById("sl_from_date").value = _today; }
+  if (document.getElementById("sl_days"))      { document.getElementById("sl_days").value = "30"; }
   slUpdateEndDate();
-  document.getElementById("sl_active").checked = true;
   document.getElementById("sl_msg").innerText = "";
   // Reset upload UI
   document.getElementById("sl_preview_wrap").style.display = "none";
@@ -2312,6 +2312,7 @@ function editSlider(s) {
   document.getElementById("sl_active").checked = s.is_active!==false;
   if (document.getElementById("sl_from_date")) document.getElementById("sl_from_date").value = s.from_date||'';
   if (document.getElementById("sl_days"))      document.getElementById("sl_days").value      = s.days||30;
+  if (document.getElementById("sl_end_date"))  document.getElementById("sl_end_date").value  = s.end_date||'';
   slUpdateEndDate();
   document.getElementById("sl_msg").innerText = "";
   document.getElementById("sl_file_input").value = "";
@@ -2346,18 +2347,15 @@ async function saveSlider() {
   const sid = document.getElementById("sl_id").value;
   const img = document.getElementById("sl_image_url").value.trim();
   if (!img) { document.getElementById("sl_msg").innerText = "Please upload a banner image first"; return; }
-  const _slFromDate = document.getElementById("sl_from_date")?.value || '';
-  const _slDays     = parseInt(document.getElementById("sl_days")?.value)||30;
-  const _slEndDate  = document.getElementById("sl_end_date")?.value || '';
   const data = {
     title:      document.getElementById("sl_title").value.trim(),
     image_url:  img,
     link_url:   document.getElementById("sl_link_url").value.trim(),
     sort_order: parseInt(document.getElementById("sl_order").value)||0,
-    is_active:  document.getElementById("sl_active").checked,
-    from_date:  _slFromDate,
-    days:       _slDays,
-    end_date:   _slEndDate,
+    is_active:  document.getElementById("sl_active").checked,,
+    from_date:  document.getElementById("sl_from_date")?.value || '',
+    days:       parseInt(document.getElementById("sl_days")?.value)||30,
+    end_date:   document.getElementById("sl_end_date")?.value || '',
   };
   try {
     let url  = sid ? `/admin/promo-sliders/${sid}` : "/admin/promo-sliders";
@@ -2701,7 +2699,7 @@ window.addEventListener("DOMContentLoaded", function() {
     gcModalInst = new bootstrap.Modal(document.getElementById("giftCardModal"));
 });
 
-// ── All voucher zone data cache ──
+// ── All products data cache ──
 let _allVoucherRows = [];
 
 async function loadGiftCards() {
@@ -3369,12 +3367,12 @@ async function saveStore() {
   </div>
 </div>
 
-<!-- Voucher Zone Modal -->
+<!-- Products Modal -->
 <div class="modal fade" id="giftCardModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">🎁 Voucher Zone Card</h5>
+        <h5 class="modal-title">🛍️ Products Card</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -3485,7 +3483,7 @@ async function deleteMerchantBanner(id) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// MERCHANT VOUCHER SUBMISSIONS (merged into Voucher Zone section)
+// MERCHANT VOUCHER SUBMISSIONS (merged into Products section)
 // ═══════════════════════════════════════════════════════════
 async function loadMerchantVouchers() {
   const el = document.getElementById('merchant_vouchers_body');
@@ -3528,7 +3526,7 @@ async function loadMerchantVouchers() {
 }
 
 async function approveMerchantVoucher(id) {
-  if (!confirm('Approve this voucher? It will appear in the Voucher Zone.')) return;
+  if (!confirm('Approve this voucher? It will appear in the Products.')) return;
   await fetch(`/admin/merchant-vouchers/${id}/approve`, {method:'PUT', credentials:'include'});
   loadGiftCards();
 }
@@ -3703,7 +3701,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 
 
-<!-- ══ Voucher Zone View Modal ══ -->
+<!-- ══ Products View Modal ══ -->
 <div class="modal fade" id="vzViewModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
