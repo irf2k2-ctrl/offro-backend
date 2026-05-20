@@ -1176,7 +1176,7 @@ function showSection(name, el){
   if(name==="terms") loadTerms();
   if(name==="policies") loadPolicies();
   if(name==="social") loadSocialLinks();
-  if(name==="merchant_txns") loadMerchantTxns();
+  if(name==="merchant_txns") loadMerchantTxnsFull();
   if(name==="discounts") loadDiscounts();
   if(name==="about") loadAbout();
   if(name==="ratings") loadRatings();
@@ -1819,60 +1819,15 @@ function downloadInvoicePdf(inv) {
 }
 
 function filterTxns() {
-  let search = (document.getElementById("txn_search")?.value || "").toLowerCase();
-  let statusF = document.getElementById("txn_status_filter")?.value || "";
-  let f = allTxns.filter(t => {
-    let matchSearch = !search || (t.merchant_name||"").toLowerCase().includes(search) ||
-           (t.merchant_phone||"").includes(search) || (t.store_name||"").toLowerCase().includes(search) ||
-           (t.invoice_no||"").toLowerCase().includes(search);
-    let matchStatus = !statusF ||
-      (statusF==="paid" && (t._txn_status==="paid"||t._txn_status==="free")) ||
-      (statusF==="pending" && t._txn_status==="pending");
-    return matchSearch && matchStatus;
-  });
-  // Sort by date descending (newest first)
-  f.sort((a,b) => {
-    const da = a.created_at ? new Date(a.created_at) : new Date(0);
-    const db2 = b.created_at ? new Date(b.created_at) : new Date(0);
-    return db2 - da;
-  });
-  document.getElementById("txn_total").innerText = f.length + " records";
-  let html = "";
-  f.forEach(t => {
-    let statusBadge = t._txn_status==="pending"
-      ? `<span class="badge-waiting">⏳ Pending</span>`
-      : t._txn_status==="free"
-        ? `<span class="badge-new">✓ Free</span>`
-        : `<span class="badge-active">✓ Paid</span>`;
-    let rzpId = t.razorpay_payment_id || (t._txn_status==="free"?"free plan":"—");
-    const txnDate = (() => {
-      if (!t.created_at) return "—";
-      // Backend already formats as "13 May 2026, 06:42 PM" — use directly if it contains a comma
-      if (typeof t.created_at === 'string' && t.created_at.includes(',')) return t.created_at;
-      // Fallback: parse and format
-      try {
-        const d = new Date(t.created_at);
-        if (isNaN(d)) return t.created_at;
-        return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) + ', ' +
-               d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
-      } catch(_) { return t.created_at; }
-    })();
-    html += `<tr>
-      <td style="font-size:12px;color:var(--muted)">${txnDate}</td>
-      <td style="font-size:11px"><strong>${t.invoice_no||"-"}</strong></td>
-      <td><strong>${t.merchant_name||"-"}</strong></td>
-      <td style="font-size:12px">${t.merchant_phone||"-"}</td>
-      <td style="font-size:12px">${t.store_name||"-"}</td>
-      <td><span class="badge-active" style="font-size:11px">${t.plan||"-"}</span></td>
-      <td style="font-size:12px">₹${(t.base_price||0).toFixed(2)}</td>
-      <td style="font-size:12px">₹${(t.gst||0).toFixed(2)}</td>
-      <td style="${t._txn_status==='pending'?'color:var(--warning)':'color:#198754'};font-weight:700">₹${(t.total||0).toFixed(2)}</td>
-      <td>${statusBadge}</td>
-      <td style="font-size:11px;color:var(--muted)">${rzpId}</td>
-    </tr>`;
-  });
-  document.getElementById("txn_body").innerHTML = html ||
-    `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px">No payment records found</td></tr>`;
+  // Delegate to new renderTxnRows system
+  const q      = (document.getElementById('txn_search')?.value||'').toLowerCase();
+  const status = document.getElementById('txn_status_filter')?.value||'';
+  const type   = document.getElementById('txn_type_filter')?.value||'';
+  let rows = (typeof _allTxnRows !== 'undefined' && _allTxnRows.length ? _allTxnRows : allTxns);
+  if (q)      rows = rows.filter(i=>(i.merchant_name||'').toLowerCase().includes(q)||(i.invoice_no||'').toLowerCase().includes(q)||(i.store_name||'').toLowerCase().includes(q));
+  if (status) rows = rows.filter(i=>{ const st=i._status||(i.invoice_no==='PENDING'?'pending':'paid'); return st===status||(status==='paid'&&(st==='free'||st==='paid')); });
+  if (type)   rows = rows.filter(i=>(i.type||'store')===type);
+  renderTxnRows(rows);
 }
 
 
@@ -1893,7 +1848,7 @@ function exportPaymentsPDF() {
   doc.setFont("helvetica", "normal");
   doc.text(new Date().toLocaleDateString("en-IN", {day:"2-digit",month:"short",year:"numeric"}), 260, 12);
   
-  const rows = allTxns.map(t => [
+  const rows = (_allTxnRows && _allTxnRows.length ? _allTxnRows : allTxns).map(t => [
     t.created_at || "-",
     t.invoice_no || "-",
     t.merchant_name || "-",
@@ -1926,8 +1881,8 @@ function exportPaymentsPDF() {
   });
   
   // Summary footer
-  const total = allTxns.reduce((s,t)=>s+(t.total||0),0);
-  const gstTotal = allTxns.reduce((s,t)=>s+(t.gst||0),0);
+  const total = (_allTxnRows && _allTxnRows.length ? _allTxnRows : allTxns).reduce((s,t)=>s+(t.total||0),0);
+  const gstTotal = (_allTxnRows && _allTxnRows.length ? _allTxnRows : allTxns).reduce((s,t)=>s+(t.gst||0),0);
   const finalY = doc.lastAutoTable.finalY + 6;
   doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(62,95,85);
   doc.text(`Total Records: ${allTxns.length}   |   Total GST: ₹${gstTotal.toFixed(2)}   |   Total Revenue: ₹${total.toFixed(2)}`, 14, finalY);
@@ -1938,7 +1893,7 @@ function exportPaymentsPDF() {
 // ===== EXPORT PAYMENTS CSV =====
 function exportPaymentsCSV() {
   const headers = ["Date","Invoice No","Merchant","Phone","Store","Plan","Base Price","GST","Total","Payment ID"];
-  const rows = allTxns.map(t => [
+  const rows = (_allTxnRows && _allTxnRows.length ? _allTxnRows : allTxns).map(t => [
     t.created_at||"",
     t.invoice_no||"",
     t.merchant_name||"",
@@ -2138,16 +2093,18 @@ function renderBanners(rows) {
     const statusBadge = st==='approved'
       ? `<div><span style="background:#d1f0e0;color:#1a6640;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Approved</span>
          <div style="font-size:10px;color:var(--muted);margin-top:3px">(${isAdmin?'Admin':'Merchant'})</div></div>`
-      : st==='pending'
+      : (st==='pending'||st==='pending_approval')
       ? `<div><span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600"><i class="fas fa-clock" style="font-size:9px"></i> Pending Approval</span>
          <div style="font-size:10px;color:var(--muted);margin-top:3px">(Merchant)</div></div>`
+      : st==='rejected'
+      ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">✕ Rejected</span>`
       : st==='expired'
       ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Expired</span>`
       : `<span style="background:#f8f9fa;color:#6c757d;padding:3px 10px;border-radius:20px;font-size:11px">○ Hidden</span>`;
 
     const createdFmt = (r.created_at||'').replace('T',' ').slice(0,16);
 
-    const isPending = st==='pending';
+    const isPending = (st==='pending'||st==='pending_approval');
     const approveBtn = (!isAdmin && isPending)
       ? `<button class="btn-approve" style="font-size:12px;padding:5px 14px;margin-left:4px" onclick="approveBnBanner('${r._id}')">Approve</button>`
       : '';
@@ -2176,7 +2133,7 @@ let _bnViewCurrent = null;
 function openBnViewModal(r) {
   _bnViewCurrent = r;
   const isAdmin = r._source==='admin';
-  const isPending = r.status==='pending';
+  const isPending = (r.status==='pending'||r.status==='pending_approval');
   const el = id => document.getElementById(id);
   if(el('bn_modal_img'))   { el('bn_modal_img').src=r.image_url||''; el('bn_modal_img').style.display=r.image_url?'block':'none'; }
   if(el('bn_modal_title')) el('bn_modal_title').textContent = r.title||'—';
@@ -2878,13 +2835,15 @@ function renderVoucherZone(rows) {
     const st = r.status;
     const statusBadge = st==='approved'
       ? `<span style="background:#d1f0e0;color:#1a6640;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Approved</span>`
-      : st==='pending'
-      ? `<span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600"><i class="fas fa-clock" style="font-size:9px"></i> Pending</span>`
+      : (st==='pending'||st==='pending_approval')
+      ? `<span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600"><i class="fas fa-clock" style="font-size:9px"></i> Pending Approval</span>`
+      : st==='rejected'
+      ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">✕ Rejected</span>`
       : st==='expired'
       ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Expired</span>`
       : `<span style="background:#f8f9fa;color:#6c757d;padding:3px 10px;border-radius:20px;font-size:11px">○ Hidden</span>`;
 
-    const isPending = (st==='pending');
+    const isPending = (st==='pending'||st==='pending_approval');
     const approveBtn = (!isAdmin && isPending)
       ? `<button class="btn-approve me-1" style="font-size:11px;padding:4px 10px" onclick="approveVZVoucher('${r._id}','${r._source}')">Approve</button>`
       : '';
@@ -2911,7 +2870,7 @@ let _vzViewCurrent = null;
 function openVZViewModal(r) {
   _vzViewCurrent = r;
   const isAdmin = r._source==='admin';
-  const isPending = r.status==='pending';
+  const isPending = (r.status==='pending'||r.status==='pending_approval');
   // TASK 2 FIX: set logo in view — works for both URL and base64 data: URIs
   const _vzLogo = document.getElementById('vz_modal_logo');
   if (_vzLogo) {
@@ -3537,14 +3496,18 @@ async function loadMerchantBanners() {
 
 async function approveMerchantBanner(id) {
   if (!confirm('Approve this banner? It will appear as a promo slider in the app.')) return;
-  await fetch(`/admin/merchant-banners/${id}/approve`, {method:'PUT', credentials:'include'});
-  loadSliders();
+  const _approveRes = await fetch(`/admin/merchant-banners/${id}/approve`, {method:'PUT', credentials:'include'});
+  if (!_approveRes.ok) { alert('Approve failed: ' + (await _approveRes.text())); return; }
+  if (typeof loadBanners === 'function') loadBanners();
+  if (typeof loadSliders === 'function') loadSliders();
+  if (typeof loadMerchantBanners === 'function') loadMerchantBanners();
 }
 async function rejectMerchantBanner(id) {
   const reason = prompt('Rejection reason (optional):') || '';
   await fetch(`/admin/merchant-banners/${id}/reject`, {method:'PUT', credentials:'include',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason})});
-  loadSliders();
+  if (typeof loadMerchantBanners === 'function') loadMerchantBanners();
+  if (typeof loadSliders === 'function') loadSliders();
 }
 async function deleteMerchantBanner(id) {
   if (!confirm('Delete this banner?')) return;
@@ -3596,15 +3559,18 @@ async function loadMerchantVouchers() {
 }
 
 async function approveMerchantVoucher(id) {
-  if (!confirm('Approve this voucher? It will appear in the Products.')) return;
-  await fetch(`/admin/merchant-vouchers/${id}/approve`, {method:'PUT', credentials:'include'});
-  loadGiftCards();
+  if (!confirm('Approve this product? It will appear in the Voucher Zone.')) return;
+  const _vApprRes = await fetch(`/admin/merchant-vouchers/${id}/approve`, {method:'PUT', credentials:'include'});
+  if (!_vApprRes.ok) { alert('Approve failed: ' + (await _vApprRes.text())); return; }
+  if (typeof loadGiftCards === 'function') loadGiftCards();
+  if (typeof loadMerchantVouchers === 'function') loadMerchantVouchers();
 }
 async function rejectMerchantVoucher(id) {
   const reason = prompt('Rejection reason (optional):') || '';
   await fetch(`/admin/merchant-vouchers/${id}/reject`, {method:'PUT', credentials:'include',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason})});
-  loadGiftCards();
+  if (typeof loadGiftCards === 'function') loadGiftCards();
+  if (typeof loadMerchantVouchers === 'function') loadMerchantVouchers();
 }
 async function deleteMerchantVoucher(id) {
   if (!confirm('Delete this voucher?')) return;
@@ -3735,6 +3701,7 @@ function renderTxnRows(rows) {
       <td>${statusBadge}</td>
       <td>${dlBtn}</td>
     </tr>`;
+  }).join('');
   const cnt = document.getElementById('txn_total');
   if(cnt) cnt.textContent = `${rows.length} transactions`;
 }
