@@ -1177,55 +1177,113 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
 
 @router.get("/invoices/full")
 def get_full_invoices(m=Depends(get_merchant)):
+    # TASK 6: Full invoice restore with discount fields + proper invoice_no
     merchant_id = str(m["_id"])
     result = []
 
-    # Store subscriptions
-    for inv in db.subscriptions.find({"merchant_id": merchant_id}).sort("created_at", -1):
+    def _fmt_dt(v):
+        if not v: return ""
+        try:
+            from datetime import datetime as _dt
+            if isinstance(v, _dt): return v.strftime("%d %b %Y")
+            return str(v)[:10]
+        except: return str(v)[:10]
+
+    # 1. Central invoices collection (most complete — has discount info)
+    for inv in db.invoices.find({"merchant_id": merchant_id}).sort("created_at", -1):
+        fd = inv.get("from_date"); ed = inv.get("end_date")
         result.append({
-            "invoice_no":   inv.get("invoice_no", str(inv["_id"])[:8].upper()),
-            "type":         "store",
-            "item_label":   inv.get("plan", ""),
-            "store_name":   "",
-            "plan":         inv.get("plan", ""),
-            "base_price":   inv.get("base_price", inv.get("amount", 0)),
-            "gst_percent":  inv.get("gst_percent", 0),
-            "gst":          inv.get("gst", 0),
-            "total":        inv.get("total", inv.get("amount", 0)),
-            "status":       inv.get("status", ""),
-            "created_at":   inv.get("created_at", ""),
+            "invoice_no":      inv.get("invoice_no", str(inv["_id"])[:8].upper()),
+            "type":            inv.get("type", "store"),
+            "item_label":      inv.get("item_label") or inv.get("plan", ""),
+            "store_name":      inv.get("store_name", ""),
+            "plan":            inv.get("plan", ""),
+            "from_date":       _fmt_dt(fd),
+            "end_date":        _fmt_dt(ed),
+            "original_amount": inv.get("original_amount", inv.get("base_price", 0)),
+            "discount_code":   inv.get("discount_code", ""),
+            "discount_amount": inv.get("discount_amount", 0),
+            "final_amount":    inv.get("final_amount", inv.get("base_price", 0)),
+            "base_price":      inv.get("base_price", inv.get("original_amount", 0)),
+            "gst_percent":     inv.get("gst_percent", 18),
+            "gst":             inv.get("gst", 0),
+            "total":           inv.get("total", inv.get("amount", 0)),
+            "status":          inv.get("status", "paid"),
+            "created_at":      _fmt_dt(inv.get("created_at")),
         })
 
-    # Banner invoices
-    for b in db.merchant_banners.find({"merchant_id": merchant_id}).sort("created_at", -1):
+    # 2. Fallback: store subscriptions not yet in invoices collection
+    inv_ids = {r["invoice_no"] for r in result}
+    for sub in db.subscriptions.find({"merchant_id": merchant_id}).sort("created_at", -1):
+        ino = sub.get("invoice_no", str(sub["_id"])[:8].upper())
+        if ino in inv_ids: continue
+        fd = sub.get("from_date"); ed = sub.get("end_date")
         result.append({
-            "invoice_no":  str(b["_id"])[:8].upper(),
-            "type":        "banner",
-            "item_label":  f"{b.get('duration_days', '')} Day Banner",
-            "store_name":  "",
-            "plan":        f"{b.get('from_date','')} → {b.get('end_date','')}",
-            "base_price":  b.get("base_price", 0),
-            "gst_percent": b.get("gst_percent", 18),
-            "gst":         b.get("gst_amount", 0),
-            "total":       b.get("total", 0),
-            "status":      b.get("payment_status", ""),
-            "created_at":  b.get("created_at", ""),
+            "invoice_no":      ino,
+            "type":            "store",
+            "item_label":      sub.get("plan", "Store Subscription"),
+            "store_name":      sub.get("store_name", ""),
+            "plan":            sub.get("plan", ""),
+            "from_date":       _fmt_dt(fd),
+            "end_date":        _fmt_dt(ed),
+            "original_amount": sub.get("base_price", sub.get("amount", 0)),
+            "discount_code":   sub.get("discount_code", ""),
+            "discount_amount": sub.get("discount_amount", 0),
+            "final_amount":    sub.get("final_amount", sub.get("base_price", sub.get("amount", 0))),
+            "base_price":      sub.get("base_price", sub.get("amount", 0)),
+            "gst_percent":     sub.get("gst_percent", 18),
+            "gst":             sub.get("gst", 0),
+            "total":           sub.get("total", sub.get("amount", 0)),
+            "status":          sub.get("status", "paid"),
+            "created_at":      _fmt_dt(sub.get("created_at")),
         })
 
-    # Voucher invoices
-    for v in db.merchant_vouchers.find({"merchant_id": merchant_id}).sort("created_at", -1):
+    # 3. Fallback: banner invoices not in central invoices
+    for b in db.merchant_banners.find({"merchant_id": merchant_id, "payment_status": "paid"}).sort("created_at", -1):
+        ino = b.get("invoice_no", str(b["_id"])[:8].upper())
+        if ino in inv_ids: continue
         result.append({
-            "invoice_no":  str(v["_id"])[:8].upper(),
-            "type":        "voucher",
-            "item_label":  f"{v.get('duration_days','')} Day Voucher",
-            "store_name":  "",
-            "plan":        f"{v.get('from_date','')} → {v.get('end_date','')}",
-            "base_price":  v.get("base_price", 0),
-            "gst_percent": v.get("gst_percent", 18),
-            "gst":         v.get("gst_amount", 0),
-            "total":       v.get("total", 0),
-            "status":      v.get("payment_status", ""),
-            "created_at":  v.get("created_at", ""),
+            "invoice_no":      ino,
+            "type":            "banner",
+            "item_label":      f"Banner – {b.get('duration_days', b.get('duration', 30))} Days",
+            "store_name":      b.get("title", ""),
+            "plan":            f"{b.get('from_date','')} → {b.get('end_date','')}",
+            "from_date":       b.get("from_date", ""),
+            "end_date":        b.get("end_date", ""),
+            "original_amount": b.get("base_price", b.get("original_amount", 0)),
+            "discount_code":   b.get("discount_code", ""),
+            "discount_amount": b.get("discount_amount", 0),
+            "final_amount":    b.get("final_amount", b.get("base_price", 0)),
+            "base_price":      b.get("base_price", 0),
+            "gst_percent":     b.get("gst_percent", 18),
+            "gst":             b.get("gst_amount", b.get("gst", 0)),
+            "total":           b.get("total", 0),
+            "status":          "paid",
+            "created_at":      _fmt_dt(b.get("created_at")),
+        })
+
+    # 4. Fallback: voucher/product invoices not in central invoices
+    for v in db.merchant_vouchers.find({"merchant_id": merchant_id, "payment_status": "paid"}).sort("created_at", -1):
+        ino = v.get("invoice_no", str(v["_id"])[:8].upper())
+        if ino in inv_ids: continue
+        result.append({
+            "invoice_no":      ino,
+            "type":            "product",
+            "item_label":      f"Discover Product – {v.get('duration_days', v.get('duration', 30))} Days",
+            "store_name":      v.get("title", ""),
+            "plan":            f"{v.get('from_date','')} → {v.get('end_date','')}",
+            "from_date":       v.get("from_date", ""),
+            "end_date":        v.get("end_date", ""),
+            "original_amount": v.get("base_price", v.get("original_amount", 0)),
+            "discount_code":   v.get("discount_code", ""),
+            "discount_amount": v.get("discount_amount", 0),
+            "final_amount":    v.get("final_amount", v.get("base_price", 0)),
+            "base_price":      v.get("base_price", 0),
+            "gst_percent":     v.get("gst_percent", 18),
+            "gst":             v.get("gst_amount", v.get("gst", 0)),
+            "total":           v.get("total", 0),
+            "status":          "paid",
+            "created_at":      _fmt_dt(v.get("created_at")),
         })
 
     result.sort(key=lambda x: x.get("created_at", ""), reverse=True)

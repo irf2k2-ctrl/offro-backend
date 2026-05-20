@@ -871,14 +871,18 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
                 logo = s.get("store_image2") or s.get("image2") or ""
         except: pass
     doc = {
-        "title":       (data.get("title") or "").strip(),
-        "text":        text,
-        "validity":    (data.get("validity") or "").strip(),
-        "logo":        logo,
-        "store_id":    store_id,
-        "merchant_id": merchant_id,
-        "is_active":   bool(data.get("is_active", True)),
-        "created_at":  datetime.utcnow(),
+        "title":         (data.get("title") or "").strip(),
+        "text":          text,
+        "validity":      (data.get("validity") or "").strip(),
+        "logo":          logo,
+        "store_id":      store_id,
+        "merchant_id":   merchant_id,
+        "is_active":     bool(data.get("is_active", True)),
+        "from_date":     (data.get("from_date") or "").strip(),
+        "end_date":      (data.get("end_date") or "").strip(),
+        "duration_days": int(data.get("duration_days") or 0),
+        "source":        "admin",
+        "created_at":    datetime.utcnow(),
     }
     result = db.gift_vouchers.insert_one(doc)
     return {"message": "Voucher created", "id": str(result.inserted_id)}
@@ -887,7 +891,7 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
 def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
     """Update an existing gift voucher."""
     upd = {}
-    for field in ["title", "text", "validity", "logo", "merchant_id", "store_id"]:
+    for field in ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date", "duration_days"]:
         if field in data:
             upd[field] = (data[field] or "").strip()
     if "store_id" in upd and upd["store_id"] and "logo" not in upd:
@@ -1380,12 +1384,22 @@ def list_merchant_vouchers(a=Depends(get_current_admin)):
 def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
     v = db.merchant_vouchers.find_one({"_id": ObjectId(vid)})
     if not v: raise HTTPException(404, "Voucher not found")
-    # TASK 1 FIX: update only status fields — preserve merchant_id, product_id, image, all details
+    # TASK 8: check if product has already expired before setting status
+    end_date_raw = v.get("end_date", "")
+    final_status = "approved"
+    if end_date_raw:
+        try:
+            from dateutil.parser import parse as _parse_dt
+            end_dt = _parse_dt(str(end_date_raw))
+            if end_dt < datetime.utcnow():
+                final_status = "expired"
+        except:
+            pass
     db.merchant_vouchers.update_one(
         {"_id": ObjectId(vid)},
         {"$set": {
-            "approval_status": "approved",
-            "status":          "approved",
+            "approval_status": final_status,
+            "status":          final_status,
             "approved_at":     datetime.utcnow().isoformat(),
         }}
     )
@@ -1454,29 +1468,111 @@ def delete_merchant_voucher(vid: str, a=Depends(get_current_admin)):
 
 @router.get("/invoices/full")
 def list_all_invoices(a=Depends(get_current_admin)):
-    """All merchant invoices: stores, banners, and vouchers with line items."""
+    """All merchant invoices: stores, banners, and vouchers — TASK 10: no zero amounts."""
+    def _fmt(v):
+        if not v: return ""
+        if isinstance(v, datetime): return v.strftime("%d %b %Y")
+        return str(v)[:10]
+    def _fmtdt(v):
+        if not v: return ""
+        if isinstance(v, datetime): return v.strftime("%Y-%m-%dT%H:%M")
+        return str(v)[:16]
+
     result = []
+    seen_ids = set()
+
+    # 1. Primary: central invoices collection
     for inv in db.invoices.find().sort("created_at", -1):
+        seen_ids.add(str(inv["_id"]))
         fd = inv.get("from_date"); ed = inv.get("end_date")
+        base = float(inv.get("base_price", inv.get("original_amount", 0)) or 0)
+        gst  = float(inv.get("gst", inv.get("gst_amount", 0)) or 0)
+        tot  = float(inv.get("total", inv.get("amount", 0)) or 0)
+        if tot == 0 and base > 0: tot = base + gst
         result.append({
-            "invoice_no":    inv.get("invoice_no",""),
-            "merchant_name": inv.get("merchant_name",""),
-            "merchant_phone":inv.get("merchant_phone",""),
-            "type":          inv.get("type","store"),
-            "item_label":    inv.get("item_label") or f"Store – {inv.get('plan','')}",
-            "store_name":    inv.get("store_name",""),
-            "base_price":      inv.get("base_price",0),
-            "original_amount": inv.get("original_amount", inv.get("base_price", 0)),
-            "discount_code":   inv.get("discount_code", ""),
-            "discount_amount": inv.get("discount_amount", 0),
-            "final_amount":    inv.get("final_amount", inv.get("base_price", 0)),
-            "gst":             inv.get("gst",0),
-            "total":           inv.get("total",0),
+            "invoice_no":      inv.get("invoice_no",""),
+            "merchant_name":   inv.get("merchant_name",""),
+            "merchant_phone":  inv.get("merchant_phone",""),
+            "type":            inv.get("type","store"),
+            "item_label":      inv.get("item_label") or f"Store – {inv.get('plan','')}",
+            "store_name":      inv.get("store_name",""),
+            "base_price":      base,
+            "original_amount": float(inv.get("original_amount", base) or base),
+            "discount_code":   inv.get("discount_code",""),
+            "discount_amount": float(inv.get("discount_amount",0) or 0),
+            "final_amount":    float(inv.get("final_amount", base) or base),
+            "gst":             gst,
+            "total":           tot,
             "plan":            inv.get("plan",""),
-            "from_date":       fd.strftime("%d %b %Y") if isinstance(fd,datetime) else str(fd or ""),
-            "end_date":        ed.strftime("%d %b %Y") if isinstance(ed,datetime) else str(ed or ""),
-            "created_at":      inv["created_at"].strftime("%Y-%m-%dT%H:%M") if inv.get("created_at") else "",
+            "from_date":       _fmt(fd),
+            "end_date":        _fmt(ed),
+            "created_at":      _fmtdt(inv.get("created_at")),
+            "_status":         "paid",
         })
+
+    # 2. Paid banners not already in invoices collection
+    for b in db.merchant_banners.find({"payment_status":"paid"}).sort("created_at",-1):
+        bid = str(b["_id"])
+        ino = b.get("invoice_no", bid[:8].upper())
+        if bid in seen_ids: continue
+        seen_ids.add(bid)
+        base = float(b.get("base_price",0) or 0)
+        gst  = float(b.get("gst_amount", b.get("gst",0)) or 0)
+        tot  = float(b.get("total",0) or 0)
+        if tot == 0 and base > 0: tot = round(base + gst, 2)
+        result.append({
+            "invoice_no":      ino,
+            "merchant_name":   b.get("merchant_name",""),
+            "merchant_phone":  b.get("merchant_phone",""),
+            "type":            "banner",
+            "item_label":      f"Banner – {b.get('duration_days', b.get('duration',30))} Days",
+            "store_name":      b.get("title",""),
+            "base_price":      base,
+            "original_amount": float(b.get("original_amount", base) or base),
+            "discount_code":   b.get("discount_code",""),
+            "discount_amount": float(b.get("discount_amount",0) or 0),
+            "final_amount":    float(b.get("final_amount", base) or base),
+            "gst":             gst,
+            "total":           tot,
+            "plan":            f"{b.get('from_date','')} → {b.get('end_date','')}",
+            "from_date":       _fmt(b.get("from_date")),
+            "end_date":        _fmt(b.get("end_date")),
+            "created_at":      _fmtdt(b.get("created_at")),
+            "_status":         "paid",
+        })
+
+    # 3. Paid vouchers/products not already in invoices collection
+    for v in db.merchant_vouchers.find({"payment_status":"paid"}).sort("created_at",-1):
+        vid = str(v["_id"])
+        ino = v.get("invoice_no", vid[:8].upper())
+        if vid in seen_ids: continue
+        seen_ids.add(vid)
+        base = float(v.get("base_price",0) or 0)
+        gst  = float(v.get("gst_amount", v.get("gst",0)) or 0)
+        tot  = float(v.get("total",0) or 0)
+        if tot == 0 and base > 0: tot = round(base + gst, 2)
+        result.append({
+            "invoice_no":      ino,
+            "merchant_name":   v.get("merchant_name",""),
+            "merchant_phone":  v.get("merchant_phone",""),
+            "type":            "product",
+            "item_label":      f"Discover Product – {v.get('duration_days', v.get('duration',30))} Days",
+            "store_name":      v.get("title",""),
+            "base_price":      base,
+            "original_amount": float(v.get("original_amount", base) or base),
+            "discount_code":   v.get("discount_code",""),
+            "discount_amount": float(v.get("discount_amount",0) or 0),
+            "final_amount":    float(v.get("final_amount", base) or base),
+            "gst":             gst,
+            "total":           tot,
+            "plan":            f"{v.get('from_date','')} → {v.get('end_date','')}",
+            "from_date":       _fmt(v.get("from_date")),
+            "end_date":        _fmt(v.get("end_date")),
+            "created_at":      _fmtdt(v.get("created_at")),
+            "_status":         "paid",
+        })
+
+    result.sort(key=lambda x: x.get("created_at",""), reverse=True)
     return result
 
 @router.get("/banner-pricing")
