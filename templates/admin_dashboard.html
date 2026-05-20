@@ -601,7 +601,7 @@ tr:hover td{background:#f7faf8;}
       <table class="table table-hover" style="min-width:960px;">
         <thead><tr>
           <th>Date</th><th>Invoice No</th><th>Merchant</th><th>Phone</th>
-          <th>Item</th><th>Type</th><th>Plan</th><th>Original</th><th>Discount</th><th>GST</th><th>Total</th><th>Status</th>
+          <th>Item</th><th>Type</th><th>Plan</th><th>Orig Amt</th><th>Disc Code</th><th>Disc Val</th><th>Final Amt</th><th>GST</th><th>Total</th><th>Status</th><th>Download</th>
         </tr></thead>
         <tbody id="txn_body"></tbody>
       </table>
@@ -1687,8 +1687,6 @@ async function loadMerchantTxns() {
         item_label:     `${b.duration_days||0}-Day Banner`,
         type:           'banner',
         plan:           `${b.from_date||''} → ${b.end_date||''}`,
-        discount_code:  b.discount_code||'',
-        discount_value: parseFloat(b.discount_value||0),
         base_price:     parseFloat(b.base_price||0),
         gst:            parseFloat(b.gst_amount||0),
         gst_percent:    parseFloat(b.gst_percent||18),
@@ -1712,8 +1710,6 @@ async function loadMerchantTxns() {
         item_label:     `${v.duration_days||0}-Day Voucher`,
         type:           'voucher',
         plan:           `${v.from_date||''} → ${v.end_date||''}`,
-        discount_code:  v.discount_code||'',
-        discount_value: parseFloat(v.discount_value||0),
         base_price:     parseFloat(v.base_price||0),
         gst:            parseFloat(v.gst_amount||0),
         gst_percent:    parseFloat(v.gst_percent||18),
@@ -1783,6 +1779,45 @@ async function loadMerchantTxns() {
   } catch(e) { console.error("loadMerchantTxns error:", e); }
 }
 
+function downloadInvoicePdf(inv) {
+  const w = window.open('','_blank');
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Invoice ${inv.invoice_no||''}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:40px;color:#2c3e35;max-width:680px;margin:auto}
+      .logo{color:#3E5F55;font-size:26px;font-weight:800;letter-spacing:-1px}
+      h2{color:#3E5F55;margin-top:30px}
+      .row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #d4e8de}
+      .label{color:#6b8c7e;font-size:13px}
+      .value{font-weight:600;font-size:13px}
+      .total-row{display:flex;justify-content:space-between;padding:12px 0;background:#f0f8f4;border-radius:8px;padding:10px 16px;margin-top:12px}
+      .badge{background:#d1f0e0;color:#1a6640;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700}
+      @media print{button{display:none}}
+    </style></head><body>
+    <div class="logo">OFFRO</div>
+    <p style="color:#6b8c7e;font-size:13px">Tax Invoice / Receipt</p>
+    <h2>Invoice #${inv.invoice_no||'—'}</h2>
+    <div class="row"><span class="label">Date</span><span class="value">${(inv.created_at||'—').slice(0,10)}</span></div>
+    <div class="row"><span class="label">Merchant</span><span class="value">${inv.merchant_name||'—'}</span></div>
+    <div class="row"><span class="label">Phone</span><span class="value">${inv.merchant_phone||'—'}</span></div>
+    <div class="row"><span class="label">Item</span><span class="value">${inv.item_label||inv.store_name||'—'}</span></div>
+    <div class="row"><span class="label">Type</span><span class="value">${inv.type||'—'}</span></div>
+    <div class="row"><span class="label">Plan</span><span class="value">${inv.plan||'—'}</span></div>
+    <hr style="margin:20px 0;border-color:#d4e8de">
+    <div class="row"><span class="label">Original Amount</span><span class="value">₹${parseFloat(inv.original_amount||inv.base_price||0).toFixed(2)}</span></div>
+    <div class="row"><span class="label">Discount Code</span><span class="value">${inv.discount_code||'—'}</span></div>
+    <div class="row"><span class="label">Discount Value</span><span class="value" style="color:#c0392b">${parseFloat(inv.discount_amount||0)>0?'−₹'+parseFloat(inv.discount_amount).toFixed(2):'—'}</span></div>
+    <div class="row"><span class="label">Final Amount (pre-tax)</span><span class="value">₹${parseFloat(inv.final_amount||(parseFloat(inv.base_price||0)-parseFloat(inv.discount_amount||0))||0).toFixed(2)}</span></div>
+    <div class="row"><span class="label">GST (18%)</span><span class="value">₹${parseFloat(inv.gst||0).toFixed(2)}</span></div>
+    <div class="total-row"><span style="font-weight:800;color:#3E5F55;font-size:16px">Total Paid</span><span style="font-weight:800;color:#3E5F55;font-size:16px">₹${parseFloat(inv.total||0).toFixed(2)}</span></div>
+    <div style="margin-top:24px"><span class="badge">● Paid</span></div>
+    <p style="font-size:11px;color:#6b8c7e;margin-top:40px">OFFRO — Discover • Save • Earn | This is a computer-generated invoice.</p>
+    <button onclick="window.print()" style="margin-top:16px;background:#3E5F55;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button>
+  </body></html>`;
+  w.document.write(html);
+  w.document.close();
+}
+
 function filterTxns() {
   let search = (document.getElementById("txn_search")?.value || "").toLowerCase();
   let statusF = document.getElementById("txn_status_filter")?.value || "";
@@ -1830,10 +1865,7 @@ function filterTxns() {
       <td style="font-size:12px">${t.store_name||"-"}</td>
       <td><span class="badge-active" style="font-size:11px">${t.plan||"-"}</span></td>
       <td style="font-size:12px">₹${(t.base_price||0).toFixed(2)}</td>
-      <td style="font-size:12px;color:${t.discount_code?'#1a6640':'var(--muted)'}">
-        ${t.discount_code ? `<span title="${t.discount_code}">−₹${(t.discount_value||0).toFixed(2)}</span>` : '—'}
-      </td>
-      <td style="font-size:12px">₹${(t.gst_amount||t.gst||0).toFixed(2)}</td>
+      <td style="font-size:12px">₹${(t.gst||0).toFixed(2)}</td>
       <td style="${t._txn_status==='pending'?'color:var(--warning)':'color:#198754'};font-weight:700">₹${(t.total||0).toFixed(2)}</td>
       <td>${statusBadge}</td>
       <td style="font-size:11px;color:var(--muted)">${rzpId}</td>
@@ -1905,7 +1937,7 @@ function exportPaymentsPDF() {
 
 // ===== EXPORT PAYMENTS CSV =====
 function exportPaymentsCSV() {
-  const headers = ["Date","Invoice No","Merchant","Phone","Store","Plan","Original","Discount Code","Discount Value","GST","Total","Payment ID"];
+  const headers = ["Date","Invoice No","Merchant","Phone","Store","Plan","Base Price","GST","Total","Payment ID"];
   const rows = allTxns.map(t => [
     t.created_at||"",
     t.invoice_no||"",
@@ -1914,9 +1946,7 @@ function exportPaymentsCSV() {
     t.store_name||"",
     t.plan||"",
     (t.base_price||0).toFixed(2),
-    t.discount_code||"",
-    (t.discount_value||0).toFixed(2),
-    (t.gst_amount||t.gst||0).toFixed(2),
+    (t.gst||0).toFixed(2),
     (t.total||0).toFixed(2),
     t.razorpay_payment_id||"manual"
   ]);
@@ -2214,14 +2244,20 @@ function openBnMerchantEditModal(row) {
           <input id="bn_edit_image" type="text" class="form-control" style="margin-top:4px" placeholder="https://...">
           <img id="bn_edit_preview" src="" style="margin-top:8px;width:100%;height:80px;object-fit:cover;border-radius:8px;display:none">
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
           <div>
             <label style="font-size:12px;font-weight:600;color:var(--muted)">Start Date</label>
-            <input id="bn_edit_from" type="text" class="form-control" style="margin-top:4px" placeholder="DD Mon YYYY">
+            <input id="bn_edit_from" type="text" class="form-control" style="margin-top:4px" placeholder="YYYY-MM-DD"
+              oninput="autoCalcBnEndDate()">
           </div>
           <div>
-            <label style="font-size:12px;font-weight:600;color:var(--muted)">End Date</label>
-            <input id="bn_edit_end" type="text" class="form-control" style="margin-top:4px" placeholder="DD Mon YYYY">
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">No. of Days</label>
+            <input id="bn_edit_days" type="number" min="1" class="form-control" style="margin-top:4px" placeholder="e.g. 7"
+              oninput="autoCalcBnEndDate()">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">End Date <span style="font-size:10px;color:var(--accent)">(auto)</span></label>
+            <input id="bn_edit_end" type="text" class="form-control" style="margin-top:4px;background:#f8faf9" placeholder="Auto-calculated" readonly>
           </div>
         </div>
         <div class="mb-3">
@@ -2251,10 +2287,27 @@ function openBnMerchantEditModal(row) {
   if(el2('bn_edit_title'))  el2('bn_edit_title').value  = row.title||'';
   if(el2('bn_edit_image'))  { el2('bn_edit_image').value = row.image_url||''; const img=el2('bn_edit_preview'); if(row.image_url){img.src=row.image_url;img.style.display='block';} else {img.style.display='none';} }
   if(el2('bn_edit_from'))   el2('bn_edit_from').value   = row.from_date||'';
+  if(el2('bn_edit_days'))   el2('bn_edit_days').value   = row.duration_days||'';
   if(el2('bn_edit_end'))    el2('bn_edit_end').value    = row.end_date||'';
   if(el2('bn_edit_status')) el2('bn_edit_status').value = row.status||'pending';
   if(el2('bn_edit_msg'))    el2('bn_edit_msg').textContent = '';
   el2('bn_merchant_edit_modal').style.display = 'flex';
+}
+
+function autoCalcBnEndDate() {
+  const fromVal = document.getElementById('bn_edit_from')?.value?.trim() || '';
+  const daysVal = parseInt(document.getElementById('bn_edit_days')?.value || '0', 10);
+  const endEl   = document.getElementById('bn_edit_end');
+  if (!endEl) return;
+  if (fromVal && daysVal > 0) {
+    const d = new Date(fromVal);
+    if (!isNaN(d.getTime())) {
+      d.setDate(d.getDate() + daysVal);
+      endEl.value = d.toISOString().slice(0, 10);
+      return;
+    }
+  }
+  endEl.value = '';
 }
 
 async function saveBnMerchantEdit() {
@@ -2262,11 +2315,12 @@ async function saveBnMerchantEdit() {
   if (!row) return;
   const el = id => document.getElementById(id);
   const payload = {
-    title:      el('bn_edit_title')?.value?.trim() || row.title,
-    image_url:  el('bn_edit_image')?.value?.trim() || row.image_url,
-    from_date:  el('bn_edit_from')?.value?.trim()  || row.from_date,
-    end_date:   el('bn_edit_end')?.value?.trim()   || row.end_date,
-    status:     el('bn_edit_status')?.value        || row.status,
+    title:         el('bn_edit_title')?.value?.trim() || row.title,
+    image_url:     el('bn_edit_image')?.value?.trim() || row.image_url,
+    from_date:     el('bn_edit_from')?.value?.trim()  || row.from_date,
+    end_date:      el('bn_edit_end')?.value?.trim()   || row.end_date,
+    duration_days: parseInt(el('bn_edit_days')?.value||'0',10) || row.duration_days,
+    status:        el('bn_edit_status')?.value        || row.status,
   };
   try {
     const res = await fetch(`/admin/merchant-banners/${row._id}`, {
@@ -2297,6 +2351,11 @@ function openSliderModal() {
   document.getElementById("sl_link_url").value = "";
   document.getElementById("sl_order").value = "0";
   document.getElementById("sl_active").checked = true;
+  // Date fields — default to today + 30 days
+  const _today = new Date().toISOString().split("T")[0];
+  if (document.getElementById("sl_from_date")) { document.getElementById("sl_from_date").value = _today; }
+  if (document.getElementById("sl_days"))      { document.getElementById("sl_days").value = "30"; }
+  slUpdateEndDate();
   document.getElementById("sl_msg").innerText = "";
   // Reset upload UI
   document.getElementById("sl_preview_wrap").style.display = "none";
@@ -2314,6 +2373,10 @@ function editSlider(s) {
   document.getElementById("sl_link_url").value = s.link_url||s.action||"";
   document.getElementById("sl_order").value = s.sort_order||0;
   document.getElementById("sl_active").checked = s.is_active!==false;
+  if (document.getElementById("sl_from_date")) document.getElementById("sl_from_date").value = s.from_date||'';
+  if (document.getElementById("sl_days"))      document.getElementById("sl_days").value      = s.days||30;
+  if (document.getElementById("sl_end_date"))  document.getElementById("sl_end_date").value  = s.end_date||'';
+  slUpdateEndDate();
   document.getElementById("sl_msg").innerText = "";
   document.getElementById("sl_file_input").value = "";
   document.getElementById("sl_upload_status").innerText = "";
@@ -2331,6 +2394,18 @@ function editSlider(s) {
   sliderModalInst.show();
 }
 
+function slUpdateEndDate() {
+  const from = document.getElementById("sl_from_date")?.value;
+  const days = parseInt(document.getElementById("sl_days")?.value)||0;
+  const endEl = document.getElementById("sl_end_date");
+  if (!endEl) return;
+  if (from && days > 0) {
+    const d = new Date(from);
+    d.setDate(d.getDate() + days - 1);
+    endEl.value = d.toISOString().split("T")[0];
+  } else { endEl.value = ""; }
+}
+
 async function saveSlider() {
   const sid = document.getElementById("sl_id").value;
   const img = document.getElementById("sl_image_url").value.trim();
@@ -2341,6 +2416,9 @@ async function saveSlider() {
     link_url:   document.getElementById("sl_link_url").value.trim(),
     sort_order: parseInt(document.getElementById("sl_order").value)||0,
     is_active:  document.getElementById("sl_active").checked,
+    from_date:  document.getElementById("sl_from_date")?.value || '',
+    days:       parseInt(document.getElementById("sl_days")?.value)||30,
+    end_date:   document.getElementById("sl_end_date")?.value || '',
   };
   try {
     let url  = sid ? `/admin/promo-sliders/${sid}` : "/admin/promo-sliders";
@@ -2784,8 +2862,11 @@ function renderVoucherZone(rows) {
   if(showing) showing.textContent = `Showing 1 to ${rows.length} of ${rows.length} results`;
 
   tbody.innerHTML = rows.map(r => {
-    const logoHtml = r.logo
-      ? `<img src="${r.logo}" style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid var(--border);" onerror="this.style.display='none'">`
+    // TASK 2 FIX: handle both HTTPS URLs and base64 data: URIs
+    const _logoSrc = r.logo || '';
+    const logoHtml = _logoSrc
+      ? `<img src="${_logoSrc}" style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+        + `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:none;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`
       : `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`;
 
     const isAdmin = r._source === 'admin';
@@ -2831,8 +2912,12 @@ function openVZViewModal(r) {
   _vzViewCurrent = r;
   const isAdmin = r._source==='admin';
   const isPending = r.status==='pending';
-  document.getElementById('vz_modal_logo').src = r.logo||'';
-  document.getElementById('vz_modal_logo').style.display = r.logo?'block':'none';
+  // TASK 2 FIX: set logo in view — works for both URL and base64 data: URIs
+  const _vzLogo = document.getElementById('vz_modal_logo');
+  if (_vzLogo) {
+    _vzLogo.src = r.logo || '';
+    _vzLogo.style.display = r.logo ? 'block' : 'none';
+  }
   document.getElementById('vz_modal_title').textContent = r.title||'—';
   document.getElementById('vz_modal_offer').textContent = r.offer_text||'—';
   document.getElementById('vz_modal_validity').textContent = r.validity||'—';
@@ -3319,6 +3404,20 @@ async function saveStore() {
           <input id="sl_link_url" class="form-control" placeholder="https://... or store_id or category">
           <small class="text-muted">Tap destination when user clicks the banner</small>
         </div>
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label">From Date</label>
+            <input id="sl_from_date" class="form-control" type="date">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Number of Days</label>
+            <input id="sl_days" class="form-control" type="number" min="1" value="30" oninput="slUpdateEndDate()">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">End Date <span style="color:var(--muted);font-size:11px">(auto-calculated)</span></label>
+          <input id="sl_end_date" class="form-control" type="date" readonly style="background:#f9f9f9;color:var(--muted)">
+        </div>
         <div class="mb-3">
           <label class="form-label">Sort Order</label>
           <input id="sl_order" class="form-control" type="number" value="0" min="0">
@@ -3597,9 +3696,9 @@ async function loadMerchantTxnsFull() {
 function renderTxnRows(rows) {
   const tbody = document.getElementById('txn_body');
   if (!tbody) return;
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--muted)">No transactions found.</td></tr>'; return; }
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="16" style="text-align:center;padding:24px;color:var(--muted)">No transactions found.</td></tr>'; return; }
 
-  const typeColor = {store:'#3E5F55', banner:'#c0392b', voucher:'#856404'};
+  const typeColor = {store:'#3E5F55', banner:'#c0392b', voucher:'#856404', product:'#856404'};
   tbody.innerHTML = rows.map(inv => {
     const st = inv._status || (inv.invoice_no==='PENDING'?'pending':(inv.invoice_no==='FREE'?'free':'paid'));
     const statusBadge = st==='paid'
@@ -3610,22 +3709,73 @@ function renderTxnRows(rows) {
     const tp = inv.type || 'store';
     const tc = typeColor[tp] || '#3E5F55';
     const typeBadge = `<span style="background:${tc}20;color:${tc};padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;text-transform:capitalize">${tp}</span>`;
+    const origAmt  = parseFloat(inv.original_amount || inv.base_price || 0);
+    const discCode = inv.discount_code || '—';
+    const discVal  = parseFloat(inv.discount_amount || 0);
+    const finalAmt = parseFloat(inv.final_amount || (origAmt - discVal));
+    const gstAmt   = parseFloat(inv.gst || 0);
+    const totalAmt = parseFloat(inv.total || 0);
+    const dlBtn    = (inv.invoice_no && inv.invoice_no!=='PENDING' && inv.invoice_no!=='FREE')
+      ? `<button onclick="downloadInvoicePdf(${JSON.stringify(inv).replace(/"/g,'&quot;')})" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;"><i class="fas fa-download me-1"></i>PDF</button>`
+      : '—';
     return `<tr>
-      <td style="font-size:12px">${inv.created_at||'—'}</td>
+      <td style="font-size:12px">${(inv.created_at||'—').slice(0,10)}</td>
       <td style="font-size:12px;font-weight:600;color:var(--primary)">${inv.invoice_no||'—'}</td>
       <td style="font-size:13px">${inv.merchant_name||'—'}</td>
       <td style="font-size:12px;color:var(--muted)">${inv.merchant_phone||'—'}</td>
       <td style="font-size:12px">${inv.item_label||inv.store_name||'—'}</td>
       <td>${typeBadge}</td>
       <td style="font-size:12px">${inv.plan||'—'}</td>
-      <td style="font-size:13px">₹${parseFloat(inv.base_price||0).toFixed(2)}</td>
-      <td style="font-size:13px">₹${parseFloat(inv.gst||0).toFixed(2)}<br><span style="font-size:10px;color:var(--muted)">${inv.gst_percent?inv.gst_percent+'%':''}</span></td>
-      <td style="font-size:13px;font-weight:700;color:var(--primary)">₹${parseFloat(inv.total||0).toFixed(2)}</td>
+      <td style="font-size:13px">₹${origAmt.toFixed(2)}</td>
+      <td style="font-size:12px;color:var(--muted)">${discCode}</td>
+      <td style="font-size:12px;color:#c0392b">${discVal>0?'−₹'+discVal.toFixed(2):'—'}</td>
+      <td style="font-size:13px">₹${finalAmt.toFixed(2)}</td>
+      <td style="font-size:13px">₹${gstAmt.toFixed(2)}<br><span style="font-size:10px;color:var(--muted)">18%</span></td>
+      <td style="font-size:13px;font-weight:700;color:var(--primary)">₹${totalAmt.toFixed(2)}</td>
       <td>${statusBadge}</td>
+      <td>${dlBtn}</td>
     </tr>`;
-  }).join('');
   const cnt = document.getElementById('txn_total');
   if(cnt) cnt.textContent = `${rows.length} transactions`;
+}
+
+function downloadInvoicePdf(inv) {
+  const w = window.open('','_blank');
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Invoice ${inv.invoice_no||''}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:40px;color:#2c3e35;max-width:680px;margin:auto}
+      .logo{color:#3E5F55;font-size:26px;font-weight:800;letter-spacing:-1px}
+      h2{color:#3E5F55;margin-top:30px}
+      .row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #d4e8de}
+      .label{color:#6b8c7e;font-size:13px}
+      .value{font-weight:600;font-size:13px}
+      .total-row{display:flex;justify-content:space-between;padding:12px 0;background:#f0f8f4;border-radius:8px;padding:10px 16px;margin-top:12px}
+      .badge{background:#d1f0e0;color:#1a6640;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700}
+      @media print{button{display:none}}
+    </style></head><body>
+    <div class="logo">OFFRO</div>
+    <p style="color:#6b8c7e;font-size:13px">Tax Invoice / Receipt</p>
+    <h2>Invoice #${inv.invoice_no||'—'}</h2>
+    <div class="row"><span class="label">Date</span><span class="value">${(inv.created_at||'—').slice(0,10)}</span></div>
+    <div class="row"><span class="label">Merchant</span><span class="value">${inv.merchant_name||'—'}</span></div>
+    <div class="row"><span class="label">Phone</span><span class="value">${inv.merchant_phone||'—'}</span></div>
+    <div class="row"><span class="label">Item</span><span class="value">${inv.item_label||inv.store_name||'—'}</span></div>
+    <div class="row"><span class="label">Type</span><span class="value">${inv.type||'—'}</span></div>
+    <div class="row"><span class="label">Plan</span><span class="value">${inv.plan||'—'}</span></div>
+    <hr style="margin:20px 0;border-color:#d4e8de">
+    <div class="row"><span class="label">Original Amount</span><span class="value">₹${parseFloat(inv.original_amount||inv.base_price||0).toFixed(2)}</span></div>
+    <div class="row"><span class="label">Discount Code</span><span class="value">${inv.discount_code||'—'}</span></div>
+    <div class="row"><span class="label">Discount Value</span><span class="value" style="color:#c0392b">${parseFloat(inv.discount_amount||0)>0?'−₹'+parseFloat(inv.discount_amount).toFixed(2):'—'}</span></div>
+    <div class="row"><span class="label">Final Amount (pre-tax)</span><span class="value">₹${parseFloat(inv.final_amount||(parseFloat(inv.base_price||0)-parseFloat(inv.discount_amount||0))||0).toFixed(2)}</span></div>
+    <div class="row"><span class="label">GST (18%)</span><span class="value">₹${parseFloat(inv.gst||0).toFixed(2)}</span></div>
+    <div class="total-row"><span style="font-weight:800;color:#3E5F55;font-size:16px">Total Paid</span><span style="font-weight:800;color:#3E5F55;font-size:16px">₹${parseFloat(inv.total||0).toFixed(2)}</span></div>
+    <div style="margin-top:24px"><span class="badge">● Paid</span></div>
+    <p style="font-size:11px;color:#6b8c7e;margin-top:40px">OFFRO — Discover • Save • Earn | This is a computer-generated invoice.</p>
+    <button onclick="window.print()" style="margin-top:16px;background:#3E5F55;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button>
+  </body></html>`;
+  w.document.write(html);
+  w.document.close();
 }
 
 function filterTxns() {

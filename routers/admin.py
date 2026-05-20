@@ -925,22 +925,17 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
         raise HTTPException(400, "image_url required")
     doc = {"title": data.get("title",""), "image_url": data["image_url"],
            "link_url": data.get("link_url",""), "sort_order": int(data.get("sort_order",0)),
-           "is_active": bool(data.get("is_active", True)),
-           "from_date": data.get("from_date",""),
-           "days":      int(data.get("days",0)),
-           "end_date":  data.get("end_date",""),
-           "created_at": datetime.utcnow()}
+           "is_active": bool(data.get("is_active", True)), "created_at": datetime.utcnow()}
     r = db.promo_sliders.insert_one(doc)
     return {"message": "Slider created", "id": str(r.inserted_id)}
 
 @router.put("/promo-sliders/{sid}")
 def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     upd = {}
-    for f in ["title","image_url","link_url","from_date","end_date"]:
+    for f in ["title","image_url","link_url"]:
         if f in data: upd[f] = data[f]
     if "sort_order" in data: upd["sort_order"] = int(data["sort_order"])
     if "is_active"  in data: upd["is_active"]  = bool(data["is_active"])
-    if "days"       in data: upd["days"]        = int(data["days"])
     if not upd: raise HTTPException(400, "Nothing to update")
     db.promo_sliders.update_one({"_id": ObjectId(sid)}, {"$set": upd})
     return {"message": "Updated"}
@@ -1385,22 +1380,39 @@ def list_merchant_vouchers(a=Depends(get_current_admin)):
 def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
     v = db.merchant_vouchers.find_one({"_id": ObjectId(vid)})
     if not v: raise HTTPException(404, "Voucher not found")
-    db.merchant_vouchers.update_one({"_id": ObjectId(vid)}, {"$set":{"approval_status":"approved","approved_at":datetime.utcnow()}})
-    # Publish to gift_vouchers so it appears in Voucher Zone
-    existing = db.gift_vouchers.find_one({"source_voucher_id": vid})
-    if not existing:
-        db.gift_vouchers.insert_one({
-            "title":      v.get("title",""),
-            "text":       v.get("offer_text",""),
-            "logo":       v.get("logo_url",""),
-            "validity":   v.get("validity") or (f"{v.get('from_date','')} → {v.get('end_date','')}" if v.get("from_date") else "30 days"),
-            "is_active":  True,
-            "price":      "",
-            "source":     "merchant",
+    # TASK 1 FIX: update only status fields — preserve merchant_id, product_id, image, all details
+    db.merchant_vouchers.update_one(
+        {"_id": ObjectId(vid)},
+        {"$set": {
+            "approval_status": "approved",
+            "status":          "approved",
+            "approved_at":     datetime.utcnow().isoformat(),
+        }}
+    )
+    # TASK 1 FIX: upsert into gift_vouchers — update if exists, insert if not — NEVER duplicate
+    db.gift_vouchers.update_one(
+        {"source_voucher_id": vid},
+        {"$set": {
+            "title":             v.get("title", ""),
+            "text":              v.get("offer_text", ""),
+            "logo":              v.get("logo_url", ""),
+            "validity":          v.get("validity") or (
+                                     f"{v.get('from_date', '')} → {v.get('end_date', '')}"
+                                     if v.get("from_date") else "30 days"
+                                 ),
+            "is_active":         True,
+            "source":            "merchant",
             "source_voucher_id": vid,
-            "merchant_name": v.get("merchant_name",""),
-            "created_at": datetime.utcnow(),
-        })
+            "merchant_id":       str(v.get("merchant_id", "")),
+            "merchant_name":     v.get("merchant_name", ""),
+            "amount":            v.get("amount", 0),
+            "updated_at":        datetime.utcnow().isoformat(),
+        },
+         "$setOnInsert": {
+            "created_at": datetime.utcnow().isoformat(),
+        }},
+        upsert=True
+    )
     return {"ok": True, "message": "Voucher approved and published to Voucher Zone."}
 
 @router.put("/merchant-vouchers/{vid}/reject")
@@ -1442,15 +1454,10 @@ def delete_merchant_voucher(vid: str, a=Depends(get_current_admin)):
 
 @router.get("/invoices/full")
 def list_all_invoices(a=Depends(get_current_admin)):
-    """All merchant invoices: store subscriptions + banner + product orders."""
+    """All merchant invoices: stores, banners, and vouchers with line items."""
     result = []
-    def _fd(v, full=False):
-        if isinstance(v, datetime):
-            return v.strftime("%d %b %Y %H:%M") if full else v.strftime("%d %b %Y")
-        return str(v or "")
-
-    # 1. Store invoices
     for inv in db.invoices.find().sort("created_at", -1):
+        fd = inv.get("from_date"); ed = inv.get("end_date")
         result.append({
             "invoice_no":    inv.get("invoice_no",""),
             "merchant_name": inv.get("merchant_name",""),
@@ -1458,60 +1465,18 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "type":          inv.get("type","store"),
             "item_label":    inv.get("item_label") or f"Store – {inv.get('plan','')}",
             "store_name":    inv.get("store_name",""),
-            "plan":          inv.get("plan",""),
-            "base_price":    inv.get("base_price",0),
-            "gst":           inv.get("gst",0),
-            "gst_percent":   inv.get("gst_percent",0),
-            "total":         inv.get("total",0),
-            "from_date":     _fd(inv.get("from_date")),
-            "end_date":      _fd(inv.get("end_date")),
-            "created_at":    _fd(inv.get("created_at"), full=True),
-            "_status":       inv.get("status","paid"),
+            "base_price":      inv.get("base_price",0),
+            "original_amount": inv.get("original_amount", inv.get("base_price", 0)),
+            "discount_code":   inv.get("discount_code", ""),
+            "discount_amount": inv.get("discount_amount", 0),
+            "final_amount":    inv.get("final_amount", inv.get("base_price", 0)),
+            "gst":             inv.get("gst",0),
+            "total":           inv.get("total",0),
+            "plan":            inv.get("plan",""),
+            "from_date":       fd.strftime("%d %b %Y") if isinstance(fd,datetime) else str(fd or ""),
+            "end_date":        ed.strftime("%d %b %Y") if isinstance(ed,datetime) else str(ed or ""),
+            "created_at":      inv["created_at"].strftime("%Y-%m-%dT%H:%M") if inv.get("created_at") else "",
         })
-
-    # 2. Banner orders
-    for b in db.merchant_banners.find().sort("created_at", -1):
-        ca = b.get("created_at","")
-        result.append({
-            "invoice_no":    str(b["_id"])[:8].upper(),
-            "merchant_name": b.get("merchant_name",""),
-            "merchant_phone":b.get("merchant_phone",""),
-            "type":          "banner",
-            "item_label":    f"{b.get('duration_days','')} Day Banner",
-            "store_name":    "",
-            "plan":          f"{b.get('from_date','')} → {b.get('end_date','')}",
-            "base_price":    b.get("base_price",0),
-            "gst":           b.get("gst_amount",0),
-            "gst_percent":   b.get("gst_percent",18),
-            "total":         b.get("total",0),
-            "from_date":     b.get("from_date",""),
-            "end_date":      b.get("end_date",""),
-            "created_at":    ca.strftime("%d %b %Y %H:%M") if isinstance(ca,datetime) else str(ca),
-            "_status":       b.get("payment_status","free"),
-        })
-
-    # 3. Product (voucher) orders
-    for v in db.merchant_vouchers.find().sort("created_at", -1):
-        ca = v.get("created_at","")
-        result.append({
-            "invoice_no":    str(v["_id"])[:8].upper(),
-            "merchant_name": v.get("merchant_name",""),
-            "merchant_phone":v.get("merchant_phone",""),
-            "type":          "product",
-            "item_label":    f"{v.get('duration_days','')} Day Product",
-            "store_name":    "",
-            "plan":          f"{v.get('from_date','')} → {v.get('end_date','')}",
-            "base_price":    v.get("base_price",0),
-            "gst":           v.get("gst_amount",0),
-            "gst_percent":   v.get("gst_percent",18),
-            "total":         v.get("total",0),
-            "from_date":     v.get("from_date",""),
-            "end_date":      v.get("end_date",""),
-            "created_at":    ca.strftime("%d %b %Y %H:%M") if isinstance(ca,datetime) else str(ca),
-            "_status":       v.get("payment_status","free"),
-        })
-
-    result.sort(key=lambda x: x.get("created_at",""), reverse=True)
     return result
 
 @router.get("/banner-pricing")

@@ -126,6 +126,21 @@ def merchant_login(data: dict):
     res.set_cookie("merchant_token", token, httponly=True, samesite="Lax", max_age=3600 * 24)
     return res
 
+@router.post("/check-phone")
+def check_merchant_phone(data: dict):
+    """Item 8: Pre-OTP check — verify merchant is registered before sending OTP."""
+    phone = (data.get("phone") or "").strip()
+    if not phone:
+        raise HTTPException(400, "Phone required")
+    merchant = db.merchants.find_one({"phone": {"$in": [phone, phone.lstrip("+91"), "+91" + phone.lstrip("+91")]}})
+    if not merchant:
+        raise HTTPException(404, "Merchant not registered. Please sign up.")
+    if merchant.get("status") == "blocked":
+        raise HTTPException(403, "Account is suspended. Contact support.")
+    return {"ok": True, "name": merchant.get("name", "")}
+
+
+
 @router.post("/logout")
 def merchant_logout():
     res = JSONResponse({"message": "Logged out"})
@@ -538,11 +553,15 @@ def my_invoices(m=Depends(get_merchant)):
             "store_name":  inv.get("store_name"),
             "plan":        inv.get("plan"),
             "total":       inv.get("total"),
-            "gst":         inv.get("gst"),
-            "base_price":  inv.get("base_price"),
-            "from_date":   fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
-            "end_date":    ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
-            "created_at":  inv["created_at"].strftime("%d %b %Y") if inv.get("created_at") else "",
+            "gst":             inv.get("gst"),
+            "base_price":      inv.get("base_price"),
+            "original_amount": inv.get("original_amount", inv.get("base_price", 0)),
+            "discount_code":   inv.get("discount_code", ""),
+            "discount_amount": inv.get("discount_amount", 0),
+            "final_amount":    inv.get("final_amount",  inv.get("base_price", 0)),
+            "from_date":       fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
+            "end_date":        ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
+            "created_at":      inv["created_at"].strftime("%d %b %Y") if inv.get("created_at") else "",
         })
     return result
 
@@ -703,13 +722,22 @@ def get_banner_pricing_merchant(m=Depends(get_merchant)):
 @router.post("/banners/order")
 def create_banner_order(data: dict, m=Depends(get_merchant)):
     """
-    Accepts: { "days": int, "from_date": "YYYY-MM-DD", "discount_code"?: str }
+    Accepts: { "days": int, "from_date": "YYYY-MM-DD" }
     Returns an order summary with pricing + Razorpay order if payment needed.
     """
-    merchant_id    = str(m["_id"])
-    days           = int(data.get("days", 30))
-    from_date_str  = data.get("from_date", "")
+    merchant_id = str(m["_id"])
+    days = int(data.get("days", 30))
+    from_date_str = data.get("from_date", "")
+    # TASK 4 FIX: read discount_code from request body
     discount_code  = (data.get("discount_code") or "").strip().upper()
+    discount_value = 0.0
+    discount_msg   = ""
+    if discount_code:
+        disc_doc = db.discounts.find_one({"code": discount_code, "active": True})
+        if disc_doc:
+            discount_value = float(disc_doc.get("value", 0))
+            discount_msg = f"✅ Code '{discount_code}' applied — ₹{discount_value:.0f} off!"
+        # ignore invalid codes silently (don't block order creation)
 
     if days < 1:
         raise HTTPException(400, "days must be ≥ 1")
@@ -720,23 +748,16 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
 
     end_date = from_date + timedelta(days=days)
 
-    doc           = _pricing_doc()
+    doc = _pricing_doc()
     gst_pct       = float(doc.get("gst_percent", 18))
     price_per_day = float(doc.get("banner_price_per_day", 15))
     base_price    = round(price_per_day * days, 2)
-
-    # ── Discount code lookup ──
-    discount_value = 0.0
-    if discount_code:
-        dcode = db.discount_codes.find_one({"code": discount_code, "active": True})
-        if dcode:
-            discount_value = float(dcode.get("value", 0))
-            discount_value = min(discount_value, base_price)   # cap at base
-
-    discounted_base = round(base_price - discount_value, 2)
-    gst_amount      = round(discounted_base * gst_pct / 100, 2)
-    total           = round(discounted_base + gst_amount, 2)
-    amount_paise    = int(total * 100)
+    gst_amount    = round(base_price * gst_pct / 100, 2)
+    # TASK 4 FIX: apply discount before GST total calculation
+    final_pre_tax = max(0.0, base_price - discount_value)
+    gst_amount    = round(final_pre_tax * gst_pct / 100, 2)
+    total         = round(final_pre_tax + gst_amount, 2)
+    amount_paise  = int(total * 100)
 
     plan_label = f"{days} Day{'s' if days!=1 else ''} Banner"
 
@@ -749,14 +770,15 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
         "end_date":      end_date.strftime("%d %b %Y"),
         "price_per_day": price_per_day,
         "base_price":    base_price,
-        "discount_code": discount_code or None,
-        "discount_value":discount_value,
         "gst_percent":   gst_pct,
         "gst_amount":    gst_amount,
         "total":         total,
         "amount_paise":  amount_paise,
-        "status":        "pending",
-        "created_at":    datetime.utcnow().isoformat(),
+        "discount_code":  discount_code,
+        "discount_amount": discount_value,
+        "final_amount":   total,
+        "status":         "pending",
+        "created_at":     datetime.utcnow().isoformat(),
     }
     inserted = db.banner_orders.insert_one(order_doc)
     order_id = str(inserted.inserted_id)
@@ -788,10 +810,12 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
         "end_date":          end_date.strftime("%d %b %Y"),
         "price_per_day":     price_per_day,
         "base_price":        base_price,
-        "discount_code":     discount_code or None,
-        "discount_value":    discount_value,
         "gst_percent":       gst_pct,
         "gst_amount":        gst_amount,
+        "discount_code":     discount_code or "",
+        "discount_value":    discount_value,
+        "discount_amount":   discount_value,
+        "discount_msg":      discount_msg,
         "amount_display":    total,
         "amount_paise":      amount_paise,
         "pay_mode":          pay_mode,
@@ -811,6 +835,11 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     if not order:
         raise HTTPException(404, "Order not found")
 
+    # Mark discount code used if applied
+    disc_code = order.get("discount_code")
+    if disc_code:
+        db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
+
     banner = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
@@ -822,6 +851,8 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "end_date":         order.get("end_date", ""),
         "price_per_day":    order.get("price_per_day", 0),
         "base_price":       order.get("base_price", 0),
+        "discount_code":    disc_code or "",
+        "discount_value":   order.get("discount_value", 0),
         "gst_percent":      order.get("gst_percent", 18),
         "gst_amount":       order.get("gst_amount", 0),
         "total":            order.get("total", 0),
@@ -872,6 +903,9 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "gst_percent":      order.get("gst_percent", 18),
         "gst_amount":       order.get("gst_amount", 0),
         "total":            order.get("total", 0),
+        "discount_code":    order.get("discount_code", ""),
+        "discount_amount":  order.get("discount", 0),
+        "final_amount":     order.get("final_amount", order.get("total", 0)),
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":   "paid",
         "status":           "pending",
@@ -925,12 +959,12 @@ def get_voucher_pricing_merchant(m=Depends(get_merchant)):
 @router.post("/vouchers/order")
 def create_voucher_order(data: dict, m=Depends(get_merchant)):
     """
-    Accepts: { "days": int, "from_date": "YYYY-MM-DD", "discount_code"?: str }
+    Issue 3: accepts { "days": int, "from_date": "YYYY-MM-DD" }
+    No fixed plan chips — merchant chooses exact number of days and start date.
     """
     merchant_id   = str(m["_id"])
     days          = int(data.get("days", 30))
     from_date_str = data.get("from_date", "")
-    discount_code = (data.get("discount_code") or "").strip().upper()
 
     if days < 1:
         raise HTTPException(400, "days must be ≥ 1")
@@ -941,42 +975,56 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
 
     end_date = from_date + timedelta(days=days)
 
-    doc           = _pricing_doc()
-    gst_pct       = float(doc.get("gst_percent", 18))
-    price_per_day = float(doc.get("voucher_price_per_day", 10))
-    base_price    = round(price_per_day * days, 2)
+    doc = _pricing_doc()
+    gst_pct        = float(doc.get("gst_percent", 18))
+    price_per_day  = float(doc.get("voucher_price_per_day", 10))
+    base_price     = round(price_per_day * days, 2)
+    gst_amount     = round(base_price * gst_pct / 100, 2)
+    total          = round(base_price + gst_amount, 2)
+    amount_paise   = int(total * 100)
 
-    # ── Discount code lookup ──
+    plan_label = f"{days} Day{'s' if days!=1 else ''} Product"
+
+    # ── Discount code validation (Item 6) ──
+    discount_code  = (data.get("discount_code") or "").strip().upper()
     discount_value = 0.0
+    discount_msg   = ""
     if discount_code:
-        dcode = db.discount_codes.find_one({"code": discount_code, "active": True})
-        if dcode:
-            discount_value = float(dcode.get("value", 0))
-            discount_value = min(discount_value, base_price)
+        disc_doc = db.discounts.find_one({"code": discount_code, "active": True})
+        if not disc_doc:
+            raise HTTPException(400, "Invalid or expired discount code.")
+        max_u = disc_doc.get("max_uses", 0)
+        used  = disc_doc.get("used_count", 0)
+        if max_u > 0 and used >= max_u:
+            raise HTTPException(400, "Discount code has reached its usage limit.")
+        if disc_doc.get("expiry_date") and disc_doc["expiry_date"] < datetime.utcnow():
+            raise HTTPException(400, "Discount code has expired.")
+        discount_value = float(disc_doc.get("value", 0))
+        if discount_value >= base_price:
+            discount_value = base_price
+        discount_msg = f"Code {discount_code} applied"
 
     discounted_base = round(base_price - discount_value, 2)
     gst_amount      = round(discounted_base * gst_pct / 100, 2)
     total           = round(discounted_base + gst_amount, 2)
     amount_paise    = int(total * 100)
 
-    plan_label = f"{days} Day{'s' if days!=1 else ''} Voucher"
-
     order_doc = {
-        "merchant_id":   merchant_id,
-        "type":          "voucher",
-        "days":          days,
-        "from_date":     from_date.strftime("%d %b %Y"),
-        "end_date":      end_date.strftime("%d %b %Y"),
-        "price_per_day": price_per_day,
-        "base_price":    base_price,
-        "discount_code": discount_code or None,
-        "discount_value":discount_value,
-        "gst_percent":   gst_pct,
-        "gst_amount":    gst_amount,
-        "total":         total,
-        "amount_paise":  amount_paise,
-        "status":        "pending",
-        "created_at":    datetime.utcnow().isoformat(),
+        "merchant_id":    merchant_id,
+        "type":           "product",
+        "days":           days,
+        "from_date":      from_date.strftime("%d %b %Y"),
+        "end_date":       end_date.strftime("%d %b %Y"),
+        "price_per_day":  price_per_day,
+        "base_price":     base_price,
+        "discount_code":  discount_code or None,
+        "discount_value": discount_value,
+        "gst_percent":    gst_pct,
+        "gst_amount":     gst_amount,
+        "total":          total,
+        "amount_paise":   amount_paise,
+        "status":         "pending",
+        "created_at":     datetime.utcnow().isoformat(),
     }
     inserted = db.voucher_orders.insert_one(order_doc)
     order_id = str(inserted.inserted_id)
@@ -1008,10 +1056,12 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
         "end_date":          end_date.strftime("%d %b %Y"),
         "price_per_day":     price_per_day,
         "base_price":        base_price,
-        "discount_code":     discount_code or None,
-        "discount_value":    discount_value,
         "gst_percent":       gst_pct,
         "gst_amount":        gst_amount,
+        "discount_code":     discount_code or "",
+        "discount_value":    discount_value,
+        "discount_amount":   discount_value,
+        "discount_msg":      discount_msg,
         "amount_display":    total,
         "amount_paise":      amount_paise,
         "pay_mode":          pay_mode,
@@ -1032,6 +1082,11 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     if not order:
         raise HTTPException(404, "Order not found")
 
+    # Mark discount used if applied
+    disc_code = order.get("discount_code")
+    if disc_code:
+        db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
+
     voucher = {
         "merchant_id":    merchant_id,
         "merchant_name":  m.get("name", ""),
@@ -1045,6 +1100,8 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
         "end_date":       order.get("end_date", ""),
         "price_per_day":  order.get("price_per_day", 0),
         "base_price":     order.get("base_price", 0),
+        "discount_code":  disc_code or "",
+        "discount_value": order.get("discount_value", 0),
         "gst_percent":    order.get("gst_percent", 18),
         "gst_amount":     order.get("gst_amount", 0),
         "total":          order.get("total", 0),
@@ -1057,7 +1114,7 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     db.voucher_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "submitted", "voucher_id": str(res.inserted_id)}})
 
-    return {"message": "Voucher submitted for review", "voucher_id": str(res.inserted_id)}
+    return {"message": "Product submitted for review", "voucher_id": str(res.inserted_id)}
 
 @router.post("/vouchers/verify")
 def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
@@ -1098,6 +1155,9 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         "gst_percent":      order.get("gst_percent", 18),
         "gst_amount":       order.get("gst_amount", 0),
         "total":            order.get("total", 0),
+        "discount_code":    order.get("discount_code", ""),
+        "discount_amount":  order.get("discount", 0),
+        "final_amount":     order.get("final_amount", order.get("total", 0)),
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":   "paid",
         "status":           "pending",
@@ -1170,3 +1230,26 @@ def get_full_invoices(m=Depends(get_merchant)):
 
     result.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return result
+
+@router.post("/discounts/validate")
+def validate_discount_code(data: dict, m=Depends(get_merchant)):
+    """Validate a discount code for merchant checkout (Item 6)."""
+    code = (data.get("code") or "").strip().upper()
+    if not code:
+        raise HTTPException(400, "Code is required")
+    disc = db.discounts.find_one({"code": code, "active": True})
+    if not disc:
+        raise HTTPException(404, "Invalid or expired discount code.")
+    max_u = disc.get("max_uses", 0)
+    used  = disc.get("used_count", 0)
+    if max_u > 0 and used >= max_u:
+        raise HTTPException(400, "This code has reached its usage limit.")
+    from datetime import datetime
+    if disc.get("expiry_date") and disc["expiry_date"] < datetime.utcnow():
+        raise HTTPException(400, "This discount code has expired.")
+    return {
+        "code":  code,
+        "value": float(disc.get("value", 0)),
+        "message": f"Code valid — ₹{disc.get('value', 0):.0f} discount applied",
+    }
+
