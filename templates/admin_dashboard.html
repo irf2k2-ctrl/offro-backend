@@ -2655,7 +2655,19 @@ async function loadGiftCards() {
       };
     });
 
-    _allVoucherRows = [...adminRows, ...merchantRows]
+    // Dedup: if a merchant voucher was approved it's already in gift_vouchers (adminRows).
+    // Filter merchant rows to exclude those that appear in adminRows via source_voucher_id.
+    const approvedMerchantIds = new Set(
+      adminCards
+        .filter(v => v.source_voucher_id || v.source === 'merchant')
+        .map(v => v.source_voucher_id)
+        .filter(Boolean)
+    );
+    const dedupedMerchantRows = merchantRows.filter(r =>
+      !approvedMerchantIds.has(r._id)      // not already in gift_vouchers
+    );
+
+    _allVoucherRows = [...adminRows, ...dedupedMerchantRows]
       .sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
 
     // Update stats

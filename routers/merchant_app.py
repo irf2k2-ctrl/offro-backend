@@ -794,8 +794,12 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
                 auth=(RZP_KEY_ID, RZP_KEY_SECRET),
                 json_data={"amount": amount_paise, "currency": "INR",
                            "receipt": f"bnr_{order_id[:8]}"})
-            rp_order_id = rp.get("id")
-            pay_mode = "razorpay"
+            rp_data = rp.json() if hasattr(rp, 'json') else {}
+            rp_order_id = rp_data.get("id")
+            if rp_order_id:
+                pay_mode = "razorpay"
+            else:
+                pay_mode = "manual"
         except Exception:
             pay_mode = "manual"
 
@@ -1100,8 +1104,12 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
                 auth=(RZP_KEY_ID, RZP_KEY_SECRET),
                 json_data={"amount": amount_paise, "currency": "INR",
                            "receipt": f"vch_{order_id[:8]}"})
-            rp_order_id = rp.get("id")
-            pay_mode = "razorpay"
+            rp_data = rp.json() if hasattr(rp, 'json') else {}
+            rp_order_id = rp_data.get("id")
+            if rp_order_id:
+                pay_mode = "razorpay"
+            else:
+                pay_mode = "manual"
         except Exception:
             pay_mode = "manual"
 
