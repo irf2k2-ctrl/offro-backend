@@ -1479,11 +1479,13 @@ def list_all_invoices(a=Depends(get_current_admin)):
         return str(v)[:16]
 
     result = []
-    seen_ids = set()
+    seen_invoice_nos = set()   # FIX T1: dedup by invoice_no, not by ObjectId
 
-    # 1. Primary: central invoices collection
+    # 1. Primary: central invoices collection (most authoritative — always wins)
     for inv in db.invoices.find().sort("created_at", -1):
-        seen_ids.add(str(inv["_id"]))
+        ino = inv.get("invoice_no", str(inv["_id"])[:8].upper())
+        if ino and ino in seen_invoice_nos: continue
+        if ino: seen_invoice_nos.add(ino)
         fd = inv.get("from_date"); ed = inv.get("end_date")
         base = float(inv.get("base_price", inv.get("original_amount", 0)) or 0)
         gst  = float(inv.get("gst", inv.get("gst_amount", 0)) or 0)
@@ -1512,10 +1514,9 @@ def list_all_invoices(a=Depends(get_current_admin)):
 
     # 2. Paid banners not already in invoices collection
     for b in db.merchant_banners.find({"payment_status":"paid"}).sort("created_at",-1):
-        bid = str(b["_id"])
-        ino = b.get("invoice_no", bid[:8].upper())
-        if bid in seen_ids: continue
-        seen_ids.add(bid)
+        ino = b.get("invoice_no", str(b["_id"])[:8].upper())
+        if ino and ino in seen_invoice_nos: continue   # FIX T1: skip if invoice already in set
+        if ino: seen_invoice_nos.add(ino)
         base = float(b.get("base_price",0) or 0)
         gst  = float(b.get("gst_amount", b.get("gst",0)) or 0)
         tot  = float(b.get("total",0) or 0)
@@ -1543,10 +1544,9 @@ def list_all_invoices(a=Depends(get_current_admin)):
 
     # 3. Paid vouchers/products not already in invoices collection
     for v in db.merchant_vouchers.find({"payment_status":"paid"}).sort("created_at",-1):
-        vid = str(v["_id"])
-        ino = v.get("invoice_no", vid[:8].upper())
-        if vid in seen_ids: continue
-        seen_ids.add(vid)
+        ino = v.get("invoice_no", str(v["_id"])[:8].upper())
+        if ino and ino in seen_invoice_nos: continue   # FIX T1: skip if invoice already in set
+        if ino: seen_invoice_nos.add(ino)
         base = float(v.get("base_price",0) or 0)
         gst  = float(v.get("gst_amount", v.get("gst",0)) or 0)
         tot  = float(v.get("total",0) or 0)

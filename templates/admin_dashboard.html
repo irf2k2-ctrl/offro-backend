@@ -3603,6 +3603,16 @@ async function loadMerchantTxnsFull() {
       }
     });
 
+    // DEFENSE-IN-DEPTH: deduplicate by invoice_no client-side (T1 fix)
+    const _seenInvNos = new Set();
+    invoices = invoices.filter(inv => {
+      const ino = inv.invoice_no || '';
+      if (!ino || ino === 'PENDING' || ino === 'FREE') return true;
+      if (_seenInvNos.has(ino)) return false;
+      _seenInvNos.add(ino);
+      return true;
+    });
+
     // Compute summary
     const paid    = invoices.filter(i=>i._status!=='pending');
     const pending = invoices.filter(i=>i._status==='pending');

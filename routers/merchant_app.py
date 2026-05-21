@@ -442,8 +442,16 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
     if not hmac.compare_digest(expected, signature):
         raise HTTPException(400, "Payment signature mismatch")
 
-    sub = db.subscriptions.find_one({"razorpay_order_id": order_id, "status": "pending"})
+    sub = db.subscriptions.find_one({"razorpay_order_id": order_id})
     if not sub: raise HTTPException(404, "Subscription record not found")
+    # IDEMPOTENCY GUARD: already paid → return existing invoice, never double-insert
+    if sub.get("status") == "paid":
+        existing_inv = db.invoices.find_one({"razorpay_payment_id": sub.get("razorpay_payment_id","")})
+        return {
+            "message":      "✅ Payment already verified.",
+            "invoice_no":   sub.get("invoice_no", existing_inv.get("invoice_no","") if existing_inv else ""),
+            "store_status": "waiting_approval",
+        }
 
     db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {
         "status":             "paid",
@@ -914,6 +922,12 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     if not order:
         raise HTTPException(404, "Order not found")
 
+    # IDEMPOTENCY GUARD: if already paid → return existing data, never insert twice
+    if order.get("status") == "paid":
+        existing_banner = db.merchant_banners.find_one({"_id": ObjectId(order.get("banner_id", ""))}) if order.get("banner_id") else None
+        existing_inv_no = (existing_banner or {}).get("invoice_no") or order.get("invoice_no", "")
+        return {"message": "Payment already verified.", "banner_id": order.get("banner_id", ""), "invoice_no": existing_inv_no}
+
     RZP_KEY_SECRET = _os.getenv("RAZORPAY_KEY_SECRET", "")
     if RZP_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
         msg = f"{razorpay_order_id}|{razorpay_payment_id}"
@@ -1227,6 +1241,12 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
     order = db.voucher_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
     if not order:
         raise HTTPException(404, "Order not found")
+
+    # IDEMPOTENCY GUARD: if already paid → return existing data, never insert twice
+    if order.get("status") == "paid":
+        existing_vch = db.merchant_vouchers.find_one({"_id": ObjectId(order.get("voucher_id", ""))}) if order.get("voucher_id") else None
+        existing_inv_no = (existing_vch or {}).get("invoice_no") or order.get("invoice_no", "")
+        return {"message": "Payment already verified.", "voucher_id": order.get("voucher_id", ""), "invoice_no": existing_inv_no}
 
     RZP_KEY_SECRET = _os.getenv("RAZORPAY_KEY_SECRET", "")
     if RZP_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
