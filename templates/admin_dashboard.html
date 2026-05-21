@@ -237,7 +237,7 @@ tr:hover td{background:#f7faf8;}
   <div class="section-header">
     <div>
       <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-id-card me-2"></i>Products (App Display)</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage the voucher cards shown on the app home screen</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage the product cards shown on the app home screen</div>
     </div>
     <button class="btn-p" onclick="openGiftCardModal()"><i class="fas fa-plus me-1"></i> Add Card</button>
   </div>
@@ -553,17 +553,17 @@ tr:hover td{background:#f7faf8;}
     </div>
 
     <div style="margin-top:16px;background:#f0f8ff;border-radius:12px;padding:20px;border:1px solid #c0d8f0;max-width:640px;">
-      <div class="fw-bold mb-3" style="color:#0d47a1;font-size:15px;">🎁 Voucher Pricing — Per Day</div>
+      <div class="fw-bold mb-3" style="color:#0d47a1;font-size:15px;">🎁 Product Pricing — Per Day</div>
       <p style="font-size:12px;color:#0d47a1;margin-bottom:14px;">Merchant selects number of days + start date. Total = days × rate + GST</p>
       <div class="row g-3 mb-2">
         <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">Voucher Price per Day (₹)</label>
+          <label class="form-label" style="font-size:13px">Product Price per Day (₹)</label>
           <input id="voucher_price_per_day" class="form-control" type="number" min="0" step="0.50" placeholder="10">
           <small class="text-muted">e.g. 45 days × ₹10 = ₹450 base</small>
         </div>
       </div>
       <button class="btn-p mt-2" onclick="saveBannerVoucherPricing()" style="font-size:13px;padding:6px 18px;">
-        <i class="fas fa-save me-1"></i> Save Banner & Voucher Pricing
+        <i class="fas fa-save me-1"></i> Save Banner & Product Pricing
       </button>
       <p id="bv_pricing_msg" style="font-size:13px;color:var(--primary);margin-top:8px;"></p>
     </div>
@@ -591,7 +591,7 @@ tr:hover td{background:#f7faf8;}
           <option value="">All Types</option>
           <option value="store">Store</option>
           <option value="banner">Banner</option>
-          <option value="voucher">Voucher</option>
+          <option value="product">Product</option>
         </select>
         <span id="txn_total" style="font-size:13px;color:var(--muted);"></span>
         <button class="btn btn-sm" onclick="exportPaymentsPDF()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-pdf me-1"></i>PDF</button>
@@ -788,7 +788,7 @@ tr:hover td{background:#f7faf8;}
             <input type="hidden" id="store_image_b64">
             <input type="hidden" id="store_image_url"></div>
           <div class="col-12">
-            <label class="form-label">Store Image 2 <small class="text-muted">(Gallery / Gift Voucher Banner)</small></label>
+            <label class="form-label">Store Image 2 <small class="text-muted">(Gallery / Product Banner)</small></label>
             <input id="store_image2" class="form-control" type="file" accept="image/*" onchange="previewImage(2)">
             <img id="store_image2_preview" src="" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px;margin-top:6px;display:none;">
             <input type="hidden" id="store_image2_b64">
@@ -1176,7 +1176,7 @@ function showSection(name, el){
   if(name==="terms") loadTerms();
   if(name==="policies") loadPolicies();
   if(name==="social") loadSocialLinks();
-  if(name==="merchant_txns") loadMerchantTxnsFull();
+  // merchant_txns handled by script block 5 override
   if(name==="discounts") loadDiscounts();
   if(name==="about") loadAbout();
   if(name==="ratings") loadRatings();
@@ -1661,123 +1661,8 @@ async function submitAdjustment(){
 // ===== MERCHANT TRANSACTIONS =====
 let allTxns = [];
 
-async function loadMerchantTxns() {
-  try {
-    if (!merchantsList.length) {
-      let r = await fetch("/admin/merchants", {credentials:"include"});
-      if (r.ok) merchantsList = await r.json();
-    }
-    // Get paid invoices
-    let ir = await fetch("/admin/merchant-transactions", {credentials:"include"});
-    let invoices = ir.ok ? await ir.json() : [];
-
-    // Get all subscriptions to find pending ones (amount > 0)
-    let sr = await fetch("/admin/subscriptions", {credentials:"include"});
-    let subs = sr.ok ? await sr.json() : [];
-
-    // Get merchant banner invoices
-    let br = await fetch("/admin/merchant-banners", {credentials:"include"});
-    let bannerInvs = br.ok ? await br.json() : [];
-    bannerInvs.forEach(b => {
-      invoices.push({
-        invoice_no:     (b._id||'').slice(-8).toUpperCase(),
-        merchant_name:  b.merchant_name||'',
-        merchant_phone: b.merchant_phone||'',
-        store_name:     '',
-        item_label:     `${b.duration_days||0}-Day Banner`,
-        type:           'banner',
-        plan:           `${b.from_date||''} → ${b.end_date||''}`,
-        base_price:     parseFloat(b.base_price||0),
-        gst:            parseFloat(b.gst_amount||0),
-        gst_percent:    parseFloat(b.gst_percent||18),
-        total:          parseFloat(b.total||0),
-        razorpay_payment_id: b.razorpay_payment_id||'',
-        created_at:     b.created_at||'',
-        _txn_status:    b.payment_status==='paid'?'paid':'free',
-        approval_status: b.approval_status||'pending',
-      });
-    });
-
-    // Get merchant voucher invoices
-    let vr = await fetch("/admin/merchant-vouchers", {credentials:"include"});
-    let voucherInvs = vr.ok ? await vr.json() : [];
-    voucherInvs.forEach(v => {
-      invoices.push({
-        invoice_no:     (v._id||'').slice(-8).toUpperCase(),
-        merchant_name:  v.merchant_name||'',
-        merchant_phone: v.merchant_phone||'',
-        store_name:     '',
-        item_label:     `${v.duration_days||0}-Day Voucher`,
-        type:           'voucher',
-        plan:           `${v.from_date||''} → ${v.end_date||''}`,
-        base_price:     parseFloat(v.base_price||0),
-        gst:            parseFloat(v.gst_amount||0),
-        gst_percent:    parseFloat(v.gst_percent||18),
-        total:          parseFloat(v.total||0),
-        razorpay_payment_id: v.razorpay_payment_id||'',
-        created_at:     v.created_at||'',
-        _txn_status:    v.payment_status==='paid'?'paid':'free',
-        approval_status: v.approval_status||'pending',
-      });
-    });
-
-    // Subscriptions with total=0 are FREE/activated plans — treat as successful
-    // Build combined list: invoices (paid) + pending subs with total > 0
-    let pendingRows = [];
-    let seenStores = new Set(invoices.map(i => i.store_name));
-    subs.forEach(s => {
-      let total = parseFloat(s.total||0);
-      if (s.status === "pending") {
-        if (total === 0) {
-          // ₹0 pending = free plan, treat as successful — add as paid row
-          invoices.push({
-            invoice_no: "FREE",
-            merchant_name: s.merchant_name||"",
-            merchant_phone: s.merchant_phone||"",
-            store_name: s.store_name||"",
-            plan: s.plan||"",
-            base_price: 0,
-            gst: 0,
-            total: 0,
-            razorpay_payment_id: "",
-            created_at: s.created_at||"",
-            _txn_status: "free"
-          });
-        } else {
-          pendingRows.push({
-            invoice_no: "PENDING",
-            merchant_name: s.merchant_name||"",
-            merchant_phone: s.merchant_phone||"",
-            store_name: s.store_name||"",
-            plan: s.plan||"",
-            base_price: parseFloat(s.base_price||0),
-            gst: parseFloat(s.gst||0),
-            total: total,
-            razorpay_payment_id: "",
-            created_at: s.created_at||"",
-            _txn_status: "pending"
-          });
-        }
-      }
-    });
-
-    // Mark invoices as paid
-    invoices = invoices.map(i => ({...i, _txn_status: i._txn_status||"paid"}));
-
-    allTxns = [...invoices, ...pendingRows];
-
-    // Stats
-    let realPending = pendingRows.length;
-    let revenue = invoices.filter(i=>i._txn_status==="paid"||i._txn_status==="free").reduce((s,t)=>s+(t.total||0),0);
-    document.getElementById("txn_total_merchants").innerText = merchantsList.length;
-    document.getElementById("txn_total_subs").innerText = invoices.length;
-    document.getElementById("txn_pending_subs").innerText = realPending + " stores";
-    document.getElementById("txn_total_revenue").innerText = "₹" + revenue.toFixed(2);
-    document.getElementById("txn_total").innerText = allTxns.length + " records";
-
-    filterTxns();
-  } catch(e) { console.error("loadMerchantTxns error:", e); }
-}
+// Legacy alias — delegates to loadMerchantTxnsFull
+function loadMerchantTxns() { return loadMerchantTxnsFull(); }
 
 function downloadInvoicePdf(inv) {
   const w = window.open('','_blank');
@@ -3488,7 +3373,7 @@ async function saveStore() {
 // ═══════════════════════════════════════════════════════════
 // MERCHANT BANNER SUBMISSIONS (merged into Banners section)
 // ═══════════════════════════════════════════════════════════
-async async function loadMerchantBanners() {
+async function loadMerchantBanners() {
   const el = document.getElementById('merchant_banners_body');
   const cnt = document.getElementById('mbanner_count');
   if (!el) return;
@@ -3564,7 +3449,7 @@ async function deleteMerchantBanner(id) {
 // ═══════════════════════════════════════════════════════════
 // MERCHANT VOUCHER SUBMISSIONS (merged into Products section)
 // ═══════════════════════════════════════════════════════════
-async async function loadMerchantVouchers() {
+async function loadMerchantVouchers() {
   const el = document.getElementById('merchant_vouchers_body');
   const cnt = document.getElementById('mvoucher_count');
   if (!el) return;
@@ -3573,7 +3458,7 @@ async async function loadMerchantVouchers() {
     const data = r.ok ? await r.json() : [];
     if (cnt) cnt.textContent = `${data.length} submitted`;
     if (!data.length) {
-      el.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">No merchant voucher submissions yet.</td></tr>';
+      el.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">No merchant product submissions yet.</td></tr>';
       return;
     }
     el.innerHTML = data.map(v => {

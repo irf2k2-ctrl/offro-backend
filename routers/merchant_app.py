@@ -865,7 +865,35 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "submitted", "banner_id": str(res.inserted_id)}})
 
-    return {"message": "Banner submitted for review", "banner_id": str(res.inserted_id)}
+    # Write free invoice for record-keeping
+    invoice_no = f"BNR-FREE-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
+    db.invoices.insert_one({
+        "invoice_no":     invoice_no,
+        "type":           "banner",
+        "merchant_id":    merchant_id,
+        "merchant_name":  m.get("name"),
+        "merchant_phone": str(m.get("phone", "")),
+        "item_label":     f"Banner – {order.get('days', 30)} Days",
+        "store_name":     title,
+        "plan":           f"{order.get('from_date','')} → {order.get('end_date','')}",
+        "base_price":     order.get("base_price", 0),
+        "original_amount":order.get("base_price", 0),
+        "discount_code":  order.get("discount_code", ""),
+        "discount_amount":order.get("discount_value", 0),
+        "final_amount":   order.get("total", 0),
+        "gst":            order.get("gst_amount", 0),
+        "gst_percent":    order.get("gst_percent", 18),
+        "total":          order.get("total", 0),
+        "from_date":      order.get("from_date", ""),
+        "end_date":       order.get("end_date", ""),
+        "payment_status": "free",
+        "created_at":     datetime.utcnow(),
+    })
+    db.merchant_banners.update_one({"_id": res.inserted_id}, {"$set": {"invoice_no": invoice_no}})
+    _log_tx(merchant_id, "banner",
+            f"Free Banner '{title}' – {order.get('days', 30)} days",
+            amount=0, meta={"banner_id": str(res.inserted_id)})
+    return {"message": "Banner submitted for review", "banner_id": str(res.inserted_id), "invoice_no": invoice_no}
 
 # ── POST /merchant/banners/verify  ─────────────────────────────────────────
 @router.post("/banners/verify")
@@ -904,7 +932,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "gst_amount":       order.get("gst_amount", 0),
         "total":            order.get("total", 0),
         "discount_code":    order.get("discount_code", ""),
-        "discount_amount":  order.get("discount", 0),
+        "discount_amount":  order.get("discount_amount", order.get("discount", 0)),
         "final_amount":     order.get("final_amount", order.get("total", 0)),
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":   "paid",
@@ -916,7 +944,39 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "paid", "banner_id": str(res.inserted_id)}})
 
-    return {"message": "Payment verified. Banner pending admin approval.", "banner_id": str(res.inserted_id)}
+    # Generate invoice for banner payment (mirrors store subscription verify_payment)
+    invoice_no = f"BNR-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
+    db.invoices.insert_one({
+        "invoice_no":         invoice_no,
+        "type":               "banner",
+        "merchant_id":        merchant_id,
+        "merchant_name":      m.get("name"),
+        "merchant_phone":     str(m.get("phone", "")),
+        "item_label":         f"Banner – {order.get('days', 30)} Days",
+        "store_name":         title,
+        "plan":               f"{order.get('from_date','')} → {order.get('end_date','')}",
+        "base_price":         order.get("base_price", 0),
+        "original_amount":    order.get("base_price", 0),
+        "discount_code":      order.get("discount_code", ""),
+        "discount_amount":    order.get("discount_amount", order.get("discount", 0)),
+        "final_amount":       order.get("final_amount", order.get("total", 0)),
+        "gst":                order.get("gst_amount", 0),
+        "gst_percent":        order.get("gst_percent", 18),
+        "total":              order.get("total", 0),
+        "from_date":          order.get("from_date", ""),
+        "end_date":           order.get("end_date", ""),
+        "razorpay_payment_id": razorpay_payment_id,
+        "payment_status":     "paid",
+        "created_at":         datetime.utcnow(),
+    })
+    # Update banner record with invoice_no
+    db.merchant_banners.update_one({"_id": res.inserted_id}, {"$set": {"invoice_no": invoice_no}})
+    _log_tx(merchant_id, "banner",
+            f"Banner '{title}' – {order.get('days', 30)} days",
+            amount=order.get("total", 0),
+            meta={"banner_id": str(res.inserted_id), "invoice_no": invoice_no})
+    return {"message": "Payment verified. Banner pending admin approval.",
+            "banner_id": str(res.inserted_id), "invoice_no": invoice_no}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1114,7 +1174,35 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     db.voucher_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "submitted", "voucher_id": str(res.inserted_id)}})
 
-    return {"message": "Product submitted for review", "voucher_id": str(res.inserted_id)}
+    # Write free invoice for record-keeping
+    invoice_no = f"PRD-FREE-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
+    db.invoices.insert_one({
+        "invoice_no":     invoice_no,
+        "type":           "product",
+        "merchant_id":    merchant_id,
+        "merchant_name":  m.get("name"),
+        "merchant_phone": str(m.get("phone", "")),
+        "item_label":     f"Discover Product – {order.get('days', 30)} Days",
+        "store_name":     title,
+        "plan":           f"{order.get('from_date','')} → {order.get('end_date','')}",
+        "base_price":     order.get("base_price", 0),
+        "original_amount":order.get("base_price", 0),
+        "discount_code":  order.get("discount_code", ""),
+        "discount_amount":order.get("discount_value", 0),
+        "final_amount":   order.get("total", 0),
+        "gst":            order.get("gst_amount", 0),
+        "gst_percent":    order.get("gst_percent", 18),
+        "total":          order.get("total", 0),
+        "from_date":      order.get("from_date", ""),
+        "end_date":       order.get("end_date", ""),
+        "payment_status": "free",
+        "created_at":     datetime.utcnow(),
+    })
+    db.merchant_vouchers.update_one({"_id": res.inserted_id}, {"$set": {"invoice_no": invoice_no}})
+    _log_tx(merchant_id, "product",
+            f"Free Discover Product '{title}' – {order.get('days', 30)} days",
+            amount=0, meta={"voucher_id": str(res.inserted_id)})
+    return {"message": "Product submitted for review", "voucher_id": str(res.inserted_id), "invoice_no": invoice_no}
 
 @router.post("/vouchers/verify")
 def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
@@ -1168,7 +1256,38 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
     db.voucher_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "paid", "voucher_id": str(res.inserted_id)}})
 
-    return {"message": "Payment verified. Voucher pending admin approval.", "voucher_id": str(res.inserted_id)}
+    # Generate invoice for product payment (mirrors store subscription verify_payment)
+    invoice_no = f"PRD-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
+    db.invoices.insert_one({
+        "invoice_no":         invoice_no,
+        "type":               "product",
+        "merchant_id":        merchant_id,
+        "merchant_name":      m.get("name"),
+        "merchant_phone":     str(m.get("phone", "")),
+        "item_label":         f"Discover Product – {order.get('days', 30)} Days",
+        "store_name":         title,
+        "plan":               f"{order.get('from_date','')} → {order.get('end_date','')}",
+        "base_price":         order.get("base_price", 0),
+        "original_amount":    order.get("base_price", 0),
+        "discount_code":      order.get("discount_code", ""),
+        "discount_amount":    order.get("discount_value", 0),
+        "final_amount":       order.get("final_amount", order.get("total", 0)),
+        "gst":                order.get("gst_amount", 0),
+        "gst_percent":        order.get("gst_percent", 18),
+        "total":              order.get("total", 0),
+        "from_date":          order.get("from_date", ""),
+        "end_date":           order.get("end_date", ""),
+        "razorpay_payment_id": razorpay_payment_id,
+        "payment_status":     "paid",
+        "created_at":         datetime.utcnow(),
+    })
+    db.merchant_vouchers.update_one({"_id": res.inserted_id}, {"$set": {"invoice_no": invoice_no}})
+    _log_tx(merchant_id, "product",
+            f"Discover Product '{title}' – {order.get('days', 30)} days",
+            amount=order.get("total", 0),
+            meta={"voucher_id": str(res.inserted_id), "invoice_no": invoice_no})
+    return {"message": "Payment verified. Product pending admin approval.",
+            "voucher_id": str(res.inserted_id), "invoice_no": invoice_no}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
