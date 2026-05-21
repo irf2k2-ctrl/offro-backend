@@ -1813,19 +1813,11 @@ function downloadInvoicePdf(inv) {
     <div style="margin-top:24px"><span class="badge">● Paid</span></div>
     <p style="font-size:11px;color:#6b8c7e;margin-top:40px">OFFRO — Discover • Save • Earn | This is a computer-generated invoice.</p>
     <button onclick="window.print()" style="margin-top:16px;background:#3E5F55;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button>
-  
-<div id="offro-toast-container" style="position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;"></div>
-<script>
-function showToast(msg, type='success') {
-  const c = document.getElementById('offro-toast-container');
-  const t = document.createElement('div');
-  const bg = type==='success' ? '#1a6640' : type==='danger' ? '#c0392b' : '#856404';
-  t.style.cssText = `background:${bg};color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.18);max-width:320px;opacity:0;transition:opacity .3s;`;
-  t.textContent = msg;
-  c.appendChild(t);
-  requestAnimationFrame(() => { t.style.opacity = '1'; });
-  setTimeout(() => { t.style.opacity='0'; setTimeout(()=>t.remove(), 400); }, 3500);
+    </body></html>`;
+  w.document.write(html);
+  w.document.close();
 }
+
 </script>
 </body></html>`;
   w.document.write(html);
@@ -3784,79 +3776,11 @@ function renderTxnRows(rows) {
   if(cnt) cnt.textContent = `${rows.length} transactions`;
 }
 
-function downloadInvoicePdf(inv) {
-  const w = window.open('','_blank');
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-    <title>Invoice ${inv.invoice_no||''}</title>
-    <style>
-      body{font-family:Arial,sans-serif;padding:40px;color:#2c3e35;max-width:680px;margin:auto}
-      .logo{color:#3E5F55;font-size:26px;font-weight:800;letter-spacing:-1px}
-      h2{color:#3E5F55;margin-top:30px}
-      .row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #d4e8de}
-      .label{color:#6b8c7e;font-size:13px}
-      .value{font-weight:600;font-size:13px}
-      .total-row{display:flex;justify-content:space-between;padding:12px 0;background:#f0f8f4;border-radius:8px;padding:10px 16px;margin-top:12px}
-      .badge{background:#d1f0e0;color:#1a6640;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700}
-      @media print{button{display:none}}
-    </style></head><body>
-    <div class="logo">OFFRO</div>
-    <p style="color:#6b8c7e;font-size:13px">Tax Invoice / Receipt</p>
-    <h2>Invoice #${inv.invoice_no||'—'}</h2>
-    <div class="row"><span class="label">Date</span><span class="value">${(inv.created_at||'—').slice(0,10)}</span></div>
-    <div class="row"><span class="label">Merchant</span><span class="value">${inv.merchant_name||'—'}</span></div>
-    <div class="row"><span class="label">Phone</span><span class="value">${inv.merchant_phone||'—'}</span></div>
-    <div class="row"><span class="label">Item</span><span class="value">${inv.item_label||inv.store_name||'—'}</span></div>
-    <div class="row"><span class="label">Type</span><span class="value">${inv.type||'—'}</span></div>
-    <div class="row"><span class="label">Plan</span><span class="value">${inv.plan||'—'}</span></div>
-    <hr style="margin:20px 0;border-color:#d4e8de">
-    <div class="row"><span class="label">Original Amount</span><span class="value">₹${parseFloat(inv.original_amount||inv.base_price||0).toFixed(2)}</span></div>
-    <div class="row"><span class="label">Discount Code</span><span class="value">${inv.discount_code||'—'}</span></div>
-    <div class="row"><span class="label">Discount Value</span><span class="value" style="color:#c0392b">${parseFloat(inv.discount_amount||0)>0?'−₹'+parseFloat(inv.discount_amount).toFixed(2):'—'}</span></div>
-    <div class="row"><span class="label">Final Amount (pre-tax)</span><span class="value">₹${parseFloat(inv.final_amount||(parseFloat(inv.base_price||0)-parseFloat(inv.discount_amount||0))||0).toFixed(2)}</span></div>
-    <div class="row"><span class="label">GST (18%)</span><span class="value">₹${parseFloat(inv.gst||0).toFixed(2)}</span></div>
-    <div class="total-row"><span style="font-weight:800;color:#3E5F55;font-size:16px">Total Paid</span><span style="font-weight:800;color:#3E5F55;font-size:16px">₹${parseFloat(inv.total||0).toFixed(2)}</span></div>
-    <div style="margin-top:24px"><span class="badge">● Paid</span></div>
-    <p style="font-size:11px;color:#6b8c7e;margin-top:40px">OFFRO — Discover • Save • Earn | This is a computer-generated invoice.</p>
-    <button onclick="window.print()" style="margin-top:16px;background:#3E5F55;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button>
-  
-<div id="offro-toast-container" style="position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;"></div>
-<script>
-function showToast(msg, type='success') {
-  const c = document.getElementById('offro-toast-container');
-  const t = document.createElement('div');
-  const bg = type==='success' ? '#1a6640' : type==='danger' ? '#c0392b' : '#856404';
-  t.style.cssText = `background:${bg};color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.18);max-width:320px;opacity:0;transition:opacity .3s;`;
-  t.textContent = msg;
-  c.appendChild(t);
-  requestAnimationFrame(() => { t.style.opacity = '1'; });
-  setTimeout(() => { t.style.opacity='0'; setTimeout(()=>t.remove(), 400); }, 3500);
-}
-</script>
-</body></html>`;
-  w.document.write(html);
-  w.document.close();
-}
 
-function filterTxns() {
-  const q      = (document.getElementById('txn_search')?.value||'').toLowerCase();
-  const status = document.getElementById('txn_status_filter')?.value||'';
-  const type   = document.getElementById('txn_type_filter')?.value||'';
-  let rows = _allTxnRows;
-  if (q)      rows = rows.filter(i=>(i.merchant_name||'').toLowerCase().includes(q)||(i.invoice_no||'').toLowerCase().includes(q)||(i.store_name||'').toLowerCase().includes(q));
-  if (status) rows = rows.filter(i=>{ const st=i._status||(i.invoice_no==='PENDING'?'pending':'paid'); return st===status||(status==='paid'&&(st==='free'||st==='paid')); });
-  if (type)   rows = rows.filter(i=>(i.type||'store')===type);
-  renderTxnRows(rows);
-}
 
-function exportPaymentsCSV() {
-  const rows = [['Date','Invoice No','Merchant','Phone','Item','Type','Plan','Base','GST%','GST Amt','Total','Status']];
-  _allTxnRows.forEach(i=>rows.push([i.created_at,i.invoice_no,i.merchant_name,i.merchant_phone,
-    i.item_label||i.store_name,i.type||'store',i.plan,i.base_price,i.gst,i.total,
-    i._status||(i.invoice_no==='PENDING'?'pending':'paid')]));
-  const csv = rows.map(r=>r.map(v=>`"${String(v??'').replace(/"/g,"'")}"`).join(',')).join('\n');
-  const a = Object.assign(document.createElement('a'), {href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})), download:'offro_payments.csv'});
-  a.click();
-}
+
+
+
 
 // ═══════════════════════════════════════════════════════════
 // HOOK into showSection — load merchant submissions + pricing
