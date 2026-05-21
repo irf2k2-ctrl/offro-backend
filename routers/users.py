@@ -139,6 +139,66 @@ def login_user(data: dict):
     return response
 
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UNIFIED MERCHANT LOGIN  (new — single token architecture)
+# POST /user/merchant-login
+# Called after MSG91 OTP verified on Flutter side.
+# Validates merchant exists → issues OFFRO session token stored on user record.
+# This means ONE token works for both User and Merchant modes.
+# ══════════════════════════════════════════════════════════════════════════════
+@router.post("/merchant-login")
+def merchant_login_unified(data: dict):
+    """
+    Unified merchant login — called after MSG91 OTP verified on Flutter side.
+    Finds merchant by phone (all variants), issues a fresh merchant token.
+    Flutter stores token + role='merchant' via Prefs.save().
+    """
+    from datetime import datetime
+    raw_phone = str(data.get("phone", "")).strip()
+    if not raw_phone:
+        raise HTTPException(status_code=400, detail="Phone is required")
+
+    # Build all normalised variants inline (no external import needed)
+    p = raw_phone.replace(" ", "").replace("-", "")
+    d = p[1:] if p.startswith("+") else p
+    if len(d) == 12 and d.startswith("91"):
+        d = d[2:]
+    elif len(d) == 11 and d.startswith("0"):
+        d = d[1:]
+    last10 = d[-10:] if len(d) >= 10 else d
+    variants = list({p, f"+91{last10}", f"91{last10}", last10, f"0{last10}"})
+
+    m = db.merchants.find_one({"phone": {"$in": variants}})
+    if not m:
+        raise HTTPException(status_code=401, detail="Phone not registered as merchant. Please register first.")
+    if m.get("status") == "blocked":
+        raise HTTPException(status_code=403, detail="Account suspended. Contact support.")
+
+    token = str(uuid.uuid4())
+    db.merchants.update_one(
+        {"_id": m["_id"]},
+        {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}}
+    )
+    print(f"[MERCHANT-LOGIN] ✅ Session issued for {raw_phone} — merchant_id={str(m['_id'])}")
+
+    response = JSONResponse(content={
+        "merchant_id": str(m["_id"]),
+        "name":        m.get("name", ""),
+        "phone":       m.get("phone", raw_phone),
+        "token":       token,
+        "role":        "merchant",
+        "city":        m.get("city", ""),
+        "area":        m.get("area", ""),
+    })
+    response.set_cookie(
+        key="merchant_token", value=token, httponly=True,
+        samesite="Lax", secure=False, max_age=3600 * 24 * 30,
+    )
+    return response
+
+
 @router.post("/check-phone")
 def check_phone(data: dict):
     """
