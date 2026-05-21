@@ -1818,12 +1818,6 @@ function downloadInvoicePdf(inv) {
   w.document.close();
 }
 
-</script>
-</body></html>`;
-  w.document.write(html);
-  w.document.close();
-}
-
 function filterTxns() {
   // Delegate to new renderTxnRows system
   const q      = (document.getElementById('txn_search')?.value||'').toLowerCase();
