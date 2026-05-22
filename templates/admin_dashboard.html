@@ -100,6 +100,7 @@ tr:hover td{background:#f7faf8;}
   </div>
   <div class="sidebar-sub">Admin Panel</div>
   <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
+  <a href="#" onclick="showSection('accounts',this)"><i class="fas fa-id-badge fa-fw"></i> Accounts</a>
   <a href="#" onclick="showSection('merchants',this)"><i class="fas fa-user-tie fa-fw"></i> Merchants</a>
   <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
   <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
@@ -129,6 +130,7 @@ tr:hover td{background:#f7faf8;}
   <div id="section-overview" class="section active">
     <div class="page-title">Overview <button class="btn-o" style="font-size:12px;padding:3px 10px;margin-left:10px;vertical-align:middle;" onclick="loadStats()">↻ Refresh</button></div>
     <div class="row g-3">
+      <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_accounts">--</h3><p>Total Accounts</p></div></div>
       <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_merchants">--</h3><p>Total Merchants</p></div></div>
       <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_active">--</h3><p>Active Merchants</p></div></div>
       <div class="col-6 col-md-3"><div class="card-stat"><h3 id="stat_stores">--</h3><p>Total Stores</p></div></div>
@@ -173,6 +175,51 @@ tr:hover td{background:#f7faf8;}
         <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
       </tbody>
     </table>
+  </div>
+</div>
+
+<!-- ═══ UNIFIED ACCOUNTS ═══ -->
+<div id="section-accounts" class="section">
+  <div class="section-header">
+    <div class="page-title" style="margin:0">🧑‍💼 Accounts</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input id="acct_search" class="form-control" style="max-width:210px;"
+        placeholder="🔍 Name / Phone..." oninput="filterAccounts()">
+      <select id="acct_role_filter" class="form-select" style="max-width:150px;" onchange="filterAccounts()">
+        <option value="">All Roles</option>
+        <option value="user_only">👤 User only</option>
+        <option value="merchant_only">🏪 Merchant only</option>
+        <option value="both">🔄 Both Roles</option>
+      </select>
+      <select id="acct_city_filter" class="form-select" style="max-width:130px;" onchange="filterAccounts()">
+        <option value="">All Cities</option>
+      </select>
+    </div>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr>
+      <th>Name</th><th>Phone</th><th>City</th>
+      <th>Roles</th><th>Stores</th><th>Products</th><th>Banners</th>
+      <th>Points</th><th>Status</th><th>Actions</th>
+    </tr></thead>
+    <tbody id="accounts_table"></tbody>
+  </table></div>
+  <div id="accounts_pagination"
+    style="display:flex;align-items:center;justify-content:space-between;
+    padding:10px 16px;border-top:1px solid var(--border);
+    background:#fff;border-radius:0 0 12px 12px;"></div>
+</div>
+
+<!-- Account Detail Modal -->
+<div class="modal fade" id="accountDetailModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content" style="border-radius:16px;overflow:hidden;">
+      <div class="modal-header" style="background:var(--sidebar);color:#fff;border:none;padding:18px 24px;">
+        <h5 class="modal-title fw-bold" id="acctDetailTitle">Account Details</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0" id="acctDetailBody" style="background:#FDFBF6;padding:20px!important;"></div>
+    </div>
   </div>
 </div>
 
@@ -957,6 +1004,7 @@ window.addEventListener('unhandledrejection', (e) => {
   console.error('[OFFRO Promise Error]', e.reason);
 });
 
+let accountsList=[], _filteredAccounts=[], _acctPage=1;
 let merchantsList=[], allStores=[], categoriesList=[], allUsers=[];
 let storeModal, merchantModal, qrModal, userHistoryModal, adjustModal_inst;
 let _ratingsCache=[], _ratingsSearch='';
@@ -1166,6 +1214,7 @@ function showSection(name, el){
   document.querySelectorAll(".sidebar a").forEach(a=>a.classList.remove("active"));
   document.getElementById("section-"+name).classList.add("active");
   if(el) el.classList.add("active");
+  if(name==="accounts") loadAccounts();
   if(name==="merchants") loadMerchants();
   if(name==="overview") loadStats();
   if(name==="stores") loadStores();
@@ -1194,6 +1243,7 @@ async function loadStats() {
         console.log("📊 /admin/stats response:", JSON.stringify(d));
         // Helper: safe set — won't throw if element missing
         const setEl = (id, val) => { const el = document.getElementById(id); if(el) el.innerText = val; };
+        setEl("stat_accounts",  (d.total_accounts ?? (d.total_users ?? 0) + (d.total_merchants ?? 0)));
         setEl("stat_merchants", d.total_merchants ?? 0);
         setEl("stat_active",    d.active_merchants ?? 0);
         setEl("stat_stores",    d.total_stores     ?? 0);
@@ -3779,6 +3829,238 @@ function showToast(msg, type='success') {
   requestAnimationFrame(() => { t.style.opacity = '1'; });
   setTimeout(() => { t.style.opacity='0'; setTimeout(()=>t.remove(), 400); }, 3500);
 }
+
+// ════════════════════════════════════════════════════════════
+//  UNIFIED ACCOUNTS
+// ════════════════════════════════════════════════════════════
+async function loadAccounts() {
+  try {
+    const r = await fetch('/admin/accounts', {credentials:'include'});
+    accountsList = await r.json();
+    // Populate city filter
+    const cities = [...new Set(accountsList.map(a=>a.city).filter(Boolean))].sort();
+    const cityEl = document.getElementById('acct_city_filter');
+    if (cityEl) {
+      cityEl.innerHTML = '<option value="">All Cities</option>' +
+        cities.map(c=>`<option value="${c}">${c}</option>`).join('');
+    }
+    _acctPage = 1;
+    filterAccounts();
+  } catch(e) { console.error('loadAccounts error', e); }
+}
+
+function filterAccounts() {
+  const search = (document.getElementById('acct_search')?.value || '').toLowerCase();
+  const role   = document.getElementById('acct_role_filter')?.value || '';
+  const city   = document.getElementById('acct_city_filter')?.value || '';
+  _filteredAccounts = accountsList.filter(a => {
+    const matchSearch = !search ||
+      (a.full_name||'').toLowerCase().includes(search) ||
+      (a.mobile_number||'').includes(search);
+    const matchCity = !city || a.city === city;
+    const isUser     = a.roles?.includes('user');
+    const isMerchant = a.roles?.includes('merchant');
+    const matchRole  = !role ||
+      (role === 'user_only'     &&  isUser && !isMerchant) ||
+      (role === 'merchant_only' && !isUser &&  isMerchant) ||
+      (role === 'both'          &&  isUser &&  isMerchant);
+    return matchSearch && matchCity && matchRole;
+  });
+  _acctPage = 1;
+  renderAccountsPage();
+}
+
+const ACCT_PER_PAGE = 20;
+
+function renderAccountsPage() {
+  const f    = _filteredAccounts;
+  const total = f.length;
+  const start = (_acctPage - 1) * ACCT_PER_PAGE;
+  const page  = f.slice(start, start + ACCT_PER_PAGE);
+  const tbody = document.getElementById('accounts_table');
+  if (!tbody) return;
+
+  if (!page.length) {
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">No accounts found</td></tr>`;
+    renderPagination('accounts_pagination', total, _acctPage, 'goAcctPage');
+    return;
+  }
+
+  tbody.innerHTML = page.map(a => {
+    const roleBadges = (a.roles || []).map(r => {
+      const isM = r === 'merchant';
+      return `<span class="badge" style="background:${isM?'var(--primary)':'#5a7fb5'};color:#fff;font-size:10px;margin-right:2px;">
+        ${isM ? '🏪 Merchant' : '👤 User'}</span>`;
+    }).join('');
+    const pts   = (a.visit_pts || 0) + (a.pool_pts || 0);
+    const stBg  = a.status === 'active' ? '#1a6640' : '#c0392b';
+    const stLbl = a.status === 'active' ? 'Active' : 'Blocked';
+    return `<tr>
+      <td><strong>${escHtml(a.full_name||'—')}</strong></td>
+      <td style="font-family:monospace;font-size:12px;">${escHtml(a.mobile_number||'')}</td>
+      <td>${escHtml(a.city||'—')}</td>
+      <td>${roleBadges}</td>
+      <td><span class="badge" style="background:var(--accent);color:var(--text);">${a.store_count||0}</span></td>
+      <td><span class="badge" style="background:#e8f5e9;color:var(--text);">${a.product_count||0}</span></td>
+      <td><span class="badge" style="background:var(--beige);color:var(--text);">${a.banner_count||0}</span></td>
+      <td style="font-size:12px;">${pts > 0 ? '⭐ '+pts : '—'}</td>
+      <td><span class="badge" style="background:${stBg};color:#fff;">${stLbl}</span></td>
+      <td>
+        <button class="btn-sm-p" onclick="openAccountDetail('${a.account_id}','${escHtml(a.full_name||'')}')">👁 View</button>
+        <button class="btn-sm-p" style="background:#c0392b;" onclick="toggleAccountStatus('${a.account_id}','${a.status}')">
+          ${a.status==='active'?'🚫 Block':'✅ Unblock'}</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  renderPagination('accounts_pagination', total, _acctPage, 'goAcctPage');
+}
+
+function goAcctPage(p) { _acctPage = p; renderAccountsPage(); }
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+let _acctDetailModal;
+async function openAccountDetail(accountId, name) {
+  if (!_acctDetailModal) {
+    _acctDetailModal = new bootstrap.Modal(document.getElementById('accountDetailModal'));
+  }
+  const titleEl = document.getElementById('acctDetailTitle');
+  const bodyEl  = document.getElementById('acctDetailBody');
+  if (titleEl) titleEl.textContent = '🧑‍💼 ' + (name || 'Account Details');
+  if (bodyEl)  bodyEl.innerHTML = '<div class="text-center py-5"><div class="spinner-border" style="color:var(--primary);"></div><p class="mt-3 text-muted">Loading...</p></div>';
+  _acctDetailModal.show();
+
+  try {
+    const r = await fetch(`/admin/accounts/${accountId}`, {credentials:'include'});
+    const d = await r.json();
+    if (bodyEl) bodyEl.innerHTML = renderAccountDetailHTML(d);
+  } catch(e) {
+    if (bodyEl) bodyEl.innerHTML = `<div class="text-center py-4 text-danger">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderAccountDetailHTML(d) {
+  const roles = (d.roles||[]).map(r=>`<span class="badge me-1" style="background:${r==='merchant'?'var(--primary)':'#5a7fb5'};color:#fff;">${r==='merchant'?'🏪 Merchant':'👤 User'}</span>`).join('');
+  const pts = (d.visit_pts||0) + (d.pool_pts||0);
+
+  const storeRows = (d.stores||[]).map(s=>`
+    <tr><td>${escHtml(s.name)}</td><td>${escHtml(s.city)}</td><td>${escHtml(s.category)}</td>
+    <td><span class="badge" style="background:var(--primary);color:#fff;">${s.status}</span></td>
+    <td>⭐ ${s.points||0}</td></tr>`).join('') || '<tr><td colspan="5" class="text-muted text-center">No stores</td></tr>';
+
+  const prodRows = (d.products||[]).map(p=>`
+    <tr><td>${escHtml(p.title)}</td>
+    <td><span class="badge" style="background:${p.status==='approved'?'#1a6640':'#e67e22'};color:#fff;">${p.status}</span></td>
+    <td>₹${p.price||0}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No products</td></tr>';
+
+  const bannerRows = (d.banners||[]).map(b=>`
+    <tr><td>${escHtml(b.title)}</td>
+    <td><span class="badge" style="background:${b.status==='approved'?'#1a6640':'#e67e22'};color:#fff;">${b.status}</span></td>
+    <td>₹${b.price||0}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No banners</td></tr>';
+
+  const payRows = (d.payments||[]).map(p=>`
+    <tr><td>${escHtml(p.type)}</td><td>₹${p.amount||0}</td>
+    <td><span class="badge" style="background:${p.status==='paid'?'#1a6640':'#c0392b'};color:#fff;">${p.status}</span></td>
+    <td style="font-size:11px;color:var(--muted);">${p.created_at?.substring(0,10)||'—'}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted text-center">No payments</td></tr>';
+
+  return `
+  <div style="padding:20px;">
+    <!-- Summary cards -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="card-stat" style="padding:14px 16px;">
+          <h3 style="font-size:22px;">${pts}</h3><p>Total Points</p>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card-stat" style="padding:14px 16px;">
+          <h3 style="font-size:22px;">${d.stores?.length||0}</h3><p>Stores</p>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card-stat" style="padding:14px 16px;">
+          <h3 style="font-size:22px;">${d.products?.length||0}</h3><p>Products</p>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card-stat" style="padding:14px 16px;">
+          <h3 style="font-size:22px;">${d.banners?.length||0}</h3><p>Banners</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Profile info -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
+      <div class="fw-bold mb-2" style="color:var(--primary);">👤 Profile</div>
+      <div class="row g-2" style="font-size:13px;">
+        <div class="col-md-4"><span style="color:var(--muted);">Name:</span> <strong>${escHtml(d.full_name||'—')}</strong></div>
+        <div class="col-md-4"><span style="color:var(--muted);">Phone:</span> <strong style="font-family:monospace;">${escHtml(d.mobile_number||'—')}</strong></div>
+        <div class="col-md-4"><span style="color:var(--muted);">City:</span> ${escHtml(d.city||'—')}</div>
+        <div class="col-md-4"><span style="color:var(--muted);">Roles:</span> ${roles}</div>
+        <div class="col-md-4"><span style="color:var(--muted);">Status:</span>
+          <span class="badge" style="background:${d.status==='active'?'#1a6640':'#c0392b'};color:#fff;">${d.status||'active'}</span></div>
+        <div class="col-md-4"><span style="color:var(--muted);">Scans:</span> ${d.scans||0}</div>
+      </div>
+    </div>
+
+    <!-- Stores -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
+      <div class="fw-bold mb-2" style="color:var(--primary);">🏪 Stores</div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
+        <thead style="background:var(--sidebar);color:#fff;"><tr>
+          <th>Name</th><th>City</th><th>Category</th><th>Status</th><th>Points</th>
+        </tr></thead>
+        <tbody>${storeRows}</tbody>
+      </table></div>
+    </div>
+
+    <!-- Products -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
+      <div class="fw-bold mb-2" style="color:var(--primary);">🛍️ Products</div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
+        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Title</th><th>Status</th><th>Price</th></tr></thead>
+        <tbody>${prodRows}</tbody>
+      </table></div>
+    </div>
+
+    <!-- Banners -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
+      <div class="fw-bold mb-2" style="color:var(--primary);">🖼️ Banners</div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
+        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Title</th><th>Status</th><th>Price</th></tr></thead>
+        <tbody>${bannerRows}</tbody>
+      </table></div>
+    </div>
+
+    <!-- Payments -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;">
+      <div class="fw-bold mb-2" style="color:var(--primary);">💳 Payment History</div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
+        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+        <tbody>${payRows}</tbody>
+      </table></div>
+    </div>
+  </div>`;
+}
+
+async function toggleAccountStatus(accountId, currentStatus) {
+  const newStatus = currentStatus === 'active' ? 'blocked' : 'active';
+  if (!confirm(`${newStatus === 'blocked' ? 'Block' : 'Unblock'} this account?`)) return;
+  try {
+    await fetch(`/admin/accounts/${accountId}/status`, {
+      method: 'PATCH', credentials: 'include',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({status: newStatus}),
+    });
+    await loadAccounts();
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+// ════ End Accounts ════
+
 </script>
 </body>
 </html>

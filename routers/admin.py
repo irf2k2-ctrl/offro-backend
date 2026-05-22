@@ -161,6 +161,186 @@ def delete_merchant(id: str, a=Depends(get_current_admin)):
     db.stores.delete_many({"merchant_id": id})
     return {"message": "Deleted"}
 
+
+# ══════════════════════════════════════════════════════════════════
+# UNIFIED ACCOUNTS — merged view of users + merchants
+# ══════════════════════════════════════════════════════════════════
+
+@router.get("/accounts")
+def list_accounts(a=Depends(get_current_admin)):
+    """Merged view: users + merchants by phone. Non-destructive — underlying collections unchanged."""
+    # Load merchants keyed by phone
+    merch_map = {}
+    for m in db.merchants.find():
+        phones = [m.get("phone","").strip()]
+        mid = str(m["_id"])
+        store_count   = db.stores.count_documents({"merchant_id": mid})
+        banner_count  = db.merchant_banners.count_documents({"merchant_id": mid}) if "merchant_banners" in db.list_collection_names() else 0
+        product_count = db.merchant_vouchers.count_documents({"merchant_id": mid}) if "merchant_vouchers" in db.list_collection_names() else 0
+        entry = {
+            "merchant_id":     mid,
+            "merchant_name":   m.get("name",""),
+            "city":            m.get("city",""),
+            "merchant_status": m.get("status","active"),
+            "store_count":     store_count,
+            "banner_count":    banner_count,
+            "product_count":   product_count,
+        }
+        for ph in phones:
+            if ph: merch_map[ph] = entry
+
+    seen = set()
+    result = []
+
+    for u in db.users.find():
+        phone = (u.get("phone") or "").strip()
+        if not phone: continue
+        seen.add(phone)
+        mdata = merch_map.get(phone, {})
+        roles = ["user"] + (["merchant"] if mdata else [])
+        total_pts = u.get("visit_pts", u.get("points", 0) or 0) + u.get("pool_pts", 0)
+        result.append({
+            "account_id":      str(u["_id"]),
+            "merchant_id":     mdata.get("merchant_id",""),
+            "full_name":       u.get("name","") or mdata.get("merchant_name","Unknown"),
+            "mobile_number":   phone,
+            "city":            u.get("city","") or mdata.get("city",""),
+            "roles":           roles,
+            "preferred_mode":  u.get("preferred_mode","user"),
+            "status":          u.get("status","active"),
+            "merchant_status": mdata.get("merchant_status",""),
+            "store_count":     mdata.get("store_count",0),
+            "banner_count":    mdata.get("banner_count",0),
+            "product_count":   mdata.get("product_count",0),
+            "visit_pts":       u.get("visit_pts", u.get("points",0) or 0),
+            "pool_pts":        u.get("pool_pts",0),
+            "total_pts":       total_pts,
+            "scans":           u.get("scans", u.get("scan_count",0) or 0),
+            "created_date":    str(u.get("created_at") or u.get("registered_at") or ""),
+            "source":          "user",
+        })
+
+    for phone, mdata in merch_map.items():
+        if phone in seen: continue
+        result.append({
+            "account_id":      mdata["merchant_id"],
+            "merchant_id":     mdata["merchant_id"],
+            "full_name":       mdata["merchant_name"],
+            "mobile_number":   phone,
+            "city":            mdata.get("city",""),
+            "roles":           ["merchant"],
+            "preferred_mode":  "merchant",
+            "status":          "active" if mdata["merchant_status"]=="active" else "inactive",
+            "merchant_status": mdata["merchant_status"],
+            "store_count":     mdata.get("store_count",0),
+            "banner_count":    mdata.get("banner_count",0),
+            "product_count":   mdata.get("product_count",0),
+            "visit_pts":       0,
+            "pool_pts":        0,
+            "total_pts":       0,
+            "scans":           0,
+            "created_date":    "",
+            "source":          "merchant",
+        })
+
+    return result
+
+
+@router.get("/accounts/{account_id}")
+def get_account_detail(account_id: str, a=Depends(get_current_admin)):
+    user = merchant = None
+    try:
+        user = db.users.find_one({"_id": ObjectId(account_id)})
+    except Exception:
+        pass
+    if not user:
+        try:
+            merchant = db.merchants.find_one({"_id": ObjectId(account_id)})
+        except Exception:
+            pass
+        if not merchant:
+            raise HTTPException(404, "Account not found")
+        phone = merchant.get("phone","")
+        mid   = str(merchant["_id"])
+    else:
+        phone = user.get("phone","")
+        # Try to find matching merchant by phone
+        merchant = db.merchants.find_one({"phone": phone})
+        mid = str(merchant["_id"]) if merchant else ""
+
+    stores = []
+    if mid:
+        for s in db.stores.find({"merchant_id": mid}):
+            stores.append({"store_id":str(s["_id"]),"name":s.get("name",""),
+                "city":s.get("city",""),"status":s.get("status",""),
+                "category":s.get("category",""),
+                "points":s.get("visit_pts", s.get("points",0) or 0)})
+
+    products = []
+    if mid and "merchant_vouchers" in db.list_collection_names():
+        for v in db.merchant_vouchers.find({"merchant_id": mid}):
+            products.append({"product_id":str(v["_id"]),"title":v.get("title",""),
+                "status":v.get("status",""),"price":v.get("price",0)})
+
+    banners = []
+    if mid and "merchant_banners" in db.list_collection_names():
+        for b in db.merchant_banners.find({"merchant_id": mid}):
+            banners.append({"banner_id":str(b["_id"]),"title":b.get("title",""),
+                "status":b.get("status",""),"price":b.get("price",0)})
+
+    payments = []
+    if mid:
+        try:
+            for inv in db.invoices.find({"merchant_id": mid}).sort("created_at",-1).limit(20):
+                payments.append({"invoice_id":str(inv["_id"]),"type":inv.get("type",""),
+                    "amount":inv.get("amount",0),"status":inv.get("status",""),
+                    "created_at":str(inv.get("created_at",""))})
+        except Exception:
+            pass
+
+    base = user or merchant or {}
+    u_or_empty = user or {}
+    total_pts = u_or_empty.get("visit_pts", u_or_empty.get("points",0) or 0) + u_or_empty.get("pool_pts",0)
+
+    return {
+        "account_id":    account_id,
+        "merchant_id":   mid,
+        "full_name":     base.get("name",""),
+        "mobile_number": phone,
+        "city":          base.get("city",""),
+        "roles":         (["user"] if user else []) + (["merchant"] if merchant else []),
+        "status":        base.get("status","active"),
+        "visit_pts":     u_or_empty.get("visit_pts", u_or_empty.get("points",0) or 0),
+        "pool_pts":      u_or_empty.get("pool_pts",0),
+        "total_pts":     total_pts,
+        "scans":         u_or_empty.get("scans", u_or_empty.get("scan_count",0) or 0),
+        "stores":        stores,
+        "products":      products,
+        "banners":       banners,
+        "payments":      payments,
+    }
+
+
+@router.patch("/accounts/{account_id}/status")
+def toggle_account_status(account_id: str, data: dict, a=Depends(get_current_admin)):
+    new_status = data.get("status","active")
+    updated = False
+    try:
+        r = db.users.update_one({"_id": ObjectId(account_id)}, {"$set": {"status": new_status}})
+        if r.modified_count: updated = True
+    except Exception:
+        pass
+    try:
+        r = db.merchants.update_one({"_id": ObjectId(account_id)}, {"$set": {"status": new_status}})
+        if r.modified_count: updated = True
+    except Exception:
+        pass
+    if not updated:
+        raise HTTPException(404, "Account not found")
+    return {"status": new_status}
+
+# ── End unified accounts ──────────────────────────────────────────
+
 # ===================== STORES =====================
 
 def _store_deal_status(store_id: str):
