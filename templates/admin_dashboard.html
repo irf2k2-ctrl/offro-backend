@@ -342,7 +342,7 @@ tr:hover td{background:#f7faf8;}
   <div style="margin-top:16px;background:#f7faf8;border-radius:8px;padding:12px 16px;border:1px solid var(--border)">
     <i class="fas fa-info-circle" style="color:var(--primary)"></i>
     <strong style="font-size:12px;color:var(--primary)"> What is "View"?</strong>
-    <span style="font-size:12px;color:var(--muted)"> View option allows you to see full voucher details including logo, title, offer text, validity, merchant type and status. From there you can edit or delete the voucher card.</span>
+    <span style="font-size:12px;color:var(--muted)"> View option allows you to see full product details including logo, title, offer text, validity, merchant type and status. From there you can edit or delete the product card.</span>
   </div>
 
   <!-- hidden spans kept for JS back-compat -->
@@ -2722,7 +2722,7 @@ async function loadGiftCards() {
         logo:       v.logo || '',
         title:      v.title || '',
         offer_text: v.text || '',
-        validity:   v.validity || (fromD && toD ? `${fromD} → ${toD}` : ''),
+        validity:   v.validity || (fromD && toD ? `${_fmtDate(fromD)} → ${_fmtDate(toD)}` : (fromD ? _fmtDate(fromD) : '')),
         from_date:  fromD,
         end_date:   toD,
         is_active:  isActive,
@@ -2742,8 +2742,8 @@ async function loadGiftCards() {
       const fromD = v.from_date || '';
       const toD   = v.end_date   || '';
       const validityDisplay = (fromD && toD)
-        ? `${fromD} → ${toD}`
-        : (v.validity || v.end_date || '—');
+        ? `${_fmtDate(fromD)} → ${_fmtDate(toD)}`
+        : (v.validity || (v.end_date ? _fmtDate(v.end_date) : '—'));
       // ISSUE 7: Check expiry at render time
       let computedStatus = st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending');
       if (computedStatus === 'approved' && toD) {
@@ -2870,10 +2870,15 @@ function renderVoucherZone() {
       : `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`;
 
     const isAdmin = r._source === 'admin';
-    // ISSUE 3: Show merchant name + mobile number in Created By
+    // ISSUE 1+3: Show creator + merchant mapping in Created By
     const phoneDisplay = r.merchant_phone ? `<div style="font-size:10px;color:var(--muted);font-family:monospace;margin-top:1px">📞 ${r.merchant_phone}</div>` : '';
+    // For admin-created cards linked to a merchant, show both badges
+    const merchantLinked = isAdmin && r.merchant_name;
     const creatorBadge = isAdmin
       ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>`
+        + (merchantLinked
+          ? `<div style="font-size:11px;color:#1a56db;margin-top:3px;font-weight:600">🔗 ${r.merchant_name}</div>${phoneDisplay}`
+          : '')
       : `<span style="background:#e8f0fe;color:#1a56db;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-user" style="font-size:9px"></i> Merchant</span>
          <div style="font-size:11px;color:var(--muted);margin-top:2px;font-weight:600">${r.merchant_name||''}</div>
          ${phoneDisplay}`;
@@ -2912,16 +2917,34 @@ function renderVoucherZone() {
 }
 
 // ISSUE 10: Consistent date formatter for Products table
+// FIX 2: Formats a YYYY-MM-DD string to "22 May 2026"
+function _fmtDate(s) {
+  if (!s) return '';
+  try {
+    const d = new Date(s + 'T00:00:00');
+    const opts = {day:'numeric', month:'short', year:'numeric'};
+    return d.toLocaleDateString('en-IN', opts);
+  } catch(e) { return s; }
+}
 function _fmtVZDate(dt) {
+  // FIX 3: Always render in Indian Standard Time (IST = UTC+5:30)
   if (!dt) return '—';
   try {
-    const d = new Date(dt);
-    if (isNaN(d)) return String(dt).slice(0,16);
-    const day  = String(d.getDate()).padStart(2,'0');
-    const mon  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
-    const yr   = d.getFullYear();
-    const hh   = String(d.getHours()).padStart(2,'0');
-    const mm   = String(d.getMinutes()).padStart(2,'0');
+    // Parse the value — if it has no timezone marker, treat as UTC
+    const raw = String(dt);
+    const parsed = raw.includes('T') && !raw.endsWith('Z') && !raw.includes('+')
+      ? raw + 'Z'   // force UTC interpretation for ISO strings stored without tz
+      : raw;
+    const d = new Date(parsed);
+    if (isNaN(d)) return raw.slice(0,16);
+    // Convert to IST (UTC+5:30 = +330 minutes)
+    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+    const ist = new Date(d.getTime() + IST_OFFSET);
+    const day  = String(ist.getUTCDate()).padStart(2,'0');
+    const mon  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()];
+    const yr   = ist.getUTCFullYear();
+    const hh   = String(ist.getUTCHours()).padStart(2,'0');
+    const mm   = String(ist.getUTCMinutes()).padStart(2,'0');
     return `${day} ${mon} ${yr} | ${hh}:${mm}`;
   } catch(e) { return String(dt).slice(0,16); }
 }
@@ -2943,8 +2966,11 @@ function openVZViewModal(r) {
   document.getElementById('vz_modal_from_date').textContent = r.from_date || '—';
   document.getElementById('vz_modal_end_date').textContent  = r.end_date  || '—';
   document.getElementById('vz_modal_validity').textContent = r.validity||'—';
-  document.getElementById('vz_modal_creator').textContent = isAdmin ? 'Admin' : `Merchant — ${r.merchant_name||''}`;
-  document.getElementById('vz_modal_phone').textContent = r.merchant_phone || (isAdmin ? '—' : '—');
+  // ISSUE 1: Show merchant mapping for admin-created products
+  document.getElementById('vz_modal_creator').textContent = isAdmin
+    ? (r.merchant_name ? `Admin → ${r.merchant_name}` : 'Admin')
+    : `Merchant — ${r.merchant_name||''}`;
+  document.getElementById('vz_modal_phone').textContent = r.merchant_phone || '—';
   document.getElementById('vz_modal_status').textContent = r.status;
   // Approve button: only show for pending merchant vouchers
   const approveBtn = document.getElementById('vz_modal_approve');
@@ -2954,7 +2980,7 @@ function openVZViewModal(r) {
 
 function approveVZVoucher(id, source) {
   if (source==='merchant') approveMerchantVoucher(id);
-  else if(confirm('Activate this voucher?')) loadGiftCards();
+  else if(confirm('Activate this product?')) loadGiftCards();
 }
 
 function openVZMoreMenu(evt, id, source, status) {
@@ -3138,7 +3164,7 @@ async function saveVZMerchantEdit() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Error');
-    if(el('vz_edit_msg')) { el('vz_edit_msg').style.color='#1a6640'; el('vz_edit_msg').textContent = '✅ Voucher updated!'; }
+    if(el('vz_edit_msg')) { el('vz_edit_msg').style.color='#1a6640'; el('vz_edit_msg').textContent = '✅ Product updated!'; }
     setTimeout(()=>{ document.getElementById('vz_merchant_edit_modal')?.remove(); loadGiftCards(); }, 800);
   } catch(e) {
     if(el('vz_edit_msg')) { el('vz_edit_msg').style.color='red'; el('vz_edit_msg').textContent = e.message; }
@@ -3146,7 +3172,7 @@ async function saveVZMerchantEdit() {
 }
 
 async function deleteVZVoucher(id, source) {
-  if (!confirm('Delete this voucher?')) return;
+  if (!confirm('Delete this product?')) return;
   const url = source==='admin' ? `/admin/gift-vouchers/${id}` : `/admin/merchant-vouchers/${id}`;
   await fetch(url, {method:'DELETE', credentials:'include'});
   loadGiftCards();
@@ -3157,8 +3183,9 @@ async function openGiftCardModal() {
   document.getElementById("gc_id").value = "";
   document.getElementById("gc_title").value = "";
   document.getElementById("gc_text").value = "";
-  document.getElementById("gc_validity").value = "";
+  document.getElementById("gc_validity").value  = "";
   document.getElementById("gc_from_date").value = "";
+  if(document.getElementById("gc_to_date")) document.getElementById("gc_to_date").value = "";
   document.getElementById("gc_duration_days").value = "";
   document.getElementById("gc_logo").value = "";
   document.getElementById("gc_logo_file").value="";
@@ -3174,8 +3201,9 @@ function editGiftCard(v) {
   document.getElementById("gc_id").value       = v.id||v._id||"";
   document.getElementById("gc_title").value    = v.title||"";
   document.getElementById("gc_text").value     = v.text||"";
-  document.getElementById("gc_validity").value      = v.validity||"";
-  document.getElementById("gc_from_date").value     = v.from_date||"";
+  document.getElementById("gc_validity").value  = v.validity||"";
+  document.getElementById("gc_from_date").value = v.from_date||"";
+  if(document.getElementById("gc_to_date")) document.getElementById("gc_to_date").value = v.end_date||"";
   document.getElementById("gc_duration_days").value = v.duration_days||"";
   document.getElementById("gc_logo").value          = v.logo||"";
   if (v.logo) { document.getElementById("gc_logo_img").src=v.logo; document.getElementById("gc_logo_preview").style.display="block"; }
@@ -3213,25 +3241,32 @@ function clearVoucherLogo() {
   document.getElementById("gc_logo_img").src = "";
 }
 function _gcUpdateValidity() {
-  // TASK 9: Auto-fill validity text from from_date + duration_days
-  const from = document.getElementById('gc_from_date').value;
-  const days = parseInt(document.getElementById('gc_duration_days').value)||0;
-  if (from && days > 0) {
-    const d = new Date(from); d.setDate(d.getDate() + days);
-    const opts = {day:'numeric',month:'short',year:'numeric'};
-    document.getElementById('gc_validity').value = d.toLocaleDateString('en-IN', opts);
+  // FIX 2: Auto-fill validity from from_date + to_date (both date pickers)
+  const from = document.getElementById('gc_from_date')?.value;
+  const to   = document.getElementById('gc_to_date')?.value;
+  if (from && to) {
+    const fmtD = s => {
+      const d = new Date(s);
+      const opts = {day:'numeric', month:'short', year:'numeric'};
+      return d.toLocaleDateString('en-IN', opts);
+    };
+    document.getElementById('gc_validity').value = `${fmtD(from)} → ${fmtD(to)}`;
+  } else if (from) {
+    const opts = {day:'numeric', month:'short', year:'numeric'};
+    document.getElementById('gc_validity').value = new Date(from).toLocaleDateString('en-IN', opts);
   }
 }
 async function saveGiftCard() {
   const vid  = document.getElementById("gc_id").value;
   const text = document.getElementById("gc_text").value.trim();
   if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
-  const _gcFrom = document.getElementById("gc_from_date").value;
-  const _gcDays = parseInt(document.getElementById("gc_duration_days").value)||0;
-  let _gcEndDate = "";
-  if (_gcFrom && _gcDays > 0) {
-    const _d = new Date(_gcFrom); _d.setDate(_d.getDate() + _gcDays);
-    _gcEndDate = _d.toISOString().split("T")[0];
+  const _gcFrom  = document.getElementById("gc_from_date")?.value || '';
+  const _gcTo    = document.getElementById("gc_to_date")?.value   || '';
+  // Compute duration_days from date range for backward compat
+  let _gcDays = 0;
+  if (_gcFrom && _gcTo) {
+    const d1 = new Date(_gcFrom), d2 = new Date(_gcTo);
+    _gcDays = Math.max(1, Math.round((d2-d1)/(1000*60*60*24)));
   }
   const data = {
     title:         document.getElementById("gc_title").value.trim(),
@@ -3241,7 +3276,7 @@ async function saveGiftCard() {
     merchant_id:   document.getElementById("gc_merchant").value,
     is_active:     document.getElementById("gc_active").checked,
     from_date:     _gcFrom,
-    end_date:      _gcEndDate,
+    end_date:      _gcTo,
     duration_days: _gcDays || undefined,
   };
   try {
@@ -3255,7 +3290,7 @@ async function saveGiftCard() {
 }
 
 async function deleteGiftCard(id) {
-  if (!confirm("Delete this voucher card?")) return;
+  if (!confirm("Delete this product?")) return;
   await fetch(`/admin/gift-vouchers/${id}`, {method:"DELETE", credentials:"include"});
   loadGiftCards();
 }
@@ -3327,7 +3362,7 @@ function onVoucherStoreChange(storeId) {
     const store = (window.allStoresList||[]).find(s => s._id === storeId);
     if (store && store.image2) {
         preview.innerHTML = `<img src="${store.image2}" style="max-width:160px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">
-        <small style="color:#6b8c7e;display:block;margin-top:4px;">This image will appear on the voucher card</small>`;
+        <small style="color:#6b8c7e;display:block;margin-top:4px;">This image will appear on the product card</small>`;
     } else {
         preview.innerHTML = `<small style="color:#f59e0b">No Image 2 found for this store. Please add it in Store settings.</small>`;
     }
@@ -3576,13 +3611,15 @@ async function saveStore() {
             <input type="date" id="gc_from_date" class="form-control" onchange="_gcUpdateValidity()">
           </div>
           <div class="col-6">
-            <label class="form-label fw-semibold">Duration (Days)</label>
-            <input type="number" id="gc_duration_days" class="form-control" placeholder="30" min="1" onchange="_gcUpdateValidity()">
+            <label class="form-label fw-semibold">To Date (End)</label>
+            <input type="date" id="gc_to_date" class="form-control" onchange="_gcUpdateValidity()">
           </div>
         </div>
+        <!-- Keep hidden for backward-compat with editGiftCard -->
+        <input type="hidden" id="gc_duration_days" value="">
         <div class="mb-3">
           <label class="form-label fw-semibold">Validity <small class="text-muted">(auto-filled from dates above)</small></label>
-          <input id="gc_validity" class="form-control" placeholder="e.g. 31 May 2026">
+          <input id="gc_validity" class="form-control" placeholder="e.g. 22 May 2026 → 22 Jun 2026">
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Logo Image</label>
@@ -3769,7 +3806,7 @@ async function rejectMerchantVoucher(id) {
   if (typeof loadMerchantVouchers === 'function') loadMerchantVouchers();
 }
 async function deleteMerchantVoucher(id) {
-  if (!confirm('Delete this voucher?')) return;
+  if (!confirm('Delete this product?')) return;
   await fetch(`/admin/merchant-vouchers/${id}`, {method:'DELETE', credentials:'include'});
   loadGiftCards();
 }
@@ -3946,7 +3983,7 @@ document.addEventListener('DOMContentLoaded', () => {
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="fas fa-id-card me-2"></i>Voucher Details</h5>
+        <h5 class="modal-title"><i class="fas fa-id-card me-2"></i>Product Details</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">

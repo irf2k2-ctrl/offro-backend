@@ -1022,16 +1022,37 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
     docs = list(db.gift_vouchers.find().sort("_id", -1))
     result = []
     for v in docs:
+        mid = v.get("merchant_id", "")
+        merchant_name  = ""
+        merchant_phone = ""
+        # ISSUE 1: Resolve merchant_name from merchant_id for admin-created products
+        if mid:
+            try:
+                m = db.merchants.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1})
+                if m:
+                    merchant_name  = m.get("name", "")
+                    merchant_phone = str(m.get("phone", ""))
+            except: pass
+        # ISSUE 3: Return full ISO datetime so frontend can convert to IST
+        ca = v.get("created_at")
+        if isinstance(ca, datetime):
+            created_at_iso = ca.strftime("%Y-%m-%dT%H:%M:%S")
+        else:
+            created_at_iso = str(ca or "")[:19]
         result.append({
-            "id":          str(v["_id"]),
-            "title":       v.get("title", ""),
-            "text":        v.get("text", ""),
-            "validity":    v.get("validity", ""),
-            "logo":        v.get("logo", ""),
-            "store_id":    v.get("store_id", ""),
-            "merchant_id": v.get("merchant_id", ""),
-            "is_active":   v.get("is_active", True),
-            "created_at":  str(v.get("created_at", ""))[:10],
+            "id":            str(v["_id"]),
+            "title":         v.get("title", ""),
+            "text":          v.get("text", ""),
+            "validity":      v.get("validity", ""),
+            "logo":          v.get("logo", ""),
+            "store_id":      v.get("store_id", ""),
+            "merchant_id":   mid,
+            "merchant_name": merchant_name,
+            "merchant_phone": merchant_phone,
+            "is_active":     v.get("is_active", True),
+            "from_date":     v.get("from_date", ""),
+            "end_date":      v.get("end_date", ""),
+            "created_at":    created_at_iso,
         })
     return result
 
@@ -1065,7 +1086,43 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
         "created_at":    datetime.utcnow(),
     }
     result = db.gift_vouchers.insert_one(doc)
-    return {"message": "Voucher created", "id": str(result.inserted_id)}
+    new_id = str(result.inserted_id)
+
+    # ISSUE 1: If linked to a merchant, also create a mirror record in merchant_vouchers
+    # so it shows in the merchant app dashboard and counts toward their products
+    if merchant_id:
+        try:
+            m = db.merchants.find_one({"_id": ObjectId(merchant_id)}, {"name":1,"phone":1})
+            if m:
+                mv_doc = {
+                    "merchant_id":    merchant_id,
+                    "merchant_name":  m.get("name", ""),
+                    "merchant_phone": str(m.get("phone", "")),
+                    "title":          doc["title"],
+                    "offer_text":     doc["text"],
+                    "logo_url":       doc["logo"],
+                    "validity":       doc["validity"],
+                    "from_date":      doc["from_date"],
+                    "end_date":       doc["end_date"],
+                    "duration_days":  doc["duration_days"],
+                    "status":         "approved",
+                    "approval_status":"approved",
+                    "payment_status": "free",
+                    "source":         "admin",
+                    "source_gift_voucher_id": new_id,
+                    "total":          0,
+                    "created_at":     datetime.utcnow(),
+                }
+                db.merchant_vouchers.insert_one(mv_doc)
+                # Also tag the gift_voucher with source_voucher_id for dedup
+                db.gift_vouchers.update_one(
+                    {"_id": result.inserted_id},
+                    {"$set": {"source": "admin", "merchant_name": m.get("name",""), "merchant_phone": str(m.get("phone",""))}}
+                )
+        except Exception as e:
+            pass  # non-fatal — gift_voucher was already created
+
+    return {"message": "Product created", "id": new_id}
 
 @router.put("/gift-vouchers/{vid}")
 def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
