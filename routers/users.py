@@ -204,14 +204,22 @@ def merchant_login_unified(data: dict):
 @router.post("/check-phone")
 def check_phone(data: dict):
     """
-    FIX 8: Check if phone is registered before OTP widget launch.
-    Returns {"registered": bool} — lets Flutter decide to show Register or Login.
+    Check if phone is registered in users OR merchants collection.
+    Returns {"registered": bool, "role": "user"|"merchant"|"both"|"none"}
+    Flutter uses this to gate OTP send — prevents unknown numbers from getting OTP.
     """
     raw_phone = str(data.get("phone", "")).strip()
     if not raw_phone:
         raise HTTPException(status_code=400, detail="Phone is required")
-    user = db.users.find_one({"phone": {"$in": _phone_variants(raw_phone)}})
-    return {"registered": user is not None}
+    variants = _phone_variants(raw_phone)
+    is_user     = db.users.find_one({"phone": {"$in": variants}}) is not None
+    is_merchant = db.merchants.find_one({"phone": {"$in": variants}}) is not None
+    registered  = is_user or is_merchant
+    if is_user and is_merchant: role = "both"
+    elif is_user:               role = "user"
+    elif is_merchant:           role = "merchant"
+    else:                       role = "none"
+    return {"registered": registered, "role": role}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
