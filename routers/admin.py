@@ -1040,19 +1040,24 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
         else:
             created_at_iso = str(ca or "")[:19]
         result.append({
-            "id":            str(v["_id"]),
-            "title":         v.get("title", ""),
-            "text":          v.get("text", ""),
-            "validity":      v.get("validity", ""),
-            "logo":          v.get("logo", ""),
-            "store_id":      v.get("store_id", ""),
-            "merchant_id":   mid,
-            "merchant_name": merchant_name,
-            "merchant_phone": merchant_phone,
-            "is_active":     v.get("is_active", True),
-            "from_date":     v.get("from_date", ""),
-            "end_date":      v.get("end_date", ""),
-            "created_at":    created_at_iso,
+            "id":                str(v["_id"]),
+            "title":             v.get("title", ""),
+            "text":              v.get("text", ""),
+            "validity":          v.get("validity", ""),
+            "logo":              v.get("logo", ""),
+            "store_id":          v.get("store_id", ""),
+            "merchant_id":       mid,
+            "merchant_name":     merchant_name,
+            "merchant_phone":    merchant_phone,
+            "is_active":         v.get("is_active", True),
+            "from_date":         v.get("from_date", ""),
+            "end_date":          v.get("end_date", ""),
+            "created_at":        created_at_iso,
+            # ISSUE 1 FIX: expose source so dashboard knows admin vs merchant-approved
+            "source":            v.get("source", "admin"),
+            "source_voucher_id": v.get("source_voucher_id", ""),
+            # ISSUE 2 FIX: duration_days for edit modal pre-population
+            "duration_days":     v.get("duration_days", 0),
         })
     return result
 

@@ -111,9 +111,11 @@ def login_user(data: dict):
 
     user = db.users.find_one({"phone": {"$in": _phone_variants(raw_phone)}})
     if not user:
+        # ISSUE 3 FIX: Return 404 + NEW_USER sentinel — Flutter catches this and
+        # redirects the user to the Register tab instead of showing a dead-end error.
         raise HTTPException(
-            status_code=401,
-            detail="Phone not registered. Please register first."
+            status_code=404,
+            detail="NEW_USER"
         )
 
     # FIX 8: Always issue a fresh token — clears any cross-app session confusion

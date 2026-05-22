@@ -2707,7 +2707,6 @@ async function loadGiftCards() {
     const adminRows = adminCards.map(v => {
       const fromD = v.from_date || '';
       const toD   = v.end_date   || '';
-      // ISSUE 7: Check admin card expiry too
       let isActive = v.is_active !== false;
       let computedStatus = isActive ? 'approved' : 'hidden';
       if (isActive && toD) {
@@ -2716,9 +2715,12 @@ async function loadGiftCards() {
           if (!isNaN(endDt) && endDt < new Date()) { computedStatus = 'expired'; isActive = false; }
         } catch(e) {}
       }
+      // ISSUE 1 FIX: gift_vouchers with source='merchant' are approved merchant products
+      // — they must show as Merchant, not Admin, in the creator badge
+      const realSource = (v.source === 'merchant') ? 'merchant' : 'admin';
       return {
         _id:        v.id || v._id,
-        _source:    'admin',
+        _source:    realSource,
         logo:       v.logo || '',
         title:      v.title || '',
         offer_text: v.text || '',
@@ -2870,15 +2872,18 @@ function renderVoucherZone() {
       : `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`;
 
     const isAdmin = r._source === 'admin';
-    // ISSUE 1+3: Show creator + merchant mapping in Created By
+    // ISSUE 1 FIX: 3-way creator badge
+    // - pureAdmin: Admin created, no merchant link → show Admin only
+    // - adminLinked: Admin created, linked to merchant → show Admin + 🔗 Merchant
+    // - merchant: submitted by merchant OR approved merchant product → show Merchant only (no Admin)
     const phoneDisplay = r.merchant_phone ? `<div style="font-size:10px;color:var(--muted);font-family:monospace;margin-top:1px">📞 ${r.merchant_phone}</div>` : '';
-    // For admin-created cards linked to a merchant, show both badges
-    const merchantLinked = isAdmin && r.merchant_name;
-    const creatorBadge = isAdmin
+    const pureAdmin   = isAdmin && !r.merchant_name;
+    const adminLinked = isAdmin && r.merchant_name;
+    const creatorBadge = pureAdmin
       ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>`
-        + (merchantLinked
-          ? `<div style="font-size:11px;color:#1a56db;margin-top:3px;font-weight:600">🔗 ${r.merchant_name}</div>${phoneDisplay}`
-          : '')
+      : adminLinked
+      ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>
+         <div style="font-size:11px;color:#1a56db;margin-top:3px;font-weight:600">🔗 ${r.merchant_name}</div>${phoneDisplay}`
       : `<span style="background:#e8f0fe;color:#1a56db;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-user" style="font-size:9px"></i> Merchant</span>
          <div style="font-size:11px;color:var(--muted);margin-top:2px;font-weight:600">${r.merchant_name||''}</div>
          ${phoneDisplay}`;
@@ -2967,9 +2972,13 @@ function openVZViewModal(r) {
   document.getElementById('vz_modal_end_date').textContent  = r.end_date  || '—';
   document.getElementById('vz_modal_validity').textContent = r.validity||'—';
   // ISSUE 1: Show merchant mapping for admin-created products
-  document.getElementById('vz_modal_creator').textContent = isAdmin
-    ? (r.merchant_name ? `Admin → ${r.merchant_name}` : 'Admin')
-    : `Merchant — ${r.merchant_name||''}`;
+  // ISSUE 1 FIX: match 3-way badge — merchant-approved products show Merchant only
+  const _pureAdmin2   = isAdmin && !r.merchant_name;
+  const _adminLinked2 = isAdmin && r.merchant_name;
+  document.getElementById('vz_modal_creator').textContent =
+    _pureAdmin2   ? 'Admin (Offro)' :
+    _adminLinked2 ? `Admin → ${r.merchant_name}` :
+    `Merchant — ${r.merchant_name||''}`;
   document.getElementById('vz_modal_phone').textContent = r.merchant_phone || '—';
   document.getElementById('vz_modal_status').textContent = r.status;
   // Approve button: only show for pending merchant vouchers
@@ -3183,10 +3192,11 @@ async function openGiftCardModal() {
   document.getElementById("gc_id").value = "";
   document.getElementById("gc_title").value = "";
   document.getElementById("gc_text").value = "";
-  document.getElementById("gc_validity").value  = "";
-  document.getElementById("gc_from_date").value = "";
+  document.getElementById("gc_validity").value      = "";
+  document.getElementById("gc_from_date").value    = "";
+  document.getElementById("gc_duration_days").value= "";
   if(document.getElementById("gc_to_date")) document.getElementById("gc_to_date").value = "";
-  document.getElementById("gc_duration_days").value = "";
+  if(document.getElementById("gc_validity_preview")) document.getElementById("gc_validity_preview").textContent = "";
   document.getElementById("gc_logo").value = "";
   document.getElementById("gc_logo_file").value="";
   document.getElementById("gc_logo_preview").style.display="none";
@@ -3201,10 +3211,15 @@ function editGiftCard(v) {
   document.getElementById("gc_id").value       = v.id||v._id||"";
   document.getElementById("gc_title").value    = v.title||"";
   document.getElementById("gc_text").value     = v.text||"";
-  document.getElementById("gc_validity").value  = v.validity||"";
-  document.getElementById("gc_from_date").value = v.from_date||"";
-  if(document.getElementById("gc_to_date")) document.getElementById("gc_to_date").value = v.end_date||"";
+  document.getElementById("gc_from_date").value     = v.from_date||"";
   document.getElementById("gc_duration_days").value = v.duration_days||"";
+  if(document.getElementById("gc_to_date")) document.getElementById("gc_to_date").value = v.end_date||"";
+  // Recalculate validity display from from_date + days (if available), else show stored text
+  if (v.from_date && v.duration_days > 0) {
+    _gcUpdateValidity();
+  } else {
+    document.getElementById("gc_validity").value = v.validity||"";
+  }
   document.getElementById("gc_logo").value          = v.logo||"";
   if (v.logo) { document.getElementById("gc_logo_img").src=v.logo; document.getElementById("gc_logo_preview").style.display="block"; }
   else { document.getElementById("gc_logo_preview").style.display="none"; document.getElementById("gc_logo_file").value=""; }
@@ -3241,33 +3256,36 @@ function clearVoucherLogo() {
   document.getElementById("gc_logo_img").src = "";
 }
 function _gcUpdateValidity() {
-  // FIX 2: Auto-fill validity from from_date + to_date (both date pickers)
+  // ISSUE 2 FIX: From Date + Number of Days → compute end_date + validity string
   const from = document.getElementById('gc_from_date')?.value;
-  const to   = document.getElementById('gc_to_date')?.value;
-  if (from && to) {
-    const fmtD = s => {
-      const d = new Date(s);
-      const opts = {day:'numeric', month:'short', year:'numeric'};
-      return d.toLocaleDateString('en-IN', opts);
-    };
-    document.getElementById('gc_validity').value = `${fmtD(from)} → ${fmtD(to)}`;
-  } else if (from) {
+  const days = parseInt(document.getElementById('gc_duration_days')?.value) || 0;
+  const toEl      = document.getElementById('gc_to_date');
+  const validEl   = document.getElementById('gc_validity');
+  const previewEl = document.getElementById('gc_validity_preview');
+  if (from && days > 0) {
+    const startD = new Date(from + 'T00:00:00');
+    const endD   = new Date(from + 'T00:00:00');
+    endD.setDate(endD.getDate() + days);
+    const endISO = endD.toISOString().split('T')[0];
+    if (toEl)    toEl.value = endISO;   // store computed end_date
     const opts = {day:'numeric', month:'short', year:'numeric'};
-    document.getElementById('gc_validity').value = new Date(from).toLocaleDateString('en-IN', opts);
+    const fmtStart = startD.toLocaleDateString('en-IN', opts);
+    const fmtEnd   = endD.toLocaleDateString('en-IN', opts);
+    if (validEl)   validEl.value = `${fmtStart} → ${fmtEnd}`;
+    if (previewEl) previewEl.textContent = `(ends ${fmtEnd})`;
+  } else {
+    if (toEl)      toEl.value    = '';
+    if (validEl)   validEl.value = '';
+    if (previewEl) previewEl.textContent = '';
   }
 }
 async function saveGiftCard() {
   const vid  = document.getElementById("gc_id").value;
   const text = document.getElementById("gc_text").value.trim();
   if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
-  const _gcFrom  = document.getElementById("gc_from_date")?.value || '';
-  const _gcTo    = document.getElementById("gc_to_date")?.value   || '';
-  // Compute duration_days from date range for backward compat
-  let _gcDays = 0;
-  if (_gcFrom && _gcTo) {
-    const d1 = new Date(_gcFrom), d2 = new Date(_gcTo);
-    _gcDays = Math.max(1, Math.round((d2-d1)/(1000*60*60*24)));
-  }
+  const _gcFrom = document.getElementById("gc_from_date")?.value  || '';
+  const _gcTo   = document.getElementById("gc_to_date")?.value    || ''; // computed by _gcUpdateValidity
+  const _gcDays = parseInt(document.getElementById("gc_duration_days")?.value) || 0;
   const data = {
     title:         document.getElementById("gc_title").value.trim(),
     text,
@@ -3611,15 +3629,21 @@ async function saveStore() {
             <input type="date" id="gc_from_date" class="form-control" onchange="_gcUpdateValidity()">
           </div>
           <div class="col-6">
-            <label class="form-label fw-semibold">To Date (End)</label>
-            <input type="date" id="gc_to_date" class="form-control" onchange="_gcUpdateValidity()">
+            <label class="form-label fw-semibold">Number of Days</label>
+            <input type="number" id="gc_duration_days" class="form-control"
+              placeholder="e.g. 30" min="1" onchange="_gcUpdateValidity()" oninput="_gcUpdateValidity()">
           </div>
         </div>
-        <!-- Keep hidden for backward-compat with editGiftCard -->
-        <input type="hidden" id="gc_duration_days" value="">
+        <!-- end_date is auto-computed from from_date + duration_days -->
+        <input type="hidden" id="gc_to_date" value="">
         <div class="mb-3">
-          <label class="form-label fw-semibold">Validity <small class="text-muted">(auto-filled from dates above)</small></label>
-          <input id="gc_validity" class="form-control" placeholder="e.g. 22 May 2026 → 22 Jun 2026">
+          <label class="form-label fw-semibold">
+            Validity
+            <small class="text-muted" id="gc_validity_preview" style="margin-left:6px;font-weight:400"></small>
+          </label>
+          <input id="gc_validity" class="form-control" readonly
+            placeholder="Auto-filled: From Date + Number of Days"
+            style="background:#f7faf8;cursor:default">
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Logo Image</label>
