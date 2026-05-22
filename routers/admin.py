@@ -1483,20 +1483,23 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
     if not b: raise HTTPException(404, "Banner not found")
     db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"approval_status":"approved","approved_at":datetime.utcnow()}})
-    # Publish to promo_sliders so it appears in app
-    existing = db.promo_sliders.find_one({"source_banner_id": bid})
-    if not existing:
-        db.promo_sliders.insert_one({
-            "title":       b.get("title",""),
-            "image_url":   b.get("image_url",""),
-            "is_active":   True,
-            "sort_order":  50,
-            "source":      "merchant",
+    # TASK 9 FIX: upsert into promo_sliders — never create duplicates
+    db.promo_sliders.update_one(
+        {"source_banner_id": bid},
+        {"$set": {
+            "title":         b.get("title",""),
+            "image_url":     b.get("image_url",""),
+            "is_active":     True,
+            "sort_order":    50,
+            "source":        "merchant",
             "source_banner_id": bid,
             "merchant_name": b.get("merchant_name",""),
-            "expires_at":  b.get("end_date",""),
-            "created_at":  datetime.utcnow(),
-        })
+            "expires_at":    b.get("end_date",""),
+            "updated_at":    datetime.utcnow().isoformat(),
+        },
+         "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}},
+        upsert=True
+    )
     return {"ok": True, "message": "Banner approved and published to app."}
 
 @router.put("/merchant-banners/{bid}/reject")

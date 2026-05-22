@@ -1694,6 +1694,31 @@ function openAdjust(uid,uname){
   document.getElementById("adj_msg").innerText="";
   if (adjustModal_inst) adjustModal_inst.show();
 }
+
+// ─── TASK 1: Account Detail → Wallet/Points action helpers ───
+function openWalletFromAcct(uid, uname) {
+  if (_acctDetailModal) _acctDetailModal.hide();
+  setTimeout(() => viewHistory(uid, uname), 350);
+}
+function openAddPointsFromAcct(uid, uname) {
+  if (_acctDetailModal) _acctDetailModal.hide();
+  setTimeout(() => {
+    openAdjust(uid, uname);
+    // Pre-select "credit" (Add)
+    const sel = document.getElementById('adj_type');
+    if (sel) sel.value = 'credit';
+  }, 350);
+}
+function openDebitPointsFromAcct(uid, uname) {
+  if (_acctDetailModal) _acctDetailModal.hide();
+  setTimeout(() => {
+    openAdjust(uid, uname);
+    // Pre-select "debit" (Deduct)
+    const sel = document.getElementById('adj_type');
+    if (sel) sel.value = 'debit';
+  }, 350);
+}
+
 async function submitAdjustment(){
   let uid=document.getElementById("adj_user_id").value;
   let type=document.getElementById("adj_type").value;
@@ -3967,8 +3992,23 @@ function renderAccountDetailHTML(d) {
     <td><span class="badge" style="background:${p.status==='paid'?'#1a6640':'#c0392b'};color:#fff;">${p.status}</span></td>
     <td style="font-size:11px;color:var(--muted);">${p.created_at?.substring(0,10)||'—'}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted text-center">No payments</td></tr>';
 
+  // TASK 1 FIX: build account ID from available fields
+  const acctId = d._id || d.user_id || d.id || '';
+  const acctName = (d.full_name || d.name || '').replace(/'/g, "\'");
   return `
   <div style="padding:20px;">
+    <!-- TASK 1: Action buttons — Wallet Transactions, Add Points, Debit Points -->
+    <div class="d-flex gap-2 mb-4 flex-wrap">
+      <button class="btn-p" style="font-size:13px;" onclick="openWalletFromAcct('${acctId}','${acctName}')">
+        <i class="fas fa-history me-1"></i> Wallet Transactions
+      </button>
+      <button class="btn-o" style="font-size:13px;" onclick="openAddPointsFromAcct('${acctId}','${acctName}')">
+        <i class="fas fa-plus-circle me-1"></i> Add Points
+      </button>
+      <button style="background:var(--danger);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="openDebitPointsFromAcct('${acctId}','${acctName}')">
+        <i class="fas fa-minus-circle me-1"></i> Debit Points
+      </button>
+    </div>
     <!-- Summary cards -->
     <div class="row g-3 mb-4">
       <div class="col-6 col-md-3">
