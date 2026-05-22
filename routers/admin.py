@@ -1171,6 +1171,11 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
             end_date = (fd + timedelta(days=days - 1)).strftime("%Y-%m-%d")
         except Exception:
             pass
+    # Normalize merchant_phone to last 10 digits for consistent matching
+    import re as _re
+    raw_phone = str(data.get("merchant_phone", "") or "").strip()
+    merchant_phone_norm = _re.sub(r'\D', '', raw_phone)[-10:] if raw_phone else ""
+
     doc = {
         "title":          data.get("title", ""),
         "image_url":      data["image_url"],
@@ -1182,7 +1187,7 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
         "expires_at":     end_date,
         "duration_days":  days,
         "merchant_name":  data.get("merchant_name", ""),
-        "merchant_phone": data.get("merchant_phone", ""),
+        "merchant_phone": merchant_phone_norm,
         "source":         "admin",
         "created_at":     datetime.utcnow(),
     }
@@ -1192,9 +1197,12 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
 @router.put("/promo-sliders/{sid}")
 def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     upd = {}
-    for f in ["title", "image_url", "link_url", "from_date", "end_date",
-              "merchant_name", "merchant_phone"]:
+    import re as _re
+    for f in ["title", "image_url", "link_url", "from_date", "end_date", "merchant_name"]:
         if f in data: upd[f] = data[f]
+    if "merchant_phone" in data:
+        raw_p = str(data["merchant_phone"] or "").strip()
+        upd["merchant_phone"] = _re.sub(r'\D', '', raw_p)[-10:] if raw_p else ""
     if "sort_order"    in data: upd["sort_order"]    = int(data["sort_order"])
     if "is_active"     in data: upd["is_active"]     = bool(data["is_active"])
     if "days"          in data: upd["duration_days"]  = int(data["days"])

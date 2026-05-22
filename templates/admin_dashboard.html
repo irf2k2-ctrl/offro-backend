@@ -2301,6 +2301,8 @@ function openSliderModal() {
   document.getElementById("sl_link_url").value = "";
   document.getElementById("sl_order").value = "0";
   document.getElementById("sl_active").checked = true;
+  const _prevEl = document.getElementById("sl_merchant_name_preview");
+  if (_prevEl) _prevEl.textContent = "";
   // Date fields — default to today + 30 days
   const _today = new Date().toISOString().split("T")[0];
   if (document.getElementById("sl_from_date")) { document.getElementById("sl_from_date").value = _today; }
@@ -2355,6 +2357,34 @@ function slUpdateEndDate() {
     d.setDate(d.getDate() + days - 1);
     endEl.value = d.toISOString().split("T")[0];
   } else { endEl.value = ""; }
+}
+
+let _merchantLookupTimer = null;
+async function lookupMerchantByPhone(val) {
+  const preview = document.getElementById('sl_merchant_name_preview');
+  if (!preview) return;
+  const digits = val.replace(/\D/g,'').slice(-10);
+  if (digits.length < 10) { preview.textContent = ''; return; }
+  preview.textContent = '⏳ Looking up...';
+  clearTimeout(_merchantLookupTimer);
+  _merchantLookupTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/admin/merchants`, {credentials:'include'});
+      if (!r.ok) { preview.textContent = ''; return; }
+      const merchants = await r.json();
+      const match = merchants.find(m => {
+        const mp = String(m.phone||'').replace(/\D/g,'').slice(-10);
+        return mp === digits;
+      });
+      if (match) {
+        preview.textContent = `✅ ${match.name}`;
+        preview.style.color = 'var(--primary)';
+      } else {
+        preview.textContent = '⚠️ Merchant not found — phone not registered';
+        preview.style.color = '#c0392b';
+      }
+    } catch { preview.textContent = ''; }
+  }, 600);
 }
 
 async function saveSlider() {
@@ -3597,11 +3627,7 @@ async function saveStore() {
           <div id="sl_upload_status" style="font-size:12px;color:var(--muted);margin-top:4px;"></div>
           <small class="text-muted">📐 Recommended size: <strong>1200 × 450 px</strong> &nbsp;|&nbsp; Ratio: 16:6 &nbsp;|&nbsp; Max 2 MB</small>
         </div>
-        <div class="mb-3">
-          <label class="form-label">Link / Action (optional)</label>
-          <input id="sl_link_url" class="form-control" placeholder="https://... or store_id or category">
-          <small class="text-muted">Tap destination when user clicks the banner</small>
-        </div>
+        <input type="hidden" id="sl_link_url" value="">
         <div class="row g-2 mb-3">
           <div class="col-6">
             <label class="form-label">From Date</label>
@@ -3618,14 +3644,11 @@ async function saveStore() {
         </div>
         <div class="mb-3">
           <label class="form-label">Assign to Merchant <span style="color:var(--muted);font-size:11px">(optional)</span></label>
-          <input id="sl_merchant_phone" class="form-control" placeholder="e.g. +919535206137">
+          <input id="sl_merchant_phone" class="form-control" placeholder="e.g. 9535206137" oninput="lookupMerchantByPhone(this.value)">
+          <div id="sl_merchant_name_preview" style="font-size:12px;color:var(--primary);margin-top:4px;font-weight:600;min-height:18px"></div>
           <small class="text-muted">If filled, this banner will appear in that merchant's banner screen.</small>
         </div>
-        <div class="mb-3">
-          <label class="form-label">Sort Order</label>
-          <input id="sl_order" class="form-control" type="number" value="0" min="0">
-          <small class="text-muted">Lower number = shown first</small>
-        </div>
+        <input type="hidden" id="sl_order" value="0">
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="sl_active" checked>
           <label class="form-check-label" for="sl_active">Active (show in app)</label>
