@@ -1947,21 +1947,27 @@ async function loadSliders() {
     // Normalize admin sliders (auto approved)
     const now = new Date();
     const adminRows = sliders.map(s => {
-      const expiry = s.expires_at ? new Date(s.expires_at) : null;
+      const endDate  = s.end_date || s.expires_at || '';
+      const expiry   = endDate ? new Date(endDate) : null;
       const isExpired = expiry && expiry < now;
+      // If this is an approved merchant banner, show merchant name; else admin
+      const isMerchantBanner = !!(s.source_banner_id || s.source === 'merchant');
       return {
-        _id:        s.id || s._id,
-        _source:    'admin',
-        image_url:  s.image_url || '',
-        title:      s.title || '',
-        subtitle:   s.link_url || '',
-        merchant_name: s.merchant_name || 'Offro (Admin)',
-        duration_days: '',
-        from_date:  '',
-        end_date:   s.expires_at || '',
-        status:     isExpired ? 'expired' : (s.is_active!==false ? 'approved' : 'hidden'),
-        sort_order: s.sort_order || 0,
-        created_at: s.created_at || '',
+        _id:           s.id || s._id,
+        _source:       'admin',
+        _is_merchant_approved: isMerchantBanner,
+        image_url:     s.image_url || '',
+        title:         s.title || '',
+        subtitle:      s.link_url || '',
+        merchant_name: s.merchant_name || (isMerchantBanner ? '—' : 'Offro (Admin)'),
+        merchant_phone: s.merchant_phone || '',
+        duration_days: s.duration_days || '',
+        from_date:     s.from_date || '',
+        end_date:      endDate,
+        status:        isExpired ? 'expired' : (s.is_active!==false ? 'approved' : 'hidden'),
+        sort_order:    s.sort_order || 0,
+        created_at:    s.created_at || '',
+        source_banner_id: s.source_banner_id || '',
         _raw: s,
       };
     });
@@ -1988,7 +1994,17 @@ async function loadSliders() {
       };
     });
 
-    _allBannerRows = [...adminRows, ...merchantRows]
+    // DEDUP: approved merchant banners are already copied into promo_sliders
+    // (with source_banner_id linking them). Only show merchant_banners that are
+    // pending/rejected — once approved they show as the promo_slider row instead.
+    const approvedMerchantIds = new Set(
+      sliders.filter(s => s.source_banner_id).map(s => s.source_banner_id)
+    );
+    const filteredMerchantRows = merchantRows.filter(r =>
+      !approvedMerchantIds.has(r._id)
+    );
+
+    _allBannerRows = [...adminRows, ...filteredMerchantRows]
       .sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
 
     // Stats
@@ -2042,12 +2058,21 @@ function renderBanners(rows) {
       ? `<img src="${r.image_url}" style="width:100px;height:50px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=0.2">`
       : `<div style="width:100px;height:50px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center"><i class="fas fa-image" style="color:var(--muted)"></i></div>`;
 
-    const isAdmin = r._source==='admin';
+    const isAdmin = r._source==='admin' && !r._is_merchant_approved;
+    const isMerchApproved = r._is_merchant_approved;
+    const nameDisplay = r.merchant_name || (isAdmin ? 'Offro (Admin)' : '—');
+    const phoneDisplay = r.merchant_phone ? `<div style="font-size:11px;color:var(--muted)">${r.merchant_phone}</div>` : '';
     const creatorBadge = isAdmin
-      ? `<div style="font-weight:600;font-size:13px">${r.merchant_name||'Offro (Admin)'}</div>
-         <span style="background:#e8f4ef;color:#3E5F55;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Admin</span>`
-      : `<div style="font-weight:600;font-size:13px">${r.merchant_name||'—'}</div>
-         <span style="background:#e8f0fe;color:#1a56db;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant</span>`;
+      ? `<div style="font-weight:600;font-size:13px">${nameDisplay}</div>
+         ${phoneDisplay}
+         <span style="background:#e8f4ef;color:#3E5F55;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Admin Created</span>`
+      : isMerchApproved
+      ? `<div style="font-weight:600;font-size:13px">${nameDisplay}</div>
+         ${phoneDisplay}
+         <span style="background:#e8f0fe;color:#1a56db;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant ✓ Approved</span>`
+      : `<div style="font-weight:600;font-size:13px">${nameDisplay}</div>
+         ${phoneDisplay}
+         <span style="background:#fff3cd;color:#856404;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant Pending</span>`;
 
     let durationHtml = '—';
     if (r.from_date && r.end_date) {

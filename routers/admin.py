@@ -1549,22 +1549,28 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
 
 @router.get("/merchant-banners")
 def list_merchant_banners(a=Depends(get_current_admin)):
-    """All merchant-submitted banners with approval status."""
+    """All merchant-submitted banners with approval status.
+    Only returns pending/rejected — approved ones live in promo_sliders to avoid duplicates."""
     result = []
     for b in db.merchant_banners.find().sort("created_at", -1):
+        approval_status = b.get("approval_status", "pending_approval")
+        # Skip approved — they are already in promo_sliders (source_banner_id links them)
+        if approval_status == "approved":
+            continue
         result.append({
-            "_id":          str(b["_id"]),
-            "merchant_name": b.get("merchant_name",""),
-            "title":        b.get("title",""),
-            "image_url":    b.get("image_url",""),
-            "duration_days": b.get("duration_days", b.get("duration", 30)),
-            "plan":         b.get("plan",""),
-            "status":       b.get("approval_status","pending_approval"),
-            "from_date":    b.get("from_date", b.get("start_date","")),
-            "end_date":     b.get("end_date",""),
-            "invoice_no":   b.get("invoice_no",""),
-            "amount":       b.get("total",0),
-            "created_at":   b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at",""))[:16],
+            "_id":            str(b["_id"]),
+            "merchant_name":  b.get("merchant_name", ""),
+            "merchant_phone": str(b.get("merchant_phone", b.get("phone", ""))),
+            "title":          b.get("title", ""),
+            "image_url":      b.get("image_url", ""),
+            "duration_days":  b.get("duration_days", b.get("duration", 30)),
+            "plan":           b.get("plan", ""),
+            "status":         approval_status,
+            "from_date":      b.get("from_date", b.get("start_date", "")),
+            "end_date":       b.get("end_date", ""),
+            "invoice_no":     b.get("invoice_no", ""),
+            "amount":         b.get("total", 0),
+            "created_at":     b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at",""))[:16],
         })
     return result
 
