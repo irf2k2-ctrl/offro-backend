@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
 import uuid
+from datetime import datetime
 
 # ── Phone normalisation helper ─────────────────────────────────
 def _phone_variants(raw: str) -> list:
@@ -122,7 +123,7 @@ def login_user(data: dict):
     token = str(uuid.uuid4())
     db.users.update_one(
         {"_id": user["_id"]},
-        {"$set": {"token": token, "last_login": __import__("datetime").datetime.utcnow().isoformat()}}
+        {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}}
     )
     print(f"[LOGIN] ✅ Fresh session issued for {raw_phone} — user_id={str(user['_id'])}")
 
@@ -157,7 +158,6 @@ def merchant_login_unified(data: dict):
     Finds merchant by phone (all variants), issues a fresh merchant token.
     Flutter stores token + role='merchant' via Prefs.save().
     """
-    from datetime import datetime
     raw_phone = str(data.get("phone", "")).strip()
     if not raw_phone:
         raise HTTPException(status_code=400, detail="Phone is required")
@@ -361,7 +361,6 @@ def withdraw(data: dict, user=Depends(get_current_user)):
     if total < amount:
         raise HTTPException(status_code=400, detail=f"Not enough points. You have {total}.")
     db.users.update_one({"_id": user["_id"]}, {"$set": {"pending_withdraw": True}})
-    from datetime import datetime
     db.withdraw_requests.insert_one({
         "user_id":      str(user["_id"]),
         "user_name":    user.get("name"),
@@ -404,7 +403,7 @@ def redeem_qr(data: dict, request: Request):
     points_to_add = int(store.get("points_per_scan", 10))
     user_id       = str(user["_id"])
 
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     recent = db.redemptions.find_one({
         "user_id":  user_id,
         "store_id": store_id,
@@ -530,6 +529,6 @@ def save_fcm_token(data: dict, user=Depends(get_current_user)):
     if fcm_token:
         db.users.update_one(
             {"_id": user["_id"]},
-            {"$set": {"fcm_token": fcm_token, "fcm_updated_at": __import__("datetime").datetime.utcnow()}}
+            {"$set": {"fcm_token": fcm_token, "fcm_updated_at": datetime.utcnow()}}
         )
     return {"ok": True}
