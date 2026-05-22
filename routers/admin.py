@@ -268,36 +268,8 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
         merchant = db.merchants.find_one({"phone": phone})
         mid = str(merchant["_id"]) if merchant else ""
 
-    stores = []
-    if mid:
-        for s in db.stores.find({"merchant_id": mid}):
-            stores.append({"store_id":str(s["_id"]),"name":s.get("name",""),
-                "city":s.get("city",""),"status":s.get("status",""),
-                "category":s.get("category",""),
-                "points":s.get("visit_pts", s.get("points",0) or 0)})
-
-    products = []
-    if mid and "merchant_vouchers" in db.list_collection_names():
-        for v in db.merchant_vouchers.find({"merchant_id": mid}):
-            products.append({"product_id":str(v["_id"]),"title":v.get("title",""),
-                "status":v.get("status",""),"price":v.get("price",0)})
-
-    banners = []
-    if mid and "merchant_banners" in db.list_collection_names():
-        for b in db.merchant_banners.find({"merchant_id": mid}):
-            banners.append({"banner_id":str(b["_id"]),"title":b.get("title",""),
-                "status":b.get("status",""),"price":b.get("price",0)})
-
-    payments = []
-    if mid:
-        try:
-            for inv in db.invoices.find({"merchant_id": mid}).sort("created_at",-1).limit(20):
-                payments.append({"invoice_id":str(inv["_id"]),"type":inv.get("type",""),
-                    "amount":inv.get("amount",0),"status":inv.get("status",""),
-                    "created_at":str(inv.get("created_at",""))})
-        except Exception:
-            pass
-
+    # No stores/products/banners/payments — those live in their own modules.
+    # Account detail is lean: identity + wallet only.
     base = user or merchant or {}
     u_or_empty = user or {}
     total_pts = u_or_empty.get("visit_pts", u_or_empty.get("points",0) or 0) + u_or_empty.get("pool_pts",0)
@@ -314,10 +286,6 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
         "pool_pts":      u_or_empty.get("pool_pts",0),
         "total_pts":     total_pts,
         "scans":         u_or_empty.get("scans", u_or_empty.get("scan_count",0) or 0),
-        "stores":        stores,
-        "products":      products,
-        "banners":       banners,
-        "payments":      payments,
     }
 
 

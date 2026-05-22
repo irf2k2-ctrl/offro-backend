@@ -4201,34 +4201,16 @@ async function openAccountDetail(accountId, name) {
 
 function renderAccountDetailHTML(d) {
   const roles = (d.roles||[]).map(r=>`<span class="badge me-1" style="background:${r==='merchant'?'var(--primary)':'#5a7fb5'};color:#fff;">${r==='merchant'?'🏪 Merchant':'👤 User'}</span>`).join('');
-  const pts = (d.visit_pts||0) + (d.pool_pts||0);
-
-  const storeRows = (d.stores||[]).map(s=>`
-    <tr><td>${escHtml(s.name)}</td><td>${escHtml(s.city)}</td><td>${escHtml(s.category)}</td>
-    <td><span class="badge" style="background:var(--primary);color:#fff;">${s.status}</span></td>
-    <td>⭐ ${s.points||0}</td></tr>`).join('') || '<tr><td colspan="5" class="text-muted text-center">No stores</td></tr>';
-
-  const prodRows = (d.products||[]).map(p=>`
-    <tr><td>${escHtml(p.title)}</td>
-    <td><span class="badge" style="background:${p.status==='approved'?'#1a6640':'#e67e22'};color:#fff;">${p.status}</span></td>
-    <td>₹${p.price||0}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No products</td></tr>';
-
-  const bannerRows = (d.banners||[]).map(b=>`
-    <tr><td>${escHtml(b.title)}</td>
-    <td><span class="badge" style="background:${b.status==='approved'?'#1a6640':'#e67e22'};color:#fff;">${b.status}</span></td>
-    <td>₹${b.price||0}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No banners</td></tr>';
-
-  const payRows = (d.payments||[]).map(p=>`
-    <tr><td>${escHtml(p.type)}</td><td>₹${p.amount||0}</td>
-    <td><span class="badge" style="background:${p.status==='paid'?'#1a6640':'#c0392b'};color:#fff;">${p.status}</span></td>
-    <td style="font-size:11px;color:var(--muted);">${p.created_at?.substring(0,10)||'—'}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted text-center">No payments</td></tr>';
-
-  // TASK 1 FIX: build account ID from available fields
-  const acctId = d.account_id || d._id || d.user_id || d.id || '';
+  const visitPts = d.visit_pts||0;
+  const poolPts  = d.pool_pts||0;
+  const totalPts = visitPts + poolPts;
+  const acctId   = d.account_id || d._id || d.user_id || d.id || '';
   const acctName = (d.full_name || d.name || '').replace(/'/g, "\'");
+
   return `
   <div style="padding:20px;">
-    <!-- TASK 1: Action buttons — Wallet Transactions, Add Points, Debit Points -->
+
+    <!-- Action buttons -->
     <div class="d-flex gap-2 mb-4 flex-wrap">
       <button class="btn-p" style="font-size:13px;" onclick="openWalletFromAcct('${acctId}','${acctName}')">
         <i class="fas fa-history me-1"></i> Wallet Transactions
@@ -4240,81 +4222,41 @@ function renderAccountDetailHTML(d) {
         <i class="fas fa-minus-circle me-1"></i> Debit Points
       </button>
     </div>
-    <!-- Summary cards -->
+
+    <!-- Points summary cards -->
     <div class="row g-3 mb-4">
-      <div class="col-6 col-md-3">
+      <div class="col-6 col-md-4">
         <div class="card-stat" style="padding:14px 16px;">
-          <h3 style="font-size:22px;">${pts}</h3><p>Total Points</p>
+          <h3 style="font-size:22px;">${totalPts}</h3><p>Total Points</p>
         </div>
       </div>
-      <div class="col-6 col-md-3">
+      <div class="col-6 col-md-4">
         <div class="card-stat" style="padding:14px 16px;">
-          <h3 style="font-size:22px;">${d.stores?.length||0}</h3><p>Stores</p>
+          <h3 style="font-size:22px;">${visitPts}</h3><p>Visit Points</p>
         </div>
       </div>
-      <div class="col-6 col-md-3">
+      <div class="col-6 col-md-4">
         <div class="card-stat" style="padding:14px 16px;">
-          <h3 style="font-size:22px;">${d.products?.length||0}</h3><p>Products</p>
-        </div>
-      </div>
-      <div class="col-6 col-md-3">
-        <div class="card-stat" style="padding:14px 16px;">
-          <h3 style="font-size:22px;">${d.banners?.length||0}</h3><p>Banners</p>
+          <h3 style="font-size:22px;">${poolPts}</h3><p>Pool Points</p>
         </div>
       </div>
     </div>
 
     <!-- Profile info -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
-      <div class="fw-bold mb-2" style="color:var(--primary);">👤 Profile</div>
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;">
+      <div class="fw-bold mb-3" style="color:var(--primary);">👤 Profile</div>
       <div class="row g-2" style="font-size:13px;">
-        <div class="col-md-4"><span style="color:var(--muted);">Name:</span> <strong>${escHtml(d.full_name||'—')}</strong></div>
-        <div class="col-md-4"><span style="color:var(--muted);">Phone:</span> <strong style="font-family:monospace;">${escHtml(d.mobile_number||'—')}</strong></div>
-        <div class="col-md-4"><span style="color:var(--muted);">City:</span> ${escHtml(d.city||'—')}</div>
-        <div class="col-md-4"><span style="color:var(--muted);">Roles:</span> ${roles}</div>
-        <div class="col-md-4"><span style="color:var(--muted);">Status:</span>
-          <span class="badge" style="background:${d.status==='active'?'#1a6640':'#c0392b'};color:#fff;">${d.status||'active'}</span></div>
-        <div class="col-md-4"><span style="color:var(--muted);">Scans:</span> ${d.scans||0}</div>
+        <div class="col-md-4"><span style="color:var(--muted);">Name</span><br><strong>${escHtml(d.full_name||'—')}</strong></div>
+        <div class="col-md-4"><span style="color:var(--muted);">Phone</span><br><strong style="font-family:monospace;">${escHtml(d.mobile_number||'—')}</strong></div>
+        <div class="col-md-4"><span style="color:var(--muted);">City</span><br>${escHtml(d.city||'—')}</div>
+        <div class="col-md-4 mt-3"><span style="color:var(--muted);">Roles</span><br>${roles}</div>
+        <div class="col-md-4 mt-3"><span style="color:var(--muted);">Status</span><br>
+          <span class="badge" style="background:${d.status==='active'?'#1a6640':'#c0392b'};color:#fff;">${d.status||'active'}</span>
+        </div>
+        <div class="col-md-4 mt-3"><span style="color:var(--muted);">Total Scans</span><br>${d.scans||0}</div>
       </div>
     </div>
 
-    <!-- Stores -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
-      <div class="fw-bold mb-2" style="color:var(--primary);">🏪 Stores</div>
-      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
-        <thead style="background:var(--sidebar);color:#fff;"><tr>
-          <th>Name</th><th>City</th><th>Category</th><th>Status</th><th>Points</th>
-        </tr></thead>
-        <tbody>${storeRows}</tbody>
-      </table></div>
-    </div>
-
-    <!-- Products -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
-      <div class="fw-bold mb-2" style="color:var(--primary);">🛍️ Products</div>
-      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
-        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Title</th><th>Status</th><th>Price</th></tr></thead>
-        <tbody>${prodRows}</tbody>
-      </table></div>
-    </div>
-
-    <!-- Banners -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
-      <div class="fw-bold mb-2" style="color:var(--primary);">🖼️ Banners</div>
-      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
-        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Title</th><th>Status</th><th>Price</th></tr></thead>
-        <tbody>${bannerRows}</tbody>
-      </table></div>
-    </div>
-
-    <!-- Payments -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;">
-      <div class="fw-bold mb-2" style="color:var(--primary);">💳 Payment History</div>
-      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
-        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
-        <tbody>${payRows}</tbody>
-      </table></div>
-    </div>
   </div>`;
 }
 
