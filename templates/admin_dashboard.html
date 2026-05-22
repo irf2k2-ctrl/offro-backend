@@ -37,11 +37,11 @@ tr:last-child td{border-bottom:none;}
 tr:hover td{background:#f7faf8;}
 .badge-active{background:#d1f0e0;color:#1a6640;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
 .badge-inactive{background:#fde8e6;color:#b33a2d;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
-.badge-waiting{background:#fff3cd;color:#856404;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
-.badge-new{background:#d1e7dd;color:#0f5132;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid #badbcc;}
-.badge-deal-active{background:#cff4fc;color:#055160;padding:2px 9px;border-radius:20px;font-size:11px;}
-.badge-deal-none{background:#f8f9fa;color:#6c757d;padding:2px 9px;border-radius:20px;font-size:11px;}
-.badge-deal-expired{background:#f8d7da;color:#721c24;padding:2px 9px;border-radius:20px;font-size:11px;}
+.badge-waiting{background:#E7D7C8;color:#8a5c2e;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
+.badge-new{background:#CDEBD6;color:#3E5F55;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid #A9CDBA;}
+.badge-deal-active{background:#CDEBD6;color:#3E5F55;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
+.badge-deal-none{background:#f2f7f5;color:var(--muted);padding:2px 9px;border-radius:20px;font-size:11px;}
+.badge-deal-expired{background:#fde8e6;color:var(--danger);padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
 .btn-p{background:var(--primary);color:white;border:none;border-radius:8px;padding:6px 13px;font-size:12px;cursor:pointer;transition:.2s;}
 .btn-p:hover{background:#2d4a42;}
 .btn-o{background:transparent;color:var(--primary);border:1px solid var(--primary);border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;transition:.2s;}
@@ -1478,7 +1478,7 @@ function renderStoresPage(){
     const _badgeLabels={newly_added:"✨ Newly Added",just_opened:"🎉 Just Opened",new_store:"🆕 New Store",trending:"🔥 Trending",popular:"⭐ Popular",top_rated:"🏆 Top Rated",must_visit:"📍 Must Visit",limited_offer:"⏳ Limited Offer"};
     const _badge = s.badge||s.store_badge||"";
     let newBadge = _badge
-      ? `<span class="badge-new" style="background:#2979FF;">${_badgeLabels[_badge]||_badge}</span>`
+      ? `<span class="badge-new">${_badgeLabels[_badge]||_badge}</span>`
       : s.is_new_in_town
         ? `<span class="badge-new">📍 New In Town</span>`
         : `<span style="color:var(--muted);font-size:11px;">—</span>`;
@@ -1491,7 +1491,10 @@ function renderStoresPage(){
     let approveBtn=s.status==="waiting_approval"?`<button class="btn-approve me-1" onclick="approveStore('${s._id}')">✓ Approve</button>`:"";
     html+=`<tr>
       <td>${img}<strong>${s.store_name}</strong></td>
-      <td style="font-size:12px">${s.merchant_name||"—"}</td>
+      <td style="font-size:12px">
+        <div style="font-weight:600">${s.merchant_name||"—"}</div>
+        ${s.merchant_phone ? `<div style="color:var(--muted);font-size:11px">${s.merchant_phone}</div>` : ''}
+      </td>
       <td style="font-size:12px">${s.category||"—"}</td>
       <td style="font-size:12px">${s.city||"—"}${s.area?`<br><small style="color:var(--muted)">${s.area}</small>`:""}  </td>
       <td style="font-size:12px">${s.visit_points||0}</td>
