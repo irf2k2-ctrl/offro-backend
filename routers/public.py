@@ -420,19 +420,30 @@ def get_about_public():
 # =================== PROMO SLIDERS (public - for Flutter app) ===================
 @router.get("/promo-sliders")
 def get_promo_sliders_public():
-    """Returns active promo slider banners for the app home screen."""
+    """Returns active, non-expired promo slider banners for the app home screen."""
+    from datetime import datetime as dt
+    today = dt.utcnow().strftime("%Y-%m-%d")
     docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
+        # Skip expired banners — check end_date or expires_at field
+        end_date = d.get("end_date", "") or d.get("expires_at", "")
+        if end_date:
+            try:
+                end_str = str(end_date)[:10]  # handles datetime objects & strings
+                if end_str < today:
+                    continue   # expired — skip
+            except Exception:
+                pass
         img = d.get("image_url", "") or d.get("image", "")
         result.append({
-            "id": str(d["_id"]),
-            "title": d.get("title", ""),
-            "subtitle": d.get("subtitle", "") or d.get("text", ""),
-            "image": img,
+            "id":        str(d["_id"]),
+            "title":     d.get("title", ""),
+            "subtitle":  d.get("subtitle", "") or d.get("text", ""),
+            "image":     img,
             "image_url": img,
-            "link_url": d.get("link_url", ""),
-            "bg_color": d.get("bg_color", ""),
+            "link_url":  d.get("link_url", ""),
+            "bg_color":  d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
         })
     return result

@@ -2298,9 +2298,10 @@ function editSlider(s) {
   document.getElementById("sl_link_url").value = s.link_url||s.action||"";
   document.getElementById("sl_order").value = s.sort_order||0;
   document.getElementById("sl_active").checked = s.is_active!==false;
-  if (document.getElementById("sl_from_date")) document.getElementById("sl_from_date").value = s.from_date||'';
-  if (document.getElementById("sl_days"))      document.getElementById("sl_days").value      = s.days||30;
-  if (document.getElementById("sl_end_date"))  document.getElementById("sl_end_date").value  = s.end_date||'';
+  if (document.getElementById("sl_from_date"))      document.getElementById("sl_from_date").value      = s.from_date||'';
+  if (document.getElementById("sl_days"))           document.getElementById("sl_days").value           = s.duration_days||s.days||30;
+  if (document.getElementById("sl_end_date"))       document.getElementById("sl_end_date").value       = s.end_date||'';
+  if (document.getElementById("sl_merchant_phone")) document.getElementById("sl_merchant_phone").value = s.merchant_phone||'';
   slUpdateEndDate();
   document.getElementById("sl_msg").innerText = "";
   document.getElementById("sl_file_input").value = "";
@@ -2336,14 +2337,15 @@ async function saveSlider() {
   const img = document.getElementById("sl_image_url").value.trim();
   if (!img) { document.getElementById("sl_msg").innerText = "Please upload a banner image first"; return; }
   const data = {
-    title:      document.getElementById("sl_title").value.trim(),
-    image_url:  img,
-    link_url:   document.getElementById("sl_link_url").value.trim(),
-    sort_order: parseInt(document.getElementById("sl_order").value)||0,
-    is_active:  document.getElementById("sl_active").checked,
-    from_date:  document.getElementById("sl_from_date")?.value || '',
-    days:       parseInt(document.getElementById("sl_days")?.value)||30,
-    end_date:   document.getElementById("sl_end_date")?.value || '',
+    title:           document.getElementById("sl_title").value.trim(),
+    image_url:       img,
+    link_url:        document.getElementById("sl_link_url").value.trim(),
+    sort_order:      parseInt(document.getElementById("sl_order").value)||0,
+    is_active:       document.getElementById("sl_active").checked,
+    from_date:       document.getElementById("sl_from_date")?.value || '',
+    days:            parseInt(document.getElementById("sl_days")?.value)||30,
+    end_date:        document.getElementById("sl_end_date")?.value || '',
+    merchant_phone:  (document.getElementById("sl_merchant_phone")?.value || '').trim(),
   };
   try {
     let url  = sid ? `/admin/promo-sliders/${sid}` : "/admin/promo-sliders";
@@ -3588,6 +3590,11 @@ async function saveStore() {
         <div class="mb-3">
           <label class="form-label">End Date <span style="color:var(--muted);font-size:11px">(auto-calculated)</span></label>
           <input id="sl_end_date" class="form-control" type="date" readonly style="background:#f9f9f9;color:var(--muted)">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Assign to Merchant <span style="color:var(--muted);font-size:11px">(optional)</span></label>
+          <input id="sl_merchant_phone" class="form-control" placeholder="e.g. +919535206137">
+          <small class="text-muted">If filled, this banner will appear in that merchant's banner screen.</small>
         </div>
         <div class="mb-3">
           <label class="form-label">Sort Order</label>

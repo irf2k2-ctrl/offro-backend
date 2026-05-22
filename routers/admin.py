@@ -1129,28 +1129,89 @@ def delete_gift_voucher(vid: str, a=Depends(get_current_admin)):
 @router.get("/promo-sliders")
 def list_promo_sliders(a=Depends(get_current_admin)):
     docs = list(db.promo_sliders.find().sort("sort_order", 1))
-    return [{"id": str(d["_id"]), "title": d.get("title",""), "image_url": d.get("image_url",""),
-             "link_url": d.get("link_url",""), "sort_order": d.get("sort_order",0),
-             "is_active": d.get("is_active", True)} for d in docs]
+    result = []
+    for d in docs:
+        created = d.get("created_at", "")
+        created_str = created.strftime("%d %b %Y %H:%M") if isinstance(created, datetime) else str(created)[:16]
+        result.append({
+            "id":            str(d["_id"]),
+            "_id":           str(d["_id"]),
+            "title":         d.get("title", ""),
+            "image_url":     d.get("image_url", ""),
+            "link_url":      d.get("link_url", ""),
+            "sort_order":    d.get("sort_order", 0),
+            "is_active":     d.get("is_active", True),
+            # expiry & dates
+            "from_date":     d.get("from_date", ""),
+            "end_date":      d.get("end_date", d.get("expires_at", "")),
+            "expires_at":    d.get("end_date", d.get("expires_at", "")),
+            "duration_days": d.get("duration_days", d.get("days", "")),
+            # merchant attribution
+            "merchant_name":  d.get("merchant_name", ""),
+            "merchant_phone": d.get("merchant_phone", ""),
+            "source":         d.get("source", "admin"),
+            "source_banner_id": d.get("source_banner_id", ""),
+            # audit
+            "created_at":    created_str,
+        })
+    return result
 
 @router.post("/promo-sliders")
 def create_promo_slider(data: dict, a=Depends(get_current_admin)):
     if not data.get("image_url"):
         raise HTTPException(400, "image_url required")
-    doc = {"title": data.get("title",""), "image_url": data["image_url"],
-           "link_url": data.get("link_url",""), "sort_order": int(data.get("sort_order",0)),
-           "is_active": bool(data.get("is_active", True)), "created_at": datetime.utcnow()}
+    # Auto-calculate end_date from from_date + days if not provided
+    from_date = data.get("from_date", "")
+    days      = int(data.get("days", 0))
+    end_date  = data.get("end_date", "")
+    if from_date and days > 0 and not end_date:
+        from datetime import timedelta
+        try:
+            fd = datetime.strptime(from_date, "%Y-%m-%d")
+            end_date = (fd + timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    doc = {
+        "title":          data.get("title", ""),
+        "image_url":      data["image_url"],
+        "link_url":       data.get("link_url", ""),
+        "sort_order":     int(data.get("sort_order", 0)),
+        "is_active":      bool(data.get("is_active", True)),
+        "from_date":      from_date,
+        "end_date":       end_date,
+        "expires_at":     end_date,
+        "duration_days":  days,
+        "merchant_name":  data.get("merchant_name", ""),
+        "merchant_phone": data.get("merchant_phone", ""),
+        "source":         "admin",
+        "created_at":     datetime.utcnow(),
+    }
     r = db.promo_sliders.insert_one(doc)
     return {"message": "Slider created", "id": str(r.inserted_id)}
 
 @router.put("/promo-sliders/{sid}")
 def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     upd = {}
-    for f in ["title","image_url","link_url"]:
+    for f in ["title", "image_url", "link_url", "from_date", "end_date",
+              "merchant_name", "merchant_phone"]:
         if f in data: upd[f] = data[f]
-    if "sort_order" in data: upd["sort_order"] = int(data["sort_order"])
-    if "is_active"  in data: upd["is_active"]  = bool(data["is_active"])
+    if "sort_order"    in data: upd["sort_order"]    = int(data["sort_order"])
+    if "is_active"     in data: upd["is_active"]     = bool(data["is_active"])
+    if "days"          in data: upd["duration_days"]  = int(data["days"])
+    # Keep expires_at in sync with end_date
+    if "end_date" in upd: upd["expires_at"] = upd["end_date"]
+    # Auto-calculate end_date from from_date + days
+    if "from_date" in data and "days" in data and "end_date" not in data:
+        from datetime import timedelta
+        try:
+            fd = datetime.strptime(data["from_date"], "%Y-%m-%d")
+            calc_end = (fd + timedelta(days=int(data["days"]) - 1)).strftime("%Y-%m-%d")
+            upd["end_date"]   = calc_end
+            upd["expires_at"] = calc_end
+        except Exception:
+            pass
     if not upd: raise HTTPException(400, "Nothing to update")
+    upd["updated_at"] = datetime.utcnow().isoformat()
     db.promo_sliders.update_one({"_id": ObjectId(sid)}, {"$set": upd})
     return {"message": "Updated"}
 

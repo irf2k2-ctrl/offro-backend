@@ -696,12 +696,17 @@ def _pricing_doc():
 # ── GET /merchant/banners  ──────────────────────────────────────────────────
 @router.get("/banners")
 def get_my_banners(m=Depends(get_merchant)):
-    merchant_id = str(m["_id"])
-    banners = list(db.merchant_banners.find(
-        {"merchant_id": merchant_id}
-    ).sort("created_at", -1))
+    from datetime import datetime as dt
+    merchant_id    = str(m["_id"])
+    merchant_phone = str(m.get("phone", ""))
+    today          = dt.utcnow().strftime("%Y-%m-%d")
+
     result = []
-    for b in banners:
+
+    # 1. Merchant-submitted banners (their own orders)
+    for b in db.merchant_banners.find({"merchant_id": merchant_id}).sort("created_at", -1):
+        end_date  = str(b.get("end_date", ""))[:10]
+        is_expired = bool(end_date and end_date < today)
         result.append({
             "_id":             str(b["_id"]),
             "title":           b.get("title", ""),
@@ -713,7 +718,32 @@ def get_my_banners(m=Depends(get_merchant)):
             "status":          b.get("status", "pending"),
             "approval_status": b.get("approval_status", "pending"),
             "created_at":      b.get("created_at", ""),
+            "source":          "merchant",
+            "is_expired":      is_expired,
         })
+
+    # 2. Admin-created banners assigned to this merchant (by phone)
+    if merchant_phone:
+        for s in db.promo_sliders.find({"merchant_phone": merchant_phone}).sort("created_at", -1):
+            end_date  = str(s.get("end_date", s.get("expires_at", "")))[:10]
+            is_expired = bool(end_date and end_date < today)
+            result.append({
+                "_id":             str(s["_id"]),
+                "title":           s.get("title", ""),
+                "image_url":       s.get("image_url", ""),
+                "duration":        s.get("duration_days", 0),
+                "from_date":       s.get("from_date", ""),
+                "end_date":        s.get("end_date", s.get("expires_at", "")),
+                "amount":          0,
+                "status":          "expired" if is_expired else ("approved" if s.get("is_active") else "hidden"),
+                "approval_status": "expired" if is_expired else "approved",
+                "created_at":      str(s.get("created_at", ""))[:16],
+                "source":          "admin",
+                "is_expired":      is_expired,
+            })
+
+    # Sort combined list by created_at desc
+    result.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
     return result
 
 # ── GET /merchant/banners/pricing  ─────────────────────────────────────────
