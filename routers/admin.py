@@ -274,18 +274,61 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     u_or_empty = user or {}
     total_pts = u_or_empty.get("visit_pts", u_or_empty.get("points",0) or 0) + u_or_empty.get("pool_pts",0)
 
+    # Live merchant counts (only when account has merchant role)
+    store_count   = 0
+    banner_count  = 0
+    voucher_count = 0
+    subscriptions = []
+    invoices      = []
+    area          = base.get("area", "")
+
+    if merchant:
+        store_count   = db.stores.count_documents({"merchant_id": mid})
+        banner_count  = db.merchant_banners.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
+        voucher_count = db.merchant_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
+
+        # Active subscriptions
+        for s in db.subscriptions.find(
+            {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
+        ).sort("created_at", -1).limit(5):
+            subscriptions.append({
+                "plan":       s.get("plan",""),
+                "store_name": s.get("store_name",""),
+                "end_date":   str(s.get("end_date",""))[:10],
+                "status":     s.get("status",""),
+            })
+
+        # Invoices
+        for inv in db.invoices.find(
+            {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
+        ).sort("created_at", -1).limit(10):
+            invoices.append({
+                "invoice_no":  inv.get("invoice_no",""),
+                "store_name":  inv.get("store_name",""),
+                "plan":        inv.get("plan",""),
+                "total":       inv.get("total", inv.get("final_amount",0)),
+                "status":      inv.get("status",""),
+                "created_at":  str(inv.get("created_at",""))[:10],
+            })
+
     return {
         "account_id":    account_id,
         "merchant_id":   mid,
         "full_name":     base.get("name",""),
         "mobile_number": phone,
         "city":          base.get("city",""),
+        "area":          area,
         "roles":         (["user"] if user else []) + (["merchant"] if merchant else []),
         "status":        base.get("status","active"),
         "visit_pts":     u_or_empty.get("visit_pts", u_or_empty.get("points",0) or 0),
         "pool_pts":      u_or_empty.get("pool_pts",0),
         "total_pts":     total_pts,
         "scans":         u_or_empty.get("scans", u_or_empty.get("scan_count",0) or 0),
+        "store_count":   store_count,
+        "banner_count":  banner_count,
+        "voucher_count": voucher_count,
+        "subscriptions": subscriptions,
+        "invoices":      invoices,
     }
 
 

@@ -575,7 +575,10 @@ def activate_free_subscription(data: dict, m=Depends(get_merchant)):
 @router.get("/invoices")
 def my_invoices(m=Depends(get_merchant)):
     result = []
-    for inv in db.invoices.find({"merchant_id": str(m["_id"])}).sort("created_at", -1):
+    merchant_id    = str(m["_id"])
+    merchant_phone = str(m.get("phone", ""))
+    inv_query = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}]}                 if merchant_phone else {"merchant_id": merchant_id}
+    for inv in db.invoices.find(inv_query).sort("created_at", -1):
         fd = inv.get("from_date"); ed = inv.get("end_date")
         result.append({
             "invoice_no":  inv.get("invoice_no"),
@@ -729,7 +732,9 @@ def get_my_banners(m=Depends(get_merchant)):
     result = []
 
     # 1. Merchant-submitted banners (their own orders)
-    for b in db.merchant_banners.find({"merchant_id": merchant_id}).sort("created_at", -1):
+    # Unified: match by merchant_id OR merchant_phone
+    mb_query = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}]}                if merchant_phone else {"merchant_id": merchant_id}
+    for b in db.merchant_banners.find(mb_query).sort("created_at", -1):
         end_date  = str(b.get("end_date", ""))[:10]
         is_expired = bool(end_date and end_date < today)
         result.append({
@@ -834,21 +839,24 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
 
     # Create a pending order record
     order_doc = {
-        "merchant_id":   merchant_id,
-        "type":          "banner",
-        "days":          days,
-        "from_date":     from_date.strftime("%d %b %Y"),
-        "end_date":      end_date.strftime("%d %b %Y"),
-        "price_per_day": price_per_day,
-        "base_price":    base_price,
-        "gst_percent":   gst_pct,
-        "gst_amount":    gst_amount,
-        "total":         total,
-        "amount_paise":  amount_paise,
+        "merchant_id":    merchant_id,
+        "merchant_phone": str(m.get("phone", "")),
+        "merchant_name":  str(m.get("name", "")),
+        "type":           "banner",
+        "days":           days,
+        "from_date":      from_date.strftime("%d %b %Y"),
+        "end_date":       end_date.strftime("%d %b %Y"),
+        "price_per_day":  price_per_day,
+        "base_price":     base_price,
+        "gst_percent":    gst_pct,
+        "gst_amount":     gst_amount,
+        "total":          total,
+        "amount_paise":   amount_paise,
         "discount_code":  discount_code,
         "discount_amount": discount_value,
         "final_amount":   total,
         "status":         "pending",
+        "approval_status": "pending",
         "created_at":     datetime.utcnow().isoformat(),
     }
     inserted = db.banner_orders.insert_one(order_doc)
@@ -1067,10 +1075,11 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
 
 @router.get("/vouchers")
 def get_my_vouchers(m=Depends(get_merchant)):
-    merchant_id = str(m["_id"])
-    vouchers = list(db.merchant_vouchers.find(
-        {"merchant_id": merchant_id}
-    ).sort("created_at", -1))
+    merchant_id    = str(m["_id"])
+    merchant_phone = str(m.get("phone", ""))
+    # Unified auth: match by merchant_id OR merchant_phone
+    query = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}]}             if merchant_phone else {"merchant_id": merchant_id}
+    vouchers = list(db.merchant_vouchers.find(query).sort("created_at", -1))
     result = []
     for v in vouchers:
         result.append({
@@ -1152,6 +1161,8 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
 
     order_doc = {
         "merchant_id":    merchant_id,
+        "merchant_phone": str(m.get("phone", "")),
+        "merchant_name":  str(m.get("name", "")),
         "type":           "product",
         "days":           days,
         "from_date":      from_date.strftime("%d %b %Y"),
@@ -1165,6 +1176,7 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
         "total":          total,
         "amount_paise":   amount_paise,
         "status":         "pending",
+        "approval_status": "pending",
         "created_at":     datetime.utcnow().isoformat(),
     }
     inserted = db.voucher_orders.insert_one(order_doc)

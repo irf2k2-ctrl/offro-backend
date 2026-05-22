@@ -4256,11 +4256,29 @@ async function openAccountDetail(accountId, name) {
 
 function renderAccountDetailHTML(d) {
   const roles = (d.roles||[]).map(r=>`<span class="badge me-1" style="background:${r==='merchant'?'var(--primary)':'#5a7fb5'};color:#fff;">${r==='merchant'?'🏪 Merchant':'👤 User'}</span>`).join('');
-  const visitPts = d.visit_pts||0;
-  const poolPts  = d.pool_pts||0;
-  const totalPts = visitPts + poolPts;
-  const acctId   = d.account_id || d._id || d.user_id || d.id || '';
-  const acctName = (d.full_name || d.name || '').replace(/'/g, "\'");
+  const visitPts  = d.visit_pts||0;
+  const poolPts   = d.pool_pts||0;
+  const totalPts  = visitPts + poolPts;
+  const acctId    = d.account_id || d._id || d.user_id || d.id || '';
+  const acctName  = (d.full_name || d.name || '').replace(/'/g, "\\'");
+  const isMerchant = (d.roles||[]).includes('merchant');
+
+  // Invoices table rows
+  const invRows = (d.invoices||[]).map(inv => `
+    <tr>
+      <td style="font-family:monospace;font-size:12px;">${escHtml(inv.invoice_no||'—')}</td>
+      <td>${escHtml(inv.store_name||'—')}</td>
+      <td>${escHtml(inv.plan||'—')}</td>
+      <td>₹${(inv.total||0).toLocaleString('en-IN')}</td>
+      <td><span class="badge" style="background:${inv.status==='paid'?'#1a6640':inv.status==='pending'?'#e67e22':'#c0392b'};color:#fff;">${inv.status||'—'}</span></td>
+      <td style="font-size:11px;color:var(--muted);">${(inv.created_at||'').substring(0,10)}</td>
+    </tr>`).join('') || '<tr><td colspan="6" class="text-center text-muted py-3">No invoices yet</td></tr>';
+
+  // Active subscription badge
+  const activeSub = (d.subscriptions||[]).find(s => s.end_date && new Date(s.end_date) > new Date());
+  const subBadge  = activeSub
+    ? `<span class="badge" style="background:#1a6640;color:#fff;">✅ ${escHtml(activeSub.plan||'Active')}</span> <span style="font-size:11px;color:var(--muted);">till ${(activeSub.end_date||'').substring(0,10)}</span>`
+    : `<span class="badge" style="background:#e67e22;color:#fff;">⚠ No Active Plan</span>`;
 
   return `
   <div style="padding:20px;">
@@ -4268,7 +4286,7 @@ function renderAccountDetailHTML(d) {
     <!-- Action buttons -->
     <div class="d-flex gap-2 mb-4 flex-wrap">
       <button class="btn-p" style="font-size:13px;" onclick="openWalletFromAcct('${acctId}','${acctName}')">
-        <i class="fas fa-history me-1"></i> Wallet Transactions
+        <i class="fas fa-history me-1"></i> Wallet History
       </button>
       <button class="btn-o" style="font-size:13px;" onclick="openAddPointsFromAcct('${acctId}','${acctName}')">
         <i class="fas fa-plus-circle me-1"></i> Add Points
@@ -4276,29 +4294,37 @@ function renderAccountDetailHTML(d) {
       <button style="background:var(--danger);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="openDebitPointsFromAcct('${acctId}','${acctName}')">
         <i class="fas fa-minus-circle me-1"></i> Debit Points
       </button>
+      <button style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="toggleAccountStatus('${acctId}','${d.status||"active"}')">
+        <i class="fas fa-${d.status==='blocked'?'lock-open':'lock'} me-1"></i> ${d.status==='blocked'?'Unblock':'Block'}
+      </button>
     </div>
 
-    <!-- Points summary cards -->
+    <!-- Stats cards -->
     <div class="row g-3 mb-4">
-      <div class="col-6 col-md-4">
+      <div class="col-6 col-md-3">
         <div class="card-stat" style="padding:14px 16px;">
           <h3 style="font-size:22px;">${totalPts}</h3><p>Total Points</p>
         </div>
       </div>
-      <div class="col-6 col-md-4">
+      <div class="col-6 col-md-3">
         <div class="card-stat" style="padding:14px 16px;">
           <h3 style="font-size:22px;">${visitPts}</h3><p>Visit Points</p>
         </div>
       </div>
-      <div class="col-6 col-md-4">
+      <div class="col-6 col-md-3">
         <div class="card-stat" style="padding:14px 16px;">
           <h3 style="font-size:22px;">${poolPts}</h3><p>Pool Points</p>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card-stat" style="padding:14px 16px;">
+          <h3 style="font-size:22px;">${d.scans||0}</h3><p>QR Scans</p>
         </div>
       </div>
     </div>
 
     <!-- Profile info -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;">
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
       <div class="fw-bold mb-3" style="color:var(--primary);">👤 Profile</div>
       <div class="row g-2" style="font-size:13px;">
         <div class="col-md-4"><span style="color:var(--muted);">Name</span><br><strong>${escHtml(d.full_name||'—')}</strong></div>
@@ -4308,9 +4334,35 @@ function renderAccountDetailHTML(d) {
         <div class="col-md-4 mt-3"><span style="color:var(--muted);">Status</span><br>
           <span class="badge" style="background:${d.status==='active'?'#1a6640':'#c0392b'};color:#fff;">${d.status||'active'}</span>
         </div>
-        <div class="col-md-4 mt-3"><span style="color:var(--muted);">Total Scans</span><br>${d.scans||0}</div>
+        <div class="col-md-4 mt-3"><span style="color:var(--muted);">Area</span><br>${escHtml(d.area||'—')}</div>
       </div>
     </div>
+
+    ${isMerchant ? `
+    <!-- Merchant summary -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
+      <div class="fw-bold mb-3" style="color:var(--primary);">🏪 Merchant Summary</div>
+      <div class="row g-2" style="font-size:13px;">
+        <div class="col-md-3"><span style="color:var(--muted);">Stores</span><br><strong>${d.store_count||0}</strong></div>
+        <div class="col-md-3"><span style="color:var(--muted);">Banners</span><br><strong>${d.banner_count||0}</strong></div>
+        <div class="col-md-3"><span style="color:var(--muted);">Products</span><br><strong>${d.voucher_count||0}</strong></div>
+        <div class="col-md-3"><span style="color:var(--muted);">Subscription</span><br>${subBadge}</div>
+      </div>
+    </div>
+
+    <!-- Invoices -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;">
+      <div class="fw-bold mb-3" style="color:var(--primary);">🧾 Invoices & Payments</div>
+      <div class="table-responsive">
+        <table class="table table-sm" style="font-size:13px;">
+          <thead style="background:var(--primary);color:#fff;">
+            <tr><th>Invoice #</th><th>Store</th><th>Plan</th><th>Amount</th><th>Status</th><th>Date</th></tr>
+          </thead>
+          <tbody>${invRows}</tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
 
   </div>`;
 }
