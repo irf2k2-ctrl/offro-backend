@@ -2695,25 +2695,51 @@ async function loadGiftCards() {
     const adminCards    = adminR.ok    ? await adminR.json()    : [];
     const merchantCards = merchantR.ok ? await merchantR.json() : [];
 
+    // Helper: parse validity text → Date (handles "31 Dec 2025", "31/12/2025", ISO)
+    function parseValidityDate(val) {
+      if (!val) return null;
+      // ISO
+      let d = new Date(val.trim());
+      if (!isNaN(d)) return d;
+      // DD/MM/YYYY or DD-MM-YYYY
+      const slash = val.trim().match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+      if (slash) return new Date(+slash[3], +slash[2]-1, +slash[1]);
+      // "31 Dec 2025"
+      const months={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+      const txt = val.trim().match(/^(\d{1,2})\s+(\w+)\s+(\d{4})$/);
+      if (txt) {
+        const m = months[txt[2].toLowerCase().slice(0,3)];
+        if (m !== undefined) return new Date(+txt[3], m, +txt[1]);
+      }
+      return null;
+    }
+    const _nowVz = new Date();
+
     // Normalize admin cards
-    const adminRows = adminCards.map(v => ({
-      _id:        v.id || v._id,
-      _source:    'admin',
-      logo:       v.logo || '',
-      title:      v.title || '',
-      offer_text: v.text || '',
-      validity:   v.validity || '',
-      is_active:  v.is_active !== false,
-      status:     v.is_active !== false ? 'approved' : 'hidden',
-      approval_status: 'approved',
-      merchant_name: v.merchant_name || '',
-      created_at: v.created_at || '',
-      _raw: v,
-    }));
+    const adminRows = adminCards.map(v => {
+      const vDate = parseValidityDate(v.validity || '');
+      const isExpired = vDate && vDate < _nowVz;
+      return {
+        _id:        v.id || v._id,
+        _source:    'admin',
+        logo:       v.logo || '',
+        title:      v.title || '',
+        offer_text: v.text || '',
+        validity:   v.validity || '',
+        is_active:  v.is_active !== false && !isExpired,
+        status:     isExpired ? 'expired' : (v.is_active !== false ? 'approved' : 'hidden'),
+        approval_status: 'approved',
+        merchant_name: v.merchant_name || '',
+        created_at: v.created_at || '',
+        _raw: v,
+      };
+    });
 
     // Normalize merchant cards
     const merchantRows = merchantCards.map(v => {
       const st = v.status || 'pending_approval';
+      const vDate = parseValidityDate(v.validity || v.end_date || '');
+      const isExpired = vDate && vDate < _nowVz;
       return {
         _id:        v._id,
         _source:    'merchant',
@@ -2721,8 +2747,8 @@ async function loadGiftCards() {
         title:      v.title || '',
         offer_text: v.offer_text || '',
         validity:   v.validity || v.end_date || '',
-        is_active:  st === 'approved',
-        status:     st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending'),
+        is_active:  st === 'approved' && !isExpired,
+        status:     isExpired ? 'expired' : (st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending')),
         approval_status: st,
         merchant_name: v.merchant_name || '',
         created_at: v.created_at || '',
@@ -2825,7 +2851,13 @@ function renderVoucherZone(rows) {
       <td>${logoHtml}</td>
       <td><strong style="font-size:13px">${r.title||'—'}</strong></td>
       <td>${creatorBadge}</td>
-      <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
+      <td style="font-size:12px;">
+        ${r.validity
+          ? (r.status==='expired'
+              ? `<span style="background:#fde8e6;color:#c0392b;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700">⛔ Expired</span><div style="font-size:10px;color:var(--muted);margin-top:2px">${r.validity}</div>`
+              : `<span style="color:var(--primary);font-size:11px;font-weight:600">📅 Till: ${r.validity}</span>`)
+          : '<span style="color:var(--muted)">—</span>'}
+      </td>
       <td>${statusBadge}</td>
       <td>
         <button class="btn-o me-1" onclick='openVZViewModal(${viewJson})'>View</button>
