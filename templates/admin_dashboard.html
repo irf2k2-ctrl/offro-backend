@@ -3988,10 +3988,31 @@ function renderAccountDetailHTML(d) {
     <td><span class="badge" style="background:${b.status==='approved'?'#1a6640':'#e67e22'};color:#fff;">${b.status}</span></td>
     <td>₹${b.price||0}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No banners</td></tr>';
 
-  const payRows = (d.payments||[]).map(p=>`
-    <tr><td>${escHtml(p.type)}</td><td>₹${p.amount||0}</td>
-    <td><span class="badge" style="background:${p.status==='paid'?'#1a6640':'#c0392b'};color:#fff;">${p.status}</span></td>
-    <td style="font-size:11px;color:var(--muted);">${p.created_at?.substring(0,10)||'—'}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted text-center">No payments</td></tr>';
+  const payRows = (d.payments||[]).map(p=>{
+    const statusCol = p.status==='paid'?'#1a6640': p.status==='free'?'#3E5F55':'#c0392b';
+    const invNo = p.invoice_no || '—';
+    const amt = p.amount || 0;
+    const base = p.base_amount || amt;
+    const gst  = p.gst_amount || 0;
+    // Build a minimal invoice object for download
+    const invObj = JSON.stringify({
+      invoice_no: p.invoice_no||'', type: p.type||'', store_name: p.store_name||'',
+      plan: p.plan||'', base_amount: base, gst_amount: gst, amount: amt,
+      status: p.status||'', razorpay_payment_id: p.razorpay_payment_id||'',
+      created_at: p.created_at||'', merchant_name: d.full_name||'',
+      merchant_phone: d.mobile_number||''
+    }).replace(/"/g,'&quot;');
+    return `<tr>
+      <td style="font-family:monospace;font-size:11px;font-weight:700;color:var(--primary);">${invNo}</td>
+      <td style="text-transform:capitalize;">${escHtml(p.type||'—')}</td>
+      <td style="font-size:11px;">${escHtml(p.store_name||'—')}</td>
+      <td style="font-size:11px;">${escHtml(p.plan||'—')}</td>
+      <td><strong>₹${amt}</strong>${gst?`<span style="font-size:10px;color:var(--muted);"> +₹${gst} GST</span>`:''}</td>
+      <td><span class="badge" style="background:${statusCol};color:#fff;">${p.status||'—'}</span></td>
+      <td style="font-size:11px;color:var(--muted);">${(p.created_at||'').substring(0,10)||'—'}</td>
+      <td><button class="btn-o" style="font-size:10px;padding:3px 8px;" onclick='downloadInvoicePdf(${invObj})'>⬇ PDF</button></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="text-muted text-center" style="padding:16px;">No invoices yet</td></tr>';
 
   // TASK 1 FIX: build account ID from available fields
   const acctId = d.account_id || d._id || d.user_id || d.id || '';
@@ -4010,24 +4031,52 @@ function renderAccountDetailHTML(d) {
         <i class="fas fa-minus-circle me-1"></i> Debit Points
       </button>
     </div>
-    <!-- Summary cards -->
-    <div class="row g-3 mb-4">
-      <div class="col-6 col-md-3">
-        <div class="card-stat" style="padding:14px 16px;">
-          <h3 style="font-size:22px;">${pts}</h3><p>Total Points</p>
+    <!-- Summary cards — Wallet + Activity -->
+    <div class="row g-3 mb-3">
+      <!-- Wallet block -->
+      <div class="col-12 col-md-6">
+        <div style="background:#fff;border:1.5px solid var(--border);border-radius:12px;padding:14px 18px;">
+          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">
+            💰 Wallet Balance
+          </div>
+          <div class="row g-2">
+            <div class="col-4">
+              <div style="text-align:center;">
+                <div style="font-size:22px;font-weight:800;color:var(--primary);">${d.visit_pts||0}</div>
+                <div style="font-size:11px;color:var(--muted);">Visit Pts</div>
+              </div>
+            </div>
+            <div class="col-4">
+              <div style="text-align:center;">
+                <div style="font-size:22px;font-weight:800;color:#5a7fb5;">${d.pool_pts||0}</div>
+                <div style="font-size:11px;color:var(--muted);">Pool Pts</div>
+              </div>
+            </div>
+            <div class="col-4">
+              <div style="text-align:center;border-left:2px solid var(--border);padding-left:8px;">
+                <div style="font-size:22px;font-weight:800;color:#1a6640;">${pts}</div>
+                <div style="font-size:11px;color:var(--muted);">Total</div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);">
+            Equivalent value: <strong style="color:var(--primary);">₹${(pts/10).toFixed(1)}</strong>
+            <span style="font-size:10px;">(10 pts = ₹1)</span>
+          </div>
         </div>
       </div>
-      <div class="col-6 col-md-3">
+      <!-- Account stats -->
+      <div class="col-6 col-md-2">
         <div class="card-stat" style="padding:14px 16px;">
           <h3 style="font-size:22px;">${d.stores?.length||0}</h3><p>Stores</p>
         </div>
       </div>
-      <div class="col-6 col-md-3">
+      <div class="col-6 col-md-2">
         <div class="card-stat" style="padding:14px 16px;">
           <h3 style="font-size:22px;">${d.products?.length||0}</h3><p>Products</p>
         </div>
       </div>
-      <div class="col-6 col-md-3">
+      <div class="col-6 col-md-2">
         <div class="card-stat" style="padding:14px 16px;">
           <h3 style="font-size:22px;">${d.banners?.length||0}</h3><p>Banners</p>
         </div>
@@ -4077,15 +4126,41 @@ function renderAccountDetailHTML(d) {
       </table></div>
     </div>
 
-    <!-- Payments -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;">
-      <div class="fw-bold mb-2" style="color:var(--primary);">💳 Payment History</div>
-      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
-        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+    <!-- Invoices & Payments -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="fw-bold" style="color:var(--primary);">💳 Invoices & Payments</div>
+        <span style="font-size:11px;color:var(--muted);">${d.payments?.length||0} record(s)</span>
+      </div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:12px;">
+        <thead style="background:var(--sidebar);color:#fff;">
+          <tr><th>Invoice #</th><th>Type</th><th>Store</th><th>Plan</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr>
+        </thead>
         <tbody>${payRows}</tbody>
       </table></div>
     </div>
+
+    <!-- Points History — inline -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="fw-bold" style="color:var(--primary);">🪙 Points History</div>
+        <span id="acctPtsHistLoading_${acctId}" style="font-size:11px;color:var(--muted);">Loading...</span>
+      </div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:12px;">
+        <thead style="background:var(--sidebar);color:#fff;">
+          <tr><th>Type</th><th>Description</th><th>Points</th><th>Date</th></tr>
+        </thead>
+        <tbody id="acctPtsHistBody_${acctId}">
+          <tr><td colspan="4" style="text-align:center;padding:16px;color:var(--muted);">Loading...</td></tr>
+        </tbody>
+      </table></div>
+    </div>
   </div>`;
+
+  // Load points history inline after render
+  if (acctId) {
+    setTimeout(() => loadInlinePointsHistory(acctId), 200);
+  }
 }
 
 async function toggleAccountStatus(accountId, currentStatus) {
@@ -4099,6 +4174,45 @@ async function toggleAccountStatus(accountId, currentStatus) {
     });
     await loadAccounts();
   } catch(e) { alert('Failed: ' + e.message); }
+}
+
+// ── Phase 2: Inline Points History loader ──────────────────────────────────
+async function loadInlinePointsHistory(accountId) {
+  const tbody   = document.getElementById(`acctPtsHistBody_${accountId}`);
+  const loading = document.getElementById(`acctPtsHistLoading_${accountId}`);
+  if (!tbody) return;
+
+  try {
+    const r = await fetch(`/admin/users/${accountId}/history`, {credentials:'include'});
+    if (!r.ok) {
+      if (tbody) tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">Not a user account — no point history</td></tr>';
+      if (loading) loading.textContent = '';
+      return;
+    }
+    const data = await r.json();
+    if (loading) loading.textContent = `${data.history?.length||0} record(s)`;
+
+    if (!data.history?.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center" style="padding:16px;">No point transactions yet</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.history.map(h => {
+      const isCredit = h.type === 'credit';
+      const badge = isCredit
+        ? `<span style="background:#d1f0e0;color:#1a6640;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;">+${h.points}</span>`
+        : `<span style="background:#fde8e6;color:#c0392b;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;">−${h.points}</span>`;
+      return `<tr>
+        <td style="color:${isCredit?'#1a6640':'#c0392b'};font-weight:700;font-size:12px;">${h.type.toUpperCase()}</td>
+        <td style="font-size:12px;">${escHtml(h.description||'')}</td>
+        <td>${badge}</td>
+        <td style="font-size:11px;color:var(--muted);">${h.date||'—'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="text-muted text-center">Failed to load: ${e.message}</td></tr>`;
+    if (loading) loading.textContent = '';
+  }
 }
 // ════ End Accounts ════
 

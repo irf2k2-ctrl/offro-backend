@@ -292,9 +292,19 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     if mid:
         try:
             for inv in db.invoices.find({"merchant_id": mid}).sort("created_at",-1).limit(20):
-                payments.append({"invoice_id":str(inv["_id"]),"type":inv.get("type",""),
-                    "amount":inv.get("amount",0),"status":inv.get("status",""),
-                    "created_at":str(inv.get("created_at",""))})
+                payments.append({
+                    "invoice_id":  str(inv["_id"]),
+                    "invoice_no":  inv.get("invoice_no",""),
+                    "type":        inv.get("type",""),
+                    "store_name":  inv.get("store_name",""),
+                    "plan":        inv.get("plan",""),
+                    "base_amount": inv.get("base_amount", inv.get("amount",0)),
+                    "gst_amount":  inv.get("gst_amount",0),
+                    "amount":      inv.get("amount",0),
+                    "status":      inv.get("status",""),
+                    "razorpay_payment_id": inv.get("razorpay_payment_id",""),
+                    "created_at":  str(inv.get("created_at","")),
+                })
         except Exception:
             pass
 
