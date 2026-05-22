@@ -183,6 +183,11 @@ def merchant_login_unified(data: dict):
         {"_id": m["_id"]},
         {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}}
     )
+    # Also sync token to users collection (by same phone) so unified fallback works
+    db.users.update_one(
+        {"phone": {"$in": variants}},
+        {"$set": {"token": token}},
+    )
     print(f"[MERCHANT-LOGIN] ✅ Session issued for {raw_phone} — merchant_id={str(m['_id'])}")
 
     response = JSONResponse(content={

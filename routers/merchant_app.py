@@ -72,11 +72,32 @@ def _qr(store_id: str) -> str:
 
 def get_merchant(request: Request):
     token = (request.cookies.get("merchant_token") or
+             request.cookies.get("user_token") or
              request.headers.get("Authorization", "").replace("Bearer ", ""))
     if not token: raise HTTPException(401, "Not authenticated")
+
+    # Primary: token stored directly in merchants (via /merchant-login or /user/merchant-login)
     m = db.merchants.find_one({"token": token})
-    if not m:    raise HTTPException(403, "Invalid session")
-    return m
+    if m:
+        return m
+
+    # Fallback: token is in users collection (unified auth edge case)
+    # Look up user → find merchant by phone → sync token
+    u = db.users.find_one({"token": token})
+    if u:
+        raw_phone = str(u.get("phone", ""))
+        d = raw_phone.lstrip("+")
+        if len(d) == 12 and d.startswith("91"): d = d[2:]
+        elif len(d) == 11 and d.startswith("0"): d = d[1:]
+        last10 = d[-10:] if len(d) >= 10 else d
+        variants = list({raw_phone, last10, f"+91{last10}", f"91{last10}"})
+        m = db.merchants.find_one({"phone": {"$in": variants}})
+        if m:
+            # Sync token so next request hits primary path
+            db.merchants.update_one({"_id": m["_id"]}, {"$set": {"token": token}})
+            return m
+
+    raise HTTPException(403, "Not a registered merchant")
 
 def plan_days(plan: str) -> int:
     return {"1month": 30, "3months": 90, "6months": 180, "12months": 365}.get(plan, 30)
