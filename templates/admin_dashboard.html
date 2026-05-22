@@ -199,7 +199,7 @@ tr:hover td{background:#f7faf8;}
   </div>
   <div class="table-wrap"><table>
     <thead><tr>
-      <th>Name</th><th>Phone</th><th>City</th>
+      <th>Name</th><th>Phone</th><th>Ref ID</th><th>City</th>
       <th>Roles</th><th>Stores</th><th>Products</th><th>Banners</th>
       <th>Points</th><th>Status</th><th>Actions</th>
     </tr></thead>
@@ -332,7 +332,11 @@ tr:hover td{background:#f7faf8;}
       <tbody id="vz_unified_body"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
     </table>
   </div>
-  <div style="margin-top:10px;font-size:12px;color:var(--muted)" id="vz_showing"></div>
+  <!-- ISSUE 8: Pagination bar -->
+  <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div style="font-size:12px;color:var(--muted)" id="vz_showing"></div>
+    <div id="vz_pagination" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
+  </div>
 
   <!-- ℹ️ What is View? -->
   <div style="margin-top:16px;background:#f7faf8;border-radius:8px;padding:12px 16px;border:1px solid var(--border)">
@@ -2030,7 +2034,7 @@ function renderBanners(rows) {
   }
   if(showing) showing.textContent=`Showing 1 to ${rows.length} of ${rows.length} results`;
 
-  tbody.innerHTML = rows.map(r => {
+  tbody.innerHTML = pageRows.map(r => {
     const thumb = r.image_url
       ? `<img src="${r.image_url}" style="width:100px;height:50px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=0.2">`
       : `<div style="width:100px;height:50px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center"><i class="fas fa-image" style="color:var(--muted)"></i></div>`;
@@ -2680,8 +2684,11 @@ window.addEventListener("DOMContentLoaded", function() {
     gcModalInst = new bootstrap.Modal(document.getElementById("giftCardModal"));
 });
 
-// ── All products data cache ──
+// ── All products data cache + pagination ──
 let _allVoucherRows = [];
+let _vzFilteredRows = [];
+let _vzPage = 1;
+const _VZ_PER_PAGE = 15;
 
 async function loadGiftCards() {
   const tbody = document.getElementById('vz_unified_body');
@@ -2697,60 +2704,94 @@ async function loadGiftCards() {
     const merchantCards = merchantR.ok ? await merchantR.json() : [];
 
     // Normalize admin cards
-    const adminRows = adminCards.map(v => ({
-      _id:        v.id || v._id,
-      _source:    'admin',
-      logo:       v.logo || '',
-      title:      v.title || '',
-      offer_text: v.text || '',
-      validity:   v.validity || '',
-      is_active:  v.is_active !== false,
-      status:     v.is_active !== false ? 'approved' : 'hidden',
-      approval_status: 'approved',
-      merchant_name: v.merchant_name || '',
-      created_at: v.created_at || '',
-      _raw: v,
-    }));
+    const adminRows = adminCards.map(v => {
+      const fromD = v.from_date || '';
+      const toD   = v.end_date   || '';
+      // ISSUE 7: Check admin card expiry too
+      let isActive = v.is_active !== false;
+      let computedStatus = isActive ? 'approved' : 'hidden';
+      if (isActive && toD) {
+        try {
+          const endDt = new Date(toD);
+          if (!isNaN(endDt) && endDt < new Date()) { computedStatus = 'expired'; isActive = false; }
+        } catch(e) {}
+      }
+      return {
+        _id:        v.id || v._id,
+        _source:    'admin',
+        logo:       v.logo || '',
+        title:      v.title || '',
+        offer_text: v.text || '',
+        validity:   v.validity || (fromD && toD ? `${fromD} → ${toD}` : ''),
+        from_date:  fromD,
+        end_date:   toD,
+        is_active:  isActive,
+        status:     computedStatus,
+        approval_status: 'approved',
+        merchant_name: v.merchant_name || '',
+        merchant_phone: v.merchant_phone || '',
+        created_at: v.created_at || '',
+        _raw: v,
+      };
+    });
 
     // Normalize merchant cards
     const merchantRows = merchantCards.map(v => {
       const st = v.status || 'pending_approval';
+      // ISSUE 2: Build full validity display string from_date → end_date
+      const fromD = v.from_date || '';
+      const toD   = v.end_date   || '';
+      const validityDisplay = (fromD && toD)
+        ? `${fromD} → ${toD}`
+        : (v.validity || v.end_date || '—');
+      // ISSUE 7: Check expiry at render time
+      let computedStatus = st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending');
+      if (computedStatus === 'approved' && toD) {
+        try {
+          const endDt = new Date(toD);
+          if (!isNaN(endDt) && endDt < new Date()) computedStatus = 'expired';
+        } catch(e) {}
+      }
       return {
         _id:        v._id,
         _source:    'merchant',
         logo:       v.logo_url || '',
         title:      v.title || '',
         offer_text: v.offer_text || '',
-        validity:   v.validity || v.end_date || '',
-        is_active:  st === 'approved',
-        status:     st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending'),
+        validity:   validityDisplay,
+        from_date:  fromD,
+        end_date:   toD,
+        is_active:  computedStatus === 'approved',
+        status:     computedStatus,
         approval_status: st,
         merchant_name: v.merchant_name || '',
+        merchant_phone: v.merchant_phone || '',
         created_at: v.created_at || '',
         _raw: v,
       };
     });
 
-    // Dedup: if a merchant voucher was approved it's already in gift_vouchers (adminRows).
-    // Filter merchant rows to exclude those that appear in adminRows via source_voucher_id.
+    // ISSUE 1 FIX: Strict dedup — merchant voucher already in gift_vouchers OR already approved
+    // Two-layer check: source_voucher_id AND merchant row status === approved
     const approvedMerchantIds = new Set(
       adminCards
-        .filter(v => v.source_voucher_id || v.source === 'merchant')
+        .filter(v => v.source_voucher_id)
         .map(v => v.source_voucher_id)
         .filter(Boolean)
     );
     const dedupedMerchantRows = merchantRows.filter(r =>
-      !approvedMerchantIds.has(r._id)      // not already in gift_vouchers
+      !approvedMerchantIds.has(r._id) &&   // not already copied to gift_vouchers
+      r.status !== 'approved'               // not in approved state (already shown via adminRows)
     );
 
     _allVoucherRows = [...adminRows, ...dedupedMerchantRows]
       .sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
 
-    // Update stats
+    // Update stats — expired is computed at normalize time (Issue 7)
     const approved = _allVoucherRows.filter(r=>r.status==='approved').length;
     const pending  = _allVoucherRows.filter(r=>r.status==='pending').length;
     const expired  = _allVoucherRows.filter(r=>r.status==='expired').length;
-    const active   = _allVoucherRows.filter(r=>r.is_active).length;
+    const active   = _allVoucherRows.filter(r=>r.is_active && r.status!=='expired').length;
     const _s = id => { const el=document.getElementById(id); if(el) el.textContent=0; };
     const _set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
     _set('vz_total',    _allVoucherRows.length);
@@ -2759,6 +2800,8 @@ async function loadGiftCards() {
     _set('vz_expired',  expired);
     _set('vz_active',   active);
 
+    _vzFilteredRows = _allVoucherRows;
+    _vzPage = 1;
     filterVoucherZone();
   } catch(e) { console.error('loadGiftCards error', e); }
 }
@@ -2777,19 +2820,46 @@ function filterVoucherZone() {
   if (dateFrom)rows = rows.filter(r=>(r.created_at||'')>=dateFrom);
   if (dateTo)  rows = rows.filter(r=>(r.created_at||'')<=dateTo+'z');
 
-  renderVoucherZone(rows);
+  _vzFilteredRows = rows;
+  _vzPage = 1; // reset to page 1 on filter change
+  renderVoucherZone();
 }
+function goVZPage(p) { _vzPage = p; renderVoucherZone(); }
 
-function renderVoucherZone(rows) {
-  const tbody = document.getElementById('vz_unified_body');
+function renderVoucherZone() {
+  const tbody   = document.getElementById('vz_unified_body');
   const showing = document.getElementById('vz_showing');
+  const pgBar   = document.getElementById('vz_pagination');
   if (!tbody) return;
+  const rows = _vzFilteredRows;
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted)">No vouchers found.</td></tr>';
     if(showing) showing.textContent = '';
+    if(pgBar)   pgBar.innerHTML = '';
     return;
   }
-  if(showing) showing.textContent = `Showing 1 to ${rows.length} of ${rows.length} results`;
+  // Pagination math
+  const total  = rows.length;
+  const pages  = Math.ceil(total / _VZ_PER_PAGE);
+  _vzPage      = Math.max(1, Math.min(_vzPage, pages));
+  const start  = (_vzPage-1)*_VZ_PER_PAGE;
+  const end    = Math.min(start+_VZ_PER_PAGE, total);
+  const pageRows = rows.slice(start, end);
+  if(showing) showing.textContent = `Showing ${start+1}–${end} of ${total} results`;
+  // Build pagination controls
+  if (pgBar) {
+    const btnStyle = (active) => `style="border:1px solid ${active?'var(--primary)':'var(--border)'};background:${active?'var(--primary)':'#fff'};color:${active?'#fff':'var(--text)'};border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;"`;
+    let pgHtml = '';
+    if (_vzPage > 1) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(${_vzPage-1})">‹ Prev</button>`;
+    const maxBtns = 7;
+    let lo = Math.max(1, _vzPage-3), hi = Math.min(pages, lo+maxBtns-1);
+    if (hi-lo < maxBtns-1) lo = Math.max(1, hi-maxBtns+1);
+    if (lo > 1) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(1)">1</button>${lo>2?'<span style="padding:4px 2px">…</span>':''}`;
+    for (let i=lo;i<=hi;i++) pgHtml += `<button ${btnStyle(i===_vzPage)} onclick="goVZPage(${i})">${i}</button>`;
+    if (hi < pages) pgHtml += `${hi<pages-1?'<span style="padding:4px 2px">…</span>':''}<button ${btnStyle(false)} onclick="goVZPage(${pages})">${pages}</button>`;
+    if (_vzPage < pages) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(${_vzPage+1})">Next ›</button>`;
+    pgBar.innerHTML = pgHtml;
+  }
 
   tbody.innerHTML = rows.map(r => {
     // TASK 2 FIX: handle both HTTPS URLs and base64 data: URIs
@@ -2800,10 +2870,13 @@ function renderVoucherZone(rows) {
       : `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`;
 
     const isAdmin = r._source === 'admin';
+    // ISSUE 3: Show merchant name + mobile number in Created By
+    const phoneDisplay = r.merchant_phone ? `<div style="font-size:10px;color:var(--muted);font-family:monospace;margin-top:1px">📞 ${r.merchant_phone}</div>` : '';
     const creatorBadge = isAdmin
       ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>`
       : `<span style="background:#e8f0fe;color:#1a56db;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-user" style="font-size:9px"></i> Merchant</span>
-         <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.merchant_name||''}</div>`;
+         <div style="font-size:11px;color:var(--muted);margin-top:2px;font-weight:600">${r.merchant_name||''}</div>
+         ${phoneDisplay}`;
 
     const st = r.status;
     const statusBadge = st==='approved'
@@ -2833,9 +2906,24 @@ function renderVoucherZone(rows) {
         ${approveBtn}
         <button class="btn-o" style="border:none;padding:4px 8px" onclick='openVZMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>
       </td>
-      <td style="font-size:11px;color:var(--muted)">${(r.created_at||'').slice(0,16)}</td>
+      <td style="font-size:11px;color:var(--muted);white-space:nowrap">${_fmtVZDate(r.created_at)}</td>
     </tr>`;
   }).join('');
+}
+
+// ISSUE 10: Consistent date formatter for Products table
+function _fmtVZDate(dt) {
+  if (!dt) return '—';
+  try {
+    const d = new Date(dt);
+    if (isNaN(d)) return String(dt).slice(0,16);
+    const day  = String(d.getDate()).padStart(2,'0');
+    const mon  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+    const yr   = d.getFullYear();
+    const hh   = String(d.getHours()).padStart(2,'0');
+    const mm   = String(d.getMinutes()).padStart(2,'0');
+    return `${day} ${mon} ${yr} | ${hh}:${mm}`;
+  } catch(e) { return String(dt).slice(0,16); }
 }
 
 // ── View Modal handler ──
@@ -2852,8 +2940,11 @@ function openVZViewModal(r) {
   }
   document.getElementById('vz_modal_title').textContent = r.title||'—';
   document.getElementById('vz_modal_offer').textContent = r.offer_text||'—';
+  document.getElementById('vz_modal_from_date').textContent = r.from_date || '—';
+  document.getElementById('vz_modal_end_date').textContent  = r.end_date  || '—';
   document.getElementById('vz_modal_validity').textContent = r.validity||'—';
   document.getElementById('vz_modal_creator').textContent = isAdmin ? 'Admin' : `Merchant — ${r.merchant_name||''}`;
+  document.getElementById('vz_modal_phone').textContent = r.merchant_phone || (isAdmin ? '—' : '—');
   document.getElementById('vz_modal_status').textContent = r.status;
   // Approve button: only show for pending merchant vouchers
   const approveBtn = document.getElementById('vz_modal_approve');
@@ -2903,28 +2994,51 @@ function openVZMerchantEditModal(row) {
     modal.id = 'vz_merchant_edit_modal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
     modal.innerHTML = `
-      <div style="background:#fff;border-radius:16px;padding:28px;width:440px;max-height:90vh;overflow-y:auto">
+      <div style="background:#fff;border-radius:16px;padding:28px;width:500px;max-height:92vh;overflow-y:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-          <h5 style="margin:0;color:var(--primary)">Edit Merchant Voucher</h5>
+          <h5 style="margin:0;color:var(--primary)">✏️ Edit Product</h5>
           <button onclick="document.getElementById('vz_merchant_edit_modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">&times;</button>
         </div>
+
+        <!-- ISSUE 5: Same fields as App -->
         <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Voucher Title</label>
-          <input id="vz_edit_title" type="text" class="form-control" style="margin-top:4px">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Product Title *</label>
+          <input id="vz_edit_title" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. ₹999 DEALS">
         </div>
         <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Offer Text</label>
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Offer Text *</label>
           <input id="vz_edit_offer" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 20% off on all items">
         </div>
-        <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Validity</label>
-          <input id="vz_edit_validity" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 31 May 2025">
+        <div class="row mb-3">
+          <div class="col-6">
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">From Date</label>
+            <input id="vz_edit_from_date" type="date" class="form-control" style="margin-top:4px" onchange="_vzUpdateValidity()">
+          </div>
+          <div class="col-6">
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">To Date (End)</label>
+            <input id="vz_edit_end_date" type="date" class="form-control" style="margin-top:4px" onchange="_vzUpdateValidity()">
+          </div>
         </div>
         <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Logo URL</label>
-          <input id="vz_edit_logo" type="text" class="form-control" style="margin-top:4px" placeholder="https://...">
-          <img id="vz_edit_logo_preview" src="" style="margin-top:8px;width:60px;height:60px;object-fit:cover;border-radius:10px;display:none;border:1px solid var(--border)">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Validity Display <small class="text-muted">(auto-filled)</small></label>
+          <input id="vz_edit_validity" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 22 May 2026 → 22 Jun 2026">
         </div>
+
+        <!-- ISSUE 6: File upload + URL option for logo -->
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Product Image</label>
+          <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="file" id="vz_edit_logo_file" class="form-control" accept="image/*"
+              style="flex:1;min-width:180px;font-size:12px" onchange="_vzPreviewUpload(this)">
+            <span style="font-size:11px;color:var(--muted)">or</span>
+            <input id="vz_edit_logo" type="text" class="form-control" style="flex:1;min-width:180px;font-size:12px" placeholder="Paste image URL...">
+          </div>
+          <div id="vz_edit_logo_wrap" style="margin-top:8px;display:none;align-items:center;gap:8px">
+            <img id="vz_edit_logo_preview" src="" style="width:60px;height:60px;object-fit:cover;border-radius:10px;border:1px solid var(--border)">
+            <button type="button" onclick="_vzClearLogo()" style="font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer">✕ Remove</button>
+          </div>
+        </div>
+
         <div class="mb-3">
           <label style="font-size:12px;font-weight:600;color:var(--muted)">Status</label>
           <select id="vz_edit_status" class="form-select" style="margin-top:4px">
@@ -2937,38 +3051,83 @@ function openVZMerchantEditModal(row) {
         <div id="vz_edit_msg" style="font-size:12px;margin-bottom:8px"></div>
         <div style="display:flex;gap:10px">
           <button class="btn-o" style="flex:1" onclick="document.getElementById('vz_merchant_edit_modal').remove()">Cancel</button>
-          <button class="btn-approve" style="flex:2" onclick="saveVZMerchantEdit()">Save Changes</button>
+          <button class="btn-approve" style="flex:2" onclick="saveVZMerchantEdit()">💾 Save Changes</button>
         </div>
       </div>`;
-    document.body.appendChild(modal);
+
+    // Logo URL input → preview
     document.getElementById('vz_edit_logo').addEventListener('input', function(){
-      const img = document.getElementById('vz_edit_logo_preview');
-      img.src = this.value; img.style.display = this.value ? 'block' : 'none';
+      _vzShowLogoPreview(this.value);
     });
+    document.body.appendChild(modal);
+// Logo listener now inside modal build block above
   }
   const el2 = id => document.getElementById(id);
-  if(el2('vz_edit_title'))    el2('vz_edit_title').value    = row.title||'';
-  if(el2('vz_edit_offer'))    el2('vz_edit_offer').value    = row.offer_text||'';
-  if(el2('vz_edit_validity')) el2('vz_edit_validity').value = row.validity||'';
-  if(el2('vz_edit_logo')) {
-    el2('vz_edit_logo').value = row.logo||'';
-    const img = el2('vz_edit_logo_preview');
-    if(row.logo){ img.src=row.logo; img.style.display='block'; } else { img.style.display='none'; }
-  }
-  if(el2('vz_edit_status'))   el2('vz_edit_status').value   = row.status||'pending';
-  if(el2('vz_edit_msg'))      el2('vz_edit_msg').textContent = '';
+  if(el2('vz_edit_title'))     el2('vz_edit_title').value     = row.title||'';
+  if(el2('vz_edit_offer'))     el2('vz_edit_offer').value     = row.offer_text||'';
+  if(el2('vz_edit_from_date')) el2('vz_edit_from_date').value = row.from_date||'';
+  if(el2('vz_edit_end_date'))  el2('vz_edit_end_date').value  = row.end_date||'';
+  if(el2('vz_edit_validity'))  el2('vz_edit_validity').value  = row.validity||'';
+  if(el2('vz_edit_logo'))      el2('vz_edit_logo').value      = row.logo||'';
+  if(row.logo) _vzShowLogoPreview(row.logo); else _vzClearLogo();
+  if(el2('vz_edit_logo_file')) el2('vz_edit_logo_file').value = '';
+  if(el2('vz_edit_status'))    el2('vz_edit_status').value    = row.status||'pending';
+  if(el2('vz_edit_msg'))       el2('vz_edit_msg').textContent = '';
   el2('vz_merchant_edit_modal').style.display = 'flex';
+}
+
+// ── Product Edit helpers (Issues 5+6) ──
+function _vzUpdateValidity() {
+  const from = document.getElementById('vz_edit_from_date')?.value;
+  const to   = document.getElementById('vz_edit_end_date')?.value;
+  const el   = document.getElementById('vz_edit_validity');
+  if (!el) return;
+  if (from && to) {
+    const fmtD = d => { const o=new Date(d); return `${o.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][o.getMonth()]} ${o.getFullYear()}`; };
+    el.value = `${fmtD(from)} → ${fmtD(to)}`;
+  }
+}
+function _vzShowLogoPreview(src) {
+  const wrap = document.getElementById('vz_edit_logo_wrap');
+  const img  = document.getElementById('vz_edit_logo_preview');
+  if (!wrap || !img) return;
+  if (src) { img.src = src; wrap.style.display = 'flex'; }
+  else     { img.src = ''; wrap.style.display = 'none'; }
+}
+function _vzClearLogo() {
+  const urlInput  = document.getElementById('vz_edit_logo');
+  const fileInput = document.getElementById('vz_edit_logo_file');
+  if (urlInput)  urlInput.value  = '';
+  if (fileInput) fileInput.value = '';
+  _vzShowLogoPreview('');
+}
+function _vzPreviewUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const b64 = e.target.result;
+    const urlInput = document.getElementById('vz_edit_logo');
+    if (urlInput) urlInput.value = b64;
+    _vzShowLogoPreview(b64);
+  };
+  reader.readAsDataURL(file);
 }
 
 async function saveVZMerchantEdit() {
   const row = _vzMerchantEditCurrent;
   if (!row) return;
   const el = id => document.getElementById(id);
+  const logoVal = el('vz_edit_logo')?.value?.trim() || row.logo || '';
+  const fromVal = el('vz_edit_from_date')?.value?.trim() || row.from_date || '';
+  const toVal   = el('vz_edit_end_date')?.value?.trim()  || row.end_date  || '';
   const payload = {
     title:      el('vz_edit_title')?.value?.trim()    || row.title,
     offer_text: el('vz_edit_offer')?.value?.trim()    || row.offer_text,
     validity:   el('vz_edit_validity')?.value?.trim() || row.validity,
-    logo:       el('vz_edit_logo')?.value?.trim()     || row.logo,
+    logo:       logoVal,
+    from_date:  fromVal,
+    end_date:   toVal,
     status:     el('vz_edit_status')?.value           || row.status,
   };
   try {
@@ -3797,8 +3956,11 @@ document.addEventListener('DOMContentLoaded', () => {
         <table style="width:100%;font-size:13px;border-collapse:collapse">
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600;width:110px">Title</td><td id="vz_modal_title" style="font-weight:700;color:var(--text)"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Offer</td><td id="vz_modal_offer" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">From Date</td><td id="vz_modal_from_date" style="color:var(--text);font-weight:600"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">To Date</td><td id="vz_modal_end_date" style="color:var(--text);font-weight:600"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Validity</td><td id="vz_modal_validity" style="color:var(--text)"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Created By</td><td id="vz_modal_creator" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Mobile</td><td id="vz_modal_phone" style="color:var(--text);font-family:monospace"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Status</td><td id="vz_modal_status" style="text-transform:capitalize;color:var(--primary);font-weight:600"></td></tr>
         </table>
       </div>
@@ -3907,7 +4069,7 @@ function renderAccountsPage() {
   if (!tbody) return;
 
   if (!page.length) {
-    tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">No accounts found</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-4">No accounts found</td></tr>`;
     renderPagination('accounts_pagination', total, _acctPage, 'goAcctPage');
     return;
   }
@@ -3921,9 +4083,13 @@ function renderAccountsPage() {
     const pts   = (a.visit_pts || 0) + (a.pool_pts || 0);
     const stBg  = a.status === 'active' ? '#1a6640' : '#c0392b';
     const stLbl = a.status === 'active' ? 'Active' : 'Blocked';
+    const shortId = (a.account_id||'').slice(-6).toUpperCase();
     return `<tr>
       <td><strong>${escHtml(a.full_name||'—')}</strong></td>
       <td style="font-family:monospace;font-size:12px;">${escHtml(a.mobile_number||'')}</td>
+      <td><span title="${a.account_id}" onclick="navigator.clipboard?.writeText('${a.account_id}');showToast('ID copied!','success')"
+        style="font-size:10px;font-family:monospace;background:#f0f4f0;border:1px solid var(--border);border-radius:5px;padding:2px 6px;cursor:pointer;color:var(--primary)">
+        #${shortId} 📋</span></td>
       <td>${escHtml(a.city||'—')}</td>
       <td>${roleBadges}</td>
       <td><span class="badge" style="background:var(--accent);color:var(--text);">${a.store_count||0}</span></td>
@@ -3988,31 +4154,10 @@ function renderAccountDetailHTML(d) {
     <td><span class="badge" style="background:${b.status==='approved'?'#1a6640':'#e67e22'};color:#fff;">${b.status}</span></td>
     <td>₹${b.price||0}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No banners</td></tr>';
 
-  const payRows = (d.payments||[]).map(p=>{
-    const statusCol = p.status==='paid'?'#1a6640': p.status==='free'?'#3E5F55':'#c0392b';
-    const invNo = p.invoice_no || '—';
-    const amt = p.amount || 0;
-    const base = p.base_amount || amt;
-    const gst  = p.gst_amount || 0;
-    // Build a minimal invoice object for download
-    const invObj = JSON.stringify({
-      invoice_no: p.invoice_no||'', type: p.type||'', store_name: p.store_name||'',
-      plan: p.plan||'', base_amount: base, gst_amount: gst, amount: amt,
-      status: p.status||'', razorpay_payment_id: p.razorpay_payment_id||'',
-      created_at: p.created_at||'', merchant_name: d.full_name||'',
-      merchant_phone: d.mobile_number||''
-    }).replace(/"/g,'&quot;');
-    return `<tr>
-      <td style="font-family:monospace;font-size:11px;font-weight:700;color:var(--primary);">${invNo}</td>
-      <td style="text-transform:capitalize;">${escHtml(p.type||'—')}</td>
-      <td style="font-size:11px;">${escHtml(p.store_name||'—')}</td>
-      <td style="font-size:11px;">${escHtml(p.plan||'—')}</td>
-      <td><strong>₹${amt}</strong>${gst?`<span style="font-size:10px;color:var(--muted);"> +₹${gst} GST</span>`:''}</td>
-      <td><span class="badge" style="background:${statusCol};color:#fff;">${p.status||'—'}</span></td>
-      <td style="font-size:11px;color:var(--muted);">${(p.created_at||'').substring(0,10)||'—'}</td>
-      <td><button class="btn-o" style="font-size:10px;padding:3px 8px;" onclick='downloadInvoicePdf(${invObj})'>⬇ PDF</button></td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="8" class="text-muted text-center" style="padding:16px;">No invoices yet</td></tr>';
+  const payRows = (d.payments||[]).map(p=>`
+    <tr><td>${escHtml(p.type)}</td><td>₹${p.amount||0}</td>
+    <td><span class="badge" style="background:${p.status==='paid'?'#1a6640':'#c0392b'};color:#fff;">${p.status}</span></td>
+    <td style="font-size:11px;color:var(--muted);">${p.created_at?.substring(0,10)||'—'}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted text-center">No payments</td></tr>';
 
   // TASK 1 FIX: build account ID from available fields
   const acctId = d.account_id || d._id || d.user_id || d.id || '';
@@ -4031,52 +4176,24 @@ function renderAccountDetailHTML(d) {
         <i class="fas fa-minus-circle me-1"></i> Debit Points
       </button>
     </div>
-    <!-- Summary cards — Wallet + Activity -->
-    <div class="row g-3 mb-3">
-      <!-- Wallet block -->
-      <div class="col-12 col-md-6">
-        <div style="background:#fff;border:1.5px solid var(--border);border-radius:12px;padding:14px 18px;">
-          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">
-            💰 Wallet Balance
-          </div>
-          <div class="row g-2">
-            <div class="col-4">
-              <div style="text-align:center;">
-                <div style="font-size:22px;font-weight:800;color:var(--primary);">${d.visit_pts||0}</div>
-                <div style="font-size:11px;color:var(--muted);">Visit Pts</div>
-              </div>
-            </div>
-            <div class="col-4">
-              <div style="text-align:center;">
-                <div style="font-size:22px;font-weight:800;color:#5a7fb5;">${d.pool_pts||0}</div>
-                <div style="font-size:11px;color:var(--muted);">Pool Pts</div>
-              </div>
-            </div>
-            <div class="col-4">
-              <div style="text-align:center;border-left:2px solid var(--border);padding-left:8px;">
-                <div style="font-size:22px;font-weight:800;color:#1a6640;">${pts}</div>
-                <div style="font-size:11px;color:var(--muted);">Total</div>
-              </div>
-            </div>
-          </div>
-          <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);">
-            Equivalent value: <strong style="color:var(--primary);">₹${(pts/10).toFixed(1)}</strong>
-            <span style="font-size:10px;">(10 pts = ₹1)</span>
-          </div>
+    <!-- Summary cards -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="card-stat" style="padding:14px 16px;">
+          <h3 style="font-size:22px;">${pts}</h3><p>Total Points</p>
         </div>
       </div>
-      <!-- Account stats -->
-      <div class="col-6 col-md-2">
+      <div class="col-6 col-md-3">
         <div class="card-stat" style="padding:14px 16px;">
           <h3 style="font-size:22px;">${d.stores?.length||0}</h3><p>Stores</p>
         </div>
       </div>
-      <div class="col-6 col-md-2">
+      <div class="col-6 col-md-3">
         <div class="card-stat" style="padding:14px 16px;">
           <h3 style="font-size:22px;">${d.products?.length||0}</h3><p>Products</p>
         </div>
       </div>
-      <div class="col-6 col-md-2">
+      <div class="col-6 col-md-3">
         <div class="card-stat" style="padding:14px 16px;">
           <h3 style="font-size:22px;">${d.banners?.length||0}</h3><p>Banners</p>
         </div>
@@ -4126,41 +4243,15 @@ function renderAccountDetailHTML(d) {
       </table></div>
     </div>
 
-    <!-- Invoices & Payments -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <div class="fw-bold" style="color:var(--primary);">💳 Invoices & Payments</div>
-        <span style="font-size:11px;color:var(--muted);">${d.payments?.length||0} record(s)</span>
-      </div>
-      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:12px;">
-        <thead style="background:var(--sidebar);color:#fff;">
-          <tr><th>Invoice #</th><th>Type</th><th>Store</th><th>Plan</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr>
-        </thead>
+    <!-- Payments -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;">
+      <div class="fw-bold mb-2" style="color:var(--primary);">💳 Payment History</div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
+        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
         <tbody>${payRows}</tbody>
       </table></div>
     </div>
-
-    <!-- Points History — inline -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;">
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <div class="fw-bold" style="color:var(--primary);">🪙 Points History</div>
-        <span id="acctPtsHistLoading_${acctId}" style="font-size:11px;color:var(--muted);">Loading...</span>
-      </div>
-      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:12px;">
-        <thead style="background:var(--sidebar);color:#fff;">
-          <tr><th>Type</th><th>Description</th><th>Points</th><th>Date</th></tr>
-        </thead>
-        <tbody id="acctPtsHistBody_${acctId}">
-          <tr><td colspan="4" style="text-align:center;padding:16px;color:var(--muted);">Loading...</td></tr>
-        </tbody>
-      </table></div>
-    </div>
   </div>`;
-
-  // Load points history inline after render
-  if (acctId) {
-    setTimeout(() => loadInlinePointsHistory(acctId), 200);
-  }
 }
 
 async function toggleAccountStatus(accountId, currentStatus) {
@@ -4174,45 +4265,6 @@ async function toggleAccountStatus(accountId, currentStatus) {
     });
     await loadAccounts();
   } catch(e) { alert('Failed: ' + e.message); }
-}
-
-// ── Phase 2: Inline Points History loader ──────────────────────────────────
-async function loadInlinePointsHistory(accountId) {
-  const tbody   = document.getElementById(`acctPtsHistBody_${accountId}`);
-  const loading = document.getElementById(`acctPtsHistLoading_${accountId}`);
-  if (!tbody) return;
-
-  try {
-    const r = await fetch(`/admin/users/${accountId}/history`, {credentials:'include'});
-    if (!r.ok) {
-      if (tbody) tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">Not a user account — no point history</td></tr>';
-      if (loading) loading.textContent = '';
-      return;
-    }
-    const data = await r.json();
-    if (loading) loading.textContent = `${data.history?.length||0} record(s)`;
-
-    if (!data.history?.length) {
-      tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center" style="padding:16px;">No point transactions yet</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = data.history.map(h => {
-      const isCredit = h.type === 'credit';
-      const badge = isCredit
-        ? `<span style="background:#d1f0e0;color:#1a6640;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;">+${h.points}</span>`
-        : `<span style="background:#fde8e6;color:#c0392b;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;">−${h.points}</span>`;
-      return `<tr>
-        <td style="color:${isCredit?'#1a6640':'#c0392b'};font-weight:700;font-size:12px;">${h.type.toUpperCase()}</td>
-        <td style="font-size:12px;">${escHtml(h.description||'')}</td>
-        <td>${badge}</td>
-        <td style="font-size:11px;color:var(--muted);">${h.date||'—'}</td>
-      </tr>`;
-    }).join('');
-  } catch(e) {
-    if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="text-muted text-center">Failed to load: ${e.message}</td></tr>`;
-    if (loading) loading.textContent = '';
-  }
 }
 // ════ End Accounts ════
 

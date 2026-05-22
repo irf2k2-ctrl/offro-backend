@@ -292,19 +292,9 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     if mid:
         try:
             for inv in db.invoices.find({"merchant_id": mid}).sort("created_at",-1).limit(20):
-                payments.append({
-                    "invoice_id":  str(inv["_id"]),
-                    "invoice_no":  inv.get("invoice_no",""),
-                    "type":        inv.get("type",""),
-                    "store_name":  inv.get("store_name",""),
-                    "plan":        inv.get("plan",""),
-                    "base_amount": inv.get("base_amount", inv.get("amount",0)),
-                    "gst_amount":  inv.get("gst_amount",0),
-                    "amount":      inv.get("amount",0),
-                    "status":      inv.get("status",""),
-                    "razorpay_payment_id": inv.get("razorpay_payment_id",""),
-                    "created_at":  str(inv.get("created_at","")),
-                })
+                payments.append({"invoice_id":str(inv["_id"]),"type":inv.get("type",""),
+                    "amount":inv.get("amount",0),"status":inv.get("status",""),
+                    "created_at":str(inv.get("created_at",""))})
         except Exception:
             pass
 
@@ -1557,19 +1547,20 @@ def list_merchant_vouchers(a=Depends(get_current_admin)):
     result = []
     for v in db.merchant_vouchers.find().sort("created_at", -1):
         result.append({
-            "_id":          str(v["_id"]),
+            "_id":           str(v["_id"]),
             "merchant_name": v.get("merchant_name",""),
-            "title":        v.get("title",""),
-            "offer_text":   v.get("offer_text",""),
-            "logo_url":     v.get("logo_url",""),
-            "validity":     v.get("validity", f"{v.get('from_date','')} → {v.get('end_date','')}" if v.get("from_date") else ""),
+            "merchant_phone": v.get("merchant_phone",""),
+            "title":         v.get("title",""),
+            "offer_text":    v.get("offer_text",""),
+            "logo_url":      v.get("logo_url",""),
+            "validity":      v.get("validity", f"{v.get('from_date','')} → {v.get('end_date','')}" if v.get("from_date") else ""),
             "duration_days": v.get("duration_days", v.get("duration",30)),
-            "from_date":    v.get("from_date",""),
-            "end_date":     v.get("end_date",""),
-            "status":       v.get("approval_status","pending_approval"),
-            "invoice_no":   v.get("invoice_no",""),
-            "amount":       v.get("total",0),
-            "created_at":   v["created_at"].strftime("%d %b %Y %H:%M") if isinstance(v.get("created_at"), datetime) else str(v.get("created_at",""))[:16],
+            "from_date":     v.get("from_date",""),
+            "end_date":      v.get("end_date",""),
+            "status":        v.get("approval_status","pending_approval"),
+            "invoice_no":    v.get("invoice_no",""),
+            "amount":        v.get("total",0),
+            "created_at":    v["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if isinstance(v.get("created_at"), datetime) else str(v.get("created_at",""))[:16],
         })
     return result
 
@@ -1634,17 +1625,38 @@ def reject_merchant_voucher(vid: str, body: dict = {}, a=Depends(get_current_adm
 @router.put("/merchant-vouchers/{vid}")
 def update_merchant_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
     """FIX 10: Admin edit merchant voucher fields + status."""
-    allowed = {"title", "offer_text", "validity", "logo", "status"}
+    # ISSUES 5+7: also allow from_date, end_date, logo_url updates
+    allowed = {"title", "offer_text", "validity", "logo", "logo_url", "from_date", "end_date", "status", "approval_status"}
     update_data = {k: v for k, v in data.items() if k in allowed}
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")
     update_data["updated_at"] = datetime.utcnow().isoformat()
+    # Map logo -> logo_url consistency
+    if "logo" in update_data and "logo_url" not in update_data:
+        update_data["logo_url"] = update_data["logo"]
+
     result = db.merchant_vouchers.update_one(
         {"_id": ObjectId(vid)},
         {"$set": update_data}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Voucher not found")
+
+    # ISSUE 7: if status updated, sync to gift_vouchers record
+    if "status" in update_data or "validity" in update_data or "from_date" in update_data or "end_date" in update_data:
+        sync_fields = {}
+        if "validity"   in update_data: sync_fields["validity"]  = update_data["validity"]
+        if "from_date"  in update_data: sync_fields["from_date"] = update_data["from_date"]
+        if "end_date"   in update_data: sync_fields["end_date"]  = update_data["end_date"]
+        if "status"     in update_data:
+            new_st = update_data["status"]
+            sync_fields["is_active"] = (new_st == "approved")
+        if "logo"       in update_data: sync_fields["logo"]      = update_data["logo"]
+        if "title"      in update_data: sync_fields["title"]     = update_data["title"]
+        if "offer_text" in update_data: sync_fields["text"]      = update_data["offer_text"]
+        if sync_fields:
+            db.gift_vouchers.update_many({"source_voucher_id": vid}, {"$set": sync_fields})
+
     return {"ok": True, "updated": update_data}
 
 
