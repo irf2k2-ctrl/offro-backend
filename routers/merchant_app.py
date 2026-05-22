@@ -680,7 +680,11 @@ def merchant_terms():
 @router.get("/subscriptions")
 def my_subscriptions(m=Depends(get_merchant)):
     result = []
-    for s in db.subscriptions.find({"merchant_id": str(m["_id"])}).sort("created_at", -1):
+    # Query by merchant_id OR by phone (unified auth — both fields may exist)
+    merchant_id = str(m["_id"])
+    merchant_phone = str(m.get("phone", ""))
+    query = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}]}
+    for s in db.subscriptions.find(query).sort("created_at", -1):
         fd = s.get("from_date"); ed = s.get("end_date")
         store_doc = {}
         try: store_doc = db.stores.find_one({"_id": ObjectId(s.get("store_id",""))}, {"store_name":1}) or {}
