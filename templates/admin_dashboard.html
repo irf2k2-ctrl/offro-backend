@@ -3993,7 +3993,7 @@ function renderAccountDetailHTML(d) {
     <td style="font-size:11px;color:var(--muted);">${p.created_at?.substring(0,10)||'—'}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted text-center">No payments</td></tr>';
 
   // TASK 1 FIX: build account ID from available fields
-  const acctId = d._id || d.user_id || d.id || '';
+  const acctId = d.account_id || d._id || d.user_id || d.id || '';
   const acctName = (d.full_name || d.name || '').replace(/'/g, "\'");
   return `
   <div style="padding:20px;">
