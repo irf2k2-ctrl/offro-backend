@@ -100,26 +100,27 @@ tr:hover td{background:#f7faf8;}
   </div>
   <div class="sidebar-sub">Admin Panel</div>
   <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
+  <div class="sep"></div>
   <a href="#" onclick="showSection('accounts',this)"><i class="fas fa-id-badge fa-fw"></i> Accounts</a>
-  <a href="#" onclick="showSection('merchants',this)"><i class="fas fa-user-tie fa-fw"></i> Merchants</a>
   <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
-  <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
-  <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
-  <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <a href="#" onclick="showSection('voucher_zone',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
-  <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
+  <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
+  <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <div class="sep"></div>
+  <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
+  <div class="sep"></div>
+  <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
   <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
   <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
   <a href="#" onclick="showSection('policies',this)"><i class="fas fa-shield-alt fa-fw"></i> Policies</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('social',this)"><i class="fab fa-whatsapp fa-fw"></i> Social Media</a>
   <a href="#" onclick="showSection('about',this)"><i class="fas fa-info-circle fa-fw"></i> About Us</a>
-  <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
   <div class="sep"></div>
+  <!-- PHASE 1: Users + Merchants hidden — collections intact, sidebar entries removed -->
   <a href="#" class="logout" onclick="logout()"><i class="fas fa-sign-out-alt fa-fw"></i> Logout</a>
 </div>
 
@@ -2695,51 +2696,25 @@ async function loadGiftCards() {
     const adminCards    = adminR.ok    ? await adminR.json()    : [];
     const merchantCards = merchantR.ok ? await merchantR.json() : [];
 
-    // Helper: parse validity text → Date (handles "31 Dec 2025", "31/12/2025", ISO)
-    function parseValidityDate(val) {
-      if (!val) return null;
-      // ISO
-      let d = new Date(val.trim());
-      if (!isNaN(d)) return d;
-      // DD/MM/YYYY or DD-MM-YYYY
-      const slash = val.trim().match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
-      if (slash) return new Date(+slash[3], +slash[2]-1, +slash[1]);
-      // "31 Dec 2025"
-      const months={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
-      const txt = val.trim().match(/^(\d{1,2})\s+(\w+)\s+(\d{4})$/);
-      if (txt) {
-        const m = months[txt[2].toLowerCase().slice(0,3)];
-        if (m !== undefined) return new Date(+txt[3], m, +txt[1]);
-      }
-      return null;
-    }
-    const _nowVz = new Date();
-
     // Normalize admin cards
-    const adminRows = adminCards.map(v => {
-      const vDate = parseValidityDate(v.validity || '');
-      const isExpired = vDate && vDate < _nowVz;
-      return {
-        _id:        v.id || v._id,
-        _source:    'admin',
-        logo:       v.logo || '',
-        title:      v.title || '',
-        offer_text: v.text || '',
-        validity:   v.validity || '',
-        is_active:  v.is_active !== false && !isExpired,
-        status:     isExpired ? 'expired' : (v.is_active !== false ? 'approved' : 'hidden'),
-        approval_status: 'approved',
-        merchant_name: v.merchant_name || '',
-        created_at: v.created_at || '',
-        _raw: v,
-      };
-    });
+    const adminRows = adminCards.map(v => ({
+      _id:        v.id || v._id,
+      _source:    'admin',
+      logo:       v.logo || '',
+      title:      v.title || '',
+      offer_text: v.text || '',
+      validity:   v.validity || '',
+      is_active:  v.is_active !== false,
+      status:     v.is_active !== false ? 'approved' : 'hidden',
+      approval_status: 'approved',
+      merchant_name: v.merchant_name || '',
+      created_at: v.created_at || '',
+      _raw: v,
+    }));
 
     // Normalize merchant cards
     const merchantRows = merchantCards.map(v => {
       const st = v.status || 'pending_approval';
-      const vDate = parseValidityDate(v.validity || v.end_date || '');
-      const isExpired = vDate && vDate < _nowVz;
       return {
         _id:        v._id,
         _source:    'merchant',
@@ -2747,8 +2722,8 @@ async function loadGiftCards() {
         title:      v.title || '',
         offer_text: v.offer_text || '',
         validity:   v.validity || v.end_date || '',
-        is_active:  st === 'approved' && !isExpired,
-        status:     isExpired ? 'expired' : (st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending')),
+        is_active:  st === 'approved',
+        status:     st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending'),
         approval_status: st,
         merchant_name: v.merchant_name || '',
         created_at: v.created_at || '',
@@ -2851,13 +2826,7 @@ function renderVoucherZone(rows) {
       <td>${logoHtml}</td>
       <td><strong style="font-size:13px">${r.title||'—'}</strong></td>
       <td>${creatorBadge}</td>
-      <td style="font-size:12px;">
-        ${r.validity
-          ? (r.status==='expired'
-              ? `<span style="background:#fde8e6;color:#c0392b;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700">⛔ Expired</span><div style="font-size:10px;color:var(--muted);margin-top:2px">${r.validity}</div>`
-              : `<span style="color:var(--primary);font-size:11px;font-weight:600">📅 Till: ${r.validity}</span>`)
-          : '<span style="color:var(--muted)">—</span>'}
-      </td>
+      <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
       <td>${statusBadge}</td>
       <td>
         <button class="btn-o me-1" onclick='openVZViewModal(${viewJson})'>View</button>
