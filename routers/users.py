@@ -201,6 +201,84 @@ def merchant_login_unified(data: dict):
     return response
 
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UNIFIED ACCOUNT LOGIN — single endpoint for all account types
+# POST /user/account-login
+# Called after MSG91 OTP verified on Flutter side.
+# Checks users first, then merchants — one token for everything.
+# ══════════════════════════════════════════════════════════════════════════════
+@router.post("/account-login")
+def account_login(data: dict):
+    """
+    Single login for all accounts. No role selection needed.
+    - Checks users collection first → issues user token
+    - If not user → checks merchants → issues merchant token
+    - Returns: token, name, phone, user_id, is_merchant, merchant_id (if merchant)
+    """
+    raw_phone = str(data.get("phone", "")).strip()
+    if not raw_phone:
+        raise HTTPException(status_code=400, detail="Phone is required")
+
+    variants = _phone_variants(raw_phone)
+
+    # Check users first
+    user = db.users.find_one({"phone": {"$in": variants}})
+    if user:
+        token = str(uuid.uuid4())
+        db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}}
+        )
+        # Also check if this user has a merchant account
+        merchant = db.merchants.find_one({"phone": {"$in": variants}})
+        mid = str(merchant["_id"]) if merchant else ""
+        print(f"[ACCOUNT-LOGIN] ✅ User session: {raw_phone} — user_id={str(user['_id'])}")
+        response = JSONResponse(content={
+            "account_id":   str(user["_id"]),
+            "user_id":      str(user["_id"]),
+            "name":         user.get("name", ""),
+            "phone":        user.get("phone", raw_phone),
+            "token":        token,
+            "is_merchant":  merchant is not None,
+            "merchant_id":  mid,
+            "visit_points": user.get("visit_points", 0),
+            "pool_points":  user.get("pool_points", 0),
+            "role":         "both" if merchant else "user",
+        })
+        response.set_cookie(key="user_token", value=token, httponly=True,
+            samesite="Lax", secure=False, max_age=3600*24*30)
+        return response
+
+    # Not a user — check merchants
+    merchant = db.merchants.find_one({"phone": {"$in": variants}})
+    if merchant:
+        if merchant.get("status") == "blocked":
+            raise HTTPException(status_code=403, detail="Account suspended. Contact support.")
+        token = str(uuid.uuid4())
+        db.merchants.update_one(
+            {"_id": merchant["_id"]},
+            {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}}
+        )
+        print(f"[ACCOUNT-LOGIN] ✅ Merchant session: {raw_phone} — merchant_id={str(merchant['_id'])}")
+        response = JSONResponse(content={
+            "account_id":  str(merchant["_id"]),
+            "user_id":     "",
+            "merchant_id": str(merchant["_id"]),
+            "name":        merchant.get("name", ""),
+            "phone":       merchant.get("phone", raw_phone),
+            "token":       token,
+            "is_merchant": True,
+            "role":        "merchant",
+        })
+        response.set_cookie(key="merchant_token", value=token, httponly=True,
+            samesite="Lax", secure=False, max_age=3600*24*30)
+        return response
+
+    # Not found anywhere
+    raise HTTPException(status_code=404, detail="Phone not registered. Please register first.")
+
 @router.post("/check-phone")
 def check_phone(data: dict):
     """
