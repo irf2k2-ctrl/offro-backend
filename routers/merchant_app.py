@@ -723,9 +723,17 @@ def get_my_banners(m=Depends(get_merchant)):
         })
 
     # 2. Admin-created banners assigned to this merchant (by phone)
-    if merchant_phone:
-        for s in db.promo_sliders.find({"merchant_phone": merchant_phone}).sort("created_at", -1):
-            end_date  = str(s.get("end_date", s.get("expires_at", "")))[:10]
+    # Normalize to last 10 digits to handle +91XXXXXXXXXX vs XXXXXXXXXX mismatch
+    phone_10 = re.sub(r'\D', '', merchant_phone)[-10:] if merchant_phone else ""
+    if phone_10:
+        # Fetch all promo_sliders that have a merchant_phone set, then match in Python
+        for s in db.promo_sliders.find(
+            {"merchant_phone": {"$exists": True, "$ne": ""}},
+        ).sort("created_at", -1):
+            s_phone_10 = re.sub(r'\D', '', str(s.get("merchant_phone", "")))[-10:]
+            if s_phone_10 != phone_10:
+                continue
+            end_date   = str(s.get("end_date", s.get("expires_at", "")))[:10]
             is_expired = bool(end_date and end_date < today)
             result.append({
                 "_id":             str(s["_id"]),
