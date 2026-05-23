@@ -8,6 +8,49 @@ from bson import ObjectId
 from datetime import datetime, timedelta
 import uuid, qrcode, io, base64, hmac, hashlib
 
+
+import os as _cld_os, hashlib as _cld_hash, time as _cld_time
+import requests as _cld_req
+
+def _cloudinary_upload(b64_or_url: str, folder: str = "offro") -> str:
+    """Upload base64 to Cloudinary → secure_url. No-op if not configured or already URL."""
+    if not b64_or_url:
+        return b64_or_url
+    cloud  = _cld_os.getenv("CLOUDINARY_CLOUD_NAME", "")
+    api_key= _cld_os.getenv("CLOUDINARY_API_KEY", "")
+    secret = _cld_os.getenv("CLOUDINARY_API_SECRET", "")
+    if not cloud or not api_key or not secret:
+        return b64_or_url  # Cloudinary not configured — pass-through
+    # Already a CDN/HTTP URL → skip upload
+    if b64_or_url.startswith("http://") or b64_or_url.startswith("https://"):
+        return b64_or_url
+    data_str  = b64_or_url.split(",", 1)[-1] if "," in b64_or_url else b64_or_url
+    timestamp = str(int(_cld_time.time()))
+    sig_str   = f"folder={folder}&timestamp={timestamp}{secret}"
+    signature = _cld_hash.sha1(sig_str.encode()).hexdigest()
+    try:
+        resp = _cld_req.post(
+            f"https://api.cloudinary.com/v1_1/{cloud}/image/upload",
+            data={"file": f"data:image/jpeg;base64,{data_str}",
+                  "folder": folder, "timestamp": timestamp,
+                  "api_key": api_key, "signature": signature},
+            timeout=25,
+        )
+        if resp.status_code == 200:
+            url = resp.json().get("secure_url", b64_or_url)
+            print(f"[CDN] uploaded to {url[:70]}")
+            return url
+        print(f"[CDN] error {resp.status_code}: {resp.text[:100]}")
+    except Exception as e:
+        print(f"[CDN] upload failed: {e}")
+    return b64_or_url
+
+def _make_thumb_url(cdn_url: str, w: int = 300) -> str:
+    """Return Cloudinary thumbnail URL."""
+    if "cloudinary.com" in str(cdn_url):
+        return cdn_url.replace("/upload/", f"/upload/w_{w},c_fill,q_auto,f_auto/")
+    return ""
+
 router = APIRouter(tags=["MerchantApp"])
 
 import os as _os
@@ -787,61 +830,78 @@ def get_my_banners(m=Depends(get_merchant)):
     from datetime import datetime as dt
     merchant_id    = str(m["_id"])
     merchant_phone = str(m.get("phone", ""))
+    # Also check legacy merchant_id field stored in accounts
+    legacy_mid     = str(m.get("merchant_id", ""))
     today          = dt.utcnow().strftime("%Y-%m-%d")
 
     result = []
 
-    # 1. Merchant-submitted banners (their own orders)
-    # Unified: match by merchant_id OR merchant_phone
-    mb_query = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}]}                if merchant_phone else {"merchant_id": merchant_id}
-    for b in db.merchant_banners.find(mb_query).sort("created_at", -1):
-        end_date  = str(b.get("end_date", ""))[:10]
-        is_expired = bool(end_date and end_date < today)
-        result.append({
-            "_id":             str(b["_id"]),
-            "title":           b.get("title", ""),
-            "image_url":       b.get("image_url", ""),
-            "duration":        b.get("duration_days", 0),
-            "from_date":       b.get("from_date", ""),
-            "end_date":        b.get("end_date", ""),
-            "amount":          b.get("total", 0),
-            "status":          b.get("status", "pending"),
-            "approval_status": b.get("approval_status", "pending"),
-            "created_at":      b.get("created_at", ""),
-            "source":          "merchant",
-            "is_expired":      is_expired,
-        })
+    def _safe_str_date(val):
+        """Convert datetime or string to ISO string safely."""
+        if val is None:
+            return ""
+        if hasattr(val, 'strftime'):
+            return val.strftime("%Y-%m-%dT%H:%M:%S")
+        return str(val)
 
-    # 2. Admin-created banners assigned to this merchant (by phone)
-    # Normalize to last 10 digits to handle +91XXXXXXXXXX vs XXXXXXXXXX mismatch
-    phone_10 = re.sub(r'\D', '', merchant_phone)[-10:] if merchant_phone else ""
-    if phone_10:
-        # Fetch all promo_sliders that have a merchant_phone set, then match in Python
-        for s in db.promo_sliders.find(
-            {"merchant_phone": {"$exists": True, "$ne": ""}},
-        ).sort("created_at", -1):
-            s_phone_10 = re.sub(r'\D', '', str(s.get("merchant_phone", "")))[-10:]
-            if s_phone_10 != phone_10:
-                continue
-            end_date   = str(s.get("end_date", s.get("expires_at", "")))[:10]
+    # 1. Merchant-submitted banners — match by merchant_id OR legacy_mid OR phone
+    try:
+        id_candidates = list({mid for mid in [merchant_id, legacy_mid] if mid and mid != "None"})
+        mb_query = {"$or": [
+            {"merchant_id": {"$in": id_candidates}},
+            {"merchant_phone": merchant_phone},
+        ]} if merchant_phone else {"merchant_id": {"$in": id_candidates}}
+        for b in db.merchant_banners.find(mb_query).sort("created_at", -1):
+            end_date   = str(b.get("end_date", ""))[:10]
             is_expired = bool(end_date and end_date < today)
             result.append({
-                "_id":             str(s["_id"]),
-                "title":           s.get("title", ""),
-                "image_url":       s.get("image_url", ""),
-                "duration":        s.get("duration_days", 0),
-                "from_date":       s.get("from_date", ""),
-                "end_date":        s.get("end_date", s.get("expires_at", "")),
-                "amount":          0,
-                "status":          "expired" if is_expired else ("approved" if s.get("is_active") else "hidden"),
-                "approval_status": "expired" if is_expired else "approved",
-                "created_at":      str(s.get("created_at", ""))[:16],
-                "source":          "admin",
+                "_id":             str(b["_id"]),
+                "title":           b.get("title", ""),
+                "image_url":       b.get("image_url", ""),
+                "duration":        b.get("duration_days", 0),
+                "from_date":       b.get("from_date", ""),
+                "end_date":        b.get("end_date", ""),
+                "amount":          b.get("total", 0),
+                "status":          b.get("status", "pending"),
+                "approval_status": b.get("approval_status", "pending"),
+                "created_at":      _safe_str_date(b.get("created_at", "")),
+                "source":          "merchant",
                 "is_expired":      is_expired,
             })
+    except Exception as e:
+        print(f"[BANNERS] merchant_banners query error: {e}")
 
-    # Sort combined list by created_at desc
-    result.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+    # 2. Admin-created banners (promo_sliders) assigned to this merchant
+    try:
+        phone_10 = re.sub(r'\D', '', merchant_phone)[-10:] if merchant_phone else ""
+        if phone_10:
+            for s in db.promo_sliders.find(
+                {"merchant_phone": {"$exists": True, "$ne": ""}}
+            ):
+                s_phone_10 = re.sub(r'\D', '', str(s.get("merchant_phone", "")))[-10:]
+                if s_phone_10 != phone_10:
+                    continue
+                end_date   = str(s.get("end_date", s.get("expires_at", "")))[:10]
+                is_expired = bool(end_date and end_date < today)
+                result.append({
+                    "_id":             str(s["_id"]),
+                    "title":           s.get("title", ""),
+                    "image_url":       s.get("image_url", ""),
+                    "duration":        s.get("duration_days", 0),
+                    "from_date":       s.get("from_date", ""),
+                    "end_date":        s.get("end_date", s.get("expires_at", "")),
+                    "amount":          0,
+                    "status":          "expired" if is_expired else ("approved" if s.get("is_active") else "hidden"),
+                    "approval_status": "expired" if is_expired else "approved",
+                    "created_at":      _safe_str_date(s.get("created_at", "")),
+                    "source":          "admin",
+                    "is_expired":      is_expired,
+                })
+    except Exception as e:
+        print(f"[BANNERS] promo_sliders query error: {e}")
+
+    # Safe sort — all created_at are now strings
+    result.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return result
 
 # ── GET /merchant/banners/pricing  ─────────────────────────────────────────
@@ -972,7 +1032,8 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     merchant_id = str(m["_id"])
     order_id    = data.get("order_id", "")
     title       = data.get("title", "")
-    image_url   = data.get("image_url", "")
+    image_url   = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
+    image_thumb = _make_thumb_url(image_url)
 
     order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
     if not order:
@@ -989,6 +1050,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "merchant_phone":   str(m.get("phone", "")),
         "title":            title,
         "image_url":        image_url,
+        "image_thumb":      image_thumb,
         "duration_days":    order.get("days", 30),
         "from_date":        order.get("from_date", ""),
         "end_date":         order.get("end_date", ""),
@@ -1044,7 +1106,8 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     merchant_id       = str(m["_id"])
     order_id          = data.get("order_id", "")
     title             = data.get("title", "")
-    image_url         = data.get("image_url", "")
+    image_url         = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
+    image_thumb       = _make_thumb_url(image_url)
     razorpay_payment_id = data.get("razorpay_payment_id", "")
     razorpay_order_id   = data.get("razorpay_order_id", "")
     razorpay_signature  = data.get("razorpay_signature", "")
@@ -1072,6 +1135,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "merchant_phone":   str(m.get("phone", "")),
         "title":            title,
         "image_url":        image_url,
+        "image_thumb":      image_thumb,
         "duration_days":    order.get("days", 30),
         "from_date":        order.get("from_date", ""),
         "end_date":         order.get("end_date", ""),
@@ -1292,7 +1356,8 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     order_id    = data.get("order_id", "")
     title       = data.get("title", "")
     offer_text  = data.get("offer_text", "")
-    logo_url    = data.get("logo_url", "")
+    logo_url    = _cloudinary_upload(data.get("logo_url",""), folder="offro/vouchers")
+    logo_thumb  = _make_thumb_url(logo_url)
     validity    = data.get("validity", "")
 
     order = db.voucher_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
@@ -1367,7 +1432,8 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
     order_id            = data.get("order_id", "")
     title               = data.get("title", "")
     offer_text          = data.get("offer_text", "")
-    logo_url            = data.get("logo_url", "")
+    logo_url            = _cloudinary_upload(data.get("logo_url",""), folder="offro/vouchers")
+    logo_thumb          = _make_thumb_url(logo_url)
     validity            = data.get("validity", "")
     razorpay_payment_id = data.get("razorpay_payment_id", "")
     razorpay_order_id   = data.get("razorpay_order_id", "")
@@ -1397,6 +1463,7 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         "title":            title,
         "offer_text":       offer_text,
         "logo_url":         logo_url,
+        "logo_thumb":       logo_thumb,
         "validity":         validity,
         "duration_days":    order.get("days", 30),
         "from_date":        order.get("from_date", ""),

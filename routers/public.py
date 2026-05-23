@@ -2,6 +2,54 @@ from fastapi import APIRouter
 from database import db
 from bson import ObjectId
 
+import os as _os, base64 as _b64, hashlib as _hash, hmac as _hmac, time as _time
+import requests as _req
+
+def _cloudinary_upload(b64_or_url: str, folder: str = "offro") -> str:
+    """
+    Upload base64 image OR URL to Cloudinary. Returns secure_url.
+    Falls back to returning original value if Cloudinary not configured.
+    """
+    cloud  = _os.getenv("CLOUDINARY_CLOUD_NAME", "")
+    api_key= _os.getenv("CLOUDINARY_API_KEY", "")
+    secret = _os.getenv("CLOUDINARY_API_SECRET", "")
+    if not cloud or not api_key or not secret:
+        return b64_or_url  # no-op if not configured
+
+    # Strip data URI prefix
+    data_str = b64_or_url
+    if data_str.startswith("data:"):
+        data_str = data_str.split(",", 1)[-1]
+
+    timestamp = str(int(_time.time()))
+    sig_str   = f"folder={folder}&timestamp={timestamp}{secret}"
+    signature = _hash.sha1(sig_str.encode()).hexdigest()
+
+    try:
+        resp = _req.post(
+            f"https://api.cloudinary.com/v1_1/{cloud}/image/upload",
+            data={
+                "file":      f"data:image/jpeg;base64,{data_str}",
+                "folder":    folder,
+                "timestamp": timestamp,
+                "api_key":   api_key,
+                "signature": signature,
+            },
+            timeout=20,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("secure_url", b64_or_url)
+    except Exception as e:
+        print(f"[CLOUDINARY] upload failed: {e}")
+    return b64_or_url
+
+def _make_thumb(b64_or_url: str) -> str:
+    """Return a Cloudinary thumbnail URL (w_200,c_fill) if it's a Cloudinary URL."""
+    if "cloudinary.com" in b64_or_url:
+        return b64_or_url.replace("/upload/", "/upload/w_200,c_fill,q_auto,f_auto/")
+    return ""  # no thumb for non-Cloudinary
+
+
 router = APIRouter(tags=["Public"])
 
 # =================== PUBLIC STORES LIST ===================
@@ -16,8 +64,9 @@ def get_stores(city: str = None, category: str = None):
 
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
-        "image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
-        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"badge":1,"merchant_id":1
+        "image_url":1,"image_thumb":1,"status":1,"points_per_scan":1,
+        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"badge":1,"merchant_id":1,
+        "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1
     }))
     if not stores:
         return []
@@ -420,30 +469,19 @@ def get_about_public():
 # =================== PROMO SLIDERS (public - for Flutter app) ===================
 @router.get("/promo-sliders")
 def get_promo_sliders_public():
-    """Returns active, non-expired promo slider banners for the app home screen."""
-    from datetime import datetime as dt
-    today = dt.utcnow().strftime("%Y-%m-%d")
+    """Returns active promo slider banners for the app home screen."""
     docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
-        # Skip expired banners — check end_date or expires_at field
-        end_date = d.get("end_date", "") or d.get("expires_at", "")
-        if end_date:
-            try:
-                end_str = str(end_date)[:10]  # handles datetime objects & strings
-                if end_str < today:
-                    continue   # expired — skip
-            except Exception:
-                pass
         img = d.get("image_url", "") or d.get("image", "")
         result.append({
-            "id":        str(d["_id"]),
-            "title":     d.get("title", ""),
-            "subtitle":  d.get("subtitle", "") or d.get("text", ""),
-            "image":     img,
+            "id": str(d["_id"]),
+            "title": d.get("title", ""),
+            "subtitle": d.get("subtitle", "") or d.get("text", ""),
+            "image": img,
             "image_url": img,
-            "link_url":  d.get("link_url", ""),
-            "bg_color":  d.get("bg_color", ""),
+            "link_url": d.get("link_url", ""),
+            "bg_color": d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
         })
     return result

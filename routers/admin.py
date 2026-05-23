@@ -11,6 +11,44 @@ import time as _time
 _store_cache = {"data": None, "ts": 0.0}
 _STORE_CACHE_TTL = 15
 
+
+import os as _cld_os, hashlib as _cld_hash, time as _cld_time
+import requests as _cld_req
+
+def _cloudinary_upload(b64_or_url: str, folder: str = "offro") -> str:
+    """Upload base64 to Cloudinary → secure_url. No-op if not configured or already URL."""
+    if not b64_or_url:
+        return b64_or_url
+    cloud  = _cld_os.getenv("CLOUDINARY_CLOUD_NAME", "")
+    api_key= _cld_os.getenv("CLOUDINARY_API_KEY", "")
+    secret = _cld_os.getenv("CLOUDINARY_API_SECRET", "")
+    if not cloud or not api_key or not secret:
+        return b64_or_url
+    if b64_or_url.startswith("http://") or b64_or_url.startswith("https://"):
+        return b64_or_url
+    data_str  = b64_or_url.split(",", 1)[-1] if "," in b64_or_url else b64_or_url
+    timestamp = str(int(_cld_time.time()))
+    sig_str   = f"folder={folder}&timestamp={timestamp}{secret}"
+    signature = _cld_hash.sha1(sig_str.encode()).hexdigest()
+    try:
+        resp = _cld_req.post(
+            f"https://api.cloudinary.com/v1_1/{cloud}/image/upload",
+            data={"file": f"data:image/jpeg;base64,{data_str}",
+                  "folder": folder, "timestamp": timestamp,
+                  "api_key": api_key, "signature": signature},
+            timeout=25,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("secure_url", b64_or_url)
+    except Exception as e:
+        print(f"[CDN] upload failed: {e}")
+    return b64_or_url
+
+def _make_thumb_url(cdn_url: str, w: int = 300) -> str:
+    if "cloudinary.com" in str(cdn_url):
+        return cdn_url.replace("/upload/", f"/upload/w_{w},c_fill,q_auto,f_auto/")
+    return ""
+
 router = APIRouter(tags=["Admin"])
 
 def create_token(): return str(uuid.uuid4())
@@ -425,7 +463,9 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "status": "active",
         "points_per_scan": int(data.get("points_per_scan", 0)),
         "lat": data.get("lat",""), "lng": data.get("lng",""),
-        "image": data.get("image") or None,
+        "image_url":   _cloudinary_upload(data.get("image","") or "", folder="offro/stores"),
+        "image_thumb": _make_thumb_url(_cloudinary_upload(data.get("image","") or "", folder="offro/stores")),
+        "image":       None,
         "is_new_in_town": bool(data.get("is_new_in_town", False)),
         "badge": data.get("badge", ""),
         "created_at": datetime.utcnow()
@@ -1091,7 +1131,7 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
 
     doc = {
         "title":          data.get("title", ""),
-        "image_url":      data["image_url"],
+        "image_url":      _cloudinary_upload(data["image_url"], folder="offro/sliders"),
         "link_url":       data.get("link_url", ""),
         "sort_order":     int(data.get("sort_order", 0)),
         "is_active":      bool(data.get("is_active", True)),
@@ -1263,6 +1303,9 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
     target     = (data.get("target") or "all_users").strip()
     use_topic  = data.get("use_topic", target != "specific")
     image_url  = (data.get("image_url") or "").strip()
+    # Upload to Cloudinary if it's a base64 image
+    if image_url and (image_url.startswith("data:") or not image_url.startswith("http")):
+        image_url = _cloudinary_upload(image_url, folder="offro/notifications")
 
     if not title or not body:
         raise HTTPException(400, "title and body are required")
