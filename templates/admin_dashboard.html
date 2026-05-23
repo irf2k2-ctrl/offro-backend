@@ -2764,6 +2764,7 @@ window.addEventListener("DOMContentLoaded", function() {
 
 // ── All products data cache + pagination ──
 let _allVoucherRows = [];
+let _vzLogoMap = {};  // stores logos separately to avoid huge base64 in onclick JSON
 let _vzFilteredRows = [];
 let _vzPage = 1;
 const _VZ_PER_PAGE = 15;
@@ -2878,6 +2879,9 @@ async function loadGiftCards() {
 
     _allVoucherRows = [...adminRows, ...dedupedMerchantRows]
       .sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+    // Build logo lookup map — strip heavy base64 from row objects so onclick JSON stays small
+    _vzLogoMap = {};
+    _allVoucherRows.forEach(r => { if (r.logo) { _vzLogoMap[r._id] = r.logo; r.logo = ''; } });
 
     // Update stats — expired is computed at normalize time (Issue 7)
     const approved = _allVoucherRows.filter(r=>r.status==='approved').length;
@@ -2955,7 +2959,8 @@ function renderVoucherZone() {
 
   tbody.innerHTML = rows.map(r => {
     // TASK 2 FIX: handle both HTTPS URLs and base64 data: URIs
-    const _logoSrc = r.logo || '';
+    // Logo stored in _vzLogoMap to avoid huge base64 in onclick JSON
+    const _logoSrc = _vzLogoMap[r._id] || r.logo || '';
     const logoHtml = _logoSrc
       ? `<img src="${_logoSrc}" style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
         + `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:none;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`
@@ -2994,7 +2999,9 @@ function renderVoucherZone() {
       ? `<button class="btn-approve me-1" style="font-size:11px;padding:4px 10px" onclick="approveVZVoucher('${r._id}','${r._source}')">Approve</button>`
       : '';
 
-    const viewJson = JSON.stringify(r).replace(/"/g,'&quot;');
+    // Strip heavy base64 logo + _raw before embedding in onclick attribute
+    const _safeR = Object.assign({}, r, {logo: '', _raw: null});
+    const viewJson = JSON.stringify(_safeR).replace(/"/g,'&quot;');
     return `<tr>
       <td>${logoHtml}</td>
       <td><strong style="font-size:13px">${r.title||'—'}</strong></td>
@@ -3053,8 +3060,9 @@ function openVZViewModal(r) {
   // TASK 2 FIX: set logo in view — works for both URL and base64 data: URIs
   const _vzLogo = document.getElementById('vz_modal_logo');
   if (_vzLogo) {
-    _vzLogo.src = r.logo || '';
-    _vzLogo.style.display = r.logo ? 'block' : 'none';
+    const _modalLogoSrc = _vzLogoMap[r._id] || r.logo || '';
+    _vzLogo.src = _modalLogoSrc;
+    _vzLogo.style.display = _modalLogoSrc ? 'block' : 'none';
   }
   document.getElementById('vz_modal_title').textContent = r.title||'—';
   document.getElementById('vz_modal_offer').textContent = r.offer_text||'—';
