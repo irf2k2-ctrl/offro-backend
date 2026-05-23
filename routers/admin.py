@@ -446,6 +446,42 @@ def list_stores(a=Depends(get_current_admin)):
     _store_cache["ts"] = _time.time()
     return result
 
+
+
+@router.post("/migrate-store-images")
+def migrate_store_images(a=Depends(get_current_admin)):
+    """One-time: upload any base64 store images to Cloudinary and replace with CDN urls."""
+    global _store_cache; _store_cache["data"] = None
+    stores = list(db.stores.find({}, {"_id": 1, "image": 1, "image_url": 1, "image_thumb": 1}))
+    migrated, skipped, failed = [], [], []
+    for s in stores:
+        sid = str(s["_id"])
+        img = s.get("image") or ""
+        already = s.get("image_url") or ""
+        if already and already.startswith("http"):
+            skipped.append(sid)
+            continue
+        if not img or img == "None":
+            skipped.append(sid)
+            continue
+        try:
+            cdn = _cloudinary_upload(img, folder="offro/stores")
+            if cdn and cdn.startswith("http"):
+                db.stores.update_one(
+                    {"_id": s["_id"]},
+                    {"$set": {
+                        "image_url":   cdn,
+                        "image_thumb": _make_thumb_url(cdn),
+                        "image":       None  # clear base64
+                    }}
+                )
+                migrated.append(sid)
+            else:
+                skipped.append(sid)  # Cloudinary not configured — skip
+        except Exception as e:
+            failed.append({"id": sid, "error": str(e)})
+    return {"migrated": len(migrated), "skipped": len(skipped), "failed": failed}
+
 @router.post("/stores")
 def create_store(data: dict, a=Depends(get_current_admin)):
     global _store_cache; _store_cache["data"] = None
@@ -561,9 +597,20 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
         upd["visit_points"] = int(data["visit_points"])
     if "merchant_id" in data and data["merchant_id"] and data["merchant_id"].strip():
         upd["merchant_id"] = data["merchant_id"].strip()
-    # Accept image — only update if a new value is explicitly provided (not null/empty)
-    if data.get("image"):          # only overwrite if new image sent
-        upd["image"] = data["image"]
+    # Accept image — upload to Cloudinary if base64, store CDN url
+    if data.get("image"):
+        _img_raw = data["image"]
+        if _img_raw.startswith("data:") or not _img_raw.startswith("http"):
+            # base64 — upload to Cloudinary
+            _cdn = _cloudinary_upload(_img_raw, folder="offro/stores")
+            upd["image_url"]   = _cdn
+            upd["image_thumb"] = _make_thumb_url(_cdn)
+            upd["image"]       = None  # clear raw base64 to save space
+        else:
+            # already a CDN URL
+            upd["image_url"]   = _img_raw
+            upd["image_thumb"] = _make_thumb_url(_img_raw)
+            upd["image"]       = None
     if data.get("image2"):         # save image2 as store_image2 (matches public.py field name)
         upd["store_image2"] = data["image2"]
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])

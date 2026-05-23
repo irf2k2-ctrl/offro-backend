@@ -254,6 +254,7 @@ tr:hover td{background:#f7faf8;}
           <option value="draft">Draft</option>
         </select>
         <button class="btn-p" onclick="openCreateStore()">+ Create Store</button>
+        <button onclick="migrateStoreImages()" style="background:#fff;border:1px solid var(--primary);color:var(--primary);padding:7px 14px;border-radius:8px;font-size:13px;cursor:pointer;margin-left:8px;" title="Upload base64 images to Cloudinary CDN">&#9729; Migrate Images</button>
       </div>
     </div>
     <div class="table-wrap"><table>
@@ -1440,6 +1441,16 @@ async function toggleMerchant(id){if(!confirm("Toggle status?"))return;await fet
 async function deleteMerchant(id){if(!confirm("Delete merchant and all stores?"))return;await fetch(`/admin/merchants/${id}`,{method:"DELETE",credentials:"include"});loadMerchants();loadStats();}
 
 // ===== STORES =====
+async function migrateStoreImages() {
+  if (!confirm("Upload all base64 store images to Cloudinary CDN?\nThis runs once and is safe to repeat.")) return;
+  try {
+    const r = await fetch("/admin/migrate-store-images", {method:"POST", credentials:"include"});
+    const d = await r.json();
+    alert(`Migration complete!\nMigrated: ${d.migrated}\nSkipped: ${d.skipped}\nFailed: ${d.failed?.length||0}`);
+    loadStores();
+  } catch(e) { alert("Migration error: " + e); }
+}
+
 async function loadStores(){
   document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--muted)"><div class="spinner-border spinner-border-sm text-success me-2"></div>Loading stores...</td></tr>`;
   try {
