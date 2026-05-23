@@ -1942,7 +1942,10 @@ async function loadSliders() {
       fetch('/admin/merchant-banners', {credentials:'include'}),
     ]);
     const sliders  = slidersR.ok  ? await slidersR.json()  : [];
-    const mbanners = merchantR.ok ? await merchantR.json() : [];
+    const mbanners_raw = merchantR.ok ? await merchantR.json() : [];
+    console.log('[loadSliders] promo-sliders:', sliders.length, 'merchant-banners:', mbanners_raw.length);
+    const mbanners = mbanners_raw;
+    // mbanners already set above with debug log
 
     // Normalize admin sliders (auto approved)
     const now = new Date();
@@ -2020,7 +2023,11 @@ async function loadSliders() {
     _set('bn_admin',    admin);
 
     filterBanners();
-  } catch(e) { console.error('loadSliders error', e); }
+  } catch(e) {
+    console.error('loadSliders error', e);
+    const tbody = document.getElementById('bn_unified_body');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--danger)">Error loading banners: ${e.message}</td></tr>`;
+  }
 }
 
 function filterBanners() {

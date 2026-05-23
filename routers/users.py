@@ -30,279 +30,37 @@ def _normalise_phone(raw: str) -> str:
 router = APIRouter(tags=["Users"])
 
 def get_current_user(request: Request):
-    token = request.cookies.get("user_token")
-    if not token:
-        auth = request.headers.get("Authorization", "")
-        if "Bearer " in auth:
-            token = auth.split(" ")[1]
+    token = (request.cookies.get("user_token") or
+             request.headers.get("Authorization", "").replace("Bearer ", ""))
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    user = db.users.find_one({"token": token})
-    if not user:
-        raise HTTPException(status_code=403, detail="Invalid session")
-    return user
-
-# ══════════════════════════════════════════════════════════════════════════════
-# OTP — SEND
-# POST /user/send-otp
-# Body: { "phone": "+91XXXXXXXXXX" }
-# ══════════════════════════════════════════════════════════════════════════════
-@router.post("/send-otp")
-def send_otp_endpoint(data: dict):
-    """
-    DEPRECATED — OTP is now handled by MSG91 Widget SDK on the Flutter side.
-    Kept for backward compatibility only. Not called by current app version.
-    """
-    return {"message": "OTP is now handled by MSG91 Widget SDK.", "deprecated": True}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# OTP — VERIFY  (replaces client-side 1234 check)
-# POST /user/verify-otp
-# Body: { "phone": "+91XXXXXXXXXX", "otp": "XXXX" }
-# Returns session token on success — same shape as old /login response
-# ══════════════════════════════════════════════════════════════════════════════
-@router.post("/verify-otp")
-def verify_otp_endpoint(data: dict):
-    """
-    DEPRECATED — OTP verification is now handled by MSG91 Widget SDK on the Flutter side.
-    Kept for backward compatibility only. Not called by current app version.
-    """
-    return {"message": "OTP verification is now handled by MSG91 Widget SDK.", "deprecated": True}
-# ══════════════════════════════════════════════════════════════════════════════
-# REGISTER  (unchanged — register first, then OTP flow)
-# ══════════════════════════════════════════════════════════════════════════════
-@router.post("/register")
-def register_user(data: dict):
-    raw_phone = str(data.get("phone", "")).strip()
-    name = data.get("name", "").strip()
-    if not raw_phone or not name:
-        raise HTTPException(status_code=400, detail="Name and phone are required")
-    phone = _normalise_phone(raw_phone)
-    if db.users.find_one({"phone": {"$in": _phone_variants(raw_phone)}}):
-        raise HTTPException(status_code=400, detail="Phone already registered")
-    user = {
-        "name":         name,
-        "phone":        phone,
-        "city":         data.get("city", ""),
-        "visit_points": 0,
-        "pool_points":  0,
-        "token":        None,
-    }
-    result = db.users.insert_one(user)
-    return {"message": "Registered successfully", "user_id": str(result.inserted_id)}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# LOGIN  (kept for backward compat — now triggers OTP send, no direct token)
-# POST /user/login
-# Flutter calls this to initiate login → then shows OTP screen → calls verify-otp
-# ══════════════════════════════════════════════════════════════════════════════
-@router.post("/login")
-def login_user(data: dict):
-    """
-    MSG91 Widget flow — OTP is verified entirely on the Flutter side via MSG91 SDK.
-    This endpoint is called AFTER MSG91 verifyOTP succeeds on device.
-    Validates phone exists → issues OFFRO session token.
-    FIX 8: Always regenerate token to prevent stale merchant/user session collision.
-    """
-    raw_phone = str(data.get("phone", "")).strip()
-    if not raw_phone:
-        raise HTTPException(status_code=400, detail="Phone is required")
-
-    user = db.users.find_one({"phone": {"$in": _phone_variants(raw_phone)}})
-    if not user:
-        # ISSUE 3 FIX: Return 404 + NEW_USER sentinel — Flutter catches this and
-        # redirects the user to the Register tab instead of showing a dead-end error.
-        raise HTTPException(
-            status_code=404,
-            detail="NEW_USER"
-        )
-
-    # FIX 8: Always issue a fresh token — clears any cross-app session confusion
-    token = str(uuid.uuid4())
-    db.users.update_one(
-        {"_id": user["_id"]},
-        {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}}
-    )
-    print(f"[LOGIN] ✅ Fresh session issued for {raw_phone} — user_id={str(user['_id'])}")
-
-    response = JSONResponse(content={
-        "user_id":      str(user["_id"]),
-        "name":         user.get("name", ""),
-        "phone":        user.get("phone", raw_phone),
-        "token":        token,
-        "visit_points": user.get("visit_points", 0),
-        "pool_points":  user.get("pool_points", 0),
-    })
-    response.set_cookie(
-        key="user_token", value=token, httponly=True,
-        samesite="Lax", secure=False, max_age=3600 * 24 * 30,
-    )
-    return response
-
-
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# UNIFIED MERCHANT LOGIN  (new — single token architecture)
-# POST /user/merchant-login
-# Called after MSG91 OTP verified on Flutter side.
-# Validates merchant exists → issues OFFRO session token stored on user record.
-# This means ONE token works for both User and Merchant modes.
-# ══════════════════════════════════════════════════════════════════════════════
-@router.post("/merchant-login")
-def merchant_login_unified(data: dict):
-    """
-    Unified merchant login — called after MSG91 OTP verified on Flutter side.
-    Finds merchant by phone (all variants), issues a fresh merchant token.
-    Flutter stores token + role='merchant' via Prefs.save().
-    """
-    raw_phone = str(data.get("phone", "")).strip()
-    if not raw_phone:
-        raise HTTPException(status_code=400, detail="Phone is required")
-
-    # Build all normalised variants inline (no external import needed)
-    p = raw_phone.replace(" ", "").replace("-", "")
-    d = p[1:] if p.startswith("+") else p
-    if len(d) == 12 and d.startswith("91"):
-        d = d[2:]
-    elif len(d) == 11 and d.startswith("0"):
-        d = d[1:]
-    last10 = d[-10:] if len(d) >= 10 else d
-    variants = list({p, f"+91{last10}", f"91{last10}", last10, f"0{last10}"})
-
-    m = db.merchants.find_one({"phone": {"$in": variants}})
-    if not m:
-        raise HTTPException(status_code=401, detail="Phone not registered as merchant. Please register first.")
-    if m.get("status") == "blocked":
-        raise HTTPException(status_code=403, detail="Account suspended. Contact support.")
-
-    token = str(uuid.uuid4())
-    db.merchants.update_one(
-        {"_id": m["_id"]},
-        {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}}
-    )
-    # Also sync token to users collection (by same phone) so unified fallback works
-    db.users.update_one(
-        {"phone": {"$in": variants}},
-        {"$set": {"token": token}},
-    )
-    print(f"[MERCHANT-LOGIN] ✅ Session issued for {raw_phone} — merchant_id={str(m['_id'])}")
-
-    response = JSONResponse(content={
-        "merchant_id": str(m["_id"]),
-        "name":        m.get("name", ""),
-        "phone":       m.get("phone", raw_phone),
-        "token":       token,
-        "role":        "merchant",
-        "city":        m.get("city", ""),
-        "area":        m.get("area", ""),
-    })
-    response.set_cookie(
-        key="merchant_token", value=token, httponly=True,
-        samesite="Lax", secure=False, max_age=3600 * 24 * 30,
-    )
-    return response
-
-
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# UNIFIED ACCOUNT LOGIN — single endpoint for all account types
-# POST /user/account-login
-# Called after MSG91 OTP verified on Flutter side.
-# Checks users first, then merchants — one token for everything.
-# ══════════════════════════════════════════════════════════════════════════════
-@router.post("/account-login")
-def account_login(data: dict):
-    """
-    Single login for all accounts. No role selection needed.
-    - Checks users collection first → issues user token
-    - If not user → checks merchants → issues merchant token
-    - Returns: token, name, phone, user_id, is_merchant, merchant_id (if merchant)
-    """
-    raw_phone = str(data.get("phone", "")).strip()
-    if not raw_phone:
-        raise HTTPException(status_code=400, detail="Phone is required")
-
-    variants = _phone_variants(raw_phone)
-
-    # Check users first
-    user = db.users.find_one({"phone": {"$in": variants}})
-    if user:
-        token = str(uuid.uuid4())
-        db.users.update_one(
-            {"_id": user["_id"]},
-            {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}}
-        )
-        # Also check if this user has a merchant account
-        merchant = db.merchants.find_one({"phone": {"$in": variants}})
-        mid = str(merchant["_id"]) if merchant else ""
-        print(f"[ACCOUNT-LOGIN] ✅ User session: {raw_phone} — user_id={str(user['_id'])}")
-        response = JSONResponse(content={
-            "account_id":   str(user["_id"]),
-            "user_id":      str(user["_id"]),
-            "name":         user.get("name", ""),
-            "phone":        user.get("phone", raw_phone),
-            "token":        token,
-            "is_merchant":  merchant is not None,
-            "merchant_id":  mid,
-            "visit_points": user.get("visit_points", 0),
-            "pool_points":  user.get("pool_points", 0),
-            "role":         "both" if merchant else "user",
-        })
-        response.set_cookie(key="user_token", value=token, httponly=True,
-            samesite="Lax", secure=False, max_age=3600*24*30)
-        return response
-
-    # Not a user — check merchants
-    merchant = db.merchants.find_one({"phone": {"$in": variants}})
-    if merchant:
-        if merchant.get("status") == "blocked":
-            raise HTTPException(status_code=403, detail="Account suspended. Contact support.")
-        token = str(uuid.uuid4())
-        db.merchants.update_one(
-            {"_id": merchant["_id"]},
-            {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}}
-        )
-        print(f"[ACCOUNT-LOGIN] ✅ Merchant session: {raw_phone} — merchant_id={str(merchant['_id'])}")
-        response = JSONResponse(content={
-            "account_id":  str(merchant["_id"]),
-            "user_id":     "",
-            "merchant_id": str(merchant["_id"]),
-            "name":        merchant.get("name", ""),
-            "phone":       merchant.get("phone", raw_phone),
-            "token":       token,
-            "is_merchant": True,
-            "role":        "merchant",
-        })
-        response.set_cookie(key="merchant_token", value=token, httponly=True,
-            samesite="Lax", secure=False, max_age=3600*24*30)
-        return response
-
-    # Not found anywhere
-    raise HTTPException(status_code=404, detail="Phone not registered. Please register first.")
+    # Unified accounts collection
+    acct = db.accounts.find_one({"token": token})
+    if not acct:
+        # Fallback: legacy users collection during transition
+        acct = db.users.find_one({"token": token})
+        if not acct:
+            raise HTTPException(status_code=401, detail="Session expired")
+    return acct
 
 @router.post("/check-phone")
 def check_phone(data: dict):
     """
-    Check if phone is registered in users OR merchants collection.
+    Unified check — single accounts collection.
     Returns {"registered": bool, "role": "user"|"merchant"|"both"|"none"}
-    Flutter uses this to gate OTP send — prevents unknown numbers from getting OTP.
     """
     raw_phone = str(data.get("phone", "")).strip()
     if not raw_phone:
         raise HTTPException(status_code=400, detail="Phone is required")
     variants = _phone_variants(raw_phone)
-    is_user     = db.users.find_one({"phone": {"$in": variants}}) is not None
-    is_merchant = db.merchants.find_one({"phone": {"$in": variants}}) is not None
-    registered  = is_user or is_merchant
-    if is_user and is_merchant: role = "both"
-    elif is_user:               role = "user"
-    elif is_merchant:           role = "merchant"
-    else:                       role = "none"
-    return {"registered": registered, "role": role}
+    acct = db.accounts.find_one({"phone": {"$in": variants}})
+    if not acct:
+        return {"registered": False, "role": "none"}
+    roles = acct.get("roles", [])
+    if "user" in roles and "merchant" in roles: role = "both"
+    elif "merchant" in roles:                   role = "merchant"
+    else:                                       role = "user"
+    return {"registered": True, "role": role}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -365,7 +123,7 @@ def withdraw(data: dict, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail=f"Minimum {min_withdraw} points required. You have {total}.")
     if total < amount:
         raise HTTPException(status_code=400, detail=f"Not enough points. You have {total}.")
-    db.users.update_one({"_id": user["_id"]}, {"$set": {"pending_withdraw": True}})
+    db.accounts.update_one({"_id": user["_id"]}, {"$set": {"pending_withdraw": True}})
     db.withdraw_requests.insert_one({
         "user_id":      str(user["_id"]),
         "user_name":    user.get("name"),
@@ -393,7 +151,9 @@ def redeem_qr(data: dict, request: Request):
         raise HTTPException(status_code=400, detail="store_id required")
     if not user_token:
         raise HTTPException(status_code=401, detail="User not authenticated")
-    user = db.users.find_one({"token": user_token})
+    user = db.accounts.find_one({"token": user_token})
+    if not user:
+        user = db.users.find_one({"token": user_token})  # legacy fallback
     if not user:
         raise HTTPException(status_code=403, detail="Invalid user session")
     try:
@@ -417,7 +177,10 @@ def redeem_qr(data: dict, request: Request):
     if recent:
         raise HTTPException(status_code=429, detail="Already redeemed from this store today. Try again tomorrow.")
 
-    db.users.update_one({"_id": user["_id"]}, {"$inc": {"visit_points": points_to_add}})
+    db.accounts.update_one({"_id": user["_id"]}, {"$inc": {"visit_points": points_to_add, "visit_pts": points_to_add}})
+        # Keep legacy users collection in sync
+        if user.get("user_id"):
+            db.users.update_one({"token": user_token}, {"$inc": {"visit_points": points_to_add}})
     db.redemptions.insert_one({
         "user_id":     user_id,
         "store_id":    store_id,
@@ -426,7 +189,7 @@ def redeem_qr(data: dict, request: Request):
         "points":      points_to_add,
         "created_at":  datetime.utcnow(),
     })
-    updated = db.users.find_one({"_id": user["_id"]})
+    updated = db.accounts.find_one({"_id": user["_id"]}) or db.users.find_one({"_id": user["_id"]})
     return {
         "message":      f"✅ {points_to_add} points added!",
         "store_name":   store.get("store_name"),
@@ -442,7 +205,7 @@ def redeem_qr(data: dict, request: Request):
 def update_city(data: dict, user=Depends(get_current_user)):
     city = data.get("city", "").strip()
     if city:
-        db.users.update_one({"_id": user["_id"]}, {"$set": {"city": city}})
+        db.accounts.update_one({"_id": user["_id"]}, {"$set": {"city": city}})
     return {"message": "City updated", "city": city}
 
 @router.get("/redemptions")
@@ -508,10 +271,10 @@ def toggle_favorite(store_id: str, user=Depends(get_current_user)):
     user_id = user["_id"]
     fav_ids = [str(f) for f in user.get("favorite_store_ids", [])]
     if store_id in fav_ids:
-        db.users.update_one({"_id": user_id}, {"$pull":     {"favorite_store_ids": store_id}})
+        db.accounts.update_one({"_id": user_id}, {"$pull":     {"favorite_store_ids": store_id}})
         return {"is_favorite": False}
     else:
-        db.users.update_one({"_id": user_id}, {"$addToSet": {"favorite_store_ids": store_id}})
+        db.accounts.update_one({"_id": user_id}, {"$addToSet": {"favorite_store_ids": store_id}})
         return {"is_favorite": True}
 
 @router.get("/favorites/{store_id}/check")
@@ -525,14 +288,14 @@ def update_user_profile(data: dict, user=Depends(get_current_user)):
     update  = {k: v for k, v in data.items() if k in allowed}
     if not update:
         raise HTTPException(400, "Nothing to update")
-    db.users.update_one({"_id": user["_id"]}, {"$set": update})
+    db.accounts.update_one({"_id": user["_id"]}, {"$set": update})
     return {"ok": True}
 
 @router.post("/fcm-token")
 def save_fcm_token(data: dict, user=Depends(get_current_user)):
     fcm_token = data.get("fcm_token", "").strip()
     if fcm_token:
-        db.users.update_one(
+        db.accounts.update_one(
             {"_id": user["_id"]},
             {"$set": {"fcm_token": fcm_token, "fcm_updated_at": datetime.utcnow()}}
         )

@@ -168,126 +168,71 @@ def delete_merchant(id: str, a=Depends(get_current_admin)):
 
 @router.get("/accounts")
 def list_accounts(a=Depends(get_current_admin)):
-    """Merged view: users + merchants by phone. Non-destructive — underlying collections unchanged."""
-    # Load merchants keyed by phone
-    merch_map = {}
-    for m in db.merchants.find():
-        phones = [m.get("phone","").strip()]
-        mid = str(m["_id"])
-        store_count   = db.stores.count_documents({"merchant_id": mid})
-        banner_count  = db.merchant_banners.count_documents({"merchant_id": mid}) if "merchant_banners" in db.list_collection_names() else 0
-        product_count = db.merchant_vouchers.count_documents({"merchant_id": mid}) if "merchant_vouchers" in db.list_collection_names() else 0
-        entry = {
-            "merchant_id":     mid,
-            "merchant_name":   m.get("name",""),
-            "city":            m.get("city",""),
-            "merchant_status": m.get("status","active"),
-            "store_count":     store_count,
-            "banner_count":    banner_count,
-            "product_count":   product_count,
-        }
-        for ph in phones:
-            if ph: merch_map[ph] = entry
-
-    seen = set()
+    """Unified accounts view — single accounts collection."""
     result = []
+    for acct in db.accounts.find().sort("created_at", -1):
+        phone   = acct.get("phone", "")
+        roles   = acct.get("roles", ["user"])
+        acct_id = str(acct["_id"])
+        mid     = acct.get("merchant_id", "")
 
-    for u in db.users.find():
-        phone = (u.get("phone") or "").strip()
-        if not phone: continue
-        seen.add(phone)
-        mdata = merch_map.get(phone, {})
-        roles = ["user"] + (["merchant"] if mdata else [])
-        total_pts = u.get("visit_pts", u.get("points", 0) or 0) + u.get("pool_pts", 0)
+        total_pts = (acct.get("visit_pts", acct.get("visit_points", 0) or 0) +
+                     acct.get("pool_pts", 0))
+
         result.append({
-            "account_id":      str(u["_id"]),
-            "merchant_id":     mdata.get("merchant_id",""),
-            "full_name":       u.get("name","") or mdata.get("merchant_name","Unknown"),
-            "mobile_number":   phone,
-            "city":            u.get("city","") or mdata.get("city",""),
-            "roles":           roles,
-            "preferred_mode":  u.get("preferred_mode","user"),
-            "status":          u.get("status","active"),
-            "merchant_status": mdata.get("merchant_status",""),
-            "store_count":     mdata.get("store_count",0),
-            "banner_count":    mdata.get("banner_count",0),
-            "product_count":   mdata.get("product_count",0),
-            "visit_pts":       u.get("visit_pts", u.get("points",0) or 0),
-            "pool_pts":        u.get("pool_pts",0),
-            "total_pts":       total_pts,
-            "scans":           u.get("scans", u.get("scan_count",0) or 0),
-            "created_date":    str(u.get("created_at") or u.get("registered_at") or ""),
-            "source":          "user",
+            "account_id":    acct_id,
+            "merchant_id":   mid,
+            "user_id":       acct.get("user_id", acct_id),
+            "full_name":     acct.get("name", ""),
+            "mobile_number": phone,
+            "city":          acct.get("city", ""),
+            "roles":         roles,
+            "status":        acct.get("status", "active"),
+            "total_points":  total_pts,
+            "visit_pts":     acct.get("visit_pts", acct.get("visit_points", 0) or 0),
+            "pool_pts":      acct.get("pool_pts", 0),
+            "scans":         acct.get("scans", 0),
+            "store_count":   db.stores.count_documents({"merchant_id": mid}) if mid else 0,
+            "created_at":    str(acct.get("created_at", ""))[:10],
         })
-
-    for phone, mdata in merch_map.items():
-        if phone in seen: continue
-        result.append({
-            "account_id":      mdata["merchant_id"],
-            "merchant_id":     mdata["merchant_id"],
-            "full_name":       mdata["merchant_name"],
-            "mobile_number":   phone,
-            "city":            mdata.get("city",""),
-            "roles":           ["merchant"],
-            "preferred_mode":  "merchant",
-            "status":          "active" if mdata["merchant_status"]=="active" else "inactive",
-            "merchant_status": mdata["merchant_status"],
-            "store_count":     mdata.get("store_count",0),
-            "banner_count":    mdata.get("banner_count",0),
-            "product_count":   mdata.get("product_count",0),
-            "visit_pts":       0,
-            "pool_pts":        0,
-            "total_pts":       0,
-            "scans":           0,
-            "created_date":    "",
-            "source":          "merchant",
-        })
-
     return result
 
 
 @router.get("/accounts/{account_id}")
 def get_account_detail(account_id: str, a=Depends(get_current_admin)):
-    user = merchant = None
+    """Full account detail from unified accounts collection."""
+    from bson import ObjectId
+    acct = None
     try:
-        user = db.users.find_one({"_id": ObjectId(account_id)})
+        acct = db.accounts.find_one({"_id": ObjectId(account_id)})
     except Exception:
         pass
-    if not user:
-        try:
-            merchant = db.merchants.find_one({"_id": ObjectId(account_id)})
-        except Exception:
-            pass
-        if not merchant:
-            raise HTTPException(404, "Account not found")
-        phone = merchant.get("phone","")
-        mid   = str(merchant["_id"])
-    else:
-        phone = user.get("phone","")
-        # Try to find matching merchant by phone
-        merchant = db.merchants.find_one({"phone": phone})
-        mid = str(merchant["_id"]) if merchant else ""
+    if not acct:
+        # Fallback: try by user_id or merchant_id field
+        acct = db.accounts.find_one({"$or": [
+            {"user_id": account_id},
+            {"merchant_id": account_id},
+        ]})
+    if not acct:
+        raise HTTPException(404, "Account not found")
 
-    # No stores/products/banners/payments — those live in their own modules.
-    # Account detail is lean: identity + wallet only.
-    base = user or merchant or {}
-    u_or_empty = user or {}
-    total_pts = u_or_empty.get("visit_pts", u_or_empty.get("points",0) or 0) + u_or_empty.get("pool_pts",0)
+    phone      = acct.get("phone", "")
+    mid        = acct.get("merchant_id", "")
+    acct_id    = str(acct["_id"])
+    roles      = acct.get("roles", ["user"])
+    is_merchant = "merchant" in roles
 
-    # Live merchant counts (only when account has merchant role)
     store_count   = 0
     banner_count  = 0
     voucher_count = 0
     subscriptions = []
     invoices      = []
-    area          = base.get("area", "")
 
-    if merchant:
+    if is_merchant and mid:
         store_count   = db.stores.count_documents({"merchant_id": mid})
         banner_count  = db.merchant_banners.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
         voucher_count = db.merchant_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
 
-        # Active subscriptions
         for s in db.subscriptions.find(
             {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
         ).sort("created_at", -1).limit(5):
@@ -298,7 +243,6 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
                 "status":     s.get("status",""),
             })
 
-        # Invoices
         for inv in db.invoices.find(
             {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
         ).sort("created_at", -1).limit(10):
@@ -306,24 +250,28 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
                 "invoice_no":  inv.get("invoice_no",""),
                 "store_name":  inv.get("store_name",""),
                 "plan":        inv.get("plan",""),
-                "total":       inv.get("total", inv.get("final_amount",0)),
+                "total":       inv.get("total", inv.get("final_amount", 0)),
                 "status":      inv.get("status",""),
                 "created_at":  str(inv.get("created_at",""))[:10],
             })
 
+    visit_pts = acct.get("visit_pts", acct.get("visit_points", 0) or 0)
+    pool_pts  = acct.get("pool_pts", 0)
+
     return {
-        "account_id":    account_id,
+        "account_id":    acct_id,
+        "user_id":       acct.get("user_id", acct_id),
         "merchant_id":   mid,
-        "full_name":     base.get("name",""),
+        "full_name":     acct.get("name", ""),
         "mobile_number": phone,
-        "city":          base.get("city",""),
-        "area":          area,
-        "roles":         (["user"] if user else []) + (["merchant"] if merchant else []),
-        "status":        base.get("status","active"),
-        "visit_pts":     u_or_empty.get("visit_pts", u_or_empty.get("points",0) or 0),
-        "pool_pts":      u_or_empty.get("pool_pts",0),
-        "total_pts":     total_pts,
-        "scans":         u_or_empty.get("scans", u_or_empty.get("scan_count",0) or 0),
+        "city":          acct.get("city", ""),
+        "area":          acct.get("area", ""),
+        "roles":         roles,
+        "status":        acct.get("status", "active"),
+        "visit_pts":     visit_pts,
+        "pool_pts":      pool_pts,
+        "total_pts":     visit_pts + pool_pts,
+        "scans":         acct.get("scans", 0),
         "store_count":   store_count,
         "banner_count":  banner_count,
         "voucher_count": voucher_count,
@@ -334,155 +282,23 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
 
 @router.patch("/accounts/{account_id}/status")
 def toggle_account_status(account_id: str, data: dict, a=Depends(get_current_admin)):
-    new_status = data.get("status","active")
-    updated = False
+    """Toggle account status in unified accounts collection."""
+    from bson import ObjectId
+    new_status = data.get("status", "active")
     try:
-        r = db.users.update_one({"_id": ObjectId(account_id)}, {"$set": {"status": new_status}})
-        if r.modified_count: updated = True
+        db.accounts.update_one(
+            {"_id": ObjectId(account_id)},
+            {"$set": {"status": new_status}}
+        )
     except Exception:
         pass
+    # Sync to legacy collections
     try:
-        r = db.merchants.update_one({"_id": ObjectId(account_id)}, {"$set": {"status": new_status}})
-        if r.modified_count: updated = True
+        db.users.update_one({"_id": ObjectId(account_id)}, {"$set": {"status": new_status}})
     except Exception:
         pass
-    if not updated:
-        raise HTTPException(404, "Account not found")
-    return {"status": new_status}
+    return {"ok": True, "status": new_status}
 
-# ── End unified accounts ──────────────────────────────────────────
-
-# ===================== STORES =====================
-
-def _store_deal_status(store_id: str):
-    """Check if store has any active/expired deals."""
-    cols = db.list_collection_names()
-    if "deals" not in cols: return "none"
-    now = datetime.utcnow()
-    active = db.deals.find_one({"store_id": store_id, "status": "active"})
-    if active:
-        end = active.get("end_date")
-        if end and isinstance(end, datetime) and end < now: return "expired"
-        return "active"
-    return "inactive"
-
-def _fmt_store_fast(s, sub_map, deal_map, merchants):
-    """Format store using pre-loaded batch data - no extra DB calls."""
-    store_id = str(s["_id"])
-    sub = sub_map.get(store_id)
-    now = datetime.utcnow()
-
-    # ── Deal status (deals use status:"active" field + end_date field) ──
-    deals = deal_map.get(store_id, [])
-    deal_status = "none"
-    deal_text = ""
-    for d in deals:
-        end = d.get("end_date", "")
-        if end:
-            try:
-                end_dt = end if isinstance(end, datetime) else datetime.strptime(str(end)[:10], "%Y-%m-%d")
-                deal_status = "active" if end_dt >= now else "expired"
-            except Exception:
-                deal_status = "active"
-        else:
-            deal_status = "active"
-        # Display text: use discount% or title
-        disc = d.get("discount", 0)
-        title = d.get("title", "")
-        deal_text = f"{disc}% OFF" if disc else title
-        break
-
-    # ── Subscription info ──
-    # paid_status = "paid"/"unpaid"/"expired" (what the HTML template reads)
-    if sub:
-        fd = sub.get("from_date"); ed = sub.get("end_date")
-        sub_from = fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or "")[:10]
-        sub_to   = ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or "")[:10]
-        sub_status = sub.get("status", "pending")
-        if isinstance(ed, datetime) and ed < now:
-            sub_status = "expired"
-        # Map to paid_status that HTML template uses
-        paid_status = "paid" if sub_status in ("paid", "active") else sub_status
-    else:
-        sub_from = sub_to = ""
-        paid_status = "unpaid"
-        sub_status = "none"
-
-    mid = s.get("merchant_id", "")
-    merchant = merchants.get(mid, {})
-
-    return {
-        "_id":            store_id,
-        "store_name":     s.get("store_name", ""),
-        "merchant_name":  merchant.get("name", "Unknown"),
-        "merchant_phone": merchant.get("phone", ""),
-        "category":       s.get("category", ""),
-        "city":           s.get("city", ""),
-        "area":           s.get("area", ""),
-        "address":        s.get("address", ""),
-        "phone":          s.get("phone", ""),
-        "status":         s.get("status", "active"),
-        "points_per_scan":s.get("points_per_scan", 0),
-        "visit_points":   s.get("visit_points", 0),
-        "is_new_in_town": s.get("is_new_in_town", False),
-        "badge": s.get("badge", ""),
-        "image":          s.get("image") or s.get("_thumb") or "",
-        "_thumb":         s.get("_thumb") or "",
-        "qr_code":        s.get("qr_code", ""),
-        "lat":            s.get("lat", ""),
-        "lng":            s.get("lng", ""),
-        "deal_status":    deal_status,
-        "deal_text":      deal_text,
-        "paid_status":    paid_status,
-        "sub_from":       sub_from,
-        "sub_to":         sub_to,
-        "sub_plan":       sub.get("plan", "") if sub else "",
-        "merchant_id":    mid,
-        "about":          s.get("about", ""),
-        "logo":           s.get("logo") or "",
-        "image2":         s.get("store_image2") or s.get("image2") or "",
-        "rating":         round(float(s.get("rating") or 0), 1),
-        "user_rating":    round(float(s.get("user_rating") or 0), 1),
-        "rating_count":   int(s.get("rating_count") or 0),
-        "admin_rating":   round(float(s.get("admin_rating") or 0), 1) if s.get("admin_rating") else None,
-    }
-
-def _fmt_store(s):
-    sid = str(s["_id"])
-    mid = s.get("merchant_id", "")
-    merchant = None
-    if mid:
-        try: merchant = db.merchants.find_one({"_id": ObjectId(mid)})
-        except: pass
-    # Latest paid subscription for this store
-    sub = db.subscriptions.find_one(
-        {"store_id": sid, "status": {"$in": ["paid", "active"]}},
-        sort=[("created_at", -1)]
-    )
-    paid_status = "paid" if sub else "unpaid"
-    sub_from = ""
-    sub_to   = ""
-    if sub:
-        fd = sub.get("from_date"); ed = sub.get("end_date")
-        sub_from = fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or "")
-        sub_to   = ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or "")
-    return {
-        "_id": sid, "store_name": s.get("store_name"), "category": s.get("category"),
-        "city": s.get("city"), "area": s.get("area"), "address": s.get("address"),
-        "phone": s.get("phone"), "status": s.get("status", "active"),
-        "merchant_name": merchant.get("name") if merchant else "Unknown",
-        "merchant_id": mid, "qr_code": s.get("qr_code",""),
-        "points_per_scan": s.get("points_per_scan", 0),
-        "lat": s.get("lat",""), "lng": s.get("lng",""),
-        "image": s.get("image") or "",
-        "is_new_in_town": s.get("is_new_in_town", False),
-        "badge": s.get("badge", ""),
-        "deal_status": _store_deal_status(sid),
-        "subscription_end": str(s.get("subscription_end","")),
-        "paid_status": paid_status,
-        "sub_from":    sub_from,
-        "sub_to":      sub_to,
-    }
 
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
@@ -703,7 +519,7 @@ def delete_store(id: str, a=Depends(get_current_admin)):
 def list_users(a=Depends(get_current_admin)):
     result = []
     cols = db.list_collection_names()
-    for u in db.users.find():
+    for u in db.accounts.find():
         uid = str(u["_id"])
         result.append({
             "_id": uid, "name": u.get("name"), "phone": u.get("phone"),
@@ -719,7 +535,7 @@ def list_users(a=Depends(get_current_admin)):
 
 @router.get("/users/{id}/history")
 def user_history(id: str, a=Depends(get_current_admin)):
-    u = db.users.find_one({"_id": ObjectId(id)})
+    u = db.accounts.find_one({"_id": ObjectId(id)}) or db.users.find_one({"_id": ObjectId(id)})
     if not u: raise HTTPException(404, "Not found")
     cols = db.list_collection_names()
     history = []
@@ -742,21 +558,21 @@ def user_history(id: str, a=Depends(get_current_admin)):
 
 @router.post("/users/{id}/adjust-points")
 def adjust_points(id: str, data: dict, a=Depends(get_current_admin)):
-    u = db.users.find_one({"_id": ObjectId(id)})
+    u = db.accounts.find_one({"_id": ObjectId(id)}) or db.users.find_one({"_id": ObjectId(id)})
     if not u: raise HTTPException(404, "Not found")
     t = data.get("type","credit"); pts = int(data.get("points",0))
     if pts <= 0: raise HTTPException(400, "Points must be > 0")
     vp = u.get("visit_points",0); pp = u.get("pool_points",0)
     if t == "credit":
-        db.users.update_one({"_id": ObjectId(id)}, {"$inc": {"pool_points": pts}})
+        db.accounts.update_one({"_id": ObjectId(id)}, {"$inc": {"pool_points": pts}})
     else:
         if vp+pp < pts: raise HTTPException(400, f"User has only {vp+pp} pts")
-        if pp >= pts: db.users.update_one({"_id": ObjectId(id)}, {"$inc": {"pool_points": -pts}})
+        if pp >= pts: db.accounts.update_one({"_id": ObjectId(id)}, {"$inc": {"pool_points": -pts}})
         else:
             rem = pts - pp
-            db.users.update_one({"_id": ObjectId(id)}, {"$set": {"pool_points":0,"visit_points":max(0,vp-rem)}})
+            db.accounts.update_one({"_id": ObjectId(id)}, {"$set": {"pool_points":0,"visit_points":max(0,vp-rem)}})
     db.point_adjustments.insert_one({"user_id":id,"type":t,"points":pts,"note":data.get("note",""),"created_at":datetime.utcnow()})
-    upd = db.users.find_one({"_id": ObjectId(id)})
+    upd = db.accounts.find_one({"_id": ObjectId(id)}) or db.users.find_one({"_id": ObjectId(id)})
     return {"message":f"{'Added' if t=='credit' else 'Deducted'} {pts} pts",
             "new_total": upd.get("visit_points",0)+upd.get("pool_points",0)}
 
@@ -765,13 +581,16 @@ def adjust_points(id: str, data: dict, a=Depends(get_current_admin)):
 @router.get("/stats")
 def admin_stats(a=Depends(get_current_admin)):
     cols = db.list_collection_names()
+    total_accounts  = db.accounts.count_documents({})
+    total_merchants = db.accounts.count_documents({"roles": "merchant"})
     return {
-        "total_merchants": db.merchants.count_documents({}),
-        "active_merchants": db.merchants.count_documents({"status":"active"}),
-        "total_stores": db.stores.count_documents({}),
-        "waiting_approval": db.stores.count_documents({"status":"waiting_approval"}),
-        "total_deals": db.deals.count_documents({}) if "deals" in cols else 0,
-        "total_users": db.users.count_documents({}) if "users" in cols else 0,
+        "total_accounts":  total_accounts,
+        "total_users":     total_accounts,
+        "total_merchants": total_merchants,
+        "active_merchants": db.accounts.count_documents({"roles": "merchant", "status": "active"}),
+        "total_stores":    db.stores.count_documents({}),
+        "waiting_approval": db.stores.count_documents({"status": "waiting_approval"}),
+        "total_deals":     db.deals.count_documents({}) if "deals" in cols else 0,
     }
 
 # ===================== SUBSCRIPTIONS (Admin view) =====================
@@ -982,7 +801,7 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
     points = int(req.get("points", req.get("amount", 200)))
     
     # Deduct points from user now
-    user = db.users.find_one({"_id": ObjectId(user_id)})
+    user = db.accounts.find_one({"_id": ObjectId(user_id)}) or db.users.find_one({"_id": ObjectId(user_id)})
     if user:
         pool = user.get("pool_points", 0)
         visit = user.get("visit_points", 0)
@@ -995,7 +814,7 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
             remaining -= new_pool
             new_pool = 0
             new_visit = max(0, new_visit - remaining)
-        db.users.update_one(
+        db.accounts.update_one(
             {"_id": ObjectId(user_id)},
             {"$set": {
                 "visit_points": new_visit,
@@ -1533,7 +1352,8 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                     f"0{_last10}",          # with leading 0
                     f"+{_last10}",          # with + only (edge case)
                 })
-                u = db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1})
+                u = (db.accounts.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1}) or
+                db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1})
                 print(f"[FCM] specific: phone={phone} variants={phone_variants} found={u is not None} stored_phone={u.get('phone') if u else None} has_token={bool(u and u.get('fcm_token'))}")
                 
                 # Fallback: check fcm_pending if user found but token missing, or user not found

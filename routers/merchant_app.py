@@ -71,49 +71,30 @@ def _qr(store_id: str) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.read()).decode()
 
 def get_merchant(request: Request):
+    """Unified auth — hits accounts collection first, falls back to merchants for legacy tokens."""
     token = (request.cookies.get("merchant_token") or
              request.cookies.get("user_token") or
              request.headers.get("Authorization", "").replace("Bearer ", ""))
-    if not token: raise HTTPException(401, "Not authenticated")
+    if not token:
+        raise HTTPException(401, "Not authenticated")
 
-    # Primary: token stored directly in merchants (via /merchant-login or /user/merchant-login)
+    # PRIMARY: unified accounts collection
+    acct = db.accounts.find_one({"token": token})
+    if acct and "merchant" in acct.get("roles", []):
+        return acct
+
+    # FALLBACK: legacy merchants collection (pre-migration data)
     m = db.merchants.find_one({"token": token})
     if m:
         return m
 
-    # Fallback: token is in users collection (unified auth edge case)
-    # Look up user → find merchant by phone → sync token
-    u = db.users.find_one({"token": token})
-    if u:
-        raw_phone = str(u.get("phone", ""))
-        d = raw_phone.lstrip("+")
-        if len(d) == 12 and d.startswith("91"): d = d[2:]
-        elif len(d) == 11 and d.startswith("0"): d = d[1:]
-        last10 = d[-10:] if len(d) >= 10 else d
-        variants = list({raw_phone, last10, f"+91{last10}", f"91{last10}"})
-        m = db.merchants.find_one({"phone": {"$in": variants}})
-        if m:
-            # Sync token so next request hits primary path
-            db.merchants.update_one({"_id": m["_id"]}, {"$set": {"token": token}})
-            return m
+    # FALLBACK 2: token in users/accounts but merchant role not set yet
+    if acct:
+        # Has token but not merchant role
+        raise HTTPException(403, "Not a registered merchant")
 
-    raise HTTPException(403, "Not a registered merchant")
+    raise HTTPException(401, "Session expired")
 
-def plan_days(plan: str) -> int:
-    return {"1month": 30, "3months": 90, "6months": 180, "12months": 365}.get(plan, 30)
-
-def _log_tx(merchant_id: str, tx_type: str, description: str, amount: float = 0, meta: dict = None):
-    """Write a transaction record for a merchant."""
-    db.merchant_transactions.insert_one({
-        "merchant_id": merchant_id,
-        "type": tx_type,          # "subscription" | "store_created" | "store_approved" | "subscription_expired"
-        "description": description,
-        "amount": amount,
-        "meta": meta or {},
-        "created_at": datetime.utcnow(),
-    })
-
-# ───────────── auth ─────────────
 
 @router.post("/register")
 def merchant_register(data: dict):
@@ -123,7 +104,7 @@ def merchant_register(data: dict):
     area  = data.get("area", "").strip()
     if not name or not phone:
         raise HTTPException(400, "Name and phone are required")
-    if db.merchants.find_one({"phone": phone}):
+    if db.accounts.find_one({"phone": {"$in": [phone, phone[-10:] if len(phone)>=10 else phone]}}):
         raise HTTPException(400, "Phone already registered. Please login.")
     merchant = {
         "name": name, "phone": phone,
@@ -132,34 +113,85 @@ def merchant_register(data: dict):
         "registered_at": datetime.utcnow(),
     }
     result = db.merchants.insert_one(merchant)
-    _log_tx(str(result.inserted_id), "account_created", f"Merchant account created for {name}")
-    return {"message": "Registered successfully. You can now login.", "merchant_id": str(result.inserted_id)}
+    merchant_oid = result.inserted_id
+
+    # Sync to unified accounts collection
+    from routers.users import _phone_variants as _pv
+    db.accounts.update_one(
+        {"phone": {"$in": _pv(phone)}},
+        {"$set": {
+            "phone":         re.sub(r"\D", "", phone)[-10:],
+            "name":          name,
+            "city":          data.get("city", ""),
+            "status":        "active",
+            "merchant_id":   str(merchant_oid),
+            "merchant_name": name,
+            "migrated_from": "register",
+        },
+        "$addToSet": {"roles": "merchant"}},
+        upsert=True,
+    )
+    _log_tx(str(merchant_oid), "account_created", f"Merchant account created for {name}")
+    return {"message": "Registered successfully. You can now login.", "merchant_id": str(merchant_oid)}
 
 @router.post("/login")
 def merchant_login(data: dict):
+    """Unified merchant login — checks accounts first, falls back to merchants."""
+    from routers.users import _phone_variants as _pv
     phone = str(data.get("phone", "")).strip()
-    m = db.merchants.find_one({"phone": phone})
-    if not m: raise HTTPException(401, "Phone not registered. Please register first.")
+    if not phone:
+        raise HTTPException(400, "Phone required")
+    variants = _pv(phone)
+
+    # Check unified accounts collection first
+    acct = db.accounts.find_one({"phone": {"$in": variants}})
+    if acct and "merchant" in acct.get("roles", []):
+        token = str(uuid.uuid4())
+        db.accounts.update_one({"_id": acct["_id"]}, {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}})
+        # Sync to merchants legacy
+        db.merchants.update_one({"phone": {"$in": variants}}, {"$set": {"token": token}})
+        res = JSONResponse({
+            "merchant_id": acct.get("merchant_id", str(acct["_id"])),
+            "name":        acct.get("name", ""),
+            "phone":       acct.get("phone", phone),
+            "token":       token,
+        })
+        res.set_cookie("merchant_token", token, httponly=True, samesite="lax", max_age=86400*30)
+        res.set_cookie("user_token",     token, httponly=True, samesite="lax", max_age=86400*30)
+        return res
+
+    # Fallback: legacy merchants collection
+    m = db.merchants.find_one({"phone": {"$in": variants}})
+    if not m:
+        raise HTTPException(401, "Phone not registered. Please register first.")
     token = str(uuid.uuid4())
     db.merchants.update_one({"_id": m["_id"]}, {"$set": {"token": token}})
-    res = JSONResponse({"merchant_id": str(m["_id"]), "name": m.get("name"),
-                        "phone": m.get("phone"), "token": token})
-    res.set_cookie("merchant_token", token, httponly=True, samesite="Lax", max_age=3600 * 24)
+    # Sync token to accounts
+    db.accounts.update_one(
+        {"phone": {"$in": variants}},
+        {"$set": {"token": token, "merchant_id": str(m["_id"])}, "$addToSet": {"roles": "merchant"}},
+        upsert=True,
+    )
+    res = JSONResponse({"merchant_id": str(m["_id"]), "name": m.get("name",""), "phone": m.get("phone", phone), "token": token})
+    res.set_cookie("merchant_token", token, httponly=True, samesite="lax", max_age=86400*30)
+    res.set_cookie("user_token",     token, httponly=True, samesite="lax", max_age=86400*30)
     return res
+
 
 @router.post("/check-phone")
 def check_merchant_phone(data: dict):
-    """Item 8: Pre-OTP check — verify merchant is registered before sending OTP."""
+    """Pre-OTP check — unified accounts collection."""
+    from routers.users import _phone_variants as _pv
     phone = (data.get("phone") or "").strip()
     if not phone:
         raise HTTPException(400, "Phone required")
-    merchant = db.merchants.find_one({"phone": {"$in": [phone, phone.lstrip("+91"), "+91" + phone.lstrip("+91")]}})
-    if not merchant:
-        raise HTTPException(404, "Merchant not registered. Please sign up.")
-    if merchant.get("status") == "blocked":
-        raise HTTPException(403, "Account is suspended. Contact support.")
-    return {"ok": True, "name": merchant.get("name", "")}
-
+    variants = _pv(phone)
+    acct = db.accounts.find_one({"phone": {"$in": variants}})
+    if acct:
+        return {"registered": True, "role": "merchant" if "merchant" in acct.get("roles",[]) else "user"}
+    # Legacy fallback
+    m = db.merchants.find_one({"phone": {"$in": variants}})
+    return {"registered": m is not None, "role": "merchant" if m else "none"}
 
 
 @router.post("/logout")
@@ -710,7 +742,7 @@ def update_merchant_profile(data: dict, m=Depends(get_merchant)):
     update = {k: v for k, v in data.items() if k in allowed}
     if not update:
         raise HTTPException(400, "Nothing to update")
-    db.merchants.update_one({"_id": m["_id"]}, {"$set": update})
+    db.accounts.update_one({"_id": m["_id"]}, {"$set": update})
     return {"ok": True}
 
 

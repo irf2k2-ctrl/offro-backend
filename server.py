@@ -162,20 +162,24 @@ async def register_fcm_token(request: Request):
     # Try user_id first
     if user_id:
         try:
-            user = db.users.find_one({"_id": ObjectId(user_id)})
+            user = db.accounts.find_one({"_id": ObjectId(user_id)})
         except Exception:
             pass
-    # Fallback to phone variants
     if not user and phone:
         variants = _phone_variants(phone)
-        user = db.users.find_one({"phone": {"$in": variants}})
+        user = (db.accounts.find_one({"phone": {"$in": variants}}) or
+                db.users.find_one({"phone": {"$in": variants}}))
 
     if user:
+        db.accounts.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"fcm_token": fcm_token, "fcm_updated_at": datetime.datetime.utcnow()}},
+        )
         db.users.update_one(
             {"_id": user["_id"]},
-            {"$set": {"fcm_token": fcm_token, "fcm_updated_at": datetime.datetime.utcnow()}}
+            {"$set": {"fcm_token": fcm_token}},
         )
-        print(f"[FCM] ✅ Token saved for user {user.get('phone','?')} id={user['_id']}")
+        print(f"[FCM] ✅ Token saved for {user.get('phone','?')}")
         return JSONResponse({"ok": True})
     else:
         # Save with phone key only — user may not be registered yet
@@ -242,6 +246,12 @@ def _ensure_indexes():
             name="subs_store_status",
             background=True,
         )
+        # Accounts — unified collection indexes
+        db.accounts.create_index("phone",       unique=True, background=True, sparse=True)
+        db.accounts.create_index("token",       background=True, sparse=True)
+        db.accounts.create_index("roles",       background=True)
+        db.accounts.create_index("merchant_id", background=True, sparse=True)
+        db.accounts.create_index("user_id",     background=True, sparse=True)
         print("✅ MongoDB indexes ensured")
     except Exception as e:
         print(f"⚠️  Index creation warning: {e}")
