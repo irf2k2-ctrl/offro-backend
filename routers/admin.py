@@ -139,25 +139,29 @@ def list_merchants(a=Depends(get_current_admin)):
     return [{"_id": str(m["_id"]), "name": m.get("name"), "phone": m.get("phone"),
              "city": m.get("city"), "area": m.get("area"), "status": m.get("status", "active"),
              "store_count": db.stores.count_documents({"merchant_id": str(m["_id"])})}
-            for m in db.merchants.find()]
+            for m in db.accounts.find({"roles": "merchant"})]
 
 @router.put("/merchants/{id}")
 def update_merchant(id: str, data: dict, a=Depends(get_current_admin)):
     upd = {f: data[f] for f in ["name","phone","city","area"] if data.get(f) is not None}
-    if upd: db.merchants.update_one({"_id": ObjectId(id)}, {"$set": upd})
+    if upd:
+        db.accounts.update_one({"_id": ObjectId(id)}, {"$set": upd})
+        db.merchants.update_one({"_id": ObjectId(id)}, {"$set": upd})  # sync
     return {"message": "Updated"}
 
 @router.put("/merchants/{id}/status")
 def toggle_merchant(id: str, a=Depends(get_current_admin)):
-    m = db.merchants.find_one({"_id": ObjectId(id)})
+    m = db.accounts.find_one({"_id": ObjectId(id)}) or db.merchants.find_one({"_id": ObjectId(id)})
     if not m: raise HTTPException(404, "Not found")
     ns = "inactive" if m.get("status") == "active" else "active"
-    db.merchants.update_one({"_id": ObjectId(id)}, {"$set": {"status": ns}})
+    db.accounts.update_one({"_id": ObjectId(id)}, {"$set": {"status": ns}})
+    db.merchants.update_one({"_id": ObjectId(id)}, {"$set": {"status": ns}})  # sync
     return {"status": ns}
 
 @router.delete("/merchants/{id}")
 def delete_merchant(id: str, a=Depends(get_current_admin)):
-    db.merchants.delete_one({"_id": ObjectId(id)})
+    db.accounts.delete_one({"_id": ObjectId(id)})
+    db.merchants.delete_one({"_id": ObjectId(id)})  # sync
     db.stores.delete_many({"merchant_id": id})
     return {"message": "Deleted"}
 
@@ -294,7 +298,7 @@ def toggle_account_status(account_id: str, data: dict, a=Depends(get_current_adm
         pass
     # Sync to legacy collections
     try:
-        db.users.update_one({"_id": ObjectId(account_id)}, {"$set": {"status": new_status}})
+        db.accounts.update_one({"_id": ObjectId(account_id)}, {"$set": {"status": new_status}})
     except Exception:
         pass
     return {"ok": True, "status": new_status}
@@ -345,7 +349,7 @@ def list_stores(a=Depends(get_current_admin)):
         try: merch_obj_ids.append(ObjectId(mid))
         except: pass
     merchants = {}
-    for m in db.merchants.find({"_id": {"$in": merch_obj_ids}}, {"name": 1, "phone": 1}):
+    for m in list(db.accounts.find({"_id": {"$in": merch_obj_ids}}, {"name": 1, "phone": 1})) or list(db.merchants.find({"_id": {"$in": merch_obj_ids}}, {"name": 1, "phone": 1})):
         merchants[str(m["_id"])] = m
     
     result = [_fmt_store_fast(s, sub_map, deal_map, merchants) for s in stores]
@@ -360,7 +364,7 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     name = data.get("store_name","").strip()
     if not mid: raise HTTPException(400, "merchant_id required")
     if not name: raise HTTPException(400, "store_name required")
-    try: merchant = db.merchants.find_one({"_id": ObjectId(mid)})
+    try: merchant = db.accounts.find_one({"_id": ObjectId(mid)}) or db.merchants.find_one({"_id": ObjectId(mid)})
     except: raise HTTPException(400, "Invalid merchant_id")
     if not merchant: raise HTTPException(404, "Merchant not found")
 
@@ -601,7 +605,7 @@ def list_subscriptions(a=Depends(get_current_admin)):
     for s in db.subscriptions.find().sort("created_at", -1):
         merchant = None
         try:
-            merchant = db.merchants.find_one({"_id": ObjectId(s.get("merchant_id",""))})
+            merchant = (db.accounts.find_one({"_id": ObjectId(s.get("merchant_id",""))}) or db.merchants.find_one({"_id": ObjectId(s.get("merchant_id",""))}))
         except: pass
         store_doc = {}
         try:
@@ -858,7 +862,7 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
         # ISSUE 1: Resolve merchant_name from merchant_id for admin-created products
         if mid:
             try:
-                m = db.merchants.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1})
+                m = (db.accounts.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1}) or db.merchants.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1}))
                 if m:
                     merchant_name  = m.get("name", "")
                     merchant_phone = str(m.get("phone", ""))
@@ -927,7 +931,7 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
     # so it shows in the merchant app dashboard and counts toward their products
     if merchant_id:
         try:
-            m = db.merchants.find_one({"_id": ObjectId(merchant_id)}, {"name":1,"phone":1})
+            m = (db.accounts.find_one({"_id": ObjectId(merchant_id)}, {"name":1,"phone":1}) or db.merchants.find_one({"_id": ObjectId(merchant_id)}, {"name":1,"phone":1}))
             if m:
                 mv_doc = {
                     "merchant_id":    merchant_id,

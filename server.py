@@ -232,7 +232,11 @@ def _ensure_indexes():
             name="deals_store_status",
             background=True,
         )
-        # Users — phone lookup (login)
+        # Accounts — phone lookup (unified login)
+        db.accounts.create_index([("phone", 1)], name="accounts_phone", background=True)
+        db.accounts.create_index([("token", 1)], name="accounts_token", background=True)
+        db.accounts.create_index([("roles", 1)], name="accounts_roles", background=True)
+        # Users — phone lookup (legacy fallback)
         db.users.create_index(
             [("phone", 1)],
             name="users_phone",

@@ -84,7 +84,8 @@ def get_merchant(request: Request):
         return acct
 
     # FALLBACK: legacy merchants collection (pre-migration data)
-    m = db.merchants.find_one({"token": token})
+    m = (db.accounts.find_one({"token": token, "roles": "merchant"}) or
+         db.merchants.find_one({"token": token}))
     if m:
         return m
 
@@ -112,7 +113,11 @@ def merchant_register(data: dict):
         "status": "active", "token": None,
         "registered_at": datetime.utcnow(),
     }
-    result = db.merchants.insert_one(merchant)
+    # Insert into unified accounts collection
+    merchant["roles"] = merchant.get("roles", ["merchant"])
+    result = db.accounts.insert_one(merchant)
+    # Also keep merchants collection in sync (for rollback safety)
+    db.merchants.update_one({"phone": merchant["phone"]}, {"$set": merchant}, upsert=True)
     merchant_oid = result.inserted_id
 
     # Sync to unified accounts collection
@@ -149,7 +154,8 @@ def merchant_login(data: dict):
         token = str(uuid.uuid4())
         db.accounts.update_one({"_id": acct["_id"]}, {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}})
         # Sync to merchants legacy
-        db.merchants.update_one({"phone": {"$in": variants}}, {"$set": {"token": token}})
+        db.accounts.update_one({"phone": {"$in": variants}}, {"$set": {"token": token}})
+        db.merchants.update_one({"phone": {"$in": variants}}, {"$set": {"token": token}})  # keep in sync
         res = JSONResponse({
             "merchant_id": acct.get("merchant_id", str(acct["_id"])),
             "name":        acct.get("name", ""),
@@ -161,7 +167,7 @@ def merchant_login(data: dict):
         return res
 
     # Fallback: legacy merchants collection
-    m = db.merchants.find_one({"phone": {"$in": variants}})
+    m = (db.accounts.find_one({"phone": {"$in": variants}, "roles": "merchant"}) or db.merchants.find_one({"phone": {"$in": variants}}))
     if not m:
         raise HTTPException(401, "Phone not registered. Please register first.")
     token = str(uuid.uuid4())
@@ -190,7 +196,7 @@ def check_merchant_phone(data: dict):
     if acct:
         return {"registered": True, "role": "merchant" if "merchant" in acct.get("roles",[]) else "user"}
     # Legacy fallback
-    m = db.merchants.find_one({"phone": {"$in": variants}})
+    m = (db.accounts.find_one({"phone": {"$in": variants}, "roles": "merchant"}) or db.merchants.find_one({"phone": {"$in": variants}}))
     return {"registered": m is not None, "role": "merchant" if m else "none"}
 
 

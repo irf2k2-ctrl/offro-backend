@@ -38,7 +38,8 @@ def get_current_user(request: Request):
     acct = db.accounts.find_one({"token": token})
     if not acct:
         # Fallback: legacy users collection during transition
-        acct = db.users.find_one({"token": token})
+        acct = (db.accounts.find_one({"token": token}) or
+            db.users.find_one({"token": token}))
         if not acct:
             raise HTTPException(status_code=401, detail="Session expired")
     return acct
@@ -111,6 +112,89 @@ def get_wallet(user=Depends(get_current_user)):
         "profile_image":      user.get("profile_image", None),
     }
 
+# ══════════════════════════════════════════════════════════════════════════════
+# UNIFIED ACCOUNT LOGIN — single endpoint for all account types
+# POST /user/account-login
+# Called after MSG91 OTP verified on Flutter side.
+# Checks accounts collection first (unified), falls back to users/merchants.
+# ══════════════════════════════════════════════════════════════════════════════
+@router.post("/account-login")
+def account_login(data: dict):
+    """
+    Single login for all accounts. No role selection needed.
+    Checks accounts collection → falls back to users → merchants.
+    Returns: token, name, phone, roles, user_id, merchant_id, is_merchant
+    """
+    raw_phone = str(data.get("phone", "")).strip()
+    if not raw_phone:
+        raise HTTPException(status_code=400, detail="Phone is required")
+
+    variants = _phone_variants(raw_phone)
+
+    # ── Primary: unified accounts collection ──
+    acct = db.accounts.find_one({"phone": {"$in": variants}})
+
+    # ── Fallback 1: legacy users collection ──
+    if not acct:
+        acct = db.users.find_one({"phone": {"$in": variants}})
+        if acct:
+            acct["roles"] = acct.get("roles", ["user"])
+
+    # ── Fallback 2: legacy merchants collection ──
+    if not acct:
+        acct = db.merchants.find_one({"phone": {"$in": variants}})
+        if acct:
+            acct["roles"] = acct.get("roles", ["merchant"])
+
+    if not acct:
+        raise HTTPException(status_code=404, detail="Phone not registered. Please register first.")
+
+    if acct.get("status") == "blocked":
+        raise HTTPException(status_code=403, detail="Account suspended. Contact support.")
+
+    roles       = acct.get("roles", ["user"])
+    is_merchant = "merchant" in roles
+    token       = str(uuid.uuid4())
+
+    # Update token in accounts (primary)
+    db.accounts.update_one(
+        {"_id": acct["_id"]},
+        {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}}
+    )
+    # Sync token to legacy collections for rollback safety
+    db.users.update_one({"phone": {"$in": variants}}, {"$set": {"token": token}})
+    if is_merchant:
+        db.merchants.update_one({"phone": {"$in": variants}}, {"$set": {"token": token}})
+
+    acct_id   = str(acct["_id"])
+    user_id   = acct.get("user_id", acct_id if not is_merchant else "")
+    merch_id  = acct.get("merchant_id", acct_id if is_merchant else "")
+
+    print(f"[ACCOUNT-LOGIN] ✅ {raw_phone} roles={roles} id={acct_id}")
+
+    resp_data = {
+        "account_id":   acct_id,
+        "user_id":      user_id,
+        "merchant_id":  merch_id,
+        "name":         acct.get("name", ""),
+        "phone":        acct.get("phone", raw_phone),
+        "token":        token,
+        "roles":        roles,
+        "is_merchant":  is_merchant,
+        "role":         "merchant" if is_merchant and "user" not in roles else ("both" if is_merchant else "user"),
+        "visit_points": acct.get("visit_points", 0),
+        "pool_points":  acct.get("pool_points", 0),
+        "city":         acct.get("city", ""),
+    }
+    response = JSONResponse(content=resp_data)
+    response.set_cookie(key="user_token", value=token, httponly=True,
+        samesite="Lax", secure=False, max_age=3600 * 24 * 30)
+    if is_merchant:
+        response.set_cookie(key="merchant_token", value=token, httponly=True,
+            samesite="Lax", secure=False, max_age=3600 * 24 * 30)
+    return response
+
+
 @router.post("/wallet/withdraw")
 def withdraw(data: dict, user=Depends(get_current_user)):
     pricing    = db.pricing.find_one({}) or {}
@@ -153,7 +237,7 @@ def redeem_qr(data: dict, request: Request):
         raise HTTPException(status_code=401, detail="User not authenticated")
     user = db.accounts.find_one({"token": user_token})
     if not user:
-        user = db.users.find_one({"token": user_token})  # legacy fallback
+        user = db.accounts.find_one({"token": user_token}) or db.users.find_one({"token": user_token})  # unified + legacy fallback
     if not user:
         raise HTTPException(status_code=403, detail="Invalid user session")
     try:
