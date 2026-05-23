@@ -244,7 +244,7 @@ tr:hover td{background:#f7faf8;}
     <div class="section-header">
       <div class="page-title" style="margin:0">Stores</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <input id="store_search" class="form-control" style="max-width:190px;" placeholder="🔍 Search store..." oninput="filterStores()">
+        <input id="store_search" class="form-control" style="max-width:190px;" placeholder="🔍 Search name, mobile..." oninput="filterStores()">
         <select id="store_city_filter" class="form-select" style="max-width:130px;" onchange="filterStores()"><option value="">All Cities</option></select>
         <select id="store_status_filter" class="form-select" style="max-width:150px;" onchange="filterStores()">
           <option value="">All Status</option>
@@ -1468,7 +1468,7 @@ function filterStores(){
   let status=document.getElementById("store_status_filter").value;
   _filteredStores=allStores.filter(s=>{
     let cm=!city||(s.city||"").toLowerCase()===city.toLowerCase();
-    let sm=!search||(s.store_name||"").toLowerCase().includes(search)||(s.merchant_name||"").toLowerCase().includes(search)||(s.city||"").toLowerCase().includes(search);
+    let sm=!search||(s.store_name||"").toLowerCase().includes(search)||(s.merchant_name||"").toLowerCase().includes(search)||(s.city||"").toLowerCase().includes(search)||(s.phone||"").includes(search)||(s.merchant_phone||"").includes(search);
     let stm=!status||(s.status||"")===(status);
     return cm&&sm&&stm;
   });
@@ -1527,11 +1527,10 @@ function renderStoresPage(){
       : s.is_new_in_town
         ? `<span class="badge-new">📍 New In Town</span>`
         : `<span style="color:var(--muted);font-size:11px;">—</span>`;
-    let dealBadge=s.deal_status==='active'
-      ?`<span class="badge-deal-active">🔥 Active</span>`
-      :s.deal_status==='expired'
-        ?`<span class="badge-deal-expired">Expired</span>`
-        :`<span class="badge-deal-none">—</span>`;
+    // Deal badge — backend sends deal_count + best_deal (not deal_status)
+    let dealBadge = (s.deal_count > 0)
+      ? `<span class="badge-active" style="font-size:10px;padding:2px 7px;">🔥 ${s.best_deal>0?s.best_deal+'% off':s.deal_count+' deal'+(s.deal_count>1?'s':'')}</span>`
+      : `<span style="color:var(--muted);font-size:11px;">—</span>`;
     let statusBadge=s.status==="waiting_approval"?`<span class="badge-waiting">⏳ Waiting</span>`:`<span class="badge-${s.status}">${s.status}</span>`;
     let approveBtn=s.status==="waiting_approval"?`<button class="btn-approve me-1" onclick="approveStore('${s._id}')">✓ Approve</button>`:"";
     html+=`<tr>
@@ -1545,9 +1544,14 @@ function renderStoresPage(){
       <td style="font-size:12px">${s.visit_points||0}</td>
       <td>${newBadge}</td><td>${statusBadge}</td><td>${dealBadge}</td>
       <td>
-        <span class="badge-${s.paid_status==='paid'?'active':s.paid_status==='expired'?'inactive':'warn'}" style="font-size:10px;">
-          ${s.paid_status==='paid'?'✓ paid':s.paid_status==='expired'?'expired':'unpaid'}
-        </span>
+        ${(()=>{
+          const _ss = (s.sub_status||"").toLowerCase();
+          const _sp = s.sub_plan||"";
+          if(_ss==='active') return `<span class="badge-active" style="font-size:10px;">✓ ${_sp||'Paid'}</span>`;
+          if(_ss==='expired') return `<span class="badge-inactive" style="font-size:10px;">Expired</span>`;
+          if(_ss==='free') return `<span class="badge-warn" style="font-size:10px;">Free</span>`;
+          return `<span class="badge-warn" style="font-size:10px;">Unpaid</span>`;
+        })()}
       </td>
       <td>
         ${approveBtn}
