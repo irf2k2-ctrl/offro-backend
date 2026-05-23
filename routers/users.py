@@ -178,9 +178,9 @@ def redeem_qr(data: dict, request: Request):
         raise HTTPException(status_code=429, detail="Already redeemed from this store today. Try again tomorrow.")
 
     db.accounts.update_one({"_id": user["_id"]}, {"$inc": {"visit_points": points_to_add, "visit_pts": points_to_add}})
-        # Keep legacy users collection in sync
-        if user.get("user_id"):
-            db.users.update_one({"token": user_token}, {"$inc": {"visit_points": points_to_add}})
+    # Keep legacy users collection in sync
+    if user.get("user_id"):
+        db.users.update_one({"token": user_token}, {"$inc": {"visit_points": points_to_add}})
     db.redemptions.insert_one({
         "user_id":     user_id,
         "store_id":    store_id,

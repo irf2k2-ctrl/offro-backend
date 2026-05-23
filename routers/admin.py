@@ -1353,7 +1353,7 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                     f"+{_last10}",          # with + only (edge case)
                 })
                 u = (db.accounts.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1}) or
-                db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1})
+                     db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1}))
                 print(f"[FCM] specific: phone={phone} variants={phone_variants} found={u is not None} stored_phone={u.get('phone') if u else None} has_token={bool(u and u.get('fcm_token'))}")
                 
                 # Fallback: check fcm_pending if user found but token missing, or user not found
