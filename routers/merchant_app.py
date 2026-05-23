@@ -156,6 +156,10 @@ def _mid(m: dict) -> str:
     return m.get("merchant_id") or str(m["_id"])
 
 
+def plan_days(plan: str) -> int:
+    return {"1month": 30, "3months": 90, "6months": 180, "12months": 365}.get(plan, 30)
+
+
 def _log_tx(merchant_id: str, tx_type: str, description: str, amount: float = 0, meta: dict = None):
     """Write a transaction record for a merchant."""
     try:
