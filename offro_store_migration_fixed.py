@@ -5,14 +5,14 @@ import cloudinary
 import cloudinary.uploader
 
 # Read environment variables correctly
-MONGO_URL = os.getenv("MONGODB_URL")
+MONGO_URL = os.getenv("mongodb://mongo:FGyxBURlEDfqBMHAfNxqDOnJKvNwcwQR@roundhouse.proxy.rlwy.net:32523/offro_db?authSource=admin")
 client = MongoClient(MONGO_URL)
 db = client["offro_db"]
 
 cloudinary.config(
-    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
-    api_key=os.getenv("CLOUDINARY_API_KEY"),
-    api_secret=os.getenv("CLOUDINARY_API_SECRET")
+    cloud_name=os.getenv("dwjcqcapf"),
+    api_key=os.getenv("888983174117729"),
+    api_secret=os.getenv("A2QVryyQNU0XegL6G6eBbOGrF_Y")
 )
 
 print("Connected to offro_db")

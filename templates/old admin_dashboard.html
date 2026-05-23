@@ -1480,18 +1480,12 @@ function renderStoresPage(){
   let pageData=f.slice((_storesPage-1)*PAGE_SIZE, _storesPage*PAGE_SIZE);
   let html="";
   pageData.forEach(s=>{
-    // Resolve store image: CDN URL first, then base64 fallback, then empty
-    let imgSrc = s.image_url || s.image || s._thumb || "";
-    // Category-based fallback emoji for stores with no image
-    const _catEmoji = {grocery:"🛒",bakery:"🍞",pharmacy:"💊",restaurant:"🍽️",cafe:"☕",
-      gym:"💪",salon:"💇",fashion:"👗",clothing:"👗",tech:"📱",mobile:"📱",clinic:"🏥",
-      electronics:"🔌",default:"🏪"};
-    const _cat = (s.category||"").toLowerCase();
-    const _fallbackEmoji = _catEmoji[_cat] || Object.entries(_catEmoji).find(([k])=>_cat.includes(k))?.[1] || _catEmoji.default;
-    const _phSpan = `<span style="display:inline-block;width:38px;height:38px;border-radius:6px;background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;text-align:center;font-size:16px;">${_fallbackEmoji}</span>`;
+    // FIX: handle both image (string) and images (array) from backend
+    // Images are stored as base64 in MongoDB — use directly
+    let imgSrc = s.image_url || s.image || s._thumb || "";  // CDN first, then base64 fallback
     let img = imgSrc
-      ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="this.outerHTML='${_phSpan}'">`
-      : _phSpan;
+      ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="this.style.display='none'">`
+      : `<span style="display:inline-block;width:38px;height:38px;border-radius:6px;background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;text-align:center;font-size:16px;">🏪</span>`;
     const _badgeLabels={newly_added:"✨ Newly Added",just_opened:"🎉 Just Opened",new_store:"🆕 New Store",trending:"🔥 Trending",popular:"⭐ Popular",top_rated:"🏆 Top Rated",must_visit:"📍 Must Visit",limited_offer:"⏳ Limited Offer"};
     const _badge = s.badge||s.store_badge||"";
     let newBadge = _badge
@@ -3550,7 +3544,7 @@ async function setRating(storeId, val, el) {  // FIX 2: async
 function storeImg(s) {
     const img = s.image_url || s.image || (s.images && s.images[0]) || "";
     if (!img) return `<div class="store-thumb-ph"><i class="fas fa-store"></i></div>`;
-    return `<img src="${img}" class="store-thumb" onerror="this.outerHTML='<div class=store-thumb-ph><i class=fas fa-store></i></div>'" referrerpolicy="no-referrer" crossorigin="anonymous">`;
+    return `<img src="${img}" class="store-thumb" onerror="this.outerHTML='<div class=store-thumb-ph><i class=fas fa-store></i></div>'">`;
 }
 
 function _populateMerchantSelect() {
@@ -3595,7 +3589,7 @@ function editStore(s) {
     const prev = document.getElementById("store_image_preview");
     const _sImgSrc = s.image_url || s.image || "";
     if (_sImgSrc) {
-        prev.innerHTML = `<img src="${_sImgSrc}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div style=\'width:80px;height:56px;border-radius:8px;background:#e8f5ee;display:flex;align-items:center;justify-content:center;font-size:22px;\'>🏪</div>')">`;
+        prev.innerHTML = `<img src="${_sImgSrc}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">`;
     } else { prev.innerHTML = ""; }
     // Show image2 preview
     const prev2 = document.getElementById("store_image2_preview");
