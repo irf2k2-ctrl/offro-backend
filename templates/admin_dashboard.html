@@ -2778,8 +2778,14 @@ async function loadGiftCards() {
       let computedStatus = isActive ? 'approved' : 'hidden';
       if (isActive && toD) {
         try {
-          const endDt = new Date(toD);
-          if (!isNaN(endDt) && endDt < new Date()) { computedStatus = 'expired'; isActive = false; }
+          // Support "22 May 2026", "2026-05-22", "22-05-2026" formats
+          let endDt = new Date(toD);
+          if (isNaN(endDt)) {
+            const cleaned = toD.replace(/(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1');
+            endDt = new Date(cleaned);
+          }
+          const today = new Date(new Date().toDateString()); // midnight today local
+          if (!isNaN(endDt) && endDt < today) { computedStatus = 'expired'; isActive = false; }
         } catch(e) {}
       }
       // ISSUE 1 FIX: gift_vouchers with source='merchant' are approved merchant products
@@ -2817,8 +2823,14 @@ async function loadGiftCards() {
       let computedStatus = st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending');
       if (computedStatus === 'approved' && toD) {
         try {
-          const endDt = new Date(toD);
-          if (!isNaN(endDt) && endDt < new Date()) computedStatus = 'expired';
+          // Support "22 May 2026", "2026-05-22", "22-05-2026" formats
+          let endDt = new Date(toD);
+          if (isNaN(endDt)) {
+            const cleaned = toD.replace(/(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1');
+            endDt = new Date(cleaned);
+          }
+          const today = new Date(new Date().toDateString()); // midnight today local
+          if (!isNaN(endDt) && endDt < today) computedStatus = 'expired';
         } catch(e) {}
       }
       return {
