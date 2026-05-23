@@ -495,6 +495,71 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
     end_date  = from_date + timedelta(days=plan_days(plan))
 
+    # ── Zero-price fast path (FREE discount or 0-price plan) ──
+    # Razorpay does NOT accept amount=0; activate immediately instead.
+    if total_paise <= 0:
+        sub_doc = {
+            "store_id":       store_id,
+            "merchant_id":    str(m["_id"]),
+            "plan":           plan,
+            "from_date":      from_date,
+            "end_date":       end_date,
+            "price":          price,
+            "gst":            gst_amt,
+            "gst_percent":    gst,
+            "total":          0,
+            "status":         "paid",
+            "pay_mode":       "free",
+            "discount_code":  discount_code,
+            "discount_value": discount_value,
+            "created_at":     datetime.utcnow(),
+            "paid_at":        datetime.utcnow(),
+            "free_activation": True,
+        }
+        sub_result = db.subscriptions.insert_one(sub_doc)
+        sub_id = str(sub_result.inserted_id)
+        db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {
+            "status":             "waiting_approval",
+            "subscription_plan":  plan,
+            "subscription_start": from_date,
+            "subscription_end":   end_date,
+        }})
+        invoice_no = f"LS-FREE-{datetime.utcnow().strftime('%Y%m%d')}-{sub_id[-6:].upper()}"
+        store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
+        db.invoices.insert_one({
+            "invoice_no":    invoice_no,
+            "merchant_id":   str(m["_id"]),
+            "merchant_name": m.get("name"),
+            "merchant_phone": m.get("phone"),
+            "store_id":      store_id,
+            "store_name":    store_doc.get("store_name", ""),
+            "plan":          plan,
+            "base_price":    0, "gst": 0, "total": 0,
+            "from_date":     from_date,
+            "end_date":      end_date,
+            "created_at":    datetime.utcnow(),
+        })
+        _log_tx(str(m["_id"]), "subscription",
+                f"Free plan activated for '{store_doc.get('store_name','')}' — {plan}",
+                amount=0, meta={"store_id": store_id, "plan": plan, "invoice": invoice_no})
+        return {
+            "ok":              True,
+            "pay_mode":        "free",
+            "subscription_id": sub_id,
+            "invoice_no":      invoice_no,
+            "amount":          0,
+            "amount_display":  0,
+            "plan_label":      plans_map[plan]["label"],
+            "from_date":       from_date_str,
+            "end_date":        end_date.strftime("%Y-%m-%d"),
+            "gst_percent":     gst,
+            "gst_amount":      0,
+            "base_price":      price,
+            "merchant_name":   m.get("name"),
+            "merchant_phone":  m.get("phone"),
+            "store_name":      store.get("store_name"),
+        }
+
     # ── Razorpay integration ──
     rp_configured = (
         RAZORPAY_KEY_ID and
