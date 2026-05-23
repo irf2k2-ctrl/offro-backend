@@ -47,16 +47,32 @@ def get_current_user(request: Request):
 @router.post("/check-phone")
 def check_phone(data: dict):
     """
-    Unified check — single accounts collection.
+    Unified check — accounts first, then legacy users + merchants as fallback.
     Returns {"registered": bool, "role": "user"|"merchant"|"both"|"none"}
     """
     raw_phone = str(data.get("phone", "")).strip()
     if not raw_phone:
         raise HTTPException(status_code=400, detail="Phone is required")
     variants = _phone_variants(raw_phone)
+
+    # Primary: unified accounts collection
     acct = db.accounts.find_one({"phone": {"$in": variants}})
+
+    # Fallback 1: legacy users
+    if not acct:
+        acct = db.users.find_one({"phone": {"$in": variants}})
+        if acct:
+            acct["roles"] = acct.get("roles", ["user"])
+
+    # Fallback 2: legacy merchants
+    if not acct:
+        acct = db.merchants.find_one({"phone": {"$in": variants}})
+        if acct:
+            acct["roles"] = acct.get("roles", ["merchant"])
+
     if not acct:
         return {"registered": False, "role": "none"}
+
     roles = acct.get("roles", [])
     if "user" in roles and "merchant" in roles: role = "both"
     elif "merchant" in roles:                   role = "merchant"
