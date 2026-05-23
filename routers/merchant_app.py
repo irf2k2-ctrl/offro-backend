@@ -71,30 +71,36 @@ def _qr(store_id: str) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.read()).decode()
 
 def get_merchant(request: Request):
-    """Unified auth — hits accounts collection first, falls back to merchants for legacy tokens."""
+    """Unified auth — token lookup across accounts + merchants collections."""
     token = (request.cookies.get("merchant_token") or
              request.cookies.get("user_token") or
              request.headers.get("Authorization", "").replace("Bearer ", ""))
     if not token:
         raise HTTPException(401, "Not authenticated")
 
-    # PRIMARY: unified accounts collection
+    # PRIMARY: unified accounts collection (any role — role checked at endpoint level if needed)
     acct = db.accounts.find_one({"token": token})
-    if acct and "merchant" in acct.get("roles", []):
+    if acct:
         return acct
 
-    # FALLBACK: legacy merchants collection (pre-migration data)
-    m = (db.accounts.find_one({"token": token, "roles": "merchant"}) or
-         db.merchants.find_one({"token": token}))
+    # FALLBACK: legacy merchants collection (pre-migration merchants not yet in accounts)
+    m = db.merchants.find_one({"token": token})
     if m:
+        # Opportunistically sync this merchant into accounts for future lookups
+        try:
+            from routers.users import _phone_variants as _pv
+            variants = _pv(str(m.get("phone", "")))
+            db.accounts.update_one(
+                {"phone": {"$in": variants}},
+                {"$set": {"token": token, "merchant_id": str(m["_id"]), "name": m.get("name",""), "phone": m.get("phone","")},
+                 "$addToSet": {"roles": "merchant"}},
+                upsert=True,
+            )
+        except Exception:
+            pass
         return m
 
-    # FALLBACK 2: token in users/accounts but merchant role not set yet
-    if acct:
-        # Has token but not merchant role
-        raise HTTPException(403, "Not a registered merchant")
-
-    raise HTTPException(401, "Session expired")
+    raise HTTPException(401, "Session expired. Please log in again.")
 
 
 @router.post("/register")
@@ -167,18 +173,34 @@ def merchant_login(data: dict):
         return res
 
     # Fallback: legacy merchants collection
-    m = (db.accounts.find_one({"phone": {"$in": variants}, "roles": "merchant"}) or db.merchants.find_one({"phone": {"$in": variants}}))
+    m = db.merchants.find_one({"phone": {"$in": variants}})
     if not m:
-        raise HTTPException(401, "Phone not registered. Please register first.")
+        raise HTTPException(401, "Phone not registered as merchant. Please register first.")
     token = str(uuid.uuid4())
-    db.merchants.update_one({"_id": m["_id"]}, {"$set": {"token": token}})
-    # Sync token to accounts
+    # Save token to merchants collection
+    db.merchants.update_one({"_id": m["_id"]}, {"$set": {"token": token, "last_login": datetime.utcnow().isoformat()}})
+    # Sync token to accounts collection (upsert so future /me calls work)
     db.accounts.update_one(
         {"phone": {"$in": variants}},
-        {"$set": {"token": token, "merchant_id": str(m["_id"])}, "$addToSet": {"roles": "merchant"}},
+        {"$set": {
+            "token":       token,
+            "merchant_id": str(m["_id"]),
+            "name":        m.get("name", ""),
+            "phone":       m.get("phone", phone),
+            "last_login":  datetime.utcnow().isoformat(),
+        },
+         "$addToSet": {"roles": "merchant"}},
         upsert=True,
     )
-    res = JSONResponse({"merchant_id": str(m["_id"]), "name": m.get("name",""), "phone": m.get("phone", phone), "token": token})
+    print(f"[MERCHANT-LOGIN] ✅ fallback: {phone} → merchant_id={str(m['_id'])}")
+    res = JSONResponse({
+        "merchant_id": str(m["_id"]),
+        "name":        m.get("name", ""),
+        "phone":       m.get("phone", phone),
+        "token":       token,
+        "is_merchant": True,
+        "role":        "merchant",
+    })
     res.set_cookie("merchant_token", token, httponly=True, samesite="lax", max_age=86400*30)
     res.set_cookie("user_token",     token, httponly=True, samesite="lax", max_age=86400*30)
     return res
