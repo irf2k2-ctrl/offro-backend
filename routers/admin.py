@@ -304,6 +304,53 @@ def toggle_account_status(account_id: str, data: dict, a=Depends(get_current_adm
     return {"ok": True, "status": new_status}
 
 
+
+def _fmt_store_fast(s, sub_map, deal_map, merchants):
+    """Format a store record for the admin list view."""
+    sid      = str(s["_id"])
+    sub      = sub_map.get(sid, {})
+    deals    = deal_map.get(sid, [])
+    mid      = s.get("merchant_id", "")
+    merchant = merchants.get(mid, {})
+
+    # Resolve image — check multiple field names
+    image = (s.get("image") or s.get("store_image") or
+             s.get("_thumb") or
+             (s.get("images") or [None])[0] or "")
+
+    sub_plan   = sub.get("plan", "")
+    sub_status = sub.get("status", "")
+    sub_label  = f"{sub_plan} ({sub_status})" if sub_plan else ""
+
+    best_deal = max((d.get("discount", 0) for d in deals), default=0)
+
+    return {
+        "_id":            sid,
+        "store_name":     s.get("store_name", ""),
+        "category":       s.get("category", ""),
+        "city":           s.get("city", ""),
+        "area":           s.get("area", ""),
+        "address":        s.get("address", ""),
+        "phone":          s.get("phone", ""),
+        "status":         s.get("status", "active"),
+        "is_new_in_town": s.get("is_new_in_town", False),
+        "badge":          s.get("badge", ""),
+        "points_per_scan":s.get("points_per_scan", 0),
+        "rating":         s.get("admin_rating") or s.get("rating") or 0,
+        "image":          image,
+        "merchant_id":    mid,
+        "merchant_name":  merchant.get("name", s.get("merchant_name", "")),
+        "merchant_phone": str(merchant.get("phone", s.get("merchant_phone", ""))),
+        "subscription":   sub_label,
+        "sub_plan":       sub_plan,
+        "sub_status":     sub_status,
+        "deal_count":     len(deals),
+        "best_deal":      best_deal,
+        "lat":            s.get("lat", ""),
+        "lng":            s.get("lng", ""),
+        "created_at":     s.get("created_at", ""),
+    }
+
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
     global _store_cache
@@ -1514,6 +1561,33 @@ def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
 # ADMIN — MERCHANT VOUCHER APPROVAL
 # ═══════════════════════════════════════════════════════════
 
+
+def _compute_voucher_status(v):
+    """Return real-time status — auto-expire if end_date has passed."""
+    stored = v.get("approval_status", v.get("status", "pending_approval"))
+    if stored in ("pending_approval", "rejected"):
+        return stored
+    end_raw = v.get("end_date", "")
+    if end_raw:
+        try:
+            from dateutil.parser import parse as _dp
+            import pytz
+            end_dt = _dp(str(end_raw))
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=pytz.UTC)
+            now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
+            if end_dt < now_utc:
+                try:
+                    db.merchant_vouchers.update_one(
+                        {"_id": v["_id"], "approval_status": {"$ne": "expired"}},
+                        {"$set": {"approval_status": "expired", "status": "expired"}}
+                    )
+                except: pass
+                return "expired"
+        except:
+            pass
+    return stored
+
 @router.get("/merchant-vouchers")
 def list_merchant_vouchers(a=Depends(get_current_admin)):
     result = []
@@ -1529,7 +1603,7 @@ def list_merchant_vouchers(a=Depends(get_current_admin)):
             "duration_days": v.get("duration_days", v.get("duration",30)),
             "from_date":     v.get("from_date",""),
             "end_date":      v.get("end_date",""),
-            "status":        v.get("approval_status","pending_approval"),
+            "status":        _compute_voucher_status(v),
             "invoice_no":    v.get("invoice_no",""),
             "amount":        v.get("total",0),
             "created_at":    v["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if isinstance(v.get("created_at"), datetime) else str(v.get("created_at",""))[:16],
