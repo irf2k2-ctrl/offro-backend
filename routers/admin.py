@@ -351,9 +351,12 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
     mid      = s.get("merchant_id", "")
     merchant = merchants.get(mid, {})
 
-    # Resolve image — check multiple field names
-    image = (s.get("image") or s.get("store_image") or
-             s.get("_thumb") or
+    # Resolve image — CDN URL first (post-Cloudinary migration), then base64 fallbacks
+    image = (s.get("image_url") or      # Cloudinary CDN URL (post-migration)
+             s.get("image_thumb") or     # Cloudinary thumb URL
+             s.get("image") or           # legacy base64 field
+             s.get("store_image") or     # alternate base64 field
+             s.get("_thumb") or          # old thumbnail base64
              (s.get("images") or [None])[0] or "")
 
     sub_plan   = sub.get("plan", "")
@@ -376,6 +379,7 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "points_per_scan":s.get("points_per_scan", 0),
         "rating":         s.get("admin_rating") or s.get("rating") or 0,
         "image":          image,
+        "image_url":      image,  # also expose as image_url for JS consistency
         "merchant_id":    mid,
         "merchant_name":  merchant.get("name", s.get("merchant_name", "")),
         "merchant_phone": str(merchant.get("phone", s.get("merchant_phone", ""))),

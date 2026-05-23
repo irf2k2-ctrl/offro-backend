@@ -1471,7 +1471,7 @@ function renderStoresPage(){
   pageData.forEach(s=>{
     // FIX: handle both image (string) and images (array) from backend
     // Images are stored as base64 in MongoDB — use directly
-    let imgSrc = s.image || s._thumb || "";
+    let imgSrc = s.image_url || s.image || s._thumb || "";  // CDN first, then base64 fallback
     let img = imgSrc
       ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="this.style.display='none'">`
       : `<span style="display:inline-block;width:38px;height:38px;border-radius:6px;background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;text-align:center;font-size:16px;">🏪</span>`;
@@ -3523,7 +3523,7 @@ async function setRating(storeId, val, el) {  // FIX 2: async
 }
 
 function storeImg(s) {
-    const img = s.image || (s.images && s.images[0]) || "";
+    const img = s.image_url || s.image || (s.images && s.images[0]) || "";
     if (!img) return `<div class="store-thumb-ph"><i class="fas fa-store"></i></div>`;
     return `<img src="${img}" class="store-thumb" onerror="this.outerHTML='<div class=store-thumb-ph><i class=fas fa-store></i></div>'">`;
 }
@@ -3563,13 +3563,14 @@ function editStore(s) {
     document.getElementById("store_address").value = s.address||"";
     document.getElementById("store_phone").value = s.phone||"";
     document.getElementById("store_visit_points").value = s.visit_points||0;
-    document.getElementById("store_image_url").value = s.image||"";
+    document.getElementById("store_image_url").value = s.image_url || s.image || "";
     document.getElementById("store_image2_url").value = s.image2||"";
     document.getElementById("store_msg").innerText = "";
     // Show image1 preview
     const prev = document.getElementById("store_image_preview");
-    if (s.image) {
-        prev.innerHTML = `<img src="${s.image}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">`;
+    const _sImgSrc = s.image_url || s.image || "";
+    if (_sImgSrc) {
+        prev.innerHTML = `<img src="${_sImgSrc}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">`;
     } else { prev.innerHTML = ""; }
     // Show image2 preview
     const prev2 = document.getElementById("store_image2_preview");
