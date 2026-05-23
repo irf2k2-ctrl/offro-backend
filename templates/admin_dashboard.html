@@ -1475,6 +1475,39 @@ function filterStores(){
   _storesPage=1;
   renderStoresPage();
 }
+
+// ── Store image fallback helpers ──────────────────────────────────────────
+const _STORE_CAT_EMOJI = {
+  grocery:"🛒", supermarket:"🛒", bakery:"🍞", bread:"🍞",
+  pharmacy:"💊", medical:"💊", clinic:"🏥", hospital:"🏥",
+  restaurant:"🍽️", food:"🍽️", cafe:"☕", coffee:"☕",
+  gym:"💪", fitness:"💪", salon:"💇", beauty:"💄",
+  fashion:"👗", clothing:"👗", apparel:"👗",
+  electronics:"🔌", tech:"📱", mobile:"📱",
+  default:"🏪"
+};
+function _storeImgPhHtml(cat) {
+  cat = (cat||"").toLowerCase();
+  const emoji = _STORE_CAT_EMOJI[cat] ||
+    (Object.entries(_STORE_CAT_EMOJI).find(([k])=> cat.includes(k)) || [null,"🏪"])[1];
+  return '<span style="display:inline-block;width:38px;height:38px;border-radius:6px;' +
+         'background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;' +
+         'text-align:center;font-size:16px;">' + emoji + '</span>';
+}
+function _storeImgFallback(el, cat) {
+  // Replace broken img with emoji placeholder — safe, no quote issues
+  const ph = document.createElement("span");
+  ph.style.cssText = "display:inline-block;width:38px;height:38px;border-radius:6px;" +
+    "background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;" +
+    "text-align:center;font-size:16px;";
+  ph.textContent = _storeImgPhHtml(cat).match(/>(.*?)<\/span>/)?.[1] || "🏪";
+  cat = (cat||"").toLowerCase();
+  const emoji = _STORE_CAT_EMOJI[cat] ||
+    (Object.entries(_STORE_CAT_EMOJI).find(([k])=> cat.includes(k)) || [null,"🏪"])[1];
+  ph.textContent = emoji;
+  el.parentNode && el.parentNode.replaceChild(ph, el);
+}
+// ─────────────────────────────────────────────────────────────────────────
 function renderStoresPage(){
   let f=_filteredStores;
   let pageData=f.slice((_storesPage-1)*PAGE_SIZE, _storesPage*PAGE_SIZE);
@@ -1482,16 +1515,11 @@ function renderStoresPage(){
   pageData.forEach(s=>{
     // Resolve store image: CDN URL first, then base64 fallback, then empty
     let imgSrc = s.image_url || s.image || s._thumb || "";
-    // Category-based fallback emoji for stores with no image
-    const _catEmoji = {grocery:"🛒",bakery:"🍞",pharmacy:"💊",restaurant:"🍽️",cafe:"☕",
-      gym:"💪",salon:"💇",fashion:"👗",clothing:"👗",tech:"📱",mobile:"📱",clinic:"🏥",
-      electronics:"🔌",default:"🏪"};
     const _cat = (s.category||"").toLowerCase();
-    const _fallbackEmoji = _catEmoji[_cat] || Object.entries(_catEmoji).find(([k])=>_cat.includes(k))?.[1] || _catEmoji.default;
-    const _phSpan = `<span style="display:inline-block;width:38px;height:38px;border-radius:6px;background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;text-align:center;font-size:16px;">${_fallbackEmoji}</span>`;
+    // Use named function to avoid quote-escaping issues in onerror attribute
     let img = imgSrc
-      ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="this.outerHTML='${_phSpan}'">`
-      : _phSpan;
+      ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="_storeImgFallback(this,'${_cat}')">`
+      : _storeImgPhHtml(_cat);
     const _badgeLabels={newly_added:"✨ Newly Added",just_opened:"🎉 Just Opened",new_store:"🆕 New Store",trending:"🔥 Trending",popular:"⭐ Popular",top_rated:"🏆 Top Rated",must_visit:"📍 Must Visit",limited_offer:"⏳ Limited Offer"};
     const _badge = s.badge||s.store_badge||"";
     let newBadge = _badge

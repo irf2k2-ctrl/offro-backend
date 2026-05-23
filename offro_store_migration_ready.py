@@ -1,46 +1,48 @@
-import os, time
+import time
 from datetime import datetime, timezone
 from pymongo import MongoClient
 import cloudinary
 import cloudinary.uploader
 
-# Read environment variables correctly
-MONGO_URL = os.getenv("mongodb://mongo:FGyxBURlEDfqBMHAfNxqDOnJKvNwcwQR@roundhouse.proxy.rlwy.net:32523/offro_db?authSource=admin")
+# MongoDB
+MONGO_URL = "mongodb://mongo:FGyxBURlEDfqBMHAfNxqDOnJKvNwcwQR@roundhouse.proxy.rlwy.net:32523/offro_db?authSource=admin"
+
 client = MongoClient(MONGO_URL)
 db = client["offro_db"]
 
+# Cloudinary
 cloudinary.config(
-    cloud_name=os.getenv("dwjcqcapf"),
-    api_key=os.getenv("888983174117729"),
-    api_secret=os.getenv("A2QVryyQNU0XegL6G6eBbOGrF_Y")
+    cloud_name="dwjcqcapf",
+    api_key="888983174117729",
+    api_secret="A2QVryyQNU0XegL6G6eBbOGrF_Y"
 )
 
 print("Connected to offro_db")
 
-stores = db.stores
+stores = db["stores"]
 count = 0
 
-docs = list(
-    stores.find(
-        {
-            "image": {
-                "$exists": True,
-                "$ne": None
-            }
-        }
-    )
-)
+docs = list(stores.find({
+    "image": {
+        "$exists": True,
+        "$ne": None
+    }
+}))
 
 print(f"Found {len(docs)} store images")
 
 for doc in docs:
-    img = doc.get("image", "")
 
     if doc.get("image_url"):
-        print(f"Skipping {doc['_id']} already migrated")
+        print(f"Skipping {doc['_id']} (already migrated)")
         continue
 
-    if not isinstance(img, str) or not img.startswith("data:image"):
+    img = doc.get("image", "")
+
+    if not isinstance(img, str):
+        continue
+
+    if not img.startswith("data:image"):
         continue
 
     try:
@@ -51,13 +53,16 @@ for doc in docs:
             folder="offro/stores"
         )
 
-        url = result.get("secure_url", "")
+        url = result.get("secure_url")
 
         if not url:
             print("Upload failed")
             continue
 
-        thumb = url.replace("/upload/", "/upload/w_300,c_fill/")
+        thumb = url.replace(
+            "/upload/",
+            "/upload/w_300,c_fill/"
+        )
 
         stores.update_one(
             {"_id": doc["_id"]},
@@ -75,4 +80,5 @@ for doc in docs:
     except Exception as e:
         print(f"Failed: {e}")
 
-print(f"Done. Migrated {count} records.")
+print("Migration completed")
+print(f"Total migrated: {count}")
