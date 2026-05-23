@@ -816,6 +816,7 @@ def get_social(a=Depends(get_current_admin)):
     }
 
 @router.put("/social")
+@router.post("/social")
 def save_social(body: dict, a=Depends(get_current_admin)):
     db.settings.update_one(
         {"key": "social_links"},

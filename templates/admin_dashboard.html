@@ -1344,7 +1344,7 @@ async function saveSocialLinks(){
     instagram:document.getElementById("sm_instagram").value.trim(),
     youtube:document.getElementById("sm_youtube").value.trim(),
   };
-  let r=await fetch("/admin/social",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),credentials:"include"});
+  let r=await fetch("/admin/social",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),credentials:"include"});
   let el=document.getElementById("social_msg");
   el.innerText=r.ok?"✅ Saved!":"❌ Error saving";
   setTimeout(()=>el.innerText="",3000);
