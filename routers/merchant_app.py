@@ -135,7 +135,7 @@ def get_merchant(request: Request):
             variants = _pv(str(m.get("phone", "")))
             db.accounts.update_one(
                 {"phone": {"$in": variants}},
-                {"$set": {"token": token, "merchant_id": str(m["_id"]), "name": m.get("name",""), "phone": m.get("phone","")},
+                {"$set": {"token": token, "merchant_id": _mid(m), "name": m.get("name",""), "phone": m.get("phone","")},
                  "$addToSet": {"roles": "merchant"}},
                 upsert=True,
             )
@@ -144,6 +144,16 @@ def get_merchant(request: Request):
         return m
 
     raise HTTPException(401, "Session expired. Please log in again.")
+
+
+def _mid(m: dict) -> str:
+    """Return the correct merchant_id for DB queries.
+
+    After the accounts migration, m["_id"] is the account ObjectId, but all
+    existing stores/banners/subscriptions were written with the OLD merchants
+    collection ObjectId stored in m["merchant_id"].  Always prefer that field.
+    """
+    return m.get("merchant_id") or str(m["_id"])
 
 
 def _log_tx(merchant_id: str, tx_type: str, description: str, amount: float = 0, meta: dict = None):
@@ -243,7 +253,7 @@ def merchant_login(data: dict):
         {"phone": {"$in": variants}},
         {"$set": {
             "token":       token,
-            "merchant_id": str(m["_id"]),
+            "merchant_id": _mid(m),
             "name":        m.get("name", ""),
             "phone":       m.get("phone", phone),
             "last_login":  datetime.utcnow().isoformat(),
@@ -253,7 +263,7 @@ def merchant_login(data: dict):
     )
     print(f"[MERCHANT-LOGIN] ✅ fallback: {phone} → merchant_id={str(m['_id'])}")
     res = JSONResponse({
-        "merchant_id": str(m["_id"]),
+        "merchant_id": _mid(m),
         "name":        m.get("name", ""),
         "phone":       m.get("phone", phone),
         "token":       token,
@@ -292,7 +302,7 @@ def merchant_logout():
 @router.get("/me")
 def merchant_me(m=Depends(get_merchant)):
     return {
-        "merchant_id": str(m["_id"]), "name": m.get("name"),
+        "merchant_id": _mid(m), "name": m.get("name"),
         "phone": m.get("phone"),       "city": m.get("city", ""),
         "area": m.get("area", ""),     "status": m.get("status", "active"),
     }
@@ -301,7 +311,7 @@ def merchant_me(m=Depends(get_merchant)):
 
 @router.get("/stores")
 def my_stores(m=Depends(get_merchant)):
-    mid = str(m["_id"])
+    mid = _mid(m)
     result = []
     for s in db.stores.find({"merchant_id": mid}):
         sub_end = s.get("subscription_end")
@@ -344,7 +354,7 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
     store_name = data.get("store_name", "").strip()
     if not store_name: raise HTTPException(400, "Store name required")
     store = {
-        "merchant_id":   str(m["_id"]),
+        "merchant_id": _mid(m),
         "merchant_name": m.get("name"),
         "store_name":    store_name,
         "category":      data.get("category", ""),
@@ -366,13 +376,13 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
     sid = str(result.inserted_id)
     qr_b64 = _qr(sid)
     db.stores.update_one({"_id": result.inserted_id}, {"$set": {"qr_code": qr_b64}})
-    _log_tx(str(m["_id"]), "store_created", f"Store '{store_name}' created", meta={"store_id": sid})
+    _log_tx(_mid(m), "store_created", f"Store '{store_name}' created", meta={"store_id": sid})
     return {"store_id": sid, "qr_code": qr_b64, "message": "Store created. Subscribe to go live."}
 
 @router.get("/stores/{sid}")
 def get_merchant_store(sid: str, m=Depends(get_merchant)):
     """Return full store detail including image2 — used by edit store screen."""
-    store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
+    store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": _mid(m)})
     if not store: raise HTTPException(404, "Store not found")
     sub_end = store.get("subscription_end")
     sub_end_str = sub_end.strftime("%d %b %Y") if isinstance(sub_end, datetime) else (str(sub_end) if sub_end else "")
@@ -405,7 +415,7 @@ def get_merchant_store(sid: str, m=Depends(get_merchant)):
 @router.post("/stores/{sid}/reset-qr")
 def reset_store_qr(sid: str, m=Depends(get_merchant)):
     """Regenerate QR code for a merchant store. Resets on every scan so stores always have a valid QR."""
-    store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
+    store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": _mid(m)})
     if not store:
         raise HTTPException(404, "Store not found")
     qr_b64 = _qr(sid)
@@ -415,7 +425,7 @@ def reset_store_qr(sid: str, m=Depends(get_merchant)):
 
 @router.put("/stores/{sid}")
 def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
-    store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": str(m["_id"])})
+    store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": _mid(m)})
     if not store: raise HTTPException(404, "Store not found")
     upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng","about"] if data.get(f) is not None}
     if data.get("image"): upd["image"] = data["image"]
@@ -453,7 +463,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     if not all([store_id, plan, from_date_str]):
         raise HTTPException(400, "store_id, plan, from_date required")
 
-    store = db.stores.find_one({"_id": ObjectId(store_id), "merchant_id": str(m["_id"])})
+    store = db.stores.find_one({"_id": ObjectId(store_id), "merchant_id": _mid(m)})
     if not store: raise HTTPException(404, "Store not found")
 
     doc       = db.pricing.find_one({}) or {}
@@ -500,7 +510,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     if total_paise <= 0:
         sub_doc = {
             "store_id":       store_id,
-            "merchant_id":    str(m["_id"]),
+            "merchant_id": _mid(m),
             "plan":           plan,
             "from_date":      from_date,
             "end_date":       end_date,
@@ -528,7 +538,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
         store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
         db.invoices.insert_one({
             "invoice_no":    invoice_no,
-            "merchant_id":   str(m["_id"]),
+            "merchant_id": _mid(m),
             "merchant_name": m.get("name"),
             "merchant_phone": m.get("phone"),
             "store_id":      store_id,
@@ -539,7 +549,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
             "end_date":      end_date,
             "created_at":    datetime.utcnow(),
         })
-        _log_tx(str(m["_id"]), "subscription",
+        _log_tx(_mid(m), "subscription",
                 f"Free plan activated for '{store_doc.get('store_name','')}' — {plan}",
                 amount=0, meta={"store_id": store_id, "plan": plan, "invoice": invoice_no})
         return {
@@ -598,7 +608,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     # Insert subscription record
     sub_doc = {
         "store_id":           store_id,
-        "merchant_id":        str(m["_id"]),
+        "merchant_id": _mid(m),
         "plan":               plan,
         "from_date":          from_date,
         "end_date":           end_date,
@@ -677,7 +687,7 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
     store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
     db.invoices.insert_one({
         "invoice_no":         invoice_no,
-        "merchant_id":        str(m["_id"]),
+        "merchant_id": _mid(m),
         "merchant_name":      m.get("name"),
         "merchant_phone":     m.get("phone"),
         "store_id":           store_id,
@@ -692,7 +702,7 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
         "created_at":         datetime.utcnow(),
     })
 
-    _log_tx(str(m["_id"]), "subscription",
+    _log_tx(_mid(m), "subscription",
             f"Subscribed '{store_doc.get('store_name','')}' — {sub['plan']}",
             amount=sub["total"],
             meta={"store_id": store_id, "plan": sub["plan"], "invoice": invoice_no})
@@ -732,7 +742,7 @@ def activate_free_subscription(data: dict, m=Depends(get_merchant)):
     store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
     db.invoices.insert_one({
         "invoice_no":    invoice_no,
-        "merchant_id":   str(m["_id"]),
+        "merchant_id": _mid(m),
         "merchant_name": m.get("name"),
         "merchant_phone": m.get("phone"),
         "store_id":      store_id,
@@ -745,7 +755,7 @@ def activate_free_subscription(data: dict, m=Depends(get_merchant)):
         "end_date":      sub["end_date"],
         "created_at":    now,
     })
-    _log_tx(str(m["_id"]), "subscription",
+    _log_tx(_mid(m), "subscription",
             f"Free plan activated for '{store_doc.get('store_name','')}' — {sub['plan']}",
             amount=0,
             meta={"store_id": store_id, "plan": sub["plan"]})
@@ -761,7 +771,7 @@ def activate_free_subscription(data: dict, m=Depends(get_merchant)):
 @router.get("/invoices")
 def my_invoices(m=Depends(get_merchant)):
     result = []
-    merchant_id    = str(m["_id"])
+    merchant_id = _mid(m)
     merchant_phone = str(m.get("phone", ""))
     inv_query = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}]}                 if merchant_phone else {"merchant_id": merchant_id}
     for inv in db.invoices.find(inv_query).sort("created_at", -1):
@@ -788,7 +798,7 @@ def my_invoices(m=Depends(get_merchant)):
 @router.get("/transactions")
 def my_transactions(m=Depends(get_merchant)):
     result = []
-    for tx in db.merchant_transactions.find({"merchant_id": str(m["_id"])}).sort("created_at", -1).limit(100):
+    for tx in db.merchant_transactions.find({"merchant_id": _mid(m)}).sort("created_at", -1).limit(100):
         result.append({
             "type":        tx.get("type"),
             "description": tx.get("description"),
@@ -804,7 +814,7 @@ def my_transactions(m=Depends(get_merchant)):
 
 @router.get("/deals")
 def my_deals(m=Depends(get_merchant)):
-    merchant_id = str(m["_id"])
+    merchant_id = _mid(m)
     result = []
     for d in db.deals.find({"merchant_id": merchant_id}).sort("created_at", -1):
         store = db.stores.find_one({"_id": ObjectId(d.get("store_id", ""))}) if d.get("store_id") else None
@@ -824,7 +834,7 @@ def my_deals(m=Depends(get_merchant)):
 
 @router.post("/deals")
 def create_deal(data: dict, m=Depends(get_merchant)):
-    merchant_id = str(m["_id"])
+    merchant_id = _mid(m)
     store_id = data.get("store_id")
     if not store_id:
         raise HTTPException(400, "store_id required")
@@ -852,7 +862,7 @@ def create_deal(data: dict, m=Depends(get_merchant)):
 
 @router.delete("/deals/{deal_id}")
 def delete_deal(deal_id: str, m=Depends(get_merchant)):
-    merchant_id = str(m["_id"])
+    merchant_id = _mid(m)
     db.deals.delete_one({"_id": ObjectId(deal_id), "merchant_id": merchant_id})
     return {"message": "Deal deleted"}
 
@@ -870,7 +880,7 @@ def merchant_terms():
 def my_subscriptions(m=Depends(get_merchant)):
     result = []
     # Query by merchant_id OR by phone (unified auth — both fields may exist)
-    merchant_id = str(m["_id"])
+    merchant_id = _mid(m)
     merchant_phone = str(m.get("phone", ""))
     query = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}]}
     for s in db.subscriptions.find(query).sort("created_at", -1):
@@ -911,7 +921,7 @@ def _pricing_doc():
 @router.get("/banners")
 def get_my_banners(m=Depends(get_merchant)):
     from datetime import datetime as dt
-    merchant_id    = str(m["_id"])
+    merchant_id = _mid(m)
     merchant_phone = str(m.get("phone", ""))
     # Also check legacy merchant_id field stored in accounts
     legacy_mid     = str(m.get("merchant_id", ""))
@@ -1004,7 +1014,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     Accepts: { "days": int, "from_date": "YYYY-MM-DD" }
     Returns an order summary with pricing + Razorpay order if payment needed.
     """
-    merchant_id = str(m["_id"])
+    merchant_id = _mid(m)
     days = int(data.get("days", 30))
     from_date_str = data.get("from_date", "")
     # TASK 4 FIX: read discount_code from request body
@@ -1112,7 +1122,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
 # ── POST /merchant/banners/activate-free  ──────────────────────────────────
 @router.post("/banners/activate-free")
 def activate_free_banner(data: dict, m=Depends(get_merchant)):
-    merchant_id = str(m["_id"])
+    merchant_id = _mid(m)
     order_id    = data.get("order_id", "")
     title       = data.get("title", "")
     image_url   = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
@@ -1186,7 +1196,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
 # ── POST /merchant/banners/verify  ─────────────────────────────────────────
 @router.post("/banners/verify")
 def verify_banner_payment(data: dict, m=Depends(get_merchant)):
-    merchant_id       = str(m["_id"])
+    merchant_id = _mid(m)
     order_id          = data.get("order_id", "")
     title             = data.get("title", "")
     image_url         = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
@@ -1282,7 +1292,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
 
 @router.get("/vouchers")
 def get_my_vouchers(m=Depends(get_merchant)):
-    merchant_id    = str(m["_id"])
+    merchant_id = _mid(m)
     merchant_phone = str(m.get("phone", ""))
     # Unified auth: match by merchant_id OR merchant_phone
     query = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}]}             if merchant_phone else {"merchant_id": merchant_id}
@@ -1319,7 +1329,7 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
     Issue 3: accepts { "days": int, "from_date": "YYYY-MM-DD" }
     No fixed plan chips — merchant chooses exact number of days and start date.
     """
-    merchant_id   = str(m["_id"])
+    merchant_id = _mid(m)
     days          = int(data.get("days", 30))
     from_date_str = data.get("from_date", "")
 
@@ -1435,7 +1445,7 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
 
 @router.post("/vouchers/activate-free")
 def activate_free_voucher(data: dict, m=Depends(get_merchant)):
-    merchant_id = str(m["_id"])
+    merchant_id = _mid(m)
     order_id    = data.get("order_id", "")
     title       = data.get("title", "")
     offer_text  = data.get("offer_text", "")
@@ -1511,7 +1521,7 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
 
 @router.post("/vouchers/verify")
 def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
-    merchant_id         = str(m["_id"])
+    merchant_id = _mid(m)
     order_id            = data.get("order_id", "")
     title               = data.get("title", "")
     offer_text          = data.get("offer_text", "")
@@ -1610,7 +1620,7 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
 @router.get("/invoices/full")
 def get_full_invoices(m=Depends(get_merchant)):
     # TASK 6: Full invoice restore with discount fields + proper invoice_no
-    merchant_id = str(m["_id"])
+    merchant_id = _mid(m)
     result = []
 
     def _fmt_dt(v):
