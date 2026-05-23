@@ -83,6 +83,58 @@ def check_phone(data: dict):
 # ══════════════════════════════════════════════════════════════════════════════
 # LOGOUT
 # ══════════════════════════════════════════════════════════════════════════════
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# REGISTER — creates new account in unified accounts collection
+# POST /user/register
+# Called by Flutter on Register tab after check-phone confirms number is new.
+# ══════════════════════════════════════════════════════════════════════════════
+@router.post("/register")
+def register_user(data: dict):
+    raw_phone = str(data.get("phone", "")).strip()
+    name      = str(data.get("name", "")).strip()
+    city      = str(data.get("city", "")).strip()
+
+    if not raw_phone or not name:
+        raise HTTPException(status_code=400, detail="Name and phone are required")
+
+    phone    = _normalise_phone(raw_phone)
+    variants = _phone_variants(raw_phone)
+
+    # Block duplicate registration across all collections
+    if db.accounts.find_one({"phone": {"$in": variants}}):
+        raise HTTPException(status_code=400, detail="Phone already registered. Please login.")
+    if db.users.find_one({"phone": {"$in": variants}}):
+        raise HTTPException(status_code=400, detail="Phone already registered. Please login.")
+
+    now = datetime.utcnow().isoformat()
+    account = {
+        "name":           name,
+        "phone":          phone,
+        "phone_variants": variants,
+        "city":           city,
+        "roles":          ["user"],
+        "status":         "active",
+        "visit_points":   0,
+        "pool_points":    0,
+        "token":          None,
+        "created_at":     now,
+        "updated_at":     now,
+    }
+    result = db.accounts.insert_one(account)
+    acct_id = str(result.inserted_id)
+
+    # Sync to legacy users collection for rollback safety
+    db.users.update_one(
+        {"phone": phone},
+        {"$setOnInsert": {**account, "account_id": acct_id}},
+        upsert=True,
+    )
+
+    print(f"[REGISTER] ✅ New user registered: {phone} name={name} id={acct_id}")
+    return {"message": "Registered successfully", "account_id": acct_id}
+
 @router.post("/logout")
 def logout_user():
     res = JSONResponse(content={"message": "Logged out"})
