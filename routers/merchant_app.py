@@ -146,6 +146,22 @@ def get_merchant(request: Request):
     raise HTTPException(401, "Session expired. Please log in again.")
 
 
+def _log_tx(merchant_id: str, tx_type: str, description: str, amount: float = 0, meta: dict = None):
+    """Write a transaction record for a merchant."""
+    try:
+        db.merchant_transactions.insert_one({
+            "merchant_id": merchant_id,
+            "type": tx_type,
+            "description": description,
+            "amount": amount,
+            "meta": meta or {},
+            "created_at": datetime.utcnow(),
+        })
+    except Exception:
+        pass  # never crash the main flow due to logging
+
+# ───────────── auth ─────────────
+
 @router.post("/register")
 def merchant_register(data: dict):
     name  = data.get("name", "").strip()
@@ -340,7 +356,9 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "status":        "draft",
         "points_per_scan": 0,
         "lat":  data.get("lat", ""),   "lng": data.get("lng", ""),
-        "image":        data.get("image") or None,
+        "image_url":    _cloudinary_upload(data.get("image","") or "", folder="offro/stores"),
+        "image_thumb":  _make_thumb_url(_cloudinary_upload(data.get("image","") or "", folder="offro/stores")),
+        "image":        None,  # clear raw base64 after CDN upload
         "is_new_in_town": False,
         "created_at":   datetime.utcnow(),
     }
