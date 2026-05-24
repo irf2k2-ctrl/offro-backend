@@ -16,7 +16,7 @@ def get_stores(city: str = None, category: str = None):
 
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
-        "image":1,"image_url":1,"image_thumb":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
+        "image":1,"image_url":1,"image_thumb":1,"_thumb":1,"store_image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
         "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"badge":1,"merchant_id":1
     }))
     if not stores:
@@ -66,9 +66,13 @@ def get_stores(city: str = None, category: str = None):
             "area": s.get("area", ""),
             "address": s.get("address", ""),
             "phone": s.get("phone", ""),
-            "image":       s.get("image_url") or s.get("image_thumb") or s.get("image") or None,
-            "image_url":   s.get("image_url") or s.get("image_thumb") or "",
-            "image_thumb": s.get("image_thumb") or s.get("image_url") or "",
+            "image":       (s.get("image_url") or s.get("image_thumb") or
+                            s.get("image") or s.get("_thumb") or s.get("store_image") or
+                            ((s.get("images") or [None])[0]) or None),
+            "image_url":   (s.get("image_url") or s.get("image_thumb") or
+                            s.get("image") or s.get("_thumb") or ""),
+            "image_thumb": (s.get("image_thumb") or s.get("image_url") or
+                            s.get("image") or s.get("_thumb") or ""),
             "image2": s.get("store_image2") or None,
             "images": s.get("images", []),
             "status": s.get("status", "active"),
