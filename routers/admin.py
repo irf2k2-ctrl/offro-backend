@@ -470,36 +470,54 @@ def list_stores(a=Depends(get_current_admin)):
 
 @router.post("/migrate-store-images")
 def migrate_store_images(a=Depends(get_current_admin)):
-    """Upload base64 store images to Cloudinary (or store in image field if CDN not configured)."""
+    """Upload base64 store images to Cloudinary (or consolidate into image field if CDN not set)."""
     global _store_cache; _store_cache["data"] = None
-    stores = list(db.stores.find({}, {"_id": 1, "image": 1, "image_url": 1, "image_thumb": 1}))
-    migrated, skipped, failed = [], [], []
+    # NO projection — fetch every field so we catch all possible image field names
+    stores = list(db.stores.find({}))
+    migrated, skipped_cdn, skipped_no_img, failed = [], [], [], []
+
+    IMG_FIELDS = ["image", "image_url", "image_thumb", "_thumb",
+                  "store_image", "img", "photo", "thumbnail"]
+
     for s in stores:
-        sid = str(s["_id"])
-        # Check both image and image_url fields for base64 data
-        img_field = s.get("image") or ""
-        img_url_field = s.get("image_url") or ""
-        # Already a proper CDN URL — nothing to do
-        if img_url_field.startswith("http") and "cloudinary.com" in img_url_field:
-            skipped.append(sid)
+        sid        = str(s["_id"])
+        store_name = s.get("store_name", sid)
+
+        # Already has a valid http image_url — nothing to do
+        existing_url = str(s.get("image_url") or "").strip()
+        if existing_url.startswith("http"):
+            skipped_cdn.append(store_name)
             continue
-        # Pick the best raw image source (prefer image_url if it has base64, else image)
+
+        # Search every known field for a non-empty image value
         raw = ""
-        if img_field and img_field not in ("None", "null") and not img_field.startswith("http"):
-            raw = img_field
-        elif img_url_field and not img_url_field.startswith("http"):
-            raw = img_url_field
-        elif img_url_field.startswith("http"):
-            # Already a valid CDN URL (non-cloudinary) — keep as-is
-            skipped.append(sid)
-            continue
+        found_field = ""
+        for field in IMG_FIELDS:
+            val = s.get(field) or ""
+            if isinstance(val, list):
+                val = val[0] if val else ""
+            val = str(val).strip()
+            if val and val not in ("None", "null", "undefined") and len(val) > 10:
+                raw = val
+                found_field = field
+                break
+
         if not raw:
-            skipped.append(sid)
+            skipped_no_img.append(store_name)
             continue
+
         try:
+            # Already an http URL (non-CDN) — normalise it into image_url
+            if raw.startswith("http"):
+                db.stores.update_one(
+                    {"_id": s["_id"]},
+                    {"$set": {"image_url": raw, "image_thumb": raw, "image": None}}
+                )
+                migrated.append(f"{store_name} (url-normalised)")
+                continue
+
             cdn = _cloudinary_upload(raw, folder="offro/stores")
             if cdn and cdn.startswith("http"):
-                # Cloudinary configured — store CDN url
                 db.stores.update_one(
                     {"_id": s["_id"]},
                     {"$set": {
@@ -508,22 +526,33 @@ def migrate_store_images(a=Depends(get_current_admin)):
                         "image":       None,
                     }}
                 )
-                migrated.append(sid)
+                migrated.append(f"{store_name} (cloudinary)")
             else:
-                # Cloudinary NOT configured — store base64 in "image" field directly
-                # so Flutter store_cards.dart can render it via Image.memory()
+                # Cloudinary not configured — move base64 into canonical "image" field
                 db.stores.update_one(
                     {"_id": s["_id"]},
                     {"$set": {
                         "image":       raw,
-                        "image_url":   "",   # clear invalid value
+                        "image_url":   "",
                         "image_thumb": "",
                     }}
                 )
-                migrated.append(sid)
+                migrated.append(f"{store_name} (base64-from:{found_field})")
         except Exception as e:
-            failed.append({"id": sid, "error": str(e)})
-    return {"migrated": len(migrated), "skipped": len(skipped), "failed": failed}
+            failed.append({"store": store_name, "error": str(e)})
+
+    return {
+        "migrated":       len(migrated),
+        "skipped_cdn":    len(skipped_cdn),
+        "skipped_no_img": len(skipped_no_img),
+        "failed":         len(failed),
+        "details": {
+            "migrated":       migrated,
+            "skipped_cdn":    skipped_cdn,
+            "skipped_no_img": skipped_no_img,
+            "failed":         failed,
+        }
+    }
 
 @router.post("/stores")
 def create_store(data: dict, a=Depends(get_current_admin)):
@@ -536,6 +565,10 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     except: raise HTTPException(400, "Invalid merchant_id")
     if not merchant: raise HTTPException(404, "Merchant not found")
 
+    # Upload image to Cloudinary once; fall back to storing base64 in "image" if CDN not set
+    _raw_img  = data.get("image","") or ""
+    _cdn_url  = _cloudinary_upload(_raw_img, folder="offro/stores") if _raw_img else ""
+    _use_cdn  = bool(_cdn_url and _cdn_url.startswith("http"))
     store = {
         "merchant_id": mid, "store_name": name,
         "category": data.get("category",""),
@@ -546,9 +579,9 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "status": "active",
         "points_per_scan": int(data.get("points_per_scan", 0)),
         "lat": data.get("lat",""), "lng": data.get("lng",""),
-        "image_url":   _cloudinary_upload(data.get("image","") or "", folder="offro/stores"),
-        "image_thumb": _make_thumb_url(_cloudinary_upload(data.get("image","") or "", folder="offro/stores")),
-        "image":       None,
+        "image_url":   _cdn_url if _use_cdn else "",
+        "image_thumb": _make_thumb_url(_cdn_url) if _use_cdn else "",
+        "image":       None if _use_cdn else (_raw_img or None),
         "is_new_in_town": bool(data.get("is_new_in_town", False)),
         "badge": data.get("badge", ""),
         "created_at": datetime.utcnow()
