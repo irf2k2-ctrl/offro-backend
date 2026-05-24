@@ -360,7 +360,27 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
              (s.get("images") or [None])[0] or "")
 
     sub_plan   = sub.get("plan", "")
-    sub_status = sub.get("status", "")
+    raw_status = sub.get("status", "")
+    # Derive effective subscription status from end_date
+    if not sub:
+        sub_status = "unpaid"
+    else:
+        try:
+            from datetime import timezone
+            ed = sub.get("end_date")
+            now_dt = datetime.utcnow()
+            if isinstance(ed, datetime):
+                sub_status = "active" if ed >= now_dt else "expired"
+            elif isinstance(ed, str) and ed:
+                from datetime import datetime as _dt
+                ed_parsed = _dt.fromisoformat(ed.replace("Z",""))
+                sub_status = "active" if ed_parsed >= now_dt else "expired"
+            elif raw_status in ("active", "paid"):
+                sub_status = "active"
+            else:
+                sub_status = "unpaid"
+        except Exception:
+            sub_status = raw_status or "unpaid"
     sub_label  = f"{sub_plan} ({sub_status})" if sub_plan else ""
 
     best_deal = max((d.get("discount", 0) for d in deals), default=0)
@@ -403,7 +423,7 @@ def list_stores(a=Depends(get_current_admin)):
     stores = list(db.stores.find({}, {
         "store_image2": 0,  # heavy base64 — loaded separately in edit form
         "qr_code": 0,       # always base64 — loaded separately in detail view
-    }))
+    }).sort("created_at", -1))  # newest first
     if not stores:
         return []
     
