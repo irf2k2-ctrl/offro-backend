@@ -1446,7 +1446,11 @@ async function migrateStoreImages() {
   try {
     const r = await fetch("/admin/migrate-store-images", {method:"POST", credentials:"include"});
     const d = await r.json();
-    alert(`Migration complete!\nMigrated: ${d.migrated}\nSkipped: ${d.skipped}\nFailed: ${d.failed?.length||0}`);
+    const cdn   = d.skipped_cdn    || 0;
+    const noImg = d.skipped_no_img || 0;
+    let msg = `Migration complete!\nMigrated: ${d.migrated}\nSkipped (already CDN): ${cdn}\nSkipped (no image): ${noImg}\nFailed: ${d.failed||0}`;
+    if (noImg > 0) msg += `\n\n⚠️ ${noImg} stores have no image at all — edit them to upload one.`;
+    alert(msg);
     loadStores();
   } catch(e) { alert("Migration error: " + e); }
 }
