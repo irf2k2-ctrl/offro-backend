@@ -511,53 +511,27 @@ tr:hover td{background:#f7faf8;}
 </div>
 
 <div id="section-categories" class="section">
-    <div class="page-title">Categories</div>
+    <div class="page-title">Browse by Categories</div>
     <div class="table-wrap" style="padding:22px;">
-      <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">Add categories with emojis. Example: <strong>🍕 Pizza</strong> or <strong>💇 Salon</strong></p>
-      <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
-        <div style="position:relative;">
-          <button type="button" id="emojiPickerBtn" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;cursor:pointer;z-index:2;padding:0;" onclick="toggleEmojiPicker()" title="Pick emoji">😊</button>
-          <input id="new_category" class="form-control" placeholder="e.g. 🍕 Pizza" style="max-width:280px;padding-left:38px;">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">Manage app categories. Each category can have an image, icon, and subtitle shown in the app.</p>
+      <!-- Add category form -->
+      <div class="d-flex gap-2 mb-3 flex-wrap align-items-end" style="background:#f8fdf9;border:1px solid var(--border);border-radius:10px;padding:14px;">
+        <div>
+          <label style="font-size:11px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">ICON (emoji)</label>
+          <input id="new_cat_icon" class="form-control" placeholder="🍕" style="width:70px;text-align:center;font-size:18px;">
         </div>
-        <button class="btn-p" onclick="addCategory()">+ Add</button>
-      </div>
-      <!-- Quick emoji picker -->
-      <div id="emoji_picker" style="display:none;background:white;border:1px solid var(--border);border-radius:10px;padding:10px;max-width:360px;margin-bottom:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:600;">COMMON EMOJIS</div>
-        <div style="display:flex;flex-wrap:wrap;gap:4px;">
-          <span onclick="insertEmoji('🛍️')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🛍️</span>
-          <span onclick="insertEmoji('🍕')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍕</span>
-          <span onclick="insertEmoji('🍔')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍔</span>
-          <span onclick="insertEmoji('☕')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">☕</span>
-          <span onclick="insertEmoji('💇')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💇</span>
-          <span onclick="insertEmoji('💊')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💊</span>
-          <span onclick="insertEmoji('👗')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">👗</span>
-          <span onclick="insertEmoji('📱')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">📱</span>
-          <span onclick="insertEmoji('🏪')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🏪</span>
-          <span onclick="insertEmoji('🎁')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎁</span>
-          <span onclick="insertEmoji('💄')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💄</span>
-          <span onclick="insertEmoji('🥗')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🥗</span>
-          <span onclick="insertEmoji('🍰')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍰</span>
-          <span onclick="insertEmoji('🧴')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🧴</span>
-          <span onclick="insertEmoji('🍜')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍜</span>
-          <span onclick="insertEmoji('🎮')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎮</span>
-          <span onclick="insertEmoji('📚')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">📚</span>
-          <span onclick="insertEmoji('🏋️')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🏋️</span>
-          <span onclick="insertEmoji('🐾')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🐾</span>
-          <span onclick="insertEmoji('🚗')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🚗</span>
-          <span onclick="insertEmoji('🏠')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🏠</span>
-          <span onclick="insertEmoji('✂️')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">✂️</span>
-          <span onclick="insertEmoji('💍')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💍</span>
-          <span onclick="insertEmoji('🌸')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🌸</span>
-          <span onclick="insertEmoji('🎵')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎵</span>
-          <span onclick="insertEmoji('🛒')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🛒</span>
-          <span onclick="insertEmoji('🥩')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🥩</span>
-          <span onclick="insertEmoji('🍺')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍺</span>
-          <span onclick="insertEmoji('🎂')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎂</span>
-          <span onclick="insertEmoji('🧹')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🧹</span>
+        <div>
+          <label style="font-size:11px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">CATEGORY NAME *</label>
+          <input id="new_category" class="form-control" placeholder="e.g. Restaurant" style="width:180px;">
         </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">SUBTITLE</label>
+          <input id="new_cat_subtitle" class="form-control" placeholder="e.g. 500+ places" style="width:160px;">
+        </div>
+        <button class="btn-p" onclick="addCategory()">+ Add Category</button>
       </div>
-      <div id="categories_list" style="margin-top:8px;"></div>
+      <!-- Categories grid with image upload -->
+      <div id="categories_list" style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;"></div>
     </div>
   </div>
 
@@ -1261,28 +1235,83 @@ async function loadStats() {
 
 // ===== CATEGORIES =====
 async function loadCategories(){
-  try{let r=await fetch("/admin/categories",{credentials:"include"});if(r.ok)categoriesList=await r.json();}catch{}
+  try{
+    let r=await fetch("/admin/categories",{credentials:"include"});
+    if(r.ok){ categoriesList=await r.json(); }
+  }catch{}
 }
 function renderCategories(){
-  let html=categoriesList.length
-    ? categoriesList.map(c=>`<span class="cat-chip">${c}<button onclick="deleteCategory('${c}')" title="Delete">×</button></span>`).join("")
-    : `<span style="color:var(--muted);">No categories yet.</span>`;
-  document.getElementById("categories_list").innerHTML=html;
+  const el=document.getElementById("categories_list");
+  if(!el)return;
+  if(!categoriesList.length){el.innerHTML='<p style="color:var(--muted);">No categories yet.</p>';return;}
+  el.innerHTML=categoriesList.map((cat,i)=>{
+    const name=cat.name||cat;
+    const icon=cat.icon||"🏪";
+    const sub=cat.subtitle||"";
+    const img=cat.image_url||"";
+    const gradColors=[
+      ["#3E5F55","#6b8c7e"],["#2E7D5E","#4CAF80"],["#1565C0","#42A5F5"],
+      ["#B45309","#F59E0B"],["#7B2D8B","#BA68C8"],["#C62828","#EF5350"]
+    ];
+    const g=gradColors[i%gradColors.length];
+    return `<div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,.1);">
+      <div style="height:120px;background:linear-gradient(135deg,${g[0]},${g[1]});position:relative;overflow:hidden;">
+        ${img?`<img src="${img}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;" onerror="this.style.display='none'">`:""}
+        <div style="position:absolute;inset:0;background:linear-gradient(to bottom,transparent 30%,rgba(0,0,0,.6))"></div>
+        <div style="position:absolute;bottom:8px;left:10px;">
+          <div style="font-size:22px">${icon}</div>
+          <div style="color:#fff;font-weight:700;font-size:13px">${name}</div>
+          ${sub?`<div style="color:rgba(255,255,255,.8);font-size:10px">${sub}</div>`:""}
+        </div>
+        <button onclick="deleteCategory('${name}')" title="Delete" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.4);border:none;color:#fff;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;line-height:1;">×</button>
+      </div>
+      <div style="background:#fff;padding:8px 10px;display:flex;gap:6px;align-items:center;">
+        <label style="flex:1;font-size:11px;color:var(--primary);font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
+          <i class="fas fa-image"></i> Upload Image
+          <input type="file" accept="image/*" style="display:none" onchange="uploadCategoryImage('${name}',this)">
+        </label>
+      </div>
+    </div>`;
+  }).join("");
 }
 async function addCategory(){
-  let val=document.getElementById("new_category").value.trim();if(!val)return;
-  let r=await fetch("/admin/categories",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:val}),credentials:"include"});
-  if(r.ok){let d=await r.json();categoriesList=d.categories;document.getElementById("new_category").value="";renderCategories();}
+  const name=document.getElementById("new_category").value.trim();
+  if(!name)return;
+  const icon=document.getElementById("new_cat_icon").value.trim()||"🏪";
+  const subtitle=document.getElementById("new_cat_subtitle").value.trim();
+  const r=await fetch("/admin/categories",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name,icon,subtitle}),credentials:"include"});
+  if(r.ok){
+    categoriesList=await r.json();
+    document.getElementById("new_category").value="";
+    document.getElementById("new_cat_icon").value="";
+    document.getElementById("new_cat_subtitle").value="";
+    renderCategories();
+    populateCategoryDropdown();
+  }
 }
 async function deleteCategory(name){
   if(!confirm(`Delete "${name}"?`))return;
-  let r=await fetch("/admin/categories/"+encodeURIComponent(name),{method:"DELETE",credentials:"include"});
-  if(r.ok){let d=await r.json();categoriesList=d.categories;renderCategories();}
+  const r=await fetch("/admin/categories/"+encodeURIComponent(name),{method:"DELETE",credentials:"include"});
+  if(r.ok){categoriesList=await r.json();renderCategories();populateCategoryDropdown();}
+}
+async function uploadCategoryImage(name,input){
+  if(!input.files[0])return;
+  const fd=new FormData();fd.append("file",input.files[0]);
+  const r=await fetch("/admin/categories/"+encodeURIComponent(name)+"/upload-image",{method:"POST",body:fd,credentials:"include"});
+  if(r.ok){
+    const d=await r.json();
+    // Update local cache
+    const cat=categoriesList.find(c=>(c.name||c)===name);
+    if(cat&&typeof cat==="object") cat.image_url=d.image_url;
+    renderCategories();
+    alert("Image uploaded!");
+  } else { alert("Upload failed"); }
 }
 function populateCategoryDropdown(sel){
   let s=document.getElementById("store_category");
   s.innerHTML='<option value="">Select category</option>';
-  let cats=categoriesList.length?categoriesList:["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"];
+  let cats=categoriesList.length?categoriesList.map(c=>c.name||c):["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"];
   cats.forEach(c=>{let o=document.createElement("option");o.value=c;o.innerText=c;if(c===sel)o.selected=true;s.appendChild(o);});
 }
 

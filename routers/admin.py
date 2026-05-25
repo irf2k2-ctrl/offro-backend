@@ -73,8 +73,23 @@ def seed_admin():
     if not db.admins.find_one({"username": "admin"}):
         db.admins.insert_one({"username": "admin", "password": "admin123", "token": None})
         print("✅ Default admin: admin / admin123")
-    if not db.categories.find_one({}):
-        db.categories.insert_one({"categories": ["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"]})
+    if not db.categories.find_one({"_v": 2}):
+        # Migrate to rich category objects with image support
+        db.categories.drop()
+        db.categories.insert_many([
+            {"_v":2,"name":"Restaurant","subtitle":"500+ places","sort_order":1,"image_url":"","icon":"🍽️","status":"active"},
+            {"_v":2,"name":"Grocery","subtitle":"Fresh & daily","sort_order":2,"image_url":"","icon":"🛒","status":"active"},
+            {"_v":2,"name":"Pharmacy","subtitle":"Health essentials","sort_order":3,"image_url":"","icon":"💊","status":"active"},
+            {"_v":2,"name":"Electronics","subtitle":"Trending gadgets","sort_order":4,"image_url":"","icon":"📱","status":"active"},
+            {"_v":2,"name":"Fashion","subtitle":"New arrivals","sort_order":5,"image_url":"","icon":"👗","status":"active"},
+            {"_v":2,"name":"Bakery","subtitle":"Fresh baked daily","sort_order":6,"image_url":"","icon":"🎂","status":"active"},
+            {"_v":2,"name":"Salon","subtitle":"Look your best","sort_order":7,"image_url":"","icon":"💇","status":"active"},
+            {"_v":2,"name":"Fitness","subtitle":"Stay strong","sort_order":8,"image_url":"","icon":"🏋️","status":"active"},
+            {"_v":2,"name":"Hospital","subtitle":"Care & wellness","sort_order":9,"image_url":"","icon":"🏥","status":"active"},
+            {"_v":2,"name":"Education","subtitle":"Learn & grow","sort_order":10,"image_url":"","icon":"📚","status":"active"},
+            {"_v":2,"name":"Automobile","subtitle":"Drive & repair","sort_order":11,"image_url":"","icon":"🚗","status":"active"},
+            {"_v":2,"name":"Other","subtitle":"More near you","sort_order":12,"image_url":"","icon":"🏪","status":"active"},
+        ])
     if not db.pricing.find_one({}):
         db.pricing.insert_one({"gst_percent": 18, "plans": [
             {"id": "1month",  "label": "1 Month",   "price": 499},
@@ -105,28 +120,59 @@ def admin_logout():
 
 @router.get("/categories")
 def get_categories(a=Depends(get_current_admin)):
-    doc = db.categories.find_one({})
-    return doc.get("categories", []) if doc else []
+    cats = list(db.categories.find({"status":{"$ne":"deleted"}}, {"_id":0}).sort("sort_order",1))
+    return cats
 
 @router.post("/categories")
 def add_category(data: dict, a=Depends(get_current_admin)):
     name = data.get("name", "").strip()
     if not name: raise HTTPException(400, "Name required")
-    doc = db.categories.find_one({})
-    cats = doc.get("categories", []) if doc else []
-    if name not in cats: cats.append(name)
-    if doc: db.categories.update_one({"_id": doc["_id"]}, {"$set": {"categories": cats}})
-    else: db.categories.insert_one({"categories": cats})
-    return {"categories": cats}
+    if db.categories.find_one({"name": name}):
+        raise HTTPException(400, "Category already exists")
+    max_order = db.categories.find_one(sort=[("sort_order", -1)]) or {}
+    sort_order = (max_order.get("sort_order", 0) or 0) + 1
+    obj = {
+        "_v": 2,
+        "name": name,
+        "subtitle": data.get("subtitle", ""),
+        "icon": data.get("icon", "🏪"),
+        "image_url": data.get("image_url", ""),
+        "sort_order": sort_order,
+        "status": "active",
+    }
+    db.categories.insert_one(obj)
+    return _category_list()
+
+@router.put("/categories/{name}")
+def update_category(name: str, data: dict, a=Depends(get_current_admin)):
+    upd = {}
+    if "image_url"  in data: upd["image_url"]  = data["image_url"]
+    if "subtitle"   in data: upd["subtitle"]    = data["subtitle"]
+    if "icon"       in data: upd["icon"]        = data["icon"]
+    if "sort_order" in data: upd["sort_order"]  = int(data["sort_order"])
+    if "status"     in data: upd["status"]      = data["status"]
+    if upd:
+        db.categories.update_one({"name": name}, {"$set": upd})
+    return _category_list()
+
+@router.post("/categories/{name}/upload-image")
+async def upload_category_image(name: str, file: UploadFile = File(...), a=Depends(get_current_admin)):
+    """Upload an image for a category card."""
+    raw = await file.read()
+    import base64 as b64mod
+    b64 = "data:" + (file.content_type or "image/jpeg") + ";base64," + b64mod.b64encode(raw).decode()
+    cdn = _cloudinary_upload(b64, folder="offro/categories")
+    img_url = cdn if (cdn and cdn.startswith("http")) else b64
+    db.categories.update_one({"name": name}, {"$set": {"image_url": img_url}}, upsert=False)
+    return {"image_url": img_url}
 
 @router.delete("/categories/{name}")
 def delete_category(name: str, a=Depends(get_current_admin)):
-    doc = db.categories.find_one({})
-    if doc:
-        cats = [c for c in doc.get("categories", []) if c != name]
-        db.categories.update_one({"_id": doc["_id"]}, {"$set": {"categories": cats}})
-        return {"categories": cats}
-    return {"categories": []}
+    db.categories.update_one({"name": name}, {"$set": {"status": "deleted"}})
+    return _category_list()
+
+def _category_list():
+    return list(db.categories.find({"status":{"$ne":"deleted"}}, {"_id":0}).sort("sort_order",1))
 
 # ===================== PRICING & PLANS =====================
 

@@ -132,8 +132,13 @@ def get_store(store_id: str):
 # =================== PUBLIC CATEGORIES ===================
 @router.get("/categories")
 def get_categories():
-    doc = db.categories.find_one({})
-    return doc.get("categories", ["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"]) if doc else []
+    """Return rich category objects with image_url, icon, subtitle for the Flutter app."""
+    cats = list(db.categories.find({"status":{"$ne":"deleted"}}, {"_id":0}).sort("sort_order",1))
+    if cats and isinstance(cats[0], dict) and "name" in cats[0]:
+        return cats  # already rich objects
+    # Fallback: old flat-string format
+    fallback = ["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"]
+    return [{"name":n,"subtitle":"","icon":"🏪","image_url":"","sort_order":i+1} for i,n in enumerate(fallback)]
 
 # =================== PUBLIC TERMS ===================
 @router.get("/terms/{type}")
