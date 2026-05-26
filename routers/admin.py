@@ -220,6 +220,7 @@ def update_terms(type: str, data: dict, a=Depends(get_current_admin)):
 
 @router.get("/merchants")
 def list_merchants(a=Depends(get_current_admin)):
+    # DEPRECATED: Use /accounts?role=merchant instead. Kept for store creation dropdown.
     return [{"_id": str(m["_id"]), "name": m.get("name"), "phone": m.get("phone"),
              "city": m.get("city"), "area": m.get("area"), "status": m.get("status", "active"),
              "store_count": db.stores.count_documents({"merchant_id": str(m["_id"])})}
@@ -794,6 +795,7 @@ def delete_store(id: str, a=Depends(get_current_admin)):
 
 @router.get("/users")
 def list_users(a=Depends(get_current_admin)):
+    # DEPRECATED: Use /accounts instead. Returns from accounts collection.
     result = []
     cols = db.list_collection_names()
     for u in db.accounts.find():
