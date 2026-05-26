@@ -1211,9 +1211,8 @@ async function uploadCategoryImage(name,input){
     const r=await fetch("/admin/categories/"+encodeURIComponent(name)+"/upload-image",{method:"POST",body:fd,credentials:"include"});
     const d=await r.json();
     if(r.ok && d.image_url){
-      // Update local cache
-      const cat=categoriesList.find(c=>(c.name||c)===name);
-      if(cat&&typeof cat==="object") cat.image_url=d.image_url;
+      // Re-fetch from server to ensure latest data (base64 or Cloudinary URL)
+      await loadCategories();
       renderCategories();
       showCatStatus(name,"✅ Image saved"+(d.via?` (${d.via})`:""),"green");
     } else {
