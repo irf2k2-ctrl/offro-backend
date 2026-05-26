@@ -157,22 +157,34 @@ def update_category(name: str, data: dict, a=Depends(get_current_admin)):
 
 @router.post("/categories/{name}/upload-image")
 async def upload_category_image(name: str, file: UploadFile = File(...), a=Depends(get_current_admin)):
-    """Upload an image for a category card via Cloudinary."""
-    import base64 as b64mod
+    """Upload an image for a category card.
+    Uses Cloudinary if configured, otherwise stores as base64 directly in MongoDB.
+    This ensures the upload always works regardless of Cloudinary configuration.
+    """
+    import base64 as b64mod, os as _upl_os
     raw = await file.read()
-    # Check Cloudinary is configured BEFORE processing
-    import os as _upl_os
+    if not raw:
+        raise HTTPException(400, "Empty file received.")
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(400, "File too large — maximum 5 MB.")
+    if not db.categories.find_one({"name": name, "status": {"$ne": "deleted"}}):
+        raise HTTPException(404, f"Category '{name}' not found.")
+    b64 = "data:" + (file.content_type or "image/jpeg") + ";base64," + b64mod.b64encode(raw).decode()
+    # Try Cloudinary first; fall back to base64 in MongoDB if not configured
     cloud  = _upl_os.getenv("CLOUDINARY_CLOUD_NAME", "")
     api_key= _upl_os.getenv("CLOUDINARY_API_KEY", "")
     secret = _upl_os.getenv("CLOUDINARY_API_SECRET", "")
-    if not cloud or not api_key or not secret:
-        raise HTTPException(400, "Cloudinary not configured — set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET in Railway environment variables.")
-    b64 = "data:" + (file.content_type or "image/jpeg") + ";base64," + b64mod.b64encode(raw).decode()
-    cdn = _cloudinary_upload(b64, folder="offro/categories")
-    if not cdn or not cdn.startswith("http"):
-        raise HTTPException(500, "Cloudinary upload failed — check Railway logs.")
-    db.categories.update_one({"name": name}, {"$set": {"image_url": cdn}}, upsert=False)
-    return {"image_url": cdn}
+    image_url = b64   # default: base64 fallback
+    via = "base64"
+    if cloud and api_key and secret:
+        cdn = _cloudinary_upload(b64, folder="offro/categories")
+        if cdn and cdn.startswith("http"):
+            image_url = cdn
+            via = "cloudinary"
+        else:
+            print(f"[WARN] Cloudinary upload failed for category '{name}', falling back to base64")
+    db.categories.update_one({"name": name}, {"$set": {"image_url": image_url}})
+    return {"image_url": image_url, "via": via}
 
 @router.delete("/categories/{name}")
 def delete_category(name: str, a=Depends(get_current_admin)):

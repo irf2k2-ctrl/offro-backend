@@ -1104,7 +1104,7 @@ function showSection(name, el){
   if(name==="overview") loadStats();
   if(name==="stores") loadStores();
   if(name==="vouchers") loadVouchers();
-  if(name==="categories") renderCategories();
+  if(name==="categories"){ loadCategories().then(()=>renderCategories()); }
   if(name==="pricing") loadPricing();
   if(name==="terms") loadTerms();
   if(name==="policies") loadPolicies();
@@ -1169,11 +1169,12 @@ function renderCategories(){
         </div>
         <button onclick="deleteCategory('${name}')" title="Delete" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.4);border:none;color:#fff;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;line-height:1;">×</button>
       </div>
-      <div style="background:#fff;padding:8px 10px;display:flex;gap:6px;align-items:center;">
-        <label style="flex:1;font-size:11px;color:var(--primary);font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
-          <i class="fas fa-image"></i> Upload Image
+      <div style="background:#fff;padding:8px 10px;">
+        <label style="font-size:11px;color:var(--primary);font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px;margin-bottom:4px;">
+          <i class="fas fa-camera"></i> ${img?"Change Image":"Upload Image"}
           <input type="file" accept="image/*" style="display:none" onchange="uploadCategoryImage('${name}',this)">
         </label>
+        <div data-cat-status="${name}" style="font-size:10px;color:var(--muted);min-height:14px;"></div>
       </div>
     </div>`;
   }).join("");
@@ -1200,17 +1201,33 @@ async function deleteCategory(name){
   if(r.ok){categoriesList=await r.json();renderCategories();populateCategoryDropdown();}
 }
 async function uploadCategoryImage(name,input){
-  if(!input.files[0])return;
-  const fd=new FormData();fd.append("file",input.files[0]);
-  const r=await fetch("/admin/categories/"+encodeURIComponent(name)+"/upload-image",{method:"POST",body:fd,credentials:"include"});
-  if(r.ok){
+  if(!input.files||!input.files[0])return;
+  const file=input.files[0];
+  if(file.size>5*1024*1024){showCatStatus(name,"❌ File too large (max 5MB)","var(--danger)");return;}
+  showCatStatus(name,"⏳ Uploading...","var(--muted)");
+  const fd=new FormData();
+  fd.append("file",file);
+  try{
+    const r=await fetch("/admin/categories/"+encodeURIComponent(name)+"/upload-image",{method:"POST",body:fd,credentials:"include"});
     const d=await r.json();
-    // Update local cache
-    const cat=categoriesList.find(c=>(c.name||c)===name);
-    if(cat&&typeof cat==="object") cat.image_url=d.image_url;
-    renderCategories();
-    alert("Image uploaded!");
-  } else { alert("Upload failed"); }
+    if(r.ok && d.image_url){
+      // Update local cache
+      const cat=categoriesList.find(c=>(c.name||c)===name);
+      if(cat&&typeof cat==="object") cat.image_url=d.image_url;
+      renderCategories();
+      showCatStatus(name,"✅ Image saved"+(d.via?` (${d.via})`:""),"green");
+    } else {
+      const msg=d.detail||d.message||"Upload failed";
+      showCatStatus(name,"❌ "+msg,"var(--danger)");
+    }
+  } catch(e){
+    showCatStatus(name,"❌ Network error","var(--danger)");
+  }
+}
+function showCatStatus(name,msg,color){
+  // Find the status span within the card for this category
+  const all=document.querySelectorAll("[data-cat-status]");
+  all.forEach(el=>{if(el.dataset.catStatus===name){el.style.color=color;el.innerText=msg;}});
 }
 function populateCategoryDropdown(sel){
   let s=document.getElementById("store_category");
