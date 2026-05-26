@@ -37,11 +37,11 @@ tr:last-child td{border-bottom:none;}
 tr:hover td{background:#f7faf8;}
 .badge-active{background:#d1f0e0;color:#1a6640;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
 .badge-inactive{background:#fde8e6;color:#b33a2d;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
-.badge-waiting{background:#E7D7C8;color:#8a5c2e;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
-.badge-new{background:#CDEBD6;color:#3E5F55;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid #A9CDBA;}
-.badge-deal-active{background:#CDEBD6;color:#3E5F55;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
-.badge-deal-none{background:#f2f7f5;color:var(--muted);padding:2px 9px;border-radius:20px;font-size:11px;}
-.badge-deal-expired{background:#fde8e6;color:var(--danger);padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
+.badge-waiting{background:#fff3cd;color:#856404;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
+.badge-new{background:#d1e7dd;color:#0f5132;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid #badbcc;}
+.badge-deal-active{background:#cff4fc;color:#055160;padding:2px 9px;border-radius:20px;font-size:11px;}
+.badge-deal-none{background:#f8f9fa;color:#6c757d;padding:2px 9px;border-radius:20px;font-size:11px;}
+.badge-deal-expired{background:#f8d7da;color:#721c24;padding:2px 9px;border-radius:20px;font-size:11px;}
 .btn-p{background:var(--primary);color:white;border:none;border-radius:8px;padding:6px 13px;font-size:12px;cursor:pointer;transition:.2s;}
 .btn-p:hover{background:#2d4a42;}
 .btn-o{background:transparent;color:var(--primary);border:1px solid var(--primary);border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;transition:.2s;}
@@ -100,27 +100,26 @@ tr:hover td{background:#f7faf8;}
   </div>
   <div class="sidebar-sub">Admin Panel</div>
   <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
-  <div class="sep"></div>
   <a href="#" onclick="showSection('accounts',this)"><i class="fas fa-id-badge fa-fw"></i> Accounts</a>
+  <a href="#" onclick="showSection('merchants',this)"><i class="fas fa-user-tie fa-fw"></i> Merchants</a>
   <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
+  <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
+  <a href="#" onclick="showSection('users',this)"><i class="fas fa-users fa-fw"></i> Users</a>
+  <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <a href="#" onclick="showSection('voucher_zone',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
-  <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
-  <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
-  <div class="sep"></div>
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
+  <div class="sep"></div>
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
-  <div class="sep"></div>
-  <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
   <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
   <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
   <a href="#" onclick="showSection('policies',this)"><i class="fas fa-shield-alt fa-fw"></i> Policies</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('social',this)"><i class="fab fa-whatsapp fa-fw"></i> Social Media</a>
   <a href="#" onclick="showSection('about',this)"><i class="fas fa-info-circle fa-fw"></i> About Us</a>
+  <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
   <div class="sep"></div>
-  <!-- PHASE 1: Users + Merchants hidden — collections intact, sidebar entries removed -->
   <a href="#" class="logout" onclick="logout()"><i class="fas fa-sign-out-alt fa-fw"></i> Logout</a>
 </div>
 
@@ -199,7 +198,7 @@ tr:hover td{background:#f7faf8;}
   </div>
   <div class="table-wrap"><table>
     <thead><tr>
-      <th>Name</th><th>Phone</th><th>Ref ID</th><th>City</th>
+      <th>Name</th><th>Phone</th><th>City</th>
       <th>Roles</th><th>Stores</th><th>Products</th><th>Banners</th>
       <th>Points</th><th>Status</th><th>Actions</th>
     </tr></thead>
@@ -244,7 +243,7 @@ tr:hover td{background:#f7faf8;}
     <div class="section-header">
       <div class="page-title" style="margin:0">Stores</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <input id="store_search" class="form-control" style="max-width:190px;" placeholder="🔍 Search name, mobile..." oninput="filterStores()">
+        <input id="store_search" class="form-control" style="max-width:190px;" placeholder="🔍 Search store..." oninput="filterStores()">
         <select id="store_city_filter" class="form-select" style="max-width:130px;" onchange="filterStores()"><option value="">All Cities</option></select>
         <select id="store_status_filter" class="form-select" style="max-width:150px;" onchange="filterStores()">
           <option value="">All Status</option>
@@ -254,7 +253,6 @@ tr:hover td{background:#f7faf8;}
           <option value="draft">Draft</option>
         </select>
         <button class="btn-p" onclick="openCreateStore()">+ Create Store</button>
-        <button onclick="migrateStoreImages()" style="background:#fff;border:1px solid var(--primary);color:var(--primary);padding:7px 14px;border-radius:8px;font-size:13px;cursor:pointer;margin-left:8px;" title="Upload base64 images to Cloudinary CDN">&#9729; Migrate Images</button>
       </div>
     </div>
     <div class="table-wrap"><table>
@@ -333,17 +331,13 @@ tr:hover td{background:#f7faf8;}
       <tbody id="vz_unified_body"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
     </table>
   </div>
-  <!-- ISSUE 8: Pagination bar -->
-  <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-    <div style="font-size:12px;color:var(--muted)" id="vz_showing"></div>
-    <div id="vz_pagination" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
-  </div>
+  <div style="margin-top:10px;font-size:12px;color:var(--muted)" id="vz_showing"></div>
 
   <!-- ℹ️ What is View? -->
   <div style="margin-top:16px;background:#f7faf8;border-radius:8px;padding:12px 16px;border:1px solid var(--border)">
     <i class="fas fa-info-circle" style="color:var(--primary)"></i>
     <strong style="font-size:12px;color:var(--primary)"> What is "View"?</strong>
-    <span style="font-size:12px;color:var(--muted)"> View option allows you to see full product details including logo, title, offer text, validity, merchant type and status. From there you can edit or delete the product card.</span>
+    <span style="font-size:12px;color:var(--muted)"> View option allows you to see full voucher details including logo, title, offer text, validity, merchant type and status. From there you can edit or delete the voucher card.</span>
   </div>
 
   <!-- hidden spans kept for JS back-compat -->
@@ -511,27 +505,53 @@ tr:hover td{background:#f7faf8;}
 </div>
 
 <div id="section-categories" class="section">
-    <div class="page-title">Browse by Categories</div>
+    <div class="page-title">Categories</div>
     <div class="table-wrap" style="padding:22px;">
-      <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">Manage app categories. Each category can have an image, icon, and subtitle shown in the app.</p>
-      <!-- Add category form -->
-      <div class="d-flex gap-2 mb-3 flex-wrap align-items-end" style="background:#f8fdf9;border:1px solid var(--border);border-radius:10px;padding:14px;">
-        <div>
-          <label style="font-size:11px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">ICON (emoji)</label>
-          <input id="new_cat_icon" class="form-control" placeholder="🍕" style="width:70px;text-align:center;font-size:18px;">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">Add categories with emojis. Example: <strong>🍕 Pizza</strong> or <strong>💇 Salon</strong></p>
+      <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+        <div style="position:relative;">
+          <button type="button" id="emojiPickerBtn" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;cursor:pointer;z-index:2;padding:0;" onclick="toggleEmojiPicker()" title="Pick emoji">😊</button>
+          <input id="new_category" class="form-control" placeholder="e.g. 🍕 Pizza" style="max-width:280px;padding-left:38px;">
         </div>
-        <div>
-          <label style="font-size:11px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">CATEGORY NAME *</label>
-          <input id="new_category" class="form-control" placeholder="e.g. Restaurant" style="width:180px;">
-        </div>
-        <div>
-          <label style="font-size:11px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">SUBTITLE</label>
-          <input id="new_cat_subtitle" class="form-control" placeholder="e.g. 500+ places" style="width:160px;">
-        </div>
-        <button class="btn-p" onclick="addCategory()">+ Add Category</button>
+        <button class="btn-p" onclick="addCategory()">+ Add</button>
       </div>
-      <!-- Categories grid with image upload -->
-      <div id="categories_list" style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;"></div>
+      <!-- Quick emoji picker -->
+      <div id="emoji_picker" style="display:none;background:white;border:1px solid var(--border);border-radius:10px;padding:10px;max-width:360px;margin-bottom:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:600;">COMMON EMOJIS</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+          <span onclick="insertEmoji('🛍️')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🛍️</span>
+          <span onclick="insertEmoji('🍕')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍕</span>
+          <span onclick="insertEmoji('🍔')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍔</span>
+          <span onclick="insertEmoji('☕')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">☕</span>
+          <span onclick="insertEmoji('💇')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💇</span>
+          <span onclick="insertEmoji('💊')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💊</span>
+          <span onclick="insertEmoji('👗')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">👗</span>
+          <span onclick="insertEmoji('📱')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">📱</span>
+          <span onclick="insertEmoji('🏪')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🏪</span>
+          <span onclick="insertEmoji('🎁')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎁</span>
+          <span onclick="insertEmoji('💄')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💄</span>
+          <span onclick="insertEmoji('🥗')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🥗</span>
+          <span onclick="insertEmoji('🍰')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍰</span>
+          <span onclick="insertEmoji('🧴')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🧴</span>
+          <span onclick="insertEmoji('🍜')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍜</span>
+          <span onclick="insertEmoji('🎮')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎮</span>
+          <span onclick="insertEmoji('📚')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">📚</span>
+          <span onclick="insertEmoji('🏋️')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🏋️</span>
+          <span onclick="insertEmoji('🐾')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🐾</span>
+          <span onclick="insertEmoji('🚗')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🚗</span>
+          <span onclick="insertEmoji('🏠')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🏠</span>
+          <span onclick="insertEmoji('✂️')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">✂️</span>
+          <span onclick="insertEmoji('💍')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">💍</span>
+          <span onclick="insertEmoji('🌸')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🌸</span>
+          <span onclick="insertEmoji('🎵')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎵</span>
+          <span onclick="insertEmoji('🛒')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🛒</span>
+          <span onclick="insertEmoji('🥩')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🥩</span>
+          <span onclick="insertEmoji('🍺')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🍺</span>
+          <span onclick="insertEmoji('🎂')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🎂</span>
+          <span onclick="insertEmoji('🧹')" style="cursor:pointer;font-size:20px;padding:3px;border-radius:4px;transition:.1s;" onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background=''">🧹</span>
+        </div>
+      </div>
+      <div id="categories_list" style="margin-top:8px;"></div>
     </div>
   </div>
 
@@ -835,11 +855,25 @@ tr:hover td{background:#f7faf8;}
             </select>
           </div>
           <div class="col-md-6 d-flex align-items-end">
-            <div class="form-check mb-1">
-              <input class="form-check-input" type="checkbox" id="store_new_in_town">
-              <label class="form-check-label" for="store_new_in_town" style="font-size:13px;font-weight:600;color:var(--primary);">
-                📍 Mark as "New In Town"
-              </label>
+            <div class="d-flex flex-column gap-1">
+              <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="store_new_in_town">
+                <label class="form-check-label" for="store_new_in_town" style="font-size:12px;font-weight:600;color:var(--primary);">
+                  📍 New In Town
+                </label>
+              </div>
+              <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="store_trending">
+                <label class="form-check-label" for="store_trending" style="font-size:12px;font-weight:600;color:var(--primary);">
+                  🔥 Trending
+                </label>
+              </div>
+              <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="store_popular">
+                <label class="form-check-label" for="store_popular" style="font-size:12px;font-weight:600;color:var(--primary);">
+                  ⭐ Popular
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -1235,83 +1269,28 @@ async function loadStats() {
 
 // ===== CATEGORIES =====
 async function loadCategories(){
-  try{
-    let r=await fetch("/admin/categories",{credentials:"include"});
-    if(r.ok){ categoriesList=await r.json(); }
-  }catch{}
+  try{let r=await fetch("/admin/categories",{credentials:"include"});if(r.ok)categoriesList=await r.json();}catch{}
 }
 function renderCategories(){
-  const el=document.getElementById("categories_list");
-  if(!el)return;
-  if(!categoriesList.length){el.innerHTML='<p style="color:var(--muted);">No categories yet.</p>';return;}
-  el.innerHTML=categoriesList.map((cat,i)=>{
-    const name=cat.name||cat;
-    const icon=cat.icon||"🏪";
-    const sub=cat.subtitle||"";
-    const img=cat.image_url||"";
-    const gradColors=[
-      ["#3E5F55","#6b8c7e"],["#2E7D5E","#4CAF80"],["#1565C0","#42A5F5"],
-      ["#B45309","#F59E0B"],["#7B2D8B","#BA68C8"],["#C62828","#EF5350"]
-    ];
-    const g=gradColors[i%gradColors.length];
-    return `<div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,.1);">
-      <div style="height:120px;background:linear-gradient(135deg,${g[0]},${g[1]});position:relative;overflow:hidden;">
-        ${img?`<img src="${img}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;" onerror="this.style.display='none'">`:""}
-        <div style="position:absolute;inset:0;background:linear-gradient(to bottom,transparent 30%,rgba(0,0,0,.6))"></div>
-        <div style="position:absolute;bottom:8px;left:10px;">
-          <div style="font-size:22px">${icon}</div>
-          <div style="color:#fff;font-weight:700;font-size:13px">${name}</div>
-          ${sub?`<div style="color:rgba(255,255,255,.8);font-size:10px">${sub}</div>`:""}
-        </div>
-        <button onclick="deleteCategory('${name}')" title="Delete" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.4);border:none;color:#fff;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;line-height:1;">×</button>
-      </div>
-      <div style="background:#fff;padding:8px 10px;display:flex;gap:6px;align-items:center;">
-        <label style="flex:1;font-size:11px;color:var(--primary);font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
-          <i class="fas fa-image"></i> Upload Image
-          <input type="file" accept="image/*" style="display:none" onchange="uploadCategoryImage('${name}',this)">
-        </label>
-      </div>
-    </div>`;
-  }).join("");
+  let html=categoriesList.length
+    ? categoriesList.map(c=>`<span class="cat-chip">${c}<button onclick="deleteCategory('${c}')" title="Delete">×</button></span>`).join("")
+    : `<span style="color:var(--muted);">No categories yet.</span>`;
+  document.getElementById("categories_list").innerHTML=html;
 }
 async function addCategory(){
-  const name=document.getElementById("new_category").value.trim();
-  if(!name)return;
-  const icon=document.getElementById("new_cat_icon").value.trim()||"🏪";
-  const subtitle=document.getElementById("new_cat_subtitle").value.trim();
-  const r=await fetch("/admin/categories",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({name,icon,subtitle}),credentials:"include"});
-  if(r.ok){
-    categoriesList=await r.json();
-    document.getElementById("new_category").value="";
-    document.getElementById("new_cat_icon").value="";
-    document.getElementById("new_cat_subtitle").value="";
-    renderCategories();
-    populateCategoryDropdown();
-  }
+  let val=document.getElementById("new_category").value.trim();if(!val)return;
+  let r=await fetch("/admin/categories",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:val}),credentials:"include"});
+  if(r.ok){let d=await r.json();categoriesList=d.categories;document.getElementById("new_category").value="";renderCategories();}
 }
 async function deleteCategory(name){
   if(!confirm(`Delete "${name}"?`))return;
-  const r=await fetch("/admin/categories/"+encodeURIComponent(name),{method:"DELETE",credentials:"include"});
-  if(r.ok){categoriesList=await r.json();renderCategories();populateCategoryDropdown();}
-}
-async function uploadCategoryImage(name,input){
-  if(!input.files[0])return;
-  const fd=new FormData();fd.append("file",input.files[0]);
-  const r=await fetch("/admin/categories/"+encodeURIComponent(name)+"/upload-image",{method:"POST",body:fd,credentials:"include"});
-  if(r.ok){
-    const d=await r.json();
-    // Update local cache
-    const cat=categoriesList.find(c=>(c.name||c)===name);
-    if(cat&&typeof cat==="object") cat.image_url=d.image_url;
-    renderCategories();
-    alert("Image uploaded!");
-  } else { alert("Upload failed"); }
+  let r=await fetch("/admin/categories/"+encodeURIComponent(name),{method:"DELETE",credentials:"include"});
+  if(r.ok){let d=await r.json();categoriesList=d.categories;renderCategories();}
 }
 function populateCategoryDropdown(sel){
   let s=document.getElementById("store_category");
   s.innerHTML='<option value="">Select category</option>';
-  let cats=categoriesList.length?categoriesList.map(c=>c.name||c):["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"];
+  let cats=categoriesList.length?categoriesList:["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"];
   cats.forEach(c=>{let o=document.createElement("option");o.value=c;o.innerText=c;if(c===sel)o.selected=true;s.appendChild(o);});
 }
 
@@ -1373,7 +1352,7 @@ async function saveSocialLinks(){
     instagram:document.getElementById("sm_instagram").value.trim(),
     youtube:document.getElementById("sm_youtube").value.trim(),
   };
-  let r=await fetch("/admin/social",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),credentials:"include"});
+  let r=await fetch("/admin/social",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(data),credentials:"include"});
   let el=document.getElementById("social_msg");
   el.innerText=r.ok?"✅ Saved!":"❌ Error saving";
   setTimeout(()=>el.innerText="",3000);
@@ -1470,20 +1449,6 @@ async function toggleMerchant(id){if(!confirm("Toggle status?"))return;await fet
 async function deleteMerchant(id){if(!confirm("Delete merchant and all stores?"))return;await fetch(`/admin/merchants/${id}`,{method:"DELETE",credentials:"include"});loadMerchants();loadStats();}
 
 // ===== STORES =====
-async function migrateStoreImages() {
-  if (!confirm("Upload all base64 store images to Cloudinary CDN?\nThis runs once and is safe to repeat.")) return;
-  try {
-    const r = await fetch("/admin/migrate-store-images", {method:"POST", credentials:"include"});
-    const d = await r.json();
-    const cdn   = d.skipped_cdn    || 0;
-    const noImg = d.skipped_no_img || 0;
-    let msg = `Migration complete!\nMigrated: ${d.migrated}\nSkipped (already CDN): ${cdn}\nSkipped (no image): ${noImg}\nFailed: ${d.failed||0}`;
-    if (noImg > 0) msg += `\n\n⚠️ ${noImg} stores have no image at all — edit them to upload one.`;
-    alert(msg);
-    loadStores();
-  } catch(e) { alert("Migration error: " + e); }
-}
-
 async function loadStores(){
   document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--muted)"><div class="spinner-border spinner-border-sm text-success me-2"></div>Loading stores...</td></tr>`;
   try {
@@ -1501,90 +1466,49 @@ function filterStores(){
   let status=document.getElementById("store_status_filter").value;
   _filteredStores=allStores.filter(s=>{
     let cm=!city||(s.city||"").toLowerCase()===city.toLowerCase();
-    let sm=!search||(s.store_name||"").toLowerCase().includes(search)||(s.merchant_name||"").toLowerCase().includes(search)||(s.city||"").toLowerCase().includes(search)||(s.phone||"").includes(search)||(s.merchant_phone||"").includes(search);
+    let sm=!search||(s.store_name||"").toLowerCase().includes(search)||(s.merchant_name||"").toLowerCase().includes(search)||(s.city||"").toLowerCase().includes(search);
     let stm=!status||(s.status||"")===(status);
     return cm&&sm&&stm;
   });
   _storesPage=1;
   renderStoresPage();
 }
-
-// ── Store image fallback helpers ──────────────────────────────────────────
-const _STORE_CAT_EMOJI = {
-  grocery:"🛒", supermarket:"🛒", bakery:"🍞", bread:"🍞",
-  pharmacy:"💊", medical:"💊", clinic:"🏥", hospital:"🏥",
-  restaurant:"🍽️", food:"🍽️", cafe:"☕", coffee:"☕",
-  gym:"💪", fitness:"💪", salon:"💇", beauty:"💄",
-  fashion:"👗", clothing:"👗", apparel:"👗",
-  electronics:"🔌", tech:"📱", mobile:"📱",
-  default:"🏪"
-};
-function _storeImgPhHtml(cat) {
-  cat = (cat||"").toLowerCase();
-  const emoji = _STORE_CAT_EMOJI[cat] ||
-    (Object.entries(_STORE_CAT_EMOJI).find(([k])=> cat.includes(k)) || [null,"🏪"])[1];
-  return '<span style="display:inline-block;width:38px;height:38px;border-radius:6px;' +
-         'background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;' +
-         'text-align:center;font-size:16px;">' + emoji + '</span>';
-}
-function _storeImgFallback(el, cat) {
-  // Replace broken img with emoji placeholder — safe, no quote issues
-  const ph = document.createElement("span");
-  ph.style.cssText = "display:inline-block;width:38px;height:38px;border-radius:6px;" +
-    "background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;" +
-    "text-align:center;font-size:16px;";
-  ph.textContent = _storeImgPhHtml(cat).match(/>(.*?)<\/span>/)?.[1] || "🏪";
-  cat = (cat||"").toLowerCase();
-  const emoji = _STORE_CAT_EMOJI[cat] ||
-    (Object.entries(_STORE_CAT_EMOJI).find(([k])=> cat.includes(k)) || [null,"🏪"])[1];
-  ph.textContent = emoji;
-  el.parentNode && el.parentNode.replaceChild(ph, el);
-}
-// ─────────────────────────────────────────────────────────────────────────
 function renderStoresPage(){
   let f=_filteredStores;
   let pageData=f.slice((_storesPage-1)*PAGE_SIZE, _storesPage*PAGE_SIZE);
   let html="";
   pageData.forEach(s=>{
-    // Resolve store image: CDN URL first, then base64 fallback, then empty
+    // FIX: handle both image (string) and images (array) from backend
+    // Images are stored as base64 in MongoDB — use directly
     let imgSrc = s.image_url || s.image || s._thumb || "";
-    const _cat = (s.category||"").toLowerCase();
-    // Use named function to avoid quote-escaping issues in onerror attribute
     let img = imgSrc
-      ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="_storeImgFallback(this,'${_cat}')">`
-      : _storeImgPhHtml(_cat);
+      ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="this.style.display='none'">`
+      : `<span style="display:inline-block;width:38px;height:38px;border-radius:6px;background:#e8f5ee;margin-right:6px;vertical-align:middle;line-height:38px;text-align:center;font-size:16px;">🏪</span>`;
     const _badgeLabels={newly_added:"✨ Newly Added",just_opened:"🎉 Just Opened",new_store:"🆕 New Store",trending:"🔥 Trending",popular:"⭐ Popular",top_rated:"🏆 Top Rated",must_visit:"📍 Must Visit",limited_offer:"⏳ Limited Offer"};
     const _badge = s.badge||s.store_badge||"";
     let newBadge = _badge
-      ? `<span class="badge-new">${_badgeLabels[_badge]||_badge}</span>`
+      ? `<span class="badge-new" style="background:#2979FF;">${_badgeLabels[_badge]||_badge}</span>`
       : s.is_new_in_town
         ? `<span class="badge-new">📍 New In Town</span>`
         : `<span style="color:var(--muted);font-size:11px;">—</span>`;
-    // Deal badge — backend sends deal_count + best_deal (not deal_status)
-    let dealBadge = (s.deal_count > 0)
-      ? `<span class="badge-active" style="font-size:10px;padding:2px 7px;">🔥 ${s.best_deal>0?s.best_deal+'% off':s.deal_count+' deal'+(s.deal_count>1?'s':'')}</span>`
-      : `<span style="color:var(--muted);font-size:11px;">—</span>`;
+    let dealBadge=s.deal_status==='active'
+      ?`<span class="badge-deal-active">🔥 Active</span>`
+      :s.deal_status==='expired'
+        ?`<span class="badge-deal-expired">Expired</span>`
+        :`<span class="badge-deal-none">—</span>`;
     let statusBadge=s.status==="waiting_approval"?`<span class="badge-waiting">⏳ Waiting</span>`:`<span class="badge-${s.status}">${s.status}</span>`;
     let approveBtn=s.status==="waiting_approval"?`<button class="btn-approve me-1" onclick="approveStore('${s._id}')">✓ Approve</button>`:"";
     html+=`<tr>
       <td>${img}<strong>${s.store_name}</strong></td>
-      <td style="font-size:12px">
-        <div style="font-weight:600">${s.merchant_name||"—"}</div>
-        ${s.merchant_phone ? `<div style="color:var(--muted);font-size:11px">${s.merchant_phone}</div>` : ''}
-      </td>
+      <td style="font-size:12px">${s.merchant_name||"—"}</td>
       <td style="font-size:12px">${s.category||"—"}</td>
       <td style="font-size:12px">${s.city||"—"}${s.area?`<br><small style="color:var(--muted)">${s.area}</small>`:""}  </td>
       <td style="font-size:12px">${s.visit_points||0}</td>
       <td>${newBadge}</td><td>${statusBadge}</td><td>${dealBadge}</td>
       <td>
-        ${(()=>{
-          const _ss = (s.sub_status||"").toLowerCase();
-          const _sp = s.sub_plan||"";
-          if(_ss==='active') return `<span class="badge-active" style="font-size:10px;">✓ ${_sp||'Paid'}</span>`;
-          if(_ss==='expired') return `<span class="badge-inactive" style="font-size:10px;">Expired</span>`;
-          if(_ss==='free') return `<span class="badge-warn" style="font-size:10px;">Free</span>`;
-          return `<span class="badge-warn" style="font-size:10px;">Unpaid</span>`;
-        })()}
+        <span class="badge-${s.paid_status==='paid'?'active':s.paid_status==='expired'?'inactive':'warn'}" style="font-size:10px;">
+          ${s.paid_status==='paid'?'✓ paid':s.paid_status==='expired'?'expired':'unpaid'}
+        </span>
       </td>
       <td>
         ${approveBtn}
@@ -1621,6 +1545,8 @@ async function openCreateStore(){
   document.getElementById("store_image_b64").value="";
   document.getElementById("store_image_preview").style.display="none";
   document.getElementById("store_new_in_town").checked=false;
+  document.getElementById("store_trending").checked=false;
+  document.getElementById("store_popular").checked=false;
   document.getElementById("store_msg").innerText="";
   populateCategoryDropdown("");
   if (storeModal) storeModal.show();
@@ -1653,6 +1579,8 @@ async function openEditStore(id){
   document.getElementById("store_lat").value=s.lat||"";
   document.getElementById("store_lng").value=s.lng||"";
   document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
+  document.getElementById("store_trending").checked=s.is_trending||false;
+  document.getElementById("store_popular").checked=s.is_popular||false;
   document.getElementById("store_badge").value=s.badge||s.store_badge||"";
   document.getElementById("store_image_b64").value="";
   if(s.image){let p=document.getElementById("store_image_preview");p.src=s.image;p.style.display="block";}
@@ -1683,6 +1611,8 @@ async function submitStore(){
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
     is_new_in_town:document.getElementById("store_new_in_town").checked,
+    is_trending:document.getElementById("store_trending").checked,
+    is_popular:document.getElementById("store_popular").checked,
     badge:document.getElementById("store_badge").value||null};
   // Only send merchant_id if selected (prevents overwriting with empty on edit)
   if(mid) payloadBase.merchant_id=mid;
@@ -2024,35 +1954,26 @@ async function loadSliders() {
       fetch('/admin/merchant-banners', {credentials:'include'}),
     ]);
     const sliders  = slidersR.ok  ? await slidersR.json()  : [];
-    const mbanners_raw = merchantR.ok ? await merchantR.json() : [];
-    console.log('[loadSliders] promo-sliders:', sliders.length, 'merchant-banners:', mbanners_raw.length);
-    const mbanners = mbanners_raw;
-    // mbanners already set above with debug log
+    const mbanners = merchantR.ok ? await merchantR.json() : [];
 
     // Normalize admin sliders (auto approved)
     const now = new Date();
     const adminRows = sliders.map(s => {
-      const endDate  = s.end_date || s.expires_at || '';
-      const expiry   = endDate ? new Date(endDate) : null;
+      const expiry = s.expires_at ? new Date(s.expires_at) : null;
       const isExpired = expiry && expiry < now;
-      // If this is an approved merchant banner, show merchant name; else admin
-      const isMerchantBanner = !!(s.source_banner_id || s.source === 'merchant');
       return {
-        _id:           s.id || s._id,
-        _source:       'admin',
-        _is_merchant_approved: isMerchantBanner,
-        image_url:     s.image_url || '',
-        title:         s.title || '',
-        subtitle:      s.link_url || '',
-        merchant_name: s.merchant_name || (isMerchantBanner ? '—' : 'Offro (Admin)'),
-        merchant_phone: s.merchant_phone || '',
-        duration_days: s.duration_days || '',
-        from_date:     s.from_date || '',
-        end_date:      endDate,
-        status:        isExpired ? 'expired' : (s.is_active!==false ? 'approved' : 'hidden'),
-        sort_order:    s.sort_order || 0,
-        created_at:    s.created_at || '',
-        source_banner_id: s.source_banner_id || '',
+        _id:        s.id || s._id,
+        _source:    'admin',
+        image_url:  s.image_url || '',
+        title:      s.title || '',
+        subtitle:   s.link_url || '',
+        merchant_name: s.merchant_name || 'Offro (Admin)',
+        duration_days: '',
+        from_date:  '',
+        end_date:   s.expires_at || '',
+        status:     isExpired ? 'expired' : (s.is_active!==false ? 'approved' : 'hidden'),
+        sort_order: s.sort_order || 0,
+        created_at: s.created_at || '',
         _raw: s,
       };
     });
@@ -2079,17 +2000,7 @@ async function loadSliders() {
       };
     });
 
-    // DEDUP: approved merchant banners are already copied into promo_sliders
-    // (with source_banner_id linking them). Only show merchant_banners that are
-    // pending/rejected — once approved they show as the promo_slider row instead.
-    const approvedMerchantIds = new Set(
-      sliders.filter(s => s.source_banner_id).map(s => s.source_banner_id)
-    );
-    const filteredMerchantRows = merchantRows.filter(r =>
-      !approvedMerchantIds.has(r._id)
-    );
-
-    _allBannerRows = [...adminRows, ...filteredMerchantRows]
+    _allBannerRows = [...adminRows, ...merchantRows]
       .sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
 
     // Stats
@@ -2105,11 +2016,7 @@ async function loadSliders() {
     _set('bn_admin',    admin);
 
     filterBanners();
-  } catch(e) {
-    console.error('loadSliders error', e);
-    const tbody = document.getElementById('bn_unified_body');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--danger)">Error loading banners: ${e.message}</td></tr>`;
-  }
+  } catch(e) { console.error('loadSliders error', e); }
 }
 
 function filterBanners() {
@@ -2147,21 +2054,12 @@ function renderBanners(rows) {
       ? `<img src="${r.image_url}" style="width:100px;height:50px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=0.2">`
       : `<div style="width:100px;height:50px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center"><i class="fas fa-image" style="color:var(--muted)"></i></div>`;
 
-    const isAdmin = r._source==='admin' && !r._is_merchant_approved;
-    const isMerchApproved = r._is_merchant_approved;
-    const nameDisplay = r.merchant_name || (isAdmin ? 'Offro (Admin)' : '—');
-    const phoneDisplay = r.merchant_phone ? `<div style="font-size:11px;color:var(--muted)">${r.merchant_phone}</div>` : '';
+    const isAdmin = r._source==='admin';
     const creatorBadge = isAdmin
-      ? `<div style="font-weight:600;font-size:13px">${nameDisplay}</div>
-         ${phoneDisplay}
-         <span style="background:#e8f4ef;color:#3E5F55;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Admin Created</span>`
-      : isMerchApproved
-      ? `<div style="font-weight:600;font-size:13px">${nameDisplay}</div>
-         ${phoneDisplay}
-         <span style="background:#e8f0fe;color:#1a56db;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant ✓ Approved</span>`
-      : `<div style="font-weight:600;font-size:13px">${nameDisplay}</div>
-         ${phoneDisplay}
-         <span style="background:#fff3cd;color:#856404;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant Pending</span>`;
+      ? `<div style="font-weight:600;font-size:13px">${r.merchant_name||'Offro (Admin)'}</div>
+         <span style="background:#e8f4ef;color:#3E5F55;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Admin</span>`
+      : `<div style="font-weight:600;font-size:13px">${r.merchant_name||'—'}</div>
+         <span style="background:#e8f0fe;color:#1a56db;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant</span>`;
 
     let durationHtml = '—';
     if (r.from_date && r.end_date) {
@@ -2390,8 +2288,6 @@ function openSliderModal() {
   document.getElementById("sl_link_url").value = "";
   document.getElementById("sl_order").value = "0";
   document.getElementById("sl_active").checked = true;
-  const _prevEl = document.getElementById("sl_merchant_name_preview");
-  if (_prevEl) _prevEl.textContent = "";
   // Date fields — default to today + 30 days
   const _today = new Date().toISOString().split("T")[0];
   if (document.getElementById("sl_from_date")) { document.getElementById("sl_from_date").value = _today; }
@@ -2414,10 +2310,9 @@ function editSlider(s) {
   document.getElementById("sl_link_url").value = s.link_url||s.action||"";
   document.getElementById("sl_order").value = s.sort_order||0;
   document.getElementById("sl_active").checked = s.is_active!==false;
-  if (document.getElementById("sl_from_date"))      document.getElementById("sl_from_date").value      = s.from_date||'';
-  if (document.getElementById("sl_days"))           document.getElementById("sl_days").value           = s.duration_days||s.days||30;
-  if (document.getElementById("sl_end_date"))       document.getElementById("sl_end_date").value       = s.end_date||'';
-  if (document.getElementById("sl_merchant_phone")) document.getElementById("sl_merchant_phone").value = s.merchant_phone||'';
+  if (document.getElementById("sl_from_date")) document.getElementById("sl_from_date").value = s.from_date||'';
+  if (document.getElementById("sl_days"))      document.getElementById("sl_days").value      = s.days||30;
+  if (document.getElementById("sl_end_date"))  document.getElementById("sl_end_date").value  = s.end_date||'';
   slUpdateEndDate();
   document.getElementById("sl_msg").innerText = "";
   document.getElementById("sl_file_input").value = "";
@@ -2448,48 +2343,19 @@ function slUpdateEndDate() {
   } else { endEl.value = ""; }
 }
 
-let _merchantLookupTimer = null;
-async function lookupMerchantByPhone(val) {
-  const preview = document.getElementById('sl_merchant_name_preview');
-  if (!preview) return;
-  const digits = val.replace(/\D/g,'').slice(-10);
-  if (digits.length < 10) { preview.textContent = ''; return; }
-  preview.textContent = '⏳ Looking up...';
-  clearTimeout(_merchantLookupTimer);
-  _merchantLookupTimer = setTimeout(async () => {
-    try {
-      const r = await fetch(`/admin/merchants`, {credentials:'include'});
-      if (!r.ok) { preview.textContent = ''; return; }
-      const merchants = await r.json();
-      const match = merchants.find(m => {
-        const mp = String(m.phone||'').replace(/\D/g,'').slice(-10);
-        return mp === digits;
-      });
-      if (match) {
-        preview.textContent = `✅ ${match.name}`;
-        preview.style.color = 'var(--primary)';
-      } else {
-        preview.textContent = '⚠️ Merchant not found — phone not registered';
-        preview.style.color = '#c0392b';
-      }
-    } catch { preview.textContent = ''; }
-  }, 600);
-}
-
 async function saveSlider() {
   const sid = document.getElementById("sl_id").value;
   const img = document.getElementById("sl_image_url").value.trim();
   if (!img) { document.getElementById("sl_msg").innerText = "Please upload a banner image first"; return; }
   const data = {
-    title:           document.getElementById("sl_title").value.trim(),
-    image_url:       img,
-    link_url:        document.getElementById("sl_link_url").value.trim(),
-    sort_order:      parseInt(document.getElementById("sl_order").value)||0,
-    is_active:       document.getElementById("sl_active").checked,
-    from_date:       document.getElementById("sl_from_date")?.value || '',
-    days:            parseInt(document.getElementById("sl_days")?.value)||30,
-    end_date:        document.getElementById("sl_end_date")?.value || '',
-    merchant_phone:  (document.getElementById("sl_merchant_phone")?.value || '').trim(),
+    title:      document.getElementById("sl_title").value.trim(),
+    image_url:  img,
+    link_url:   document.getElementById("sl_link_url").value.trim(),
+    sort_order: parseInt(document.getElementById("sl_order").value)||0,
+    is_active:  document.getElementById("sl_active").checked,
+    from_date:  document.getElementById("sl_from_date")?.value || '',
+    days:       parseInt(document.getElementById("sl_days")?.value)||30,
+    end_date:   document.getElementById("sl_end_date")?.value || '',
   };
   try {
     let url  = sid ? `/admin/promo-sliders/${sid}` : "/admin/promo-sliders";
@@ -2833,12 +2699,8 @@ window.addEventListener("DOMContentLoaded", function() {
     gcModalInst = new bootstrap.Modal(document.getElementById("giftCardModal"));
 });
 
-// ── All products data cache + pagination ──
+// ── All products data cache ──
 let _allVoucherRows = [];
-let _vzLogoMap = {};  // stores logos separately to avoid huge base64 in onclick JSON
-let _vzFilteredRows = [];
-let _vzPage = 1;
-const _VZ_PER_PAGE = 15;
 
 async function loadGiftCards() {
   const tbody = document.getElementById('vz_unified_body');
@@ -2853,41 +2715,41 @@ async function loadGiftCards() {
     const adminCards    = adminR.ok    ? await adminR.json()    : [];
     const merchantCards = merchantR.ok ? await merchantR.json() : [];
 
+    // Helper: parse validity text → Date (handles "31 Dec 2025", "31/12/2025", ISO)
+    function parseValidityDate(val) {
+      if (!val) return null;
+      // ISO
+      let d = new Date(val.trim());
+      if (!isNaN(d)) return d;
+      // DD/MM/YYYY or DD-MM-YYYY
+      const slash = val.trim().match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+      if (slash) return new Date(+slash[3], +slash[2]-1, +slash[1]);
+      // "31 Dec 2025"
+      const months={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+      const txt = val.trim().match(/^(\d{1,2})\s+(\w+)\s+(\d{4})$/);
+      if (txt) {
+        const m = months[txt[2].toLowerCase().slice(0,3)];
+        if (m !== undefined) return new Date(+txt[3], m, +txt[1]);
+      }
+      return null;
+    }
+    const _nowVz = new Date();
+
     // Normalize admin cards
     const adminRows = adminCards.map(v => {
-      const fromD = v.from_date || '';
-      const toD   = v.end_date   || '';
-      let isActive = v.is_active !== false;
-      let computedStatus = isActive ? 'approved' : 'hidden';
-      if (isActive && toD) {
-        try {
-          // Support "22 May 2026", "2026-05-22", "22-05-2026" formats
-          let endDt = new Date(toD);
-          if (isNaN(endDt)) {
-            const cleaned = toD.replace(/(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1');
-            endDt = new Date(cleaned);
-          }
-          const today = new Date(new Date().toDateString()); // midnight today local
-          if (!isNaN(endDt) && endDt < today) { computedStatus = 'expired'; isActive = false; }
-        } catch(e) {}
-      }
-      // ISSUE 1 FIX: gift_vouchers with source='merchant' are approved merchant products
-      // — they must show as Merchant, not Admin, in the creator badge
-      const realSource = (v.source === 'merchant') ? 'merchant' : 'admin';
+      const vDate = parseValidityDate(v.validity || '');
+      const isExpired = vDate && vDate < _nowVz;
       return {
         _id:        v.id || v._id,
-        _source:    realSource,
+        _source:    'admin',
         logo:       v.logo || '',
         title:      v.title || '',
         offer_text: v.text || '',
-        validity:   v.validity || (fromD && toD ? `${_fmtDate(fromD)} → ${_fmtDate(toD)}` : (fromD ? _fmtDate(fromD) : '')),
-        from_date:  fromD,
-        end_date:   toD,
-        is_active:  isActive,
-        status:     computedStatus,
+        validity:   v.validity || '',
+        is_active:  v.is_active !== false && !isExpired,
+        status:     isExpired ? 'expired' : (v.is_active !== false ? 'approved' : 'hidden'),
         approval_status: 'approved',
         merchant_name: v.merchant_name || '',
-        merchant_phone: v.merchant_phone || '',
         created_at: v.created_at || '',
         _raw: v,
       };
@@ -2896,69 +2758,44 @@ async function loadGiftCards() {
     // Normalize merchant cards
     const merchantRows = merchantCards.map(v => {
       const st = v.status || 'pending_approval';
-      // ISSUE 2: Build full validity display string from_date → end_date
-      const fromD = v.from_date || '';
-      const toD   = v.end_date   || '';
-      const validityDisplay = (fromD && toD)
-        ? `${_fmtDate(fromD)} → ${_fmtDate(toD)}`
-        : (v.validity || (v.end_date ? _fmtDate(v.end_date) : '—'));
-      // ISSUE 7: Check expiry at render time
-      let computedStatus = st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending');
-      if (computedStatus === 'approved' && toD) {
-        try {
-          // Support "22 May 2026", "2026-05-22", "22-05-2026" formats
-          let endDt = new Date(toD);
-          if (isNaN(endDt)) {
-            const cleaned = toD.replace(/(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1');
-            endDt = new Date(cleaned);
-          }
-          const today = new Date(new Date().toDateString()); // midnight today local
-          if (!isNaN(endDt) && endDt < today) computedStatus = 'expired';
-        } catch(e) {}
-      }
+      const vDate = parseValidityDate(v.validity || v.end_date || '');
+      const isExpired = vDate && vDate < _nowVz;
       return {
         _id:        v._id,
         _source:    'merchant',
         logo:       v.logo_url || '',
         title:      v.title || '',
         offer_text: v.offer_text || '',
-        validity:   validityDisplay,
-        from_date:  fromD,
-        end_date:   toD,
-        is_active:  computedStatus === 'approved',
-        status:     computedStatus,
+        validity:   v.validity || v.end_date || '',
+        is_active:  st === 'approved' && !isExpired,
+        status:     isExpired ? 'expired' : (st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending')),
         approval_status: st,
         merchant_name: v.merchant_name || '',
-        merchant_phone: v.merchant_phone || '',
         created_at: v.created_at || '',
         _raw: v,
       };
     });
 
-    // ISSUE 1 FIX: Strict dedup — merchant voucher already in gift_vouchers OR already approved
-    // Two-layer check: source_voucher_id AND merchant row status === approved
+    // Dedup: if a merchant voucher was approved it's already in gift_vouchers (adminRows).
+    // Filter merchant rows to exclude those that appear in adminRows via source_voucher_id.
     const approvedMerchantIds = new Set(
       adminCards
-        .filter(v => v.source_voucher_id)
+        .filter(v => v.source_voucher_id || v.source === 'merchant')
         .map(v => v.source_voucher_id)
         .filter(Boolean)
     );
     const dedupedMerchantRows = merchantRows.filter(r =>
-      !approvedMerchantIds.has(r._id) &&   // not already copied to gift_vouchers
-      r.status !== 'approved'               // not in approved state (already shown via adminRows)
+      !approvedMerchantIds.has(r._id)      // not already in gift_vouchers
     );
 
     _allVoucherRows = [...adminRows, ...dedupedMerchantRows]
       .sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
-    // Build logo lookup map — strip heavy base64 from row objects so onclick JSON stays small
-    _vzLogoMap = {};
-    _allVoucherRows.forEach(r => { if (r.logo) { _vzLogoMap[r._id] = r.logo; r.logo = ''; } });
 
-    // Update stats — expired is computed at normalize time (Issue 7)
+    // Update stats
     const approved = _allVoucherRows.filter(r=>r.status==='approved').length;
     const pending  = _allVoucherRows.filter(r=>r.status==='pending').length;
     const expired  = _allVoucherRows.filter(r=>r.status==='expired').length;
-    const active   = _allVoucherRows.filter(r=>r.is_active && r.status!=='expired').length;
+    const active   = _allVoucherRows.filter(r=>r.is_active).length;
     const _s = id => { const el=document.getElementById(id); if(el) el.textContent=0; };
     const _set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
     _set('vz_total',    _allVoucherRows.length);
@@ -2967,8 +2804,6 @@ async function loadGiftCards() {
     _set('vz_expired',  expired);
     _set('vz_active',   active);
 
-    _vzFilteredRows = _allVoucherRows;
-    _vzPage = 1;
     filterVoucherZone();
   } catch(e) { console.error('loadGiftCards error', e); }
 }
@@ -2987,72 +2822,33 @@ function filterVoucherZone() {
   if (dateFrom)rows = rows.filter(r=>(r.created_at||'')>=dateFrom);
   if (dateTo)  rows = rows.filter(r=>(r.created_at||'')<=dateTo+'z');
 
-  _vzFilteredRows = rows;
-  _vzPage = 1; // reset to page 1 on filter change
-  renderVoucherZone();
+  renderVoucherZone(rows);
 }
-function goVZPage(p) { _vzPage = p; renderVoucherZone(); }
 
-function renderVoucherZone() {
-  const tbody   = document.getElementById('vz_unified_body');
+function renderVoucherZone(rows) {
+  const tbody = document.getElementById('vz_unified_body');
   const showing = document.getElementById('vz_showing');
-  const pgBar   = document.getElementById('vz_pagination');
   if (!tbody) return;
-  const rows = _vzFilteredRows;
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted)">No vouchers found.</td></tr>';
     if(showing) showing.textContent = '';
-    if(pgBar)   pgBar.innerHTML = '';
     return;
   }
-  // Pagination math
-  const total  = rows.length;
-  const pages  = Math.ceil(total / _VZ_PER_PAGE);
-  _vzPage      = Math.max(1, Math.min(_vzPage, pages));
-  const start  = (_vzPage-1)*_VZ_PER_PAGE;
-  const end    = Math.min(start+_VZ_PER_PAGE, total);
-  const pageRows = rows.slice(start, end);
-  if(showing) showing.textContent = `Showing ${start+1}–${end} of ${total} results`;
-  // Build pagination controls
-  if (pgBar) {
-    const btnStyle = (active) => `style="border:1px solid ${active?'var(--primary)':'var(--border)'};background:${active?'var(--primary)':'#fff'};color:${active?'#fff':'var(--text)'};border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;"`;
-    let pgHtml = '';
-    if (_vzPage > 1) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(${_vzPage-1})">‹ Prev</button>`;
-    const maxBtns = 7;
-    let lo = Math.max(1, _vzPage-3), hi = Math.min(pages, lo+maxBtns-1);
-    if (hi-lo < maxBtns-1) lo = Math.max(1, hi-maxBtns+1);
-    if (lo > 1) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(1)">1</button>${lo>2?'<span style="padding:4px 2px">…</span>':''}`;
-    for (let i=lo;i<=hi;i++) pgHtml += `<button ${btnStyle(i===_vzPage)} onclick="goVZPage(${i})">${i}</button>`;
-    if (hi < pages) pgHtml += `${hi<pages-1?'<span style="padding:4px 2px">…</span>':''}<button ${btnStyle(false)} onclick="goVZPage(${pages})">${pages}</button>`;
-    if (_vzPage < pages) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(${_vzPage+1})">Next ›</button>`;
-    pgBar.innerHTML = pgHtml;
-  }
+  if(showing) showing.textContent = `Showing 1 to ${rows.length} of ${rows.length} results`;
 
   tbody.innerHTML = rows.map(r => {
     // TASK 2 FIX: handle both HTTPS URLs and base64 data: URIs
-    // Logo stored in _vzLogoMap to avoid huge base64 in onclick JSON
-    const _logoSrc = _vzLogoMap[r._id] || r.logo || '';
+    const _logoSrc = r.logo || '';
     const logoHtml = _logoSrc
       ? `<img src="${_logoSrc}" style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
         + `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:none;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`
       : `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`;
 
     const isAdmin = r._source === 'admin';
-    // ISSUE 1 FIX: 3-way creator badge
-    // - pureAdmin: Admin created, no merchant link → show Admin only
-    // - adminLinked: Admin created, linked to merchant → show Admin + 🔗 Merchant
-    // - merchant: submitted by merchant OR approved merchant product → show Merchant only (no Admin)
-    const phoneDisplay = r.merchant_phone ? `<div style="font-size:10px;color:var(--muted);font-family:monospace;margin-top:1px">📞 ${r.merchant_phone}</div>` : '';
-    const pureAdmin   = isAdmin && !r.merchant_name;
-    const adminLinked = isAdmin && r.merchant_name;
-    const creatorBadge = pureAdmin
+    const creatorBadge = isAdmin
       ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>`
-      : adminLinked
-      ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>
-         <div style="font-size:11px;color:#1a56db;margin-top:3px;font-weight:600">🔗 ${r.merchant_name}</div>${phoneDisplay}`
       : `<span style="background:#e8f0fe;color:#1a56db;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-user" style="font-size:9px"></i> Merchant</span>
-         <div style="font-size:11px;color:var(--muted);margin-top:2px;font-weight:600">${r.merchant_name||''}</div>
-         ${phoneDisplay}`;
+         <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.merchant_name||''}</div>`;
 
     const st = r.status;
     const statusBadge = st==='approved'
@@ -3070,56 +2866,27 @@ function renderVoucherZone() {
       ? `<button class="btn-approve me-1" style="font-size:11px;padding:4px 10px" onclick="approveVZVoucher('${r._id}','${r._source}')">Approve</button>`
       : '';
 
-    // Strip heavy base64 logo + _raw before embedding in onclick attribute
-    const _safeR = Object.assign({}, r, {logo: '', _raw: null});
-    const viewJson = JSON.stringify(_safeR).replace(/"/g,'&quot;');
+    const viewJson = JSON.stringify(r).replace(/"/g,'&quot;');
     return `<tr>
       <td>${logoHtml}</td>
       <td><strong style="font-size:13px">${r.title||'—'}</strong></td>
       <td>${creatorBadge}</td>
-      <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
+      <td style="font-size:12px;">
+        ${r.validity
+          ? (r.status==='expired'
+              ? `<span style="background:#fde8e6;color:#c0392b;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700">⛔ Expired</span><div style="font-size:10px;color:var(--muted);margin-top:2px">${r.validity}</div>`
+              : `<span style="color:var(--primary);font-size:11px;font-weight:600">📅 Till: ${r.validity}</span>`)
+          : '<span style="color:var(--muted)">—</span>'}
+      </td>
       <td>${statusBadge}</td>
       <td>
         <button class="btn-o me-1" onclick='openVZViewModal(${viewJson})'>View</button>
         ${approveBtn}
         <button class="btn-o" style="border:none;padding:4px 8px" onclick='openVZMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>
       </td>
-      <td style="font-size:11px;color:var(--muted);white-space:nowrap">${_fmtVZDate(r.created_at)}</td>
+      <td style="font-size:11px;color:var(--muted)">${(r.created_at||'').slice(0,16)}</td>
     </tr>`;
   }).join('');
-}
-
-// ISSUE 10: Consistent date formatter for Products table
-// FIX 2: Formats a YYYY-MM-DD string to "22 May 2026"
-function _fmtDate(s) {
-  if (!s) return '';
-  try {
-    const d = new Date(s + 'T00:00:00');
-    const opts = {day:'numeric', month:'short', year:'numeric'};
-    return d.toLocaleDateString('en-IN', opts);
-  } catch(e) { return s; }
-}
-function _fmtVZDate(dt) {
-  // FIX 3: Always render in Indian Standard Time (IST = UTC+5:30)
-  if (!dt) return '—';
-  try {
-    // Parse the value — if it has no timezone marker, treat as UTC
-    const raw = String(dt);
-    const parsed = raw.includes('T') && !raw.endsWith('Z') && !raw.includes('+')
-      ? raw + 'Z'   // force UTC interpretation for ISO strings stored without tz
-      : raw;
-    const d = new Date(parsed);
-    if (isNaN(d)) return raw.slice(0,16);
-    // Convert to IST (UTC+5:30 = +330 minutes)
-    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
-    const ist = new Date(d.getTime() + IST_OFFSET);
-    const day  = String(ist.getUTCDate()).padStart(2,'0');
-    const mon  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()];
-    const yr   = ist.getUTCFullYear();
-    const hh   = String(ist.getUTCHours()).padStart(2,'0');
-    const mm   = String(ist.getUTCMinutes()).padStart(2,'0');
-    return `${day} ${mon} ${yr} | ${hh}:${mm}`;
-  } catch(e) { return String(dt).slice(0,16); }
 }
 
 // ── View Modal handler ──
@@ -3131,24 +2898,13 @@ function openVZViewModal(r) {
   // TASK 2 FIX: set logo in view — works for both URL and base64 data: URIs
   const _vzLogo = document.getElementById('vz_modal_logo');
   if (_vzLogo) {
-    const _modalLogoSrc = _vzLogoMap[r._id] || r.logo || '';
-    _vzLogo.src = _modalLogoSrc;
-    _vzLogo.style.display = _modalLogoSrc ? 'block' : 'none';
+    _vzLogo.src = r.logo || '';
+    _vzLogo.style.display = r.logo ? 'block' : 'none';
   }
   document.getElementById('vz_modal_title').textContent = r.title||'—';
   document.getElementById('vz_modal_offer').textContent = r.offer_text||'—';
-  document.getElementById('vz_modal_from_date').textContent = r.from_date || '—';
-  document.getElementById('vz_modal_end_date').textContent  = r.end_date  || '—';
   document.getElementById('vz_modal_validity').textContent = r.validity||'—';
-  // ISSUE 1: Show merchant mapping for admin-created products
-  // ISSUE 1 FIX: match 3-way badge — merchant-approved products show Merchant only
-  const _pureAdmin2   = isAdmin && !r.merchant_name;
-  const _adminLinked2 = isAdmin && r.merchant_name;
-  document.getElementById('vz_modal_creator').textContent =
-    _pureAdmin2   ? 'Admin (Offro)' :
-    _adminLinked2 ? `Admin → ${r.merchant_name}` :
-    `Merchant — ${r.merchant_name||''}`;
-  document.getElementById('vz_modal_phone').textContent = r.merchant_phone || '—';
+  document.getElementById('vz_modal_creator').textContent = isAdmin ? 'Admin' : `Merchant — ${r.merchant_name||''}`;
   document.getElementById('vz_modal_status').textContent = r.status;
   // Approve button: only show for pending merchant vouchers
   const approveBtn = document.getElementById('vz_modal_approve');
@@ -3158,7 +2914,7 @@ function openVZViewModal(r) {
 
 function approveVZVoucher(id, source) {
   if (source==='merchant') approveMerchantVoucher(id);
-  else if(confirm('Activate this product?')) loadGiftCards();
+  else if(confirm('Activate this voucher?')) loadGiftCards();
 }
 
 function openVZMoreMenu(evt, id, source, status) {
@@ -3198,51 +2954,28 @@ function openVZMerchantEditModal(row) {
     modal.id = 'vz_merchant_edit_modal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
     modal.innerHTML = `
-      <div style="background:#fff;border-radius:16px;padding:28px;width:500px;max-height:92vh;overflow-y:auto">
+      <div style="background:#fff;border-radius:16px;padding:28px;width:440px;max-height:90vh;overflow-y:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-          <h5 style="margin:0;color:var(--primary)">✏️ Edit Product</h5>
+          <h5 style="margin:0;color:var(--primary)">Edit Merchant Voucher</h5>
           <button onclick="document.getElementById('vz_merchant_edit_modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">&times;</button>
         </div>
-
-        <!-- ISSUE 5: Same fields as App -->
         <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Product Title *</label>
-          <input id="vz_edit_title" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. ₹999 DEALS">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Voucher Title</label>
+          <input id="vz_edit_title" type="text" class="form-control" style="margin-top:4px">
         </div>
         <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Offer Text *</label>
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Offer Text</label>
           <input id="vz_edit_offer" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 20% off on all items">
         </div>
-        <div class="row mb-3">
-          <div class="col-6">
-            <label style="font-size:12px;font-weight:600;color:var(--muted)">From Date</label>
-            <input id="vz_edit_from_date" type="date" class="form-control" style="margin-top:4px" onchange="_vzUpdateValidity()">
-          </div>
-          <div class="col-6">
-            <label style="font-size:12px;font-weight:600;color:var(--muted)">To Date (End)</label>
-            <input id="vz_edit_end_date" type="date" class="form-control" style="margin-top:4px" onchange="_vzUpdateValidity()">
-          </div>
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Validity</label>
+          <input id="vz_edit_validity" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 31 May 2025">
         </div>
         <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Validity Display <small class="text-muted">(auto-filled)</small></label>
-          <input id="vz_edit_validity" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 22 May 2026 → 22 Jun 2026">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Logo URL</label>
+          <input id="vz_edit_logo" type="text" class="form-control" style="margin-top:4px" placeholder="https://...">
+          <img id="vz_edit_logo_preview" src="" style="margin-top:8px;width:60px;height:60px;object-fit:cover;border-radius:10px;display:none;border:1px solid var(--border)">
         </div>
-
-        <!-- ISSUE 6: File upload + URL option for logo -->
-        <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Product Image</label>
-          <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="file" id="vz_edit_logo_file" class="form-control" accept="image/*"
-              style="flex:1;min-width:180px;font-size:12px" onchange="_vzPreviewUpload(this)">
-            <span style="font-size:11px;color:var(--muted)">or</span>
-            <input id="vz_edit_logo" type="text" class="form-control" style="flex:1;min-width:180px;font-size:12px" placeholder="Paste image URL...">
-          </div>
-          <div id="vz_edit_logo_wrap" style="margin-top:8px;display:none;align-items:center;gap:8px">
-            <img id="vz_edit_logo_preview" src="" style="width:60px;height:60px;object-fit:cover;border-radius:10px;border:1px solid var(--border)">
-            <button type="button" onclick="_vzClearLogo()" style="font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer">✕ Remove</button>
-          </div>
-        </div>
-
         <div class="mb-3">
           <label style="font-size:12px;font-weight:600;color:var(--muted)">Status</label>
           <select id="vz_edit_status" class="form-select" style="margin-top:4px">
@@ -3255,83 +2988,38 @@ function openVZMerchantEditModal(row) {
         <div id="vz_edit_msg" style="font-size:12px;margin-bottom:8px"></div>
         <div style="display:flex;gap:10px">
           <button class="btn-o" style="flex:1" onclick="document.getElementById('vz_merchant_edit_modal').remove()">Cancel</button>
-          <button class="btn-approve" style="flex:2" onclick="saveVZMerchantEdit()">💾 Save Changes</button>
+          <button class="btn-approve" style="flex:2" onclick="saveVZMerchantEdit()">Save Changes</button>
         </div>
       </div>`;
-
-    // Logo URL input → preview
-    document.getElementById('vz_edit_logo').addEventListener('input', function(){
-      _vzShowLogoPreview(this.value);
-    });
     document.body.appendChild(modal);
-// Logo listener now inside modal build block above
+    document.getElementById('vz_edit_logo').addEventListener('input', function(){
+      const img = document.getElementById('vz_edit_logo_preview');
+      img.src = this.value; img.style.display = this.value ? 'block' : 'none';
+    });
   }
   const el2 = id => document.getElementById(id);
-  if(el2('vz_edit_title'))     el2('vz_edit_title').value     = row.title||'';
-  if(el2('vz_edit_offer'))     el2('vz_edit_offer').value     = row.offer_text||'';
-  if(el2('vz_edit_from_date')) el2('vz_edit_from_date').value = row.from_date||'';
-  if(el2('vz_edit_end_date'))  el2('vz_edit_end_date').value  = row.end_date||'';
-  if(el2('vz_edit_validity'))  el2('vz_edit_validity').value  = row.validity||'';
-  if(el2('vz_edit_logo'))      el2('vz_edit_logo').value      = row.logo||'';
-  if(row.logo) _vzShowLogoPreview(row.logo); else _vzClearLogo();
-  if(el2('vz_edit_logo_file')) el2('vz_edit_logo_file').value = '';
-  if(el2('vz_edit_status'))    el2('vz_edit_status').value    = row.status||'pending';
-  if(el2('vz_edit_msg'))       el2('vz_edit_msg').textContent = '';
-  el2('vz_merchant_edit_modal').style.display = 'flex';
-}
-
-// ── Product Edit helpers (Issues 5+6) ──
-function _vzUpdateValidity() {
-  const from = document.getElementById('vz_edit_from_date')?.value;
-  const to   = document.getElementById('vz_edit_end_date')?.value;
-  const el   = document.getElementById('vz_edit_validity');
-  if (!el) return;
-  if (from && to) {
-    const fmtD = d => { const o=new Date(d); return `${o.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][o.getMonth()]} ${o.getFullYear()}`; };
-    el.value = `${fmtD(from)} → ${fmtD(to)}`;
+  if(el2('vz_edit_title'))    el2('vz_edit_title').value    = row.title||'';
+  if(el2('vz_edit_offer'))    el2('vz_edit_offer').value    = row.offer_text||'';
+  if(el2('vz_edit_validity')) el2('vz_edit_validity').value = row.validity||'';
+  if(el2('vz_edit_logo')) {
+    el2('vz_edit_logo').value = row.logo||'';
+    const img = el2('vz_edit_logo_preview');
+    if(row.logo){ img.src=row.logo; img.style.display='block'; } else { img.style.display='none'; }
   }
-}
-function _vzShowLogoPreview(src) {
-  const wrap = document.getElementById('vz_edit_logo_wrap');
-  const img  = document.getElementById('vz_edit_logo_preview');
-  if (!wrap || !img) return;
-  if (src) { img.src = src; wrap.style.display = 'flex'; }
-  else     { img.src = ''; wrap.style.display = 'none'; }
-}
-function _vzClearLogo() {
-  const urlInput  = document.getElementById('vz_edit_logo');
-  const fileInput = document.getElementById('vz_edit_logo_file');
-  if (urlInput)  urlInput.value  = '';
-  if (fileInput) fileInput.value = '';
-  _vzShowLogoPreview('');
-}
-function _vzPreviewUpload(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const b64 = e.target.result;
-    const urlInput = document.getElementById('vz_edit_logo');
-    if (urlInput) urlInput.value = b64;
-    _vzShowLogoPreview(b64);
-  };
-  reader.readAsDataURL(file);
+  if(el2('vz_edit_status'))   el2('vz_edit_status').value   = row.status||'pending';
+  if(el2('vz_edit_msg'))      el2('vz_edit_msg').textContent = '';
+  el2('vz_merchant_edit_modal').style.display = 'flex';
 }
 
 async function saveVZMerchantEdit() {
   const row = _vzMerchantEditCurrent;
   if (!row) return;
   const el = id => document.getElementById(id);
-  const logoVal = el('vz_edit_logo')?.value?.trim() || row.logo || '';
-  const fromVal = el('vz_edit_from_date')?.value?.trim() || row.from_date || '';
-  const toVal   = el('vz_edit_end_date')?.value?.trim()  || row.end_date  || '';
   const payload = {
     title:      el('vz_edit_title')?.value?.trim()    || row.title,
     offer_text: el('vz_edit_offer')?.value?.trim()    || row.offer_text,
     validity:   el('vz_edit_validity')?.value?.trim() || row.validity,
-    logo:       logoVal,
-    from_date:  fromVal,
-    end_date:   toVal,
+    logo:       el('vz_edit_logo')?.value?.trim()     || row.logo,
     status:     el('vz_edit_status')?.value           || row.status,
   };
   try {
@@ -3342,7 +3030,7 @@ async function saveVZMerchantEdit() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Error');
-    if(el('vz_edit_msg')) { el('vz_edit_msg').style.color='#1a6640'; el('vz_edit_msg').textContent = '✅ Product updated!'; }
+    if(el('vz_edit_msg')) { el('vz_edit_msg').style.color='#1a6640'; el('vz_edit_msg').textContent = '✅ Voucher updated!'; }
     setTimeout(()=>{ document.getElementById('vz_merchant_edit_modal')?.remove(); loadGiftCards(); }, 800);
   } catch(e) {
     if(el('vz_edit_msg')) { el('vz_edit_msg').style.color='red'; el('vz_edit_msg').textContent = e.message; }
@@ -3350,7 +3038,7 @@ async function saveVZMerchantEdit() {
 }
 
 async function deleteVZVoucher(id, source) {
-  if (!confirm('Delete this product?')) return;
+  if (!confirm('Delete this voucher?')) return;
   const url = source==='admin' ? `/admin/gift-vouchers/${id}` : `/admin/merchant-vouchers/${id}`;
   await fetch(url, {method:'DELETE', credentials:'include'});
   loadGiftCards();
@@ -3361,11 +3049,9 @@ async function openGiftCardModal() {
   document.getElementById("gc_id").value = "";
   document.getElementById("gc_title").value = "";
   document.getElementById("gc_text").value = "";
-  document.getElementById("gc_validity").value      = "";
-  document.getElementById("gc_from_date").value    = "";
-  document.getElementById("gc_duration_days").value= "";
-  if(document.getElementById("gc_to_date")) document.getElementById("gc_to_date").value = "";
-  if(document.getElementById("gc_validity_preview")) document.getElementById("gc_validity_preview").textContent = "";
+  document.getElementById("gc_validity").value = "";
+  document.getElementById("gc_from_date").value = "";
+  document.getElementById("gc_duration_days").value = "";
   document.getElementById("gc_logo").value = "";
   document.getElementById("gc_logo_file").value="";
   document.getElementById("gc_logo_preview").style.display="none";
@@ -3380,15 +3066,9 @@ function editGiftCard(v) {
   document.getElementById("gc_id").value       = v.id||v._id||"";
   document.getElementById("gc_title").value    = v.title||"";
   document.getElementById("gc_text").value     = v.text||"";
+  document.getElementById("gc_validity").value      = v.validity||"";
   document.getElementById("gc_from_date").value     = v.from_date||"";
   document.getElementById("gc_duration_days").value = v.duration_days||"";
-  if(document.getElementById("gc_to_date")) document.getElementById("gc_to_date").value = v.end_date||"";
-  // Recalculate validity display from from_date + days (if available), else show stored text
-  if (v.from_date && v.duration_days > 0) {
-    _gcUpdateValidity();
-  } else {
-    document.getElementById("gc_validity").value = v.validity||"";
-  }
   document.getElementById("gc_logo").value          = v.logo||"";
   if (v.logo) { document.getElementById("gc_logo_img").src=v.logo; document.getElementById("gc_logo_preview").style.display="block"; }
   else { document.getElementById("gc_logo_preview").style.display="none"; document.getElementById("gc_logo_file").value=""; }
@@ -3425,36 +3105,26 @@ function clearVoucherLogo() {
   document.getElementById("gc_logo_img").src = "";
 }
 function _gcUpdateValidity() {
-  // ISSUE 2 FIX: From Date + Number of Days → compute end_date + validity string
-  const from = document.getElementById('gc_from_date')?.value;
-  const days = parseInt(document.getElementById('gc_duration_days')?.value) || 0;
-  const toEl      = document.getElementById('gc_to_date');
-  const validEl   = document.getElementById('gc_validity');
-  const previewEl = document.getElementById('gc_validity_preview');
+  // TASK 9: Auto-fill validity text from from_date + duration_days
+  const from = document.getElementById('gc_from_date').value;
+  const days = parseInt(document.getElementById('gc_duration_days').value)||0;
   if (from && days > 0) {
-    const startD = new Date(from + 'T00:00:00');
-    const endD   = new Date(from + 'T00:00:00');
-    endD.setDate(endD.getDate() + days);
-    const endISO = endD.toISOString().split('T')[0];
-    if (toEl)    toEl.value = endISO;   // store computed end_date
-    const opts = {day:'numeric', month:'short', year:'numeric'};
-    const fmtStart = startD.toLocaleDateString('en-IN', opts);
-    const fmtEnd   = endD.toLocaleDateString('en-IN', opts);
-    if (validEl)   validEl.value = `${fmtStart} → ${fmtEnd}`;
-    if (previewEl) previewEl.textContent = `(ends ${fmtEnd})`;
-  } else {
-    if (toEl)      toEl.value    = '';
-    if (validEl)   validEl.value = '';
-    if (previewEl) previewEl.textContent = '';
+    const d = new Date(from); d.setDate(d.getDate() + days);
+    const opts = {day:'numeric',month:'short',year:'numeric'};
+    document.getElementById('gc_validity').value = d.toLocaleDateString('en-IN', opts);
   }
 }
 async function saveGiftCard() {
   const vid  = document.getElementById("gc_id").value;
   const text = document.getElementById("gc_text").value.trim();
   if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
-  const _gcFrom = document.getElementById("gc_from_date")?.value  || '';
-  const _gcTo   = document.getElementById("gc_to_date")?.value    || ''; // computed by _gcUpdateValidity
-  const _gcDays = parseInt(document.getElementById("gc_duration_days")?.value) || 0;
+  const _gcFrom = document.getElementById("gc_from_date").value;
+  const _gcDays = parseInt(document.getElementById("gc_duration_days").value)||0;
+  let _gcEndDate = "";
+  if (_gcFrom && _gcDays > 0) {
+    const _d = new Date(_gcFrom); _d.setDate(_d.getDate() + _gcDays);
+    _gcEndDate = _d.toISOString().split("T")[0];
+  }
   const data = {
     title:         document.getElementById("gc_title").value.trim(),
     text,
@@ -3463,7 +3133,7 @@ async function saveGiftCard() {
     merchant_id:   document.getElementById("gc_merchant").value,
     is_active:     document.getElementById("gc_active").checked,
     from_date:     _gcFrom,
-    end_date:      _gcTo,
+    end_date:      _gcEndDate,
     duration_days: _gcDays || undefined,
   };
   try {
@@ -3477,7 +3147,7 @@ async function saveGiftCard() {
 }
 
 async function deleteGiftCard(id) {
-  if (!confirm("Delete this product?")) return;
+  if (!confirm("Delete this voucher card?")) return;
   await fetch(`/admin/gift-vouchers/${id}`, {method:"DELETE", credentials:"include"});
   loadGiftCards();
 }
@@ -3549,7 +3219,7 @@ function onVoucherStoreChange(storeId) {
     const store = (window.allStoresList||[]).find(s => s._id === storeId);
     if (store && store.image2) {
         preview.innerHTML = `<img src="${store.image2}" style="max-width:160px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">
-        <small style="color:#6b8c7e;display:block;margin-top:4px;">This image will appear on the product card</small>`;
+        <small style="color:#6b8c7e;display:block;margin-top:4px;">This image will appear on the voucher card</small>`;
     } else {
         preview.innerHTML = `<small style="color:#f59e0b">No Image 2 found for this store. Please add it in Store settings.</small>`;
     }
@@ -3615,7 +3285,7 @@ async function setRating(storeId, val, el) {  // FIX 2: async
 function storeImg(s) {
     const img = s.image_url || s.image || (s.images && s.images[0]) || "";
     if (!img) return `<div class="store-thumb-ph"><i class="fas fa-store"></i></div>`;
-    return `<img src="${img}" class="store-thumb" onerror="this.outerHTML='<div class=store-thumb-ph><i class=fas fa-store></i></div>'" referrerpolicy="no-referrer" crossorigin="anonymous">`;
+    return `<img src="${img}" class="store-thumb" onerror="this.outerHTML='<div class=store-thumb-ph><i class=fas fa-store></i></div>'">`;
 }
 
 function _populateMerchantSelect() {
@@ -3658,9 +3328,9 @@ function editStore(s) {
     document.getElementById("store_msg").innerText = "";
     // Show image1 preview
     const prev = document.getElementById("store_image_preview");
-    const _sImgSrc = s.image_url || s.image || "";
-    if (_sImgSrc) {
-        prev.innerHTML = `<img src="${_sImgSrc}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div style=\'width:80px;height:56px;border-radius:8px;background:#e8f5ee;display:flex;align-items:center;justify-content:center;font-size:22px;\'>🏪</div>')">`;
+    if (s.image) {
+        const _sImgSrc = s.image_url || s.image || "";
+        prev.innerHTML = `<img src="${_sImgSrc}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">`;
     } else { prev.innerHTML = ""; }
     // Show image2 preview
     const prev2 = document.getElementById("store_image2_preview");
@@ -3737,7 +3407,11 @@ async function saveStore() {
           <div id="sl_upload_status" style="font-size:12px;color:var(--muted);margin-top:4px;"></div>
           <small class="text-muted">📐 Recommended size: <strong>1200 × 450 px</strong> &nbsp;|&nbsp; Ratio: 16:6 &nbsp;|&nbsp; Max 2 MB</small>
         </div>
-        <input type="hidden" id="sl_link_url" value="">
+        <div class="mb-3">
+          <label class="form-label">Link / Action (optional)</label>
+          <input id="sl_link_url" class="form-control" placeholder="https://... or store_id or category">
+          <small class="text-muted">Tap destination when user clicks the banner</small>
+        </div>
         <div class="row g-2 mb-3">
           <div class="col-6">
             <label class="form-label">From Date</label>
@@ -3753,12 +3427,10 @@ async function saveStore() {
           <input id="sl_end_date" class="form-control" type="date" readonly style="background:#f9f9f9;color:var(--muted)">
         </div>
         <div class="mb-3">
-          <label class="form-label">Assign to Merchant <span style="color:var(--muted);font-size:11px">(optional)</span></label>
-          <input id="sl_merchant_phone" class="form-control" placeholder="e.g. 9535206137" oninput="lookupMerchantByPhone(this.value)">
-          <div id="sl_merchant_name_preview" style="font-size:12px;color:var(--primary);margin-top:4px;font-weight:600;min-height:18px"></div>
-          <small class="text-muted">If filled, this banner will appear in that merchant's banner screen.</small>
+          <label class="form-label">Sort Order</label>
+          <input id="sl_order" class="form-control" type="number" value="0" min="0">
+          <small class="text-muted">Lower number = shown first</small>
         </div>
-        <input type="hidden" id="sl_order" value="0">
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="sl_active" checked>
           <label class="form-check-label" for="sl_active">Active (show in app)</label>
@@ -3797,21 +3469,13 @@ async function saveStore() {
             <input type="date" id="gc_from_date" class="form-control" onchange="_gcUpdateValidity()">
           </div>
           <div class="col-6">
-            <label class="form-label fw-semibold">Number of Days</label>
-            <input type="number" id="gc_duration_days" class="form-control"
-              placeholder="e.g. 30" min="1" onchange="_gcUpdateValidity()" oninput="_gcUpdateValidity()">
+            <label class="form-label fw-semibold">Duration (Days)</label>
+            <input type="number" id="gc_duration_days" class="form-control" placeholder="30" min="1" onchange="_gcUpdateValidity()">
           </div>
         </div>
-        <!-- end_date is auto-computed from from_date + duration_days -->
-        <input type="hidden" id="gc_to_date" value="">
         <div class="mb-3">
-          <label class="form-label fw-semibold">
-            Validity
-            <small class="text-muted" id="gc_validity_preview" style="margin-left:6px;font-weight:400"></small>
-          </label>
-          <input id="gc_validity" class="form-control" readonly
-            placeholder="Auto-filled: From Date + Number of Days"
-            style="background:#f7faf8;cursor:default">
+          <label class="form-label fw-semibold">Validity <small class="text-muted">(auto-filled from dates above)</small></label>
+          <input id="gc_validity" class="form-control" placeholder="e.g. 31 May 2026">
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Logo Image</label>
@@ -3998,7 +3662,7 @@ async function rejectMerchantVoucher(id) {
   if (typeof loadMerchantVouchers === 'function') loadMerchantVouchers();
 }
 async function deleteMerchantVoucher(id) {
-  if (!confirm('Delete this product?')) return;
+  if (!confirm('Delete this voucher?')) return;
   await fetch(`/admin/merchant-vouchers/${id}`, {method:'DELETE', credentials:'include'});
   loadGiftCards();
 }
@@ -4175,7 +3839,7 @@ document.addEventListener('DOMContentLoaded', () => {
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="fas fa-id-card me-2"></i>Product Details</h5>
+        <h5 class="modal-title"><i class="fas fa-id-card me-2"></i>Voucher Details</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -4185,11 +3849,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <table style="width:100%;font-size:13px;border-collapse:collapse">
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600;width:110px">Title</td><td id="vz_modal_title" style="font-weight:700;color:var(--text)"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Offer</td><td id="vz_modal_offer" style="color:var(--text)"></td></tr>
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">From Date</td><td id="vz_modal_from_date" style="color:var(--text);font-weight:600"></td></tr>
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">To Date</td><td id="vz_modal_end_date" style="color:var(--text);font-weight:600"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Validity</td><td id="vz_modal_validity" style="color:var(--text)"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Created By</td><td id="vz_modal_creator" style="color:var(--text)"></td></tr>
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Mobile</td><td id="vz_modal_phone" style="color:var(--text);font-family:monospace"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Status</td><td id="vz_modal_status" style="text-transform:capitalize;color:var(--primary);font-weight:600"></td></tr>
         </table>
       </div>
@@ -4298,7 +3959,7 @@ function renderAccountsPage() {
   if (!tbody) return;
 
   if (!page.length) {
-    tbody.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-4">No accounts found</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">No accounts found</td></tr>`;
     renderPagination('accounts_pagination', total, _acctPage, 'goAcctPage');
     return;
   }
@@ -4312,13 +3973,9 @@ function renderAccountsPage() {
     const pts   = (a.visit_pts || 0) + (a.pool_pts || 0);
     const stBg  = a.status === 'active' ? '#1a6640' : '#c0392b';
     const stLbl = a.status === 'active' ? 'Active' : 'Blocked';
-    const shortId = (a.account_id||'').slice(-6).toUpperCase();
     return `<tr>
       <td><strong>${escHtml(a.full_name||'—')}</strong></td>
       <td style="font-family:monospace;font-size:12px;">${escHtml(a.mobile_number||'')}</td>
-      <td><span title="${a.account_id}" onclick="navigator.clipboard?.writeText('${a.account_id}');showToast('ID copied!','success')"
-        style="font-size:10px;font-family:monospace;background:#f0f4f0;border:1px solid var(--border);border-radius:5px;padding:2px 6px;cursor:pointer;color:var(--primary)">
-        #${shortId} 📋</span></td>
       <td>${escHtml(a.city||'—')}</td>
       <td>${roleBadges}</td>
       <td><span class="badge" style="background:var(--accent);color:var(--text);">${a.store_count||0}</span></td>
@@ -4366,37 +4023,37 @@ async function openAccountDetail(accountId, name) {
 
 function renderAccountDetailHTML(d) {
   const roles = (d.roles||[]).map(r=>`<span class="badge me-1" style="background:${r==='merchant'?'var(--primary)':'#5a7fb5'};color:#fff;">${r==='merchant'?'🏪 Merchant':'👤 User'}</span>`).join('');
-  const visitPts  = d.visit_pts||0;
-  const poolPts   = d.pool_pts||0;
-  const totalPts  = visitPts + poolPts;
-  const acctId    = d.account_id || d._id || d.user_id || d.id || '';
-  const acctName  = (d.full_name || d.name || '').replace(/'/g, "\\'");
-  const isMerchant = (d.roles||[]).includes('merchant');
+  const pts = (d.visit_pts||0) + (d.pool_pts||0);
 
-  // Invoices table rows
-  const invRows = (d.invoices||[]).map(inv => `
-    <tr>
-      <td style="font-family:monospace;font-size:12px;">${escHtml(inv.invoice_no||'—')}</td>
-      <td>${escHtml(inv.store_name||'—')}</td>
-      <td>${escHtml(inv.plan||'—')}</td>
-      <td>₹${(inv.total||0).toLocaleString('en-IN')}</td>
-      <td><span class="badge" style="background:${inv.status==='paid'?'#1a6640':inv.status==='pending'?'#e67e22':'#c0392b'};color:#fff;">${inv.status||'—'}</span></td>
-      <td style="font-size:11px;color:var(--muted);">${(inv.created_at||'').substring(0,10)}</td>
-    </tr>`).join('') || '<tr><td colspan="6" class="text-center text-muted py-3">No invoices yet</td></tr>';
+  const storeRows = (d.stores||[]).map(s=>`
+    <tr><td>${escHtml(s.name)}</td><td>${escHtml(s.city)}</td><td>${escHtml(s.category)}</td>
+    <td><span class="badge" style="background:var(--primary);color:#fff;">${s.status}</span></td>
+    <td>⭐ ${s.points||0}</td></tr>`).join('') || '<tr><td colspan="5" class="text-muted text-center">No stores</td></tr>';
 
-  // Active subscription badge
-  const activeSub = (d.subscriptions||[]).find(s => s.end_date && new Date(s.end_date) > new Date());
-  const subBadge  = activeSub
-    ? `<span class="badge" style="background:#1a6640;color:#fff;">✅ ${escHtml(activeSub.plan||'Active')}</span> <span style="font-size:11px;color:var(--muted);">till ${(activeSub.end_date||'').substring(0,10)}</span>`
-    : `<span class="badge" style="background:#e67e22;color:#fff;">⚠ No Active Plan</span>`;
+  const prodRows = (d.products||[]).map(p=>`
+    <tr><td>${escHtml(p.title)}</td>
+    <td><span class="badge" style="background:${p.status==='approved'?'#1a6640':'#e67e22'};color:#fff;">${p.status}</span></td>
+    <td>₹${p.price||0}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No products</td></tr>';
 
+  const bannerRows = (d.banners||[]).map(b=>`
+    <tr><td>${escHtml(b.title)}</td>
+    <td><span class="badge" style="background:${b.status==='approved'?'#1a6640':'#e67e22'};color:#fff;">${b.status}</span></td>
+    <td>₹${b.price||0}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No banners</td></tr>';
+
+  const payRows = (d.payments||[]).map(p=>`
+    <tr><td>${escHtml(p.type)}</td><td>₹${p.amount||0}</td>
+    <td><span class="badge" style="background:${p.status==='paid'?'#1a6640':'#c0392b'};color:#fff;">${p.status}</span></td>
+    <td style="font-size:11px;color:var(--muted);">${p.created_at?.substring(0,10)||'—'}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted text-center">No payments</td></tr>';
+
+  // TASK 1 FIX: build account ID from available fields
+  const acctId = d.account_id || d._id || d.user_id || d.id || '';
+  const acctName = (d.full_name || d.name || '').replace(/'/g, "\'");
   return `
   <div style="padding:20px;">
-
-    <!-- Action buttons -->
+    <!-- TASK 1: Action buttons — Wallet Transactions, Add Points, Debit Points -->
     <div class="d-flex gap-2 mb-4 flex-wrap">
       <button class="btn-p" style="font-size:13px;" onclick="openWalletFromAcct('${acctId}','${acctName}')">
-        <i class="fas fa-history me-1"></i> Wallet History
+        <i class="fas fa-history me-1"></i> Wallet Transactions
       </button>
       <button class="btn-o" style="font-size:13px;" onclick="openAddPointsFromAcct('${acctId}','${acctName}')">
         <i class="fas fa-plus-circle me-1"></i> Add Points
@@ -4404,76 +4061,82 @@ function renderAccountDetailHTML(d) {
       <button style="background:var(--danger);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="openDebitPointsFromAcct('${acctId}','${acctName}')">
         <i class="fas fa-minus-circle me-1"></i> Debit Points
       </button>
-      <button style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="toggleAccountStatus('${acctId}','${d.status||"active"}')">
-        <i class="fas fa-${d.status==='blocked'?'lock-open':'lock'} me-1"></i> ${d.status==='blocked'?'Unblock':'Block'}
-      </button>
     </div>
-
-    <!-- Stats cards -->
+    <!-- Summary cards -->
     <div class="row g-3 mb-4">
       <div class="col-6 col-md-3">
         <div class="card-stat" style="padding:14px 16px;">
-          <h3 style="font-size:22px;">${totalPts}</h3><p>Total Points</p>
+          <h3 style="font-size:22px;">${pts}</h3><p>Total Points</p>
         </div>
       </div>
       <div class="col-6 col-md-3">
         <div class="card-stat" style="padding:14px 16px;">
-          <h3 style="font-size:22px;">${visitPts}</h3><p>Visit Points</p>
+          <h3 style="font-size:22px;">${d.stores?.length||0}</h3><p>Stores</p>
         </div>
       </div>
       <div class="col-6 col-md-3">
         <div class="card-stat" style="padding:14px 16px;">
-          <h3 style="font-size:22px;">${poolPts}</h3><p>Pool Points</p>
+          <h3 style="font-size:22px;">${d.products?.length||0}</h3><p>Products</p>
         </div>
       </div>
       <div class="col-6 col-md-3">
         <div class="card-stat" style="padding:14px 16px;">
-          <h3 style="font-size:22px;">${d.scans||0}</h3><p>QR Scans</p>
+          <h3 style="font-size:22px;">${d.banners?.length||0}</h3><p>Banners</p>
         </div>
       </div>
     </div>
 
     <!-- Profile info -->
     <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
-      <div class="fw-bold mb-3" style="color:var(--primary);">👤 Profile</div>
+      <div class="fw-bold mb-2" style="color:var(--primary);">👤 Profile</div>
       <div class="row g-2" style="font-size:13px;">
-        <div class="col-md-4"><span style="color:var(--muted);">Name</span><br><strong>${escHtml(d.full_name||'—')}</strong></div>
-        <div class="col-md-4"><span style="color:var(--muted);">Phone</span><br><strong style="font-family:monospace;">${escHtml(d.mobile_number||'—')}</strong></div>
-        <div class="col-md-4"><span style="color:var(--muted);">City</span><br>${escHtml(d.city||'—')}</div>
-        <div class="col-md-4 mt-3"><span style="color:var(--muted);">Roles</span><br>${roles}</div>
-        <div class="col-md-4 mt-3"><span style="color:var(--muted);">Status</span><br>
-          <span class="badge" style="background:${d.status==='active'?'#1a6640':'#c0392b'};color:#fff;">${d.status||'active'}</span>
-        </div>
-        <div class="col-md-4 mt-3"><span style="color:var(--muted);">Area</span><br>${escHtml(d.area||'—')}</div>
+        <div class="col-md-4"><span style="color:var(--muted);">Name:</span> <strong>${escHtml(d.full_name||'—')}</strong></div>
+        <div class="col-md-4"><span style="color:var(--muted);">Phone:</span> <strong style="font-family:monospace;">${escHtml(d.mobile_number||'—')}</strong></div>
+        <div class="col-md-4"><span style="color:var(--muted);">City:</span> ${escHtml(d.city||'—')}</div>
+        <div class="col-md-4"><span style="color:var(--muted);">Roles:</span> ${roles}</div>
+        <div class="col-md-4"><span style="color:var(--muted);">Status:</span>
+          <span class="badge" style="background:${d.status==='active'?'#1a6640':'#c0392b'};color:#fff;">${d.status||'active'}</span></div>
+        <div class="col-md-4"><span style="color:var(--muted);">Scans:</span> ${d.scans||0}</div>
       </div>
     </div>
 
-    ${isMerchant ? `
-    <!-- Merchant summary -->
+    <!-- Stores -->
     <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
-      <div class="fw-bold mb-3" style="color:var(--primary);">🏪 Merchant Summary</div>
-      <div class="row g-2" style="font-size:13px;">
-        <div class="col-md-3"><span style="color:var(--muted);">Stores</span><br><strong>${d.store_count||0}</strong></div>
-        <div class="col-md-3"><span style="color:var(--muted);">Banners</span><br><strong>${d.banner_count||0}</strong></div>
-        <div class="col-md-3"><span style="color:var(--muted);">Products</span><br><strong>${d.voucher_count||0}</strong></div>
-        <div class="col-md-3"><span style="color:var(--muted);">Subscription</span><br>${subBadge}</div>
-      </div>
+      <div class="fw-bold mb-2" style="color:var(--primary);">🏪 Stores</div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
+        <thead style="background:var(--sidebar);color:#fff;"><tr>
+          <th>Name</th><th>City</th><th>Category</th><th>Status</th><th>Points</th>
+        </tr></thead>
+        <tbody>${storeRows}</tbody>
+      </table></div>
     </div>
 
-    <!-- Invoices -->
+    <!-- Products -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
+      <div class="fw-bold mb-2" style="color:var(--primary);">🛍️ Products</div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
+        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Title</th><th>Status</th><th>Price</th></tr></thead>
+        <tbody>${prodRows}</tbody>
+      </table></div>
+    </div>
+
+    <!-- Banners -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
+      <div class="fw-bold mb-2" style="color:var(--primary);">🖼️ Banners</div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
+        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Title</th><th>Status</th><th>Price</th></tr></thead>
+        <tbody>${bannerRows}</tbody>
+      </table></div>
+    </div>
+
+    <!-- Payments -->
     <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;">
-      <div class="fw-bold mb-3" style="color:var(--primary);">🧾 Invoices & Payments</div>
-      <div class="table-responsive">
-        <table class="table table-sm" style="font-size:13px;">
-          <thead style="background:var(--primary);color:#fff;">
-            <tr><th>Invoice #</th><th>Store</th><th>Plan</th><th>Amount</th><th>Status</th><th>Date</th></tr>
-          </thead>
-          <tbody>${invRows}</tbody>
-        </table>
-      </div>
+      <div class="fw-bold mb-2" style="color:var(--primary);">💳 Payment History</div>
+      <div style="overflow-x:auto;"><table class="table table-sm mb-0" style="font-size:13px;">
+        <thead style="background:var(--sidebar);color:#fff;"><tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+        <tbody>${payRows}</tbody>
+      </table></div>
     </div>
-    ` : ''}
-
   </div>`;
 }
 

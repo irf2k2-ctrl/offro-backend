@@ -441,6 +441,8 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "phone":          s.get("phone", ""),
         "status":         s.get("status", "active"),
         "is_new_in_town": s.get("is_new_in_town", False),
+        "is_trending":    s.get("is_trending", False),
+        "is_popular":     s.get("is_popular", False),
         "badge":          s.get("badge", ""),
         "points_per_scan":s.get("points_per_scan", 0),
         "rating":         s.get("admin_rating") or s.get("rating") or 0,
@@ -629,6 +631,8 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "image_thumb": _make_thumb_url(_cdn_url) if _use_cdn else "",
         "image":       None if _use_cdn else (_raw_img or None),
         "is_new_in_town": bool(data.get("is_new_in_town", False)),
+        "is_trending":    bool(data.get("is_trending", False)),
+        "is_popular":     bool(data.get("is_popular", False)),
         "badge": data.get("badge", ""),
         "created_at": datetime.utcnow()
     }
@@ -743,6 +747,8 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
     if data.get("image2"):         # save image2 as store_image2 (matches public.py field name)
         upd["store_image2"] = data["image2"]
     if "is_new_in_town" in data: upd["is_new_in_town"] = bool(data["is_new_in_town"])
+    if "is_trending"    in data: upd["is_trending"]    = bool(data["is_trending"])
+    if "is_popular"     in data: upd["is_popular"]     = bool(data["is_popular"])
     if "badge" in data: upd["badge"] = data.get("badge", "")
     if "status" in data: upd["status"] = data["status"]
     if upd: db.stores.update_one({"_id": ObjectId(id)}, {"$set": upd})

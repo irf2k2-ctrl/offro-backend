@@ -17,7 +17,7 @@ def get_stores(city: str = None, category: str = None):
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
         "image":1,"image_url":1,"image_thumb":1,"_thumb":1,"store_image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
-        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"badge":1,"merchant_id":1
+        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1
     }))
     if not stores:
         return []
@@ -84,6 +84,8 @@ def get_stores(city: str = None, category: str = None):
             "offer":      deal_summary,
             "deal_count":    deal_count,
             "is_new_in_town": s.get("is_new_in_town", False),
+            "is_trending":    s.get("is_trending", False),
+            "is_popular":     s.get("is_popular", False),
             "badge": s.get("badge", ""),
             "merchant_id": s.get("merchant_id", "")
         })
@@ -436,23 +438,15 @@ def get_promo_sliders_public():
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
-        title = d.get("title", "")
-        # label: explicit field OR derive from title
-        raw_label = d.get("label", "") or d.get("badge", "")
-        if not raw_label:
-            raw_label = "FEATURED"
         result.append({
             "id": str(d["_id"]),
-            "title": title,
+            "title": d.get("title", ""),
             "subtitle": d.get("subtitle", "") or d.get("text", ""),
             "image": img,
             "image_url": img,
             "link_url": d.get("link_url", ""),
             "bg_color": d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
-            "label": raw_label.upper(),
-            "cta_text": d.get("cta_text", "") or "Explore Now",
-            "store_id": d.get("store_id", ""),
         })
     return result
 
