@@ -137,7 +137,21 @@ def get_categories():
     """Return rich category objects with image_url, icon, subtitle for the Flutter app."""
     cats = list(db.categories.find({"status":{"$ne":"deleted"}}, {"_id":0}).sort("sort_order",1))
     if cats and isinstance(cats[0], dict) and "name" in cats[0]:
-        return cats  # already rich objects
+        # Sanitize: strip base64 blobs from image_url (CachedNetworkImage needs real URLs)
+        result = []
+        for cat in cats:
+            raw_img = cat.get("image_url", "") or ""
+            # Only keep if it's a real HTTP/HTTPS URL, not a base64 blob
+            safe_img = raw_img if (raw_img.startswith("http://") or raw_img.startswith("https://")) else ""
+            result.append({
+                "name":       cat.get("name", ""),
+                "subtitle":   cat.get("subtitle", ""),
+                "icon":       cat.get("icon", "🏪"),
+                "image_url":  safe_img,
+                "sort_order": cat.get("sort_order", 0),
+                "status":     cat.get("status", "active"),
+            })
+        return result
     # Fallback: old flat-string format
     fallback = ["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"]
     return [{"name":n,"subtitle":"","icon":"🏪","image_url":"","sort_order":i+1} for i,n in enumerate(fallback)]
