@@ -436,15 +436,23 @@ def get_promo_sliders_public():
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
+        title = d.get("title", "")
+        # label: explicit field OR derive from title
+        raw_label = d.get("label", "") or d.get("badge", "")
+        if not raw_label:
+            raw_label = "FEATURED"
         result.append({
             "id": str(d["_id"]),
-            "title": d.get("title", ""),
+            "title": title,
             "subtitle": d.get("subtitle", "") or d.get("text", ""),
             "image": img,
             "image_url": img,
             "link_url": d.get("link_url", ""),
             "bg_color": d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
+            "label": raw_label.upper(),
+            "cta_text": d.get("cta_text", "") or "Explore Now",
+            "store_id": d.get("store_id", ""),
         })
     return result
 
