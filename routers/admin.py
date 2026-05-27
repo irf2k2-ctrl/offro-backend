@@ -934,9 +934,15 @@ def admin_stats(a=Depends(get_current_admin)):
     cols = db.list_collection_names()
     total_accounts  = db.accounts.count_documents({})
     total_merchants = db.accounts.count_documents({"roles": "merchant"})
+    # App Users = accounts that are NOT merchants (pure user accounts)
+    app_users = db.accounts.count_documents({"roles": {"$not": {"$elemMatch": {"$eq": "merchant"}}}})
+    # Fallback: also check 'users' collection if app_users is 0 and it exists
+    if app_users == 0 and "users" in cols:
+        app_users = db.users.count_documents({})
     return {
         "total_accounts":  total_accounts,
         "total_users":     total_accounts,
+        "app_users":       app_users,
         "total_merchants": total_merchants,
         "active_merchants": db.accounts.count_documents({"roles": "merchant", "status": "active"}),
         "total_stores":    db.stores.count_documents({}),
@@ -1840,7 +1846,7 @@ def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admi
 @router.put("/merchant-banners/{bid}")
 def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
     """FIX 9: Admin edit merchant banner fields + status."""
-    allowed = {"title", "image_url", "from_date", "end_date", "status"}
+    allowed = {"title", "image_url", "from_date", "end_date", "status", "duration_days"}
     update_data = {k: v for k, v in data.items() if k in allowed}
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")

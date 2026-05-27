@@ -1137,7 +1137,7 @@ async function loadStats() {
         setEl("stat_active",    d.active_merchants ?? 0);
         setEl("stat_stores",    d.total_stores     ?? 0);
         setEl("stat_deals",     d.total_deals      ?? 0);
-        setEl("stat_users",     d.total_users      ?? 0);
+        setEl("stat_users",     d.app_users        ?? d.total_users ?? 0);
         setEl("stat_waiting",   d.waiting_approval ?? 0);
     } catch(e) { console.error(e); }
 }
@@ -1983,7 +1983,7 @@ window.addEventListener("DOMContentLoaded", function() {
 });
 
 // ── Banner image upload ──
-async function sliderUploadFile(input) {
+async async function sliderUploadFile(input) {
   const file = input.files[0];
   if (!file) return;
   const statusEl = document.getElementById("sl_upload_status");
@@ -2044,7 +2044,8 @@ async function loadSliders() {
     const now = new Date();
     const adminRows = sliders.map(s => {
       const endDate  = s.end_date || s.expires_at || '';
-      const expiry   = endDate ? new Date(endDate) : null;
+      let expiry = endDate ? new Date(endDate) : null;
+      if (expiry && !isNaN(expiry)) expiry.setHours(23, 59, 59, 999); // end of day fix
       const isExpired = expiry && expiry < now;
       // If this is an approved merchant banner, show merchant name; else admin
       const isMerchantBanner = !!(s.source_banner_id || s.source === 'merchant');
@@ -2071,7 +2072,8 @@ async function loadSliders() {
     // Normalize merchant banners
     const merchantRows = mbanners.map(b => {
       const st = b.status || 'pending_approval';
-      const endDt = b.end_date ? new Date(b.end_date) : null;
+      let endDt = b.end_date ? new Date(b.end_date) : null;
+      if (endDt && !isNaN(endDt)) endDt.setHours(23, 59, 59, 999); // end of day fix
       const isExpired = endDt && endDt < now;
       return {
         _id:        b._id,
@@ -2179,7 +2181,9 @@ function renderBanners(rows) {
       const days = r.duration_days ? `<br><span style="background:var(--light);color:var(--primary);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700">${r.duration_days} Days</span>` : '';
       durationHtml = `<div style="font-size:12px">${r.from_date}<br>to<br>${r.end_date}${days}</div>`;
     } else if (r.end_date) {
-      durationHtml = `<div style="font-size:12px">Until ${r.end_date}</div>`;
+      // Always show duration_days badge even when only end_date is available
+      const days = r.duration_days ? `<br><span style="background:var(--light);color:var(--primary);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700">${r.duration_days} Days</span>` : '';
+      durationHtml = `<div style="font-size:12px">Until ${r.end_date}${days}</div>`;
     }
 
     const st = r.status;
@@ -2878,8 +2882,9 @@ async function loadGiftCards() {
             const cleaned = toD.replace(/(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1');
             endDt = new Date(cleaned);
           }
-          const today = new Date(new Date().toDateString()); // midnight today local
-          if (!isNaN(endDt) && endDt < today) { computedStatus = 'expired'; isActive = false; }
+          // Compare end of end_date day (23:59:59) vs now — prevents off-by-one due to UTC/IST
+          if (!isNaN(endDt)) { endDt.setHours(23, 59, 59, 999); }
+          if (!isNaN(endDt) && endDt < new Date()) { computedStatus = 'expired'; isActive = false; }
         } catch(e) {}
       }
       // ISSUE 1 FIX: gift_vouchers with source='merchant' are approved merchant products
@@ -2923,8 +2928,9 @@ async function loadGiftCards() {
             const cleaned = toD.replace(/(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1');
             endDt = new Date(cleaned);
           }
-          const today = new Date(new Date().toDateString()); // midnight today local
-          if (!isNaN(endDt) && endDt < today) computedStatus = 'expired';
+          // Compare end of end_date day (23:59:59) vs now — prevents off-by-one due to UTC/IST
+          if (!isNaN(endDt)) { endDt.setHours(23, 59, 59, 999); }
+          if (!isNaN(endDt) && endDt < new Date()) computedStatus = 'expired';
         } catch(e) {}
       }
       return {
