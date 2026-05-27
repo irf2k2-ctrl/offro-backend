@@ -74,22 +74,31 @@ def seed_admin():
         db.admins.insert_one({"username": "admin", "password": "admin123", "token": None})
         print("✅ Default admin: admin / admin123")
     if not db.categories.find_one({"_v": 2}):
-        # Migrate to rich category objects with image support
+        # Migrate flat-string categories → rich object model (v2)
+        # Preserve any images already uploaded to existing rich-format docs
+        preserved = {}
+        for old_cat in db.categories.find({"name": {"$exists": True}, "_v": {"$ne": 2}}, {"_id": 0}):
+            if old_cat.get("image_url"):
+                preserved[old_cat["name"]] = old_cat["image_url"]
         db.categories.drop()
-        db.categories.insert_many([
-            {"_v":2,"name":"Restaurant","subtitle":"500+ places","sort_order":1,"image_url":"","icon":"🍽️","status":"active"},
-            {"_v":2,"name":"Grocery","subtitle":"Fresh & daily","sort_order":2,"image_url":"","icon":"🛒","status":"active"},
-            {"_v":2,"name":"Pharmacy","subtitle":"Health essentials","sort_order":3,"image_url":"","icon":"💊","status":"active"},
-            {"_v":2,"name":"Electronics","subtitle":"Trending gadgets","sort_order":4,"image_url":"","icon":"📱","status":"active"},
-            {"_v":2,"name":"Fashion","subtitle":"New arrivals","sort_order":5,"image_url":"","icon":"👗","status":"active"},
-            {"_v":2,"name":"Bakery","subtitle":"Fresh baked daily","sort_order":6,"image_url":"","icon":"🎂","status":"active"},
-            {"_v":2,"name":"Salon","subtitle":"Look your best","sort_order":7,"image_url":"","icon":"💇","status":"active"},
-            {"_v":2,"name":"Fitness","subtitle":"Stay strong","sort_order":8,"image_url":"","icon":"🏋️","status":"active"},
-            {"_v":2,"name":"Hospital","subtitle":"Care & wellness","sort_order":9,"image_url":"","icon":"🏥","status":"active"},
-            {"_v":2,"name":"Education","subtitle":"Learn & grow","sort_order":10,"image_url":"","icon":"📚","status":"active"},
-            {"_v":2,"name":"Automobile","subtitle":"Drive & repair","sort_order":11,"image_url":"","icon":"🚗","status":"active"},
-            {"_v":2,"name":"Other","subtitle":"More near you","sort_order":12,"image_url":"","icon":"🏪","status":"active"},
-        ])
+        default_cats = [
+            {"_v":2,"name":"Restaurant","subtitle":"500+ places","sort_order":1,"icon":"🍽️","status":"active"},
+            {"_v":2,"name":"Grocery","subtitle":"Fresh & daily","sort_order":2,"icon":"🛒","status":"active"},
+            {"_v":2,"name":"Pharmacy","subtitle":"Health essentials","sort_order":3,"icon":"💊","status":"active"},
+            {"_v":2,"name":"Electronics","subtitle":"Trending gadgets","sort_order":4,"icon":"📱","status":"active"},
+            {"_v":2,"name":"Fashion","subtitle":"New arrivals","sort_order":5,"icon":"👗","status":"active"},
+            {"_v":2,"name":"Bakery","subtitle":"Fresh baked daily","sort_order":6,"icon":"🎂","status":"active"},
+            {"_v":2,"name":"Salon","subtitle":"Look your best","sort_order":7,"icon":"💇","status":"active"},
+            {"_v":2,"name":"Fitness","subtitle":"Stay strong","sort_order":8,"icon":"🏋️","status":"active"},
+            {"_v":2,"name":"Hospital","subtitle":"Care & wellness","sort_order":9,"icon":"🏥","status":"active"},
+            {"_v":2,"name":"Education","subtitle":"Learn & grow","sort_order":10,"icon":"📚","status":"active"},
+            {"_v":2,"name":"Automobile","subtitle":"Drive & repair","sort_order":11,"icon":"🚗","status":"active"},
+            {"_v":2,"name":"Other","subtitle":"More near you","sort_order":12,"icon":"🏪","status":"active"},
+        ]
+        for cat in default_cats:
+            cat["image_url"] = preserved.get(cat["name"], "")
+        db.categories.insert_many(default_cats)
+        print(f"[INIT] Categories migrated to v2. Preserved images for: {list(preserved.keys())}")
     if not db.pricing.find_one({}):
         db.pricing.insert_one({"gst_percent": 18, "plans": [
             {"id": "1month",  "label": "1 Month",   "price": 499},
@@ -159,17 +168,27 @@ def update_category(name: str, data: dict, a=Depends(get_current_admin)):
 async def upload_category_image(name: str, file: UploadFile = File(...), a=Depends(get_current_admin)):
     """Upload an image for a category card.
     Uses Cloudinary if configured, otherwise stores as base64 directly in MongoDB.
-    This ensures the upload always works regardless of Cloudinary configuration.
+    Always works regardless of Cloudinary configuration.
     """
     import base64 as b64mod, os as _upl_os
+    print(f"[UPLOAD] Category image upload started: name='{name}', content_type='{file.content_type}'")
     raw = await file.read()
     if not raw:
+        print(f"[UPLOAD] ERROR: Empty file for category '{name}'")
         raise HTTPException(400, "Empty file received.")
     if len(raw) > 5 * 1024 * 1024:
+        print(f"[UPLOAD] ERROR: File too large ({len(raw)} bytes) for category '{name}'")
         raise HTTPException(400, "File too large — maximum 5 MB.")
-    if not db.categories.find_one({"name": name, "status": {"$ne": "deleted"}}):
-        raise HTTPException(404, f"Category '{name}' not found.")
-    b64 = "data:" + (file.content_type or "image/jpeg") + ";base64," + b64mod.b64encode(raw).decode()
+    # Broad find — works regardless of status field presence
+    existing = db.categories.find_one({"name": name})
+    if not existing:
+        print(f"[UPLOAD] ERROR: Category '{name}' not found in DB")
+        # List available categories for debugging
+        all_cats = [c.get("name","?") for c in db.categories.find({}, {"name":1,"_id":0})]
+        print(f"[UPLOAD] Available categories: {all_cats}")
+        raise HTTPException(404, f"Category '{name}' not found. Available: {all_cats}")
+    content_type = file.content_type or "image/jpeg"
+    b64 = f"data:{content_type};base64," + b64mod.b64encode(raw).decode()
     # Try Cloudinary first; fall back to base64 in MongoDB if not configured
     cloud  = _upl_os.getenv("CLOUDINARY_CLOUD_NAME", "")
     api_key= _upl_os.getenv("CLOUDINARY_API_KEY", "")
@@ -177,14 +196,47 @@ async def upload_category_image(name: str, file: UploadFile = File(...), a=Depen
     image_url = b64   # default: base64 fallback
     via = "base64"
     if cloud and api_key and secret:
+        print(f"[UPLOAD] Trying Cloudinary for category '{name}'...")
         cdn = _cloudinary_upload(b64, folder="offro/categories")
         if cdn and cdn.startswith("http"):
             image_url = cdn
             via = "cloudinary"
+            print(f"[UPLOAD] Cloudinary success: {cdn[:60]}...")
         else:
-            print(f"[WARN] Cloudinary upload failed for category '{name}', falling back to base64")
-    db.categories.update_one({"name": name}, {"$set": {"image_url": image_url}})
-    return {"image_url": image_url, "via": via}
+            print(f"[WARN] Cloudinary upload failed for category '{name}', using base64 fallback")
+    else:
+        print(f"[UPLOAD] Cloudinary not configured — saving as base64 (size: {len(b64)} chars)")
+    result = db.categories.update_one({"name": name}, {"$set": {"image_url": image_url}})
+    print(f"[UPLOAD] DB update: matched={result.matched_count}, modified={result.modified_count}")
+    return {"image_url": image_url, "via": via, "size_bytes": len(raw)}
+
+@router.post("/categories/reinit")
+def reinit_categories(a=Depends(get_current_admin)):
+    """Force re-initialize all categories to v2 defaults. Preserves existing images."""
+    preserved = {}
+    for cat in db.categories.find({"name": {"$exists": True}}, {"_id": 0}):
+        if cat.get("image_url"):
+            preserved[cat["name"]] = cat["image_url"]
+    db.categories.drop()
+    default_cats = [
+        {"_v":2,"name":"Restaurant","subtitle":"500+ places","sort_order":1,"icon":"🍽️","status":"active"},
+        {"_v":2,"name":"Grocery","subtitle":"Fresh & daily","sort_order":2,"icon":"🛒","status":"active"},
+        {"_v":2,"name":"Pharmacy","subtitle":"Health essentials","sort_order":3,"icon":"💊","status":"active"},
+        {"_v":2,"name":"Electronics","subtitle":"Trending gadgets","sort_order":4,"icon":"📱","status":"active"},
+        {"_v":2,"name":"Fashion","subtitle":"New arrivals","sort_order":5,"icon":"👗","status":"active"},
+        {"_v":2,"name":"Bakery","subtitle":"Fresh baked daily","sort_order":6,"icon":"🎂","status":"active"},
+        {"_v":2,"name":"Salon","subtitle":"Look your best","sort_order":7,"icon":"💇","status":"active"},
+        {"_v":2,"name":"Fitness","subtitle":"Stay strong","sort_order":8,"icon":"🏋️","status":"active"},
+        {"_v":2,"name":"Hospital","subtitle":"Care & wellness","sort_order":9,"icon":"🏥","status":"active"},
+        {"_v":2,"name":"Education","subtitle":"Learn & grow","sort_order":10,"icon":"📚","status":"active"},
+        {"_v":2,"name":"Automobile","subtitle":"Drive & repair","sort_order":11,"icon":"🚗","status":"active"},
+        {"_v":2,"name":"Other","subtitle":"More near you","sort_order":12,"icon":"🏪","status":"active"},
+    ]
+    for cat in default_cats:
+        cat["image_url"] = preserved.get(cat["name"], "")
+    db.categories.insert_many(default_cats)
+    print(f"[REINIT] Categories re-initialized. Preserved images: {list(preserved.keys())}")
+    return _category_list()
 
 @router.delete("/categories/{name}")
 def delete_category(name: str, a=Depends(get_current_admin)):

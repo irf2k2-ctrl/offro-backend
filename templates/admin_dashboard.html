@@ -483,7 +483,12 @@ tr:hover td{background:#f7faf8;}
 <div id="section-categories" class="section">
     <div class="page-title">Browse by Categories</div>
     <div class="table-wrap" style="padding:22px;">
-      <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">Manage app categories. Each category can have an image, icon, and subtitle shown in the app.</p>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <p style="color:var(--muted);font-size:13px;margin:0;">Manage app categories. Each can have an image, icon and subtitle shown in the app.</p>
+        <button class="btn-outline" onclick="reinitCategories()" style="font-size:11px;padding:5px 12px;" title="Re-create default categories if they are missing or corrupted">
+          🔄 Reset to Defaults
+        </button>
+      </div>
       <!-- Add category form -->
       <div class="d-flex gap-2 mb-3 flex-wrap align-items-end" style="background:#f8fdf9;border:1px solid var(--border);border-radius:10px;padding:14px;">
         <div>
@@ -1144,6 +1149,23 @@ async function loadCategories(){
     if(r.ok){ categoriesList=await r.json(); }
   }catch{}
 }
+async function reinitCategories(){
+  if(!confirm("This will reset all categories to defaults and may remove uploaded images. Continue?"))return;
+  try{
+    // Call a special re-init endpoint, or use workaround: delete all and re-add
+    const r=await fetch("/admin/categories/reinit",{method:"POST",credentials:"include"});
+    if(r.ok){
+      categoriesList=await r.json();
+      renderCategories();
+      alert("✅ Categories re-initialized successfully!");
+    } else {
+      // Fallback: force migration by calling the backend init endpoint
+      alert("⚠️ Re-init endpoint not available. Please restart the Railway service to trigger migration.");
+    }
+  } catch(e){
+    alert("⚠️ Could not re-init: "+e.message);
+  }
+}
 function renderCategories(){
   const el=document.getElementById("categories_list");
   if(!el)return;
@@ -1170,11 +1192,11 @@ function renderCategories(){
         <button onclick="deleteCategory('${name}')" title="Delete" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.4);border:none;color:#fff;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;line-height:1;">×</button>
       </div>
       <div style="background:#fff;padding:8px 10px;">
-        <label style="font-size:11px;color:var(--primary);font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px;margin-bottom:4px;">
-          <i class="fas fa-camera"></i> ${img?"Change Image":"Upload Image"}
+        <label style="font-size:11px;color:var(--primary);font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px;margin-bottom:4px;padding:5px 8px;border-radius:7px;border:1px solid var(--border);background:#f8fffe;">
+          <i class="fas fa-camera"></i> ${img?"🔄 Change Image":"📷 Upload Image"}
           <input type="file" accept="image/*" style="display:none" onchange="uploadCategoryImage('${name}',this)">
         </label>
-        <div data-cat-status="${name}" style="font-size:10px;color:var(--muted);min-height:14px;"></div>
+        <div data-cat-status="${name}" style="font-size:10px;color:var(--muted);min-height:14px;margin-top:3px;"></div>
       </div>
     </div>`;
   }).join("");
@@ -1204,23 +1226,34 @@ async function uploadCategoryImage(name,input){
   if(!input.files||!input.files[0])return;
   const file=input.files[0];
   if(file.size>5*1024*1024){showCatStatus(name,"❌ File too large (max 5MB)","var(--danger)");return;}
-  showCatStatus(name,"⏳ Uploading...","var(--muted)");
+  // Validate file type
+  if(!file.type.startsWith("image/")){showCatStatus(name,"❌ Please select an image file","var(--danger)");return;}
+  showCatStatus(name,"⏳ Uploading...","#e67e22");
   const fd=new FormData();
   fd.append("file",file);
   try{
     const r=await fetch("/admin/categories/"+encodeURIComponent(name)+"/upload-image",{method:"POST",body:fd,credentials:"include"});
-    const d=await r.json();
+    let d;
+    try{ d=await r.json(); }catch(je){ d={}; }
     if(r.ok && d.image_url){
-      // Re-fetch from server to ensure latest data (base64 or Cloudinary URL)
       await loadCategories();
       renderCategories();
-      showCatStatus(name,"✅ Image saved"+(d.via?` (${d.via})`:""),"green");
+      const sizeKb = d.size_bytes ? ` (${Math.round(d.size_bytes/1024)}KB)` : "";
+      showCatStatus(name,"✅ Saved via "+(d.via||"base64")+sizeKb,"#2ecc71");
+    } else if(r.status===404){
+      // Category not found in DB — trigger a re-migration
+      showCatStatus(name,"⚠️ Category not in DB yet. Save changes first.","var(--warning)");
+      console.error("[OFFRO] Upload 404 — server says:",d);
+    } else if(r.status===401||r.status===403){
+      showCatStatus(name,"❌ Session expired — please re-login","var(--danger)");
     } else {
-      const msg=d.detail||d.message||"Upload failed";
+      const msg=d.detail||d.message||("HTTP "+r.status);
       showCatStatus(name,"❌ "+msg,"var(--danger)");
+      console.error("[OFFRO] Upload error:",d);
     }
   } catch(e){
-    showCatStatus(name,"❌ Network error","var(--danger)");
+    showCatStatus(name,"❌ Network error: "+e.message,"var(--danger)");
+    console.error("[OFFRO] Upload exception:",e);
   }
 }
 function showCatStatus(name,msg,color){
