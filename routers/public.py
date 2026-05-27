@@ -17,7 +17,9 @@ def get_stores(city: str = None, category: str = None):
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
         "image":1,"image_url":1,"image_thumb":1,"_thumb":1,"store_image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
-        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1
+        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1,
+        "tags":1,"favorite_count":1,"favorites":1,"view_count":1,"views":1,
+        "created_at":1,"late_night":1
     }))
     if not stores:
         return []
@@ -87,7 +89,12 @@ def get_stores(city: str = None, category: str = None):
             "is_trending":    s.get("is_trending", False),
             "is_popular":     s.get("is_popular", False),
             "badge": s.get("badge", ""),
-            "merchant_id": s.get("merchant_id", "")
+            "merchant_id": s.get("merchant_id", ""),
+            "tags":           s.get("tags", []),
+            "favorite_count": int(s.get("favorite_count") or s.get("favorites") or 0),
+            "view_count":     int(s.get("view_count") or s.get("views") or 0),
+            "created_at":     str(s.get("created_at", "") or ""),
+            "late_night":     bool(s.get("late_night", False)),
         })
     return result
 
