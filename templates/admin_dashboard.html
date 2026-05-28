@@ -769,9 +769,11 @@ tr:hover td{background:#f7faf8;}
           <div class="col-md-6"><label class="form-label">Category</label>
             <select id="store_category" class="form-select"></select></div>
           <div class="col-md-6"><label class="form-label">City</label>
-            <input id="store_city" class="form-control" placeholder="City"></div>
+            <input id="store_city" class="form-control" placeholder="City" onchange="loadAreasForCity(this.value)"></div>
           <div class="col-md-6"><label class="form-label">Area</label>
-            <input id="store_area" class="form-control" placeholder="Area"></div>
+            <select id="store_area" class="form-select">
+              <option value="">— Select Area —</option>
+            </select></div>
           <div class="col-12"><label class="form-label">Address</label>
             <input id="store_address" class="form-control" placeholder="Full address"></div>
           <div class="col-md-6"><label class="form-label">Phone</label>
@@ -1558,6 +1560,32 @@ function populateCityFilter(elId,data,field){
   sel.innerHTML='<option value="">All Cities</option>';
   cities.forEach(c=>{let o=document.createElement("option");o.value=c;o.innerText=c;if(c===cur)o.selected=true;sel.appendChild(o);});
 }
+async function loadAreasForCity(city, selectedArea=""){
+  const sel = document.getElementById("store_area");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Select Area —</option>';
+  if (!city || city.trim() === "") return;
+  try {
+    const r = await fetch(`/admin/areas?city=${encodeURIComponent(city.trim())}`,{credentials:"include"});
+    if (!r.ok) return;
+    const data = await r.json();
+    const areas = data.areas || [];
+    areas.forEach(a => {
+      const o = document.createElement("option");
+      o.value = a; o.innerText = a;
+      if (a === selectedArea) o.selected = true;
+      sel.appendChild(o);
+    });
+    // If selectedArea not in list, add it as first custom option
+    if (selectedArea && !areas.includes(selectedArea)) {
+      const o = document.createElement("option");
+      o.value = selectedArea; o.innerText = selectedArea + " (custom)";
+      o.selected = true;
+      sel.insertBefore(o, sel.children[1]);
+    }
+  } catch(e){ console.warn("loadAreasForCity error:",e); }
+}
+
 async function openCreateStore(){
   editingStore=false;
   document.getElementById("storeModalTitle").innerText="Create New Store";
@@ -1567,8 +1595,9 @@ async function openCreateStore(){
   let sel=document.getElementById("store_merchant");
   sel.innerHTML='<option value="">-- Select Merchant --</option>';
   merchantsList.forEach(m=>{sel.innerHTML+=`<option value="${m._id}">${m.name} (${m.phone})</option>`;});
-  sel.onchange=function(){let m=merchantsList.find(x=>x._id===this.value);if(m){document.getElementById("store_city").value=m.city||"";document.getElementById("store_area").value=m.area||"";document.getElementById("store_phone").value=m.phone||"";}};
-  ["store_name","store_city","store_area","store_address","store_phone","store_lat","store_lng"].forEach(id=>document.getElementById(id).value="");
+  sel.onchange=function(){let m=merchantsList.find(x=>x._id===this.value);if(m){document.getElementById("store_city").value=m.city||"";document.getElementById("store_phone").value=m.phone||"";loadAreasForCity(m.city||"",m.area||"");}};
+  ["store_name","store_city","store_address","store_phone","store_lat","store_lng"].forEach(id=>document.getElementById(id).value="");
+  loadAreasForCity(""); // reset area dropdown
   document.getElementById("store_points").value="10";
   document.getElementById("store_visit_points_primary").value="0";
   document.getElementById("store_image_b64").value="";
@@ -1598,8 +1627,8 @@ async function openEditStore(id){
   sel.onchange=null;
   document.getElementById("store_name").value=s.store_name||"";
   document.getElementById("store_city").value=s.city||"";
-  document.getElementById("store_area").value=s.area||"";
   document.getElementById("store_address").value=s.address||"";
+  await loadAreasForCity(s.city||"", s.area||""); // populate area dropdown
   document.getElementById("store_phone").value=s.phone||"";
   document.getElementById("store_points").value=(s.points_per_scan!=null&&s.points_per_scan!==undefined)?s.points_per_scan:10;
   document.getElementById("store_visit_points_primary").value=s.visit_points||0;

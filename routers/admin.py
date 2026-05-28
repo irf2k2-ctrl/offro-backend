@@ -109,6 +109,33 @@ def seed_admin():
 
 # ===================== AUTH =====================
 
+# ── Predefined city→area map (mirrors public.py for admin use) ──
+ADMIN_CITY_AREAS = {
+    "ballari":  ["Cowl Bazaar","Gandhi Nagar","Cantonment","Bellary Fort","M.G. Road",
+                 "Hosapete Road","Civil Station","Sanganakal Road","Shivappa Nayaka Circle",
+                 "Humnabad Road","Kudligi Road","Raichur Road","Kottur","Kampli","Siruguppa"],
+    "bengaluru":["Indiranagar","Koramangala","Jayanagar","Whitefield","HSR Layout",
+                 "Marathahalli","BTM Layout","Electronic City","JP Nagar","Rajajinagar",
+                 "Malleshwaram","Yelahanka","Hebbal","Domlur","Majestic","KR Market"],
+    "hyderabad":["Banjara Hills","Jubilee Hills","Gachibowli","Hitech City","Madhapur",
+                 "Ameerpet","Begumpet","Secunderabad","Dilsukhnagar","Kukatpally","Kondapur"],
+    "hubli":    ["Old Hubli","Vidyanagar","Deshpande Nagar","Keshwapur","Gokul Road","Navanagar"],
+    "dharwad":  ["PB Road","Saraswathipuram","Sadashivnagar","Shirur Park","Saptapur"],
+    "mysuru":   ["Jayalakshmipuram","Vijayanagar","Kuvempunagar","Gokulam","Saraswathipuram"],
+}
+
+@router.get("/areas")
+def admin_get_areas(city: str = ""):
+    city_key = city.strip().lower()
+    if city_key in ADMIN_CITY_AREAS:
+        return {"areas": ADMIN_CITY_AREAS[city_key]}
+    for k, v in ADMIN_CITY_AREAS.items():
+        if city_key in k or k in city_key:
+            return {"areas": v}
+    # Fallback: distinct areas from DB
+    db_areas = db.stores.distinct("area", {"city": {"$regex": city_key, "$options": "i"}})
+    return {"areas": sorted([a for a in db_areas if a])}
+
 @router.post("/login")
 def admin_login(data: dict):
     a = db.admins.find_one({"username": data.get("username"), "password": data.get("password")})

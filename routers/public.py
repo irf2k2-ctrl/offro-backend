@@ -11,8 +11,9 @@ def get_stores(city: str = None, category: str = None):
     query = {"status": "active"}
     if city:
         query["city"] = {"$regex": city, "$options": "i"}
-    if category and category != "All":
-        query["category"] = category
+    if category and category.strip() and category.strip() != "All":
+        # Case-insensitive match so "Restaurant" matches "restaurant", "RESTAURANT" etc.
+        query["category"] = {"$regex": f"^{category.strip()}$", "$options": "i"}
 
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
@@ -139,6 +140,59 @@ def get_store(store_id: str):
     }
 
 # =================== PUBLIC CATEGORIES ===================
+# ── City → Areas mapping (predefined) ──────────────────────────────
+CITY_AREAS = {
+    "ballari": [
+        "Cowl Bazaar", "Gandhi Nagar", "Cantonment", "Bellary Fort", "M.G. Road",
+        "Hosapete Road", "Civil Station", "Sanganakal Road", "Shivappa Nayaka Circle",
+        "Humnabad Road", "Kudligi Road", "Raichur Road", "Navalagunda Road",
+        "Kottur", "Hirekerur", "Kampli", "Siruguppa"
+    ],
+    "bengaluru": [
+        "Indiranagar", "Koramangala", "Jayanagar", "Whitefield", "HSR Layout",
+        "Marathahalli", "BTM Layout", "Electronic City", "Bannerghatta Road",
+        "JP Nagar", "Rajajinagar", "Malleshwaram", "Yelahanka", "Hebbal",
+        "Domlur", "Bellandur", "Sarjapur", "Kadubeesanahalli", "Bellandur",
+        "Majestic", "KR Market", "Shivajinagar", "Frazer Town"
+    ],
+    "hyderabad": [
+        "Banjara Hills", "Jubilee Hills", "Gachibowli", "Hitech City",
+        "Madhapur", "Ameerpet", "Begumpet", "Secunderabad", "Dilsukhnagar",
+        "LB Nagar", "Kukatpally", "Miyapur", "Kondapur", "Manikonda",
+        "Tolichowki", "Mehdipatnam", "Abids", "Nampally", "Koti"
+    ],
+    "hubli": [
+        "Old Hubli", "Vidyanagar", "Deshpande Nagar", "Keshwapur",
+        "Gokul Road", "Navanagar", "Unkal", "Akkipet", "Kalidas Nagar"
+    ],
+    "dharwad": [
+        "PB Road", "Saraswathipuram", "Sadashivnagar", "Shirur Park",
+        "Shivaji Nagar", "Hubli Road", "Saptapur", "Gabhur"
+    ],
+    "mysuru": [
+        "Jayalakshmipuram", "Vijayanagar", "Kuvempunagar", "Gokulam",
+        "Saraswathipuram", "Nazarabad", "Chamrajpura", "Krishnamurthypuram"
+    ],
+}
+
+@router.get("/areas")
+def get_areas(city: str = ""):
+    """Return predefined area list for a given city (case-insensitive)."""
+    city_key = city.strip().lower() if city else ""
+    # Try exact match first
+    if city_key in CITY_AREAS:
+        return {"city": city, "areas": CITY_AREAS[city_key]}
+    # Try partial match
+    for key, areas in CITY_AREAS.items():
+        if city_key in key or key in city_key:
+            return {"city": city, "areas": areas}
+    # Fallback: return areas from DB for this city
+    if city_key:
+        db_areas = db.stores.distinct("area", {"city": {"$regex": city_key, "$options": "i"}, "area": {"$exists": True, "$ne": ""}})
+        if db_areas:
+            return {"city": city, "areas": sorted([a for a in db_areas if a])}
+    return {"city": city, "areas": []}
+
 @router.get("/categories")
 def get_categories():
     """Return rich category objects with image_url, icon, subtitle for the Flutter app.
@@ -153,6 +207,8 @@ def get_categories():
         for cat in rich_cats:
             raw_img = cat.get("image_url", "") or ""
             safe_img = raw_img if (raw_img.startswith("http://") or raw_img.startswith("https://")) else ""
+            if raw_img and not safe_img:
+                print(f"[OFFRO /categories] WARN: image_url for '{cat.get('name')}' is not an http URL — stripping (len={len(raw_img)})")
             result.append({
                 "name":       cat.get("name", ""),
                 "subtitle":   cat.get("subtitle", ""),
