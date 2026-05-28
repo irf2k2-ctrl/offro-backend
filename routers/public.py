@@ -206,9 +206,13 @@ def get_categories():
         result = []
         for cat in rich_cats:
             raw_img = cat.get("image_url", "") or ""
-            safe_img = raw_img if (raw_img.startswith("http://") or raw_img.startswith("https://")) else ""
-            if raw_img and not safe_img:
-                print(f"[OFFRO /categories] WARN: image_url for '{cat.get('name')}' is not an http URL — stripping (len={len(raw_img)})")
+            # Pass http URLs AND base64 data URIs — Flutter decodes both
+            if raw_img.startswith("http://") or raw_img.startswith("https://") or raw_img.startswith("data:image"):
+                safe_img = raw_img
+            else:
+                safe_img = ""
+                if raw_img:
+                    print(f"[OFFRO /categories] WARN: unusable image_url for '{cat.get('name')}' — stripped")
             result.append({
                 "name":       cat.get("name", ""),
                 "subtitle":   cat.get("subtitle", ""),
@@ -225,7 +229,10 @@ def get_categories():
         for i, item in enumerate(cats_raw):
             if isinstance(item, dict) and "name" in item:
                 raw_img = item.get("image_url", "") or ""
-                safe_img = raw_img if (raw_img.startswith("http://") or raw_img.startswith("https://")) else ""
+                if raw_img.startswith("http://") or raw_img.startswith("https://") or raw_img.startswith("data:image"):
+                    safe_img = raw_img
+                else:
+                    safe_img = ""
                 result.append({
                     "name":       item.get("name", ""),
                     "subtitle":   item.get("subtitle", ""),
