@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request as _Req
 from database import db
 from bson import ObjectId
 
@@ -590,7 +590,6 @@ kyc@localsaver.in"""
 # =================== DISCOUNT VALIDATION (public) ===================
 
 # =================== USER RATINGS ===================
-from fastapi import Request as _Req
 
 def _get_user_optional(request: _Req):
     token = request.cookies.get("user_token") or request.headers.get("Authorization","").replace("Bearer ","").strip()
