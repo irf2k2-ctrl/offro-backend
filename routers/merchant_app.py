@@ -1308,6 +1308,9 @@ def get_my_vouchers(m=Depends(get_merchant)):
             "title":           v.get("title", ""),
             "offer_text":      v.get("offer_text", ""),
             "logo_url":        v.get("logo_url", ""),
+            "price":           v.get("price", ""),
+            "original_price":  v.get("original_price", ""),
+            "discount_label":  v.get("discount_label", ""),
             "duration_days":   v.get("duration_days", 0),
             "from_date":       v.get("from_date", ""),
             "end_date":        v.get("end_date", ""),
@@ -1455,7 +1458,18 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     offer_text  = data.get("offer_text", "")
     logo_url    = _cloudinary_upload(data.get("logo_url",""), folder="offro/vouchers")
     logo_thumb  = _make_thumb_url(logo_url)
-    validity    = data.get("validity", "")
+    validity       = data.get("validity", "")
+    price          = str(data.get("price", "") or "").strip()
+    original_price = str(data.get("original_price", "") or "").strip()
+    # Auto-compute discount_label if both prices present
+    discount_label = ""
+    try:
+        if price and original_price:
+            p = float(price); op = float(original_price)
+            if op > p > 0:
+                discount_label = f"{round((op - p) / op * 100)}% OFF"
+    except Exception:
+        pass
 
     order = db.voucher_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
     if not order:
@@ -1474,6 +1488,9 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
         "offer_text":     offer_text,
         "logo_url":       logo_url,
         "validity":       validity,
+        "price":          price,
+        "original_price": original_price,
+        "discount_label": discount_label,
         "duration_days":  order.get("days", 30),
         "from_date":      order.get("from_date", ""),
         "end_date":       order.get("end_date", ""),
@@ -1535,6 +1552,16 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
     razorpay_payment_id = data.get("razorpay_payment_id", "")
     razorpay_order_id   = data.get("razorpay_order_id", "")
     razorpay_signature  = data.get("razorpay_signature", "")
+    price          = str(data.get("price", "") or "").strip()
+    original_price = str(data.get("original_price", "") or "").strip()
+    discount_label = ""
+    try:
+        if price and original_price:
+            p = float(price); op = float(original_price)
+            if op > p > 0:
+                discount_label = f"{round((op - p) / op * 100)}% OFF"
+    except Exception:
+        pass
 
     order = db.voucher_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
     if not order:
@@ -1562,6 +1589,9 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         "logo_url":         logo_url,
         "logo_thumb":       logo_thumb,
         "validity":         validity,
+        "price":            price,
+        "original_price":   original_price,
+        "discount_label":   discount_label,
         "duration_days":    order.get("days", 30),
         "from_date":        order.get("from_date", ""),
         "end_date":         order.get("end_date", ""),

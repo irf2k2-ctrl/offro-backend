@@ -102,42 +102,189 @@ def get_stores(city: str = None, category: str = None):
 # =================== SINGLE STORE ===================
 @router.get("/stores/{store_id}")
 def get_store(store_id: str):
+    from fastapi import HTTPException as _HTTPEx
     try:
         store = db.stores.find_one({"_id": ObjectId(store_id)})
     except Exception:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail="Invalid store_id")
+        raise _HTTPEx(status_code=400, detail="Invalid store_id")
     if not store:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Store not found")
+        raise _HTTPEx(status_code=404, detail="Store not found")
+
+    cols = db.list_collection_names()
+
+    # Deals
     deals = list(db.deals.find({"store_id": store_id, "status": "active"})) \
-        if "deals" in db.list_collection_names() else []
+        if "deals" in cols else []
     deals_list = [{
-        "title": d.get("title"),
-        "discount": d.get("discount"),
-        "category": d.get("category"),
+        "title":       d.get("title"),
+        "discount":    d.get("discount"),
+        "category":    d.get("category"),
         "description": d.get("description"),
-        "start_date": d.get("start_date"),
-        "end_date": d.get("end_date")
+        "start_date":  d.get("start_date"),
+        "end_date":    d.get("end_date"),
     } for d in deals]
+
+    # Approved products (merchant_vouchers) for this store
+    products_list = []
+    if "merchant_vouchers" in cols:
+        merchant_id = store.get("merchant_id", "")
+        merchant_phone = str(store.get("phone", ""))
+        q = {"status": "approved"}
+        if merchant_id:
+            q = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}],
+                 "status": "approved"}
+        prods = list(db.merchant_vouchers.find(q).sort("created_at", -1).limit(20))
+        for p in prods:
+            products_list.append({
+                "_id":            str(p["_id"]),
+                "title":          p.get("title", ""),
+                "offer_text":     p.get("offer_text", ""),
+                "logo_url":       p.get("logo_url", "") or p.get("logo_thumb", ""),
+                "price":          p.get("price", "") or "",
+                "original_price": p.get("original_price", "") or "",
+                "discount":       p.get("discount_label", "") or "",
+                "validity":       p.get("validity", ""),
+                "end_date":       p.get("end_date", ""),
+            })
+
+    # Rating count
+    rating_count = db.ratings.count_documents({"store_id": store_id}) \
+        if "ratings" in cols else 0
+
+    # Review count
+    review_count = db.reviews.count_documents({"store_id": store_id}) \
+        if "reviews" in cols else 0
+
+    # Image resolution
+    image_url   = (store.get("image_url") or store.get("image_thumb") or
+                   store.get("image") or store.get("_thumb") or "")
+    image_thumb = (store.get("image_thumb") or store.get("image_url") or
+                   store.get("image") or "")
+
     return {
-        "_id": str(store["_id"]),
-        "store_name": store.get("store_name"),
-        "category": store.get("category", ""),
-        "city": store.get("city", ""),
-        "area": store.get("area", ""),
-        "address": store.get("address", ""),
-        "phone": store.get("phone", ""),
-        "image": store.get("image") or None,
-        "image2": store.get("store_image2") or None,
-        "images": store.get("images", []),
-        "latitude": store.get("lat") or None,
-        "longitude": store.get("lng") or None,
+        "_id":          str(store["_id"]),
+        "store_name":   store.get("store_name"),
+        "category":     store.get("category", ""),
+        "city":         store.get("city", ""),
+        "area":         store.get("area", ""),
+        "address":      store.get("address", ""),
+        "phone":        store.get("phone", ""),
+        "image":        store.get("image") or None,
+        "image_url":    image_url,
+        "image_thumb":  image_thumb,
+        "image2":       store.get("store_image2") or store.get("image2") or None,
+        "images":       store.get("images", []),
+        "latitude":     store.get("lat") or None,
+        "longitude":    store.get("lng") or None,
         "visit_points": store.get("points_per_scan", 10),
-        "rating": float(store.get("admin_rating") or store.get("rating") or 0),
-        "about":       store.get("about") or store.get("description") or "",
-        "deals": deals_list
+        "rating":       float(store.get("admin_rating") or store.get("rating") or 0),
+        "rating_count": rating_count,
+        "review_count": review_count,
+        "about":        store.get("about") or store.get("description") or "",
+        "tags":         store.get("tags", []),
+        "open_time":    store.get("open_time", ""),
+        "close_time":   store.get("close_time", ""),
+        "cost_for_two": store.get("cost_for_two", ""),
+        "dine_in":      store.get("dine_in", False),
+        "is_trending":  store.get("is_trending", False),
+        "is_new_in_town": store.get("is_new_in_town", False),
+        "is_popular":   store.get("is_popular", False),
+        "badge":        store.get("badge", ""),
+        "deals":        deals_list,
+        "products":     products_list,
     }
+
+
+# =================== STORE REVIEWS ===================
+
+@router.get("/stores/{store_id}/reviews")
+def get_store_reviews(store_id: str, limit: int = 10, skip: int = 0):
+    """Public: fetch paginated reviews for a store."""
+    from fastapi import HTTPException as _HTTPEx
+    cols = db.list_collection_names()
+    if "reviews" not in cols:
+        return {"reviews": [], "total": 0}
+    total = db.reviews.count_documents({"store_id": store_id})
+    reviews = list(
+        db.reviews.find({"store_id": store_id})
+        .sort("created_at", -1)
+        .skip(skip)
+        .limit(limit)
+    )
+    result = []
+    for r in reviews:
+        result.append({
+            "_id":        str(r["_id"]),
+            "store_id":   r.get("store_id", ""),
+            "user_name":  r.get("user_name", "Anonymous"),
+            "rating":     float(r.get("rating", 0)),
+            "text":       r.get("text", ""),
+            "created_at": str(r.get("created_at", "")),
+        })
+    return {"reviews": result, "total": total}
+
+
+@router.post("/stores/{store_id}/review")
+def submit_store_review(store_id: str, data: dict, request: _Req):
+    """Authenticated user submits a review (rating + text)."""
+    from fastapi import HTTPException as _HTTPEx
+    try:
+        store = db.stores.find_one({"_id": ObjectId(store_id)})
+    except Exception:
+        raise _HTTPEx(400, "Invalid store_id")
+    if not store:
+        raise _HTTPEx(404, "Store not found")
+
+    rating = float(data.get("rating", 0))
+    text   = (data.get("text", "") or "").strip()
+    if not (1 <= rating <= 5):
+        raise _HTTPEx(400, "Rating must be 1–5")
+    if len(text) < 3:
+        raise _HTTPEx(400, "Review text too short (min 3 chars)")
+
+    # Optional auth — if token provided, use real name; else use provided name
+    user     = _get_user_optional(request)
+    user_id  = str(user["_id"]) if user else None
+    user_name = (user.get("name") or user.get("full_name") or "").strip() if user else ""
+    if not user_name:
+        user_name = (data.get("user_name", "") or "").strip() or "Anonymous"
+
+    # One review per user per store (upsert by user_id if known, else always insert)
+    from datetime import datetime as _dt
+    if user_id:
+        db.reviews.update_one(
+            {"store_id": store_id, "user_id": user_id},
+            {"$set": {
+                "store_id":   store_id,
+                "user_id":    user_id,
+                "user_name":  user_name,
+                "rating":     rating,
+                "text":       text,
+                "updated_at": _dt.utcnow().isoformat(),
+            }, "$setOnInsert": {"created_at": _dt.utcnow().isoformat()}},
+            upsert=True
+        )
+    else:
+        db.reviews.insert_one({
+            "store_id":   store_id,
+            "user_id":    None,
+            "user_name":  user_name,
+            "rating":     rating,
+            "text":       text,
+            "created_at": _dt.utcnow().isoformat(),
+        })
+
+    # Update store avg rating (includes reviews)
+    all_ratings = list(db.ratings.find({"store_id": store_id}, {"rating": 1}))
+    all_reviews = list(db.reviews.find({"store_id": store_id}, {"rating": 1}))
+    combined = [r["rating"] for r in all_ratings] + [r["rating"] for r in all_reviews]
+    avg = round(sum(combined) / len(combined), 1) if combined else rating
+    if not store.get("admin_rating"):
+        db.stores.update_one(
+            {"_id": ObjectId(store_id)},
+            {"$set": {"rating": avg}}
+        )
+    return {"ok": True, "message": "Review submitted!", "avg_rating": avg}
 
 # =================== PUBLIC CATEGORIES ===================
 # ── City → Areas mapping (predefined) ──────────────────────────────
