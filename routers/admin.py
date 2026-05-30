@@ -869,6 +869,62 @@ def set_store_rating(id: str, data: dict, a=Depends(get_current_admin)):
     )
     return {"message": "Rating updated", "rating": rating}
 
+
+# ===================== REVIEWS (ADMIN) =====================
+
+@router.get("/reviews")
+def list_reviews(store_id: str = "", a=Depends(get_current_admin)):
+    """List all user reviews. Optionally filter by store_id."""
+    from datetime import datetime as _dt
+    query = {}
+    if store_id:
+        query["store_id"] = store_id
+    result = []
+    for r in db.reviews.find(query).sort("created_at", -1).limit(500):
+        store_name = ""
+        try:
+            s = db.stores.find_one({"_id": ObjectId(r["store_id"])}, {"store_name":1})
+            if s:
+                store_name = s.get("store_name","")
+        except Exception:
+            pass
+        result.append({
+            "_id":        str(r["_id"]),
+            "store_id":   r.get("store_id",""),
+            "store_name": store_name,
+            "user_id":    r.get("user_id",""),
+            "user_name":  r.get("user_name","Anonymous"),
+            "rating":     r.get("rating",0),
+            "text":       r.get("text",""),
+            "created_at": r.get("created_at",""),
+            "updated_at": r.get("updated_at",""),
+        })
+    return result
+
+@router.delete("/reviews/{review_id}")
+def delete_review(review_id: str, a=Depends(get_current_admin)):
+    """Delete an inappropriate review and recalculate store rating."""
+    try:
+        r = db.reviews.find_one({"_id": ObjectId(review_id)})
+        if not r:
+            raise HTTPException(404, "Review not found")
+        store_id = r.get("store_id","")
+        db.reviews.delete_one({"_id": ObjectId(review_id)})
+        # Recalculate store avg rating
+        if store_id:
+            all_ratings = list(db.ratings.find({"store_id": store_id}, {"rating":1}))
+            all_reviews = list(db.reviews.find({"store_id": store_id}, {"rating":1}))
+            combined = [x["rating"] for x in all_ratings + all_reviews]
+            avg = round(sum(combined)/len(combined),1) if combined else 0
+            store = db.stores.find_one({"_id": ObjectId(store_id)}, {"admin_rating":1})
+            if store and not store.get("admin_rating"):
+                db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {"rating": avg}})
+        return {"ok": True, "message": "Review deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @router.put("/stores/{id}/approve")
 def approve_store(id: str, a=Depends(get_current_admin)):
     global _store_cache; _store_cache["data"] = None

@@ -113,6 +113,7 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
+<a href="#" onclick="showSection('reviews',this)"><i class="fas fa-comment-dots fa-fw"></i> Reviews</a>
   <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
   <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
   <a href="#" onclick="showSection('policies',this)"><i class="fas fa-shield-alt fa-fw"></i> Policies</a>
@@ -174,6 +175,39 @@ tr:hover td{background:#f7faf8;}
       </thead>
       <tbody id="ratings_table">
         <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ REVIEWS ═══ -->
+<div id="section-reviews" class="section">
+  <div class="section-header">
+    <div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)">💬 User Reviews</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">View and moderate customer reviews submitted in the app</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <input type="text" id="reviews_store_filter" class="form-control"
+        placeholder="Filter by store name..." style="max-width:220px;font-size:13px;"
+        oninput="_reviewsStoreFilter=this.value;_renderReviews(_reviewsCache);">
+      <button class="btn-p" onclick="loadReviews()"><i class="fas fa-sync me-1"></i> Refresh</button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Store</th>
+          <th>User</th>
+          <th>Rating</th>
+          <th>Review</th>
+          <th>Date</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="reviews_table">
+        <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
       </tbody>
     </table>
   </div>
@@ -1120,6 +1154,7 @@ function showSection(name, el){
   if(name==="discounts") loadDiscounts();
   if(name==="about") loadAbout();
   if(name==="ratings") loadRatings();
+  if(name==="reviews") loadReviews();
   if(name==="voucher_zone") loadGiftCards();
   if(name==="promo_sliders") { loadSliders(); }
   if(name==="notifications") loadNotifications();
@@ -2868,6 +2903,72 @@ async function setStoreRating(storeId, val, el) {
       body:JSON.stringify({admin_rating: val})
     });
   } catch(e) { console.error(e); }
+}
+
+
+// ═══════════ REVIEWS ═══════════
+let _reviewsCache = [];
+let _reviewsStoreFilter = "";
+
+async function loadReviews() {
+  const tbody = document.getElementById("reviews_table");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading reviews...</td></tr>`;
+  try {
+    const r = await fetch("/admin/reviews", { credentials:"include" });
+    _reviewsCache = await r.json();
+    _renderReviews(_reviewsCache);
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="6" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
+  }
+}
+
+function _renderReviews(data) {
+  const tbody = document.getElementById("reviews_table");
+  if (!tbody) return;
+  let rows = data;
+  if (_reviewsStoreFilter.trim()) {
+    const q = _reviewsStoreFilter.toLowerCase();
+    rows = rows.filter(r => (r.store_name||"").toLowerCase().includes(q) || (r.store_id||"").includes(q));
+  }
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No reviews found</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const stars = "★".repeat(Math.round(r.rating||0)) + "☆".repeat(5-Math.round(r.rating||0));
+    const starColor = (r.rating||0) >= 4 ? "#e67e22" : (r.rating||0) >= 3 ? "#f39c12" : "#e74c3c";
+    const date = r.created_at ? r.created_at.substring(0,10) : "—";
+    const text = (r.text||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    return `<tr>
+      <td><div style="font-weight:600;color:var(--text)">${r.store_name||r.store_id||"—"}</div></td>
+      <td><div style="font-size:13px;color:var(--text)">${r.user_name||"Anonymous"}</div>
+          <div style="font-size:11px;color:var(--muted)">${r.user_id||""}</div></td>
+      <td><span style="color:${starColor};font-size:15px;letter-spacing:1px" title="${r.rating} / 5">${stars}</span>
+          <span style="font-size:12px;color:var(--muted);margin-left:4px">${r.rating||0}/5</span></td>
+      <td style="max-width:260px;font-size:13px;color:var(--text)">${text||"<em style='color:var(--muted)'>No text</em>"}</td>
+      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${date}</td>
+      <td>
+        <button class="btn-sm" style="background:#c0392b;color:white;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px"
+          onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,"\'")}')">
+          <i class="fas fa-trash me-1"></i>Delete
+        </button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+async function deleteReview(reviewId, storeName) {
+  if (!confirm(`Delete this review for "${storeName}"? This cannot be undone.`)) return;
+  try {
+    const r = await fetch(`/admin/reviews/${reviewId}`, { method:"DELETE", credentials:"include" });
+    if (r.ok) {
+      _reviewsCache = _reviewsCache.filter(x => x._id !== reviewId);
+      _renderReviews(_reviewsCache);
+    } else {
+      alert("Failed to delete review");
+    }
+  } catch(e) { alert("Error: " + e.message); }
 }
 
 // ═══════════ VOUCHER ZONE (App Display) ═══════════
