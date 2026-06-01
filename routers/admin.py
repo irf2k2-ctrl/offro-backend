@@ -163,7 +163,8 @@ def get_categories(a=Depends(get_current_admin)):
 def add_category(data: dict, a=Depends(get_current_admin)):
     name = data.get("name", "").strip()
     if not name: raise HTTPException(400, "Name required")
-    if db.categories.find_one({"name": name}):
+    # Only block if a NON-deleted category with this name exists
+    if db.categories.find_one({"name": name, "status": {"$ne": "deleted"}}):
         raise HTTPException(400, "Category already exists")
     max_order = db.categories.find_one(sort=[("sort_order", -1)]) or {}
     sort_order = (max_order.get("sort_order", 0) or 0) + 1

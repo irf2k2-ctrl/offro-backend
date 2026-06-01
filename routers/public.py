@@ -347,13 +347,14 @@ CITY_AREAS = {
 
 
 @router.get("/deals/all")
-def get_all_active_deals(city: str = "", category: str = ""):
-    """Return all active deals (offers + products) for the Hot Deals screen."""
+def get_all_active_deals(city: str = ""):
+    """Return only active store deals (offers) for the Hot Deals screen.
+    Products are excluded. Each deal includes store image, name, area, validity.
+    """
     from datetime import datetime as _dt
-    now_str = _dt.utcnow().isoformat()
-    
-    # Get active subscription store IDs first
     _now = _dt.utcnow()
+
+    # Step 1: Active subscription store IDs
     _active_store_ids = set()
     for _sub in db.subscriptions.find({}, {"store_id": 1, "end_date": 1}):
         _ed = _sub.get("end_date")
@@ -366,82 +367,66 @@ def get_all_active_deals(city: str = "", category: str = ""):
         except Exception:
             pass
 
-    # Build store query
+    # Step 2: Active stores in city
     store_q = {"status": "active"}
     if city:
         store_q["city"] = {"$regex": city, "$options": "i"}
 
     stores_raw = list(db.stores.find(store_q, {
-        "store_name":1,"category":1,"city":1,"area":1,"image_url":1,"image_thumb":1,
-        "_thumb":1,"image":1,"store_image":1,"images":1,"lat":1,"lng":1,"rating":1
+        "store_name": 1, "category": 1, "city": 1, "area": 1, "address": 1, "phone": 1,
+        "image_url": 1, "image_thumb": 1, "_thumb": 1, "image": 1, "images": 1,
     }))
-    # Filter by active subscription
     stores_map = {
         str(s["_id"]): s for s in stores_raw
         if str(s["_id"]) in _active_store_ids
     }
 
+    # Step 3: Active deals only (no products)
     result = []
-
-    # 1. Active deals
     deal_q = {"status": "active"}
     if stores_map:
         deal_q["store_id"] = {"$in": list(stores_map.keys())}
-    for d in db.deals.find(deal_q).sort("created_at", -1).limit(100):
-        sid = d.get("store_id","")
-        store = stores_map.get(sid, {})
+
+    for d in db.deals.find(deal_q).sort("created_at", -1).limit(200):
+        sid   = str(d.get("store_id", ""))
+        store = stores_map.get(sid)
+        if not store:
+            continue
+
+        # Validity check — skip expired deals
+        end_date = d.get("end_date") or d.get("valid_until") or d.get("expiry") or ""
+        if end_date:
+            try:
+                end_dt = end_date if isinstance(end_date, _dt) else _dt.fromisoformat(str(end_date).replace("Z",""))
+                if end_dt < _now:
+                    continue
+            except Exception:
+                pass
+
+        # Resolve store image
+        def _store_img(s):
+            for k in ("image_url","image_thumb","_thumb","image"):
+                v = s.get(k,"") or ""
+                if v: return v
+            imgs = s.get("images") or []
+            return imgs[0] if imgs else ""
+
         result.append({
             "type":        "deal",
             "_id":         str(d["_id"]),
-            "title":       d.get("title",""),
-            "description": d.get("description",""),
-            "discount":    d.get("discount") or d.get("discount_percent",""),
-            "category":    d.get("category","") or store.get("category",""),
+            "title":       d.get("title", d.get("deal_name", "")),
+            "discount":    d.get("discount", d.get("offer_percent", "")),
+            "description": d.get("description", ""),
+            "end_date":    str(end_date) if end_date else "",
             "store_id":    sid,
             "store_name":  store.get("store_name",""),
             "store_area":  store.get("area",""),
             "store_city":  store.get("city",""),
-            "image_url":   (store.get("image_url") or store.get("image_thumb") or
-                            store.get("image") or store.get("_thumb") or
-                            ((store.get("images") or [None])[0]) or ""),
-            "start_date":  d.get("start_date",""),
-            "end_date":    d.get("end_date",""),
+            "store_address": store.get("address",""),
+            "store_phone": store.get("phone",""),
+            "image_url":   _store_img(store),
+            "category":    d.get("category","") or store.get("category",""),
         })
-
-    # 2. Approved products (merchant_vouchers)
-    cols = db.list_collection_names()
-    if "merchant_vouchers" in cols:
-        prod_q = {"status": "approved", "is_active": True}
-        for p in db.merchant_vouchers.find(prod_q).sort("approved_at", -1).limit(100):
-            # Find store by merchant_id or account_id
-            sid = ""
-            mid = p.get("merchant_id","") or p.get("account_id","")
-            if mid:
-                store_doc = db.stores.find_one(
-                    {"merchant_id": mid, "status": "active"},
-                    {"_id":1,"store_name":1,"city":1,"area":1,"image_url":1,"image_thumb":1,"_thumb":1,"image":1,"images":1,"category":1}
-                )
-                if store_doc and str(store_doc["_id"]) in _active_store_ids:
-                    sid = str(store_doc["_id"])
-                    store = store_doc
-                else:
-                    continue  # skip if store has no active subscription
-            result.append({
-                "type":        "product",
-                "_id":         str(p["_id"]),
-                "title":       p.get("voucher_name","") or p.get("title",""),
-                "description": p.get("description",""),
-                "discount":    str(p.get("discount_percent","")) or str(p.get("price","")),
-                "category":    p.get("category","") or store.get("category",""),
-                "store_id":    sid,
-                "store_name":  store.get("store_name","") if isinstance(store,dict) else "",
-                "store_area":  store.get("area","") if isinstance(store,dict) else "",
-                "store_city":  store.get("city","") if isinstance(store,dict) else "",
-                "image_url":   (store.get("image_url") or store.get("image_thumb") or
-                                store.get("image") or store.get("_thumb") or
-                                ((store.get("images") or [None])[0]) or "") if isinstance(store,dict) else "",
-                "price":       p.get("price",""),
-            })
 
     return result
 
@@ -466,15 +451,44 @@ def get_areas(city: str = ""):
 @router.get("/categories")
 def get_categories():
     """Return rich category objects with image_url, icon, subtitle for the Flutter app.
+    Only categories that have at least 1 active subscribed store are returned.
     Handles two MongoDB schemas:
       1. Rich: multiple docs each with {name, image_url, icon, subtitle, sort_order}
       2. Legacy: single doc with {categories: ["Grocery","Restaurant",...]}
     """
+    from datetime import datetime as _dt
+    _now = _dt.utcnow()
+
+    # Build set of active subscription store IDs
+    _active_sub_ids = set()
+    for _sub in db.subscriptions.find({}, {"store_id": 1, "end_date": 1}):
+        _ed = _sub.get("end_date")
+        if _ed is None:
+            continue
+        try:
+            _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
+            if _ed_dt >= _now:
+                _active_sub_ids.add(str(_sub["store_id"]))
+        except Exception:
+            pass
+
+    # Build set of category names that have at least 1 active store with active subscription
+    _categories_with_stores = set()
+    for _store in db.stores.find({"status": "active"}, {"category": 1}):
+        if str(_store["_id"]) in _active_sub_ids:
+            _cat = (_store.get("category") or "").strip()
+            if _cat:
+                _categories_with_stores.add(_cat.lower())
+
     # Schema 1: try rich per-document format first
-    rich_cats = list(db.categories.find({"name": {"$exists": True}}, {"_id":0}).sort("sort_order",1))
+    rich_cats = list(db.categories.find({"name": {"$exists": True}, "status": {"$ne": "deleted"}}, {"_id":0}).sort("sort_order",1))
     if rich_cats:
         result = []
         for cat in rich_cats:
+            cat_name = cat.get("name", "")
+            # Skip categories with no active stores
+            if _categories_with_stores and cat_name.lower() not in _categories_with_stores:
+                continue
             raw_img = cat.get("image_url", "") or ""
             # Pass http URLs AND base64 data URIs — Flutter decodes both
             if raw_img.startswith("http://") or raw_img.startswith("https://") or raw_img.startswith("data:image"):
@@ -482,9 +496,9 @@ def get_categories():
             else:
                 safe_img = ""
                 if raw_img:
-                    print(f"[OFFRO /categories] WARN: unusable image_url for '{cat.get('name')}' — stripped")
+                    print(f"[OFFRO /categories] WARN: unusable image_url for '{cat_name}' — stripped")
             result.append({
-                "name":       cat.get("name", ""),
+                "name":       cat_name,
                 "subtitle":   cat.get("subtitle", ""),
                 "icon":       cat.get("icon", "🏪"),
                 "image_url":  safe_img,
