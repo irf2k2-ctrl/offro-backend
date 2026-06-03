@@ -52,6 +52,9 @@ tr:hover td{background:#f7faf8;}
 .btn-w:hover{background:var(--warning);color:white;}
 .btn-approve{background:#198754;color:white;border:none;border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;}
 .btn-approve:hover{background:#157347;}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex!important;}
+.modal-box{background:#fff;border-radius:20px;padding:28px;width:460px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);}
 .modal-content{background:#fff;color:#2c3e35;border-radius:12px;}
 .modal-header{background:var(--primary);color:white;border-radius:14px 14px 0 0;padding:14px 20px;border-bottom:none;}
 .modal-title{font-weight:600;font-size:14px;}
@@ -4384,12 +4387,9 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     </div>
   </div>
-</div>
 
-<div id="offro-toast-container" style="position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;"></div>
-
-  <!-- CITIES SECTION -->
-  <div id="section-cities" class="section" style="display:none">
+<!-- CITIES SECTION -->
+  <div id="section-cities" class="section">
     <div class="section-header">
       <h2><i class="fas fa-city"></i> Cities</h2>
       <button class="btn" onclick="openCityModal()"><i class="fas fa-plus"></i> Add City</button>
@@ -4409,7 +4409,7 @@ document.addEventListener('DOMContentLoaded', () => {
   </div>
 
   <!-- DEFAULT IMAGES SECTION -->
-  <div id="section-default_images" class="section" style="display:none">
+  <div id="section-default_images" class="section">
     <div class="section-header">
       <h2><i class="fas fa-image"></i> Default Images</h2>
     </div>
@@ -4500,6 +4500,9 @@ document.addEventListener('DOMContentLoaded', () => {
     </div>
   </div>
 
+</div>
+
+<div id="offro-toast-container" style="position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;"></div>
 <script>
 function showToast(msg, type='success') {
   const c = document.getElementById('offro-toast-container');
