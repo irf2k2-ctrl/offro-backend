@@ -430,6 +430,42 @@ def get_all_active_deals(city: str = ""):
 
     return result
 
+
+# =================== CITIES ===================
+@router.get("/cities")
+def get_cities():
+    """Return list of cities that OFFRO is active in, with optional background image.
+    Used by the Flutter home screen hero section to show city imagery.
+    Falls back to a default image if no image is configured for the city.
+    """
+    DEFAULT_CITY_IMAGE = "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=800&q=80"
+    docs = list(db.cities.find({"status": {"$ne": "inactive"}}).sort("sort_order", 1))
+    if docs:
+        result = []
+        for d in docs:
+            raw_img = d.get("image_url", "") or d.get("image", "") or ""
+            if not (raw_img.startswith("http://") or raw_img.startswith("https://") or raw_img.startswith("data:image")):
+                raw_img = DEFAULT_CITY_IMAGE
+            result.append({
+                "name":       d.get("name", ""),
+                "slug":       d.get("slug", d.get("name", "").lower()),
+                "image_url":  raw_img,
+                "sort_order": d.get("sort_order", 0),
+            })
+        return result
+    # Fallback: derive cities from active stores
+    store_cities = db.stores.distinct("city", {"status": "active"})
+    result = []
+    for c in store_cities:
+        if c and str(c).strip():
+            result.append({
+                "name":      str(c).strip(),
+                "slug":      str(c).strip().lower(),
+                "image_url": DEFAULT_CITY_IMAGE,
+                "sort_order": 0,
+            })
+    return result
+
 @router.get("/areas")
 def get_areas(city: str = ""):
     """Return predefined area list for a given city (case-insensitive)."""
