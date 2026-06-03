@@ -905,3 +905,18 @@ def get_gift_vouchers_public():
             except: pass
         result.append({"id": vid, **d})
     return result
+
+
+# ─── Default Images (fallback for stores/products/offers/cities) ──────────────
+@router.get("/default-images")
+def get_default_images():
+    """Return default/fallback images configured by admin."""
+    doc = db.settings.find_one({"_type": "default_images"})
+    if not doc:
+        return {"store": "", "product": "", "offer": "", "city": ""}
+    return {
+        "store":   doc.get("store", ""),
+        "product": doc.get("product", ""),
+        "offer":   doc.get("offer", ""),
+        "city":    doc.get("city", ""),
+    }

@@ -2331,3 +2331,115 @@ def review_stats(a=Depends(get_current_admin)):
             "avg_rating": round(float(row["avg"]), 1),
         })
     return {"stats": result}
+
+
+# ════════════════════════════════════════════════════════
+# CITIES MANAGEMENT
+# ════════════════════════════════════════════════════════
+
+@router.get("/cities")
+def admin_get_cities(a=Depends(get_current_admin)):
+    cities = list(db.cities.find({}).sort("sort_order", 1))
+    return [{
+        "id":         str(c["_id"]),
+        "name":       c.get("name", ""),
+        "image_url":  c.get("image_url", ""),
+        "sort_order": c.get("sort_order", 0),
+        "active":     c.get("active", True),
+        "created_at": str(c.get("created_at", "")),
+    } for c in cities]
+
+
+@router.post("/cities")
+def admin_create_city(body: dict, a=Depends(get_current_admin)):
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(400, "City name required")
+    existing = db.cities.find_one({"name": {"$regex": f"^{name}$", "$options": "i"}})
+    if existing:
+        raise HTTPException(400, "City already exists")
+    doc = {
+        "name":       name,
+        "image_url":  body.get("image_url", ""),
+        "sort_order": int(body.get("sort_order", 0)),
+        "active":     bool(body.get("active", True)),
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    result = db.cities.insert_one(doc)
+    return {"ok": True, "id": str(result.inserted_id)}
+
+
+@router.put("/cities/{city_id}")
+def admin_update_city(city_id: str, body: dict, a=Depends(get_current_admin)):
+    update = {}
+    for field in ["name", "image_url", "sort_order", "active"]:
+        if field in body:
+            update[field] = body[field]
+    if not update:
+        raise HTTPException(400, "Nothing to update")
+    db.cities.update_one({"_id": ObjectId(city_id)}, {"$set": update})
+    return {"ok": True}
+
+
+@router.delete("/cities/{city_id}")
+def admin_delete_city(city_id: str, a=Depends(get_current_admin)):
+    db.cities.delete_one({"_id": ObjectId(city_id)})
+    return {"ok": True}
+
+
+@router.post("/cities/{city_id}/upload-image")
+async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=Depends(get_current_admin)):
+    content = await file.read()
+    mime = file.content_type or "image/jpeg"
+    b64 = base64.b64encode(content).decode()
+    data_url = f"data:{mime};base64,{b64}"
+    db.cities.update_one({"_id": ObjectId(city_id)}, {"$set": {"image_url": data_url}})
+    return {"ok": True, "image_url": data_url}
+
+
+# ════════════════════════════════════════════════════════
+# DEFAULT IMAGES MANAGEMENT
+# ════════════════════════════════════════════════════════
+
+@router.get("/default-images")
+def admin_get_default_images(a=Depends(get_current_admin)):
+    doc = db.settings.find_one({"_type": "default_images"})
+    if not doc:
+        return {"store": "", "product": "", "offer": "", "city": ""}
+    return {
+        "store":   doc.get("store", ""),
+        "product": doc.get("product", ""),
+        "offer":   doc.get("offer", ""),
+        "city":    doc.get("city", ""),
+    }
+
+
+@router.put("/default-images/urls")
+def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
+    update = {}
+    for field in ["store", "product", "offer", "city"]:
+        if field in body:
+            update[field] = body[field]
+    if update:
+        db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
+    return {"ok": True}
+
+
+@router.put("/default-images")
+async def admin_update_default_images(
+    store_file: UploadFile = File(None),
+    product_file: UploadFile = File(None),
+    offer_file: UploadFile = File(None),
+    city_file: UploadFile = File(None),
+    a=Depends(get_current_admin),
+):
+    update = {}
+    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file)]:
+        if f and f.filename:
+            content = await f.read()
+            mime = f.content_type or "image/jpeg"
+            b64 = base64.b64encode(content).decode()
+            update[field] = f"data:{mime};base64,{b64}"
+    if update:
+        db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
+    return {"ok": True}

@@ -121,6 +121,9 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('social',this)"><i class="fab fa-whatsapp fa-fw"></i> Social Media</a>
   <a href="#" onclick="showSection('about',this)"><i class="fas fa-info-circle fa-fw"></i> About Us</a>
   <div class="sep"></div>
+  <a href="#" onclick="showSection('cities',this)"><i class="fas fa-city fa-fw"></i> Cities</a>
+  <a href="#" onclick="showSection('default_images',this)"><i class="fas fa-image fa-fw"></i> Default Images</a>
+  <div class="sep"></div>
   <!-- PHASE 1: Users + Merchants hidden — collections intact, sidebar entries removed -->
   <a href="#" class="logout" onclick="logout()"><i class="fas fa-sign-out-alt fa-fw"></i> Logout</a>
 </div>
@@ -1137,6 +1140,8 @@ async function submitFulfill(){
 }
 
 function showSection(name, el){
+  if (name === 'cities') loadCities();
+  if (name === 'default_images') loadDefaultImages();
   document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));
   document.querySelectorAll(".sidebar a").forEach(a=>a.classList.remove("active"));
   document.getElementById("section-"+name).classList.add("active");
@@ -4382,6 +4387,119 @@ document.addEventListener('DOMContentLoaded', () => {
 </div>
 
 <div id="offro-toast-container" style="position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;"></div>
+
+  <!-- CITIES SECTION -->
+  <div id="section-cities" class="section" style="display:none">
+    <div class="section-header">
+      <h2><i class="fas fa-city"></i> Cities</h2>
+      <button class="btn" onclick="openCityModal()"><i class="fas fa-plus"></i> Add City</button>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">
+      Manage cities shown in the app. Each city has a hero image shown on the home screen. 
+      The app automatically loads the image for the user's detected city. If no city image exists, the default city image is used.
+    </p>
+    <table>
+      <thead>
+        <tr><th>City Name</th><th>Image</th><th>Sort Order</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="cities_body">
+        <tr><td colspan="5" style="text-align:center;color:var(--muted)">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- DEFAULT IMAGES SECTION -->
+  <div id="section-default_images" class="section" style="display:none">
+    <div class="section-header">
+      <h2><i class="fas fa-image"></i> Default Images</h2>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:20px;">
+      Fallback images used automatically when merchants don't upload their own. Paste a URL or upload a file for each type.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">
+      <!-- Store -->
+      <div class="card" style="padding:20px">
+        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-store"></i> Default Store Image</h3>
+        <div id="di_store_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
+          <span style="color:#aaa;font-size:13px">No image set</span>
+        </div>
+        <input type="text" id="di_store_url" placeholder="Paste image URL..." class="form-control mb-2">
+        <input type="file" id="di_store_file" accept="image/*" class="form-control mb-2">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="saveDiUrl('store')">Save URL</button>
+          <button class="btn btn-secondary" onclick="saveDiFile('store')">Upload File</button>
+        </div>
+      </div>
+      <!-- Product -->
+      <div class="card" style="padding:20px">
+        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-box"></i> Default Product Image</h3>
+        <div id="di_product_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
+          <span style="color:#aaa;font-size:13px">No image set</span>
+        </div>
+        <input type="text" id="di_product_url" placeholder="Paste image URL..." class="form-control mb-2">
+        <input type="file" id="di_product_file" accept="image/*" class="form-control mb-2">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="saveDiUrl('product')">Save URL</button>
+          <button class="btn btn-secondary" onclick="saveDiFile('product')">Upload File</button>
+        </div>
+      </div>
+      <!-- Offer -->
+      <div class="card" style="padding:20px">
+        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-percent"></i> Default Offer Image</h3>
+        <div id="di_offer_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
+          <span style="color:#aaa;font-size:13px">No image set</span>
+        </div>
+        <input type="text" id="di_offer_url" placeholder="Paste image URL..." class="form-control mb-2">
+        <input type="file" id="di_offer_file" accept="image/*" class="form-control mb-2">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="saveDiUrl('offer')">Save URL</button>
+          <button class="btn btn-secondary" onclick="saveDiFile('offer')">Upload File</button>
+        </div>
+      </div>
+      <!-- City -->
+      <div class="card" style="padding:20px">
+        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-city"></i> Default City Image</h3>
+        <div id="di_city_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
+          <span style="color:#aaa;font-size:13px">No image set</span>
+        </div>
+        <input type="text" id="di_city_url" placeholder="Paste image URL..." class="form-control mb-2">
+        <input type="file" id="di_city_file" accept="image/*" class="form-control mb-2">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="saveDiUrl('city')">Save URL</button>
+          <button class="btn btn-secondary" onclick="saveDiFile('city')">Upload File</button>
+        </div>
+      </div>
+    </div>
+    <div id="di_msg" style="margin-top:16px;color:green;font-weight:600;font-size:14px"></div>
+  </div>
+
+  <!-- CITY MODAL -->
+  <div id="cityModal" class="modal-overlay" style="display:none">
+    <div class="modal-box" style="max-width:460px">
+      <h3 id="cityModalTitle" style="margin-bottom:18px;color:var(--primary)">Add City</h3>
+      <input type="hidden" id="city_id">
+      <label class="form-label">City Name *</label>
+      <input type="text" id="city_name" placeholder="e.g. Ballari" class="form-control mb-3">
+      <label class="form-label">Image URL</label>
+      <input type="text" id="city_image_url" placeholder="https://... (or upload below)" class="form-control mb-3">
+      <label class="form-label">Upload Image</label>
+      <input type="file" id="city_image_file" accept="image/*" class="form-control mb-3">
+      <div id="city_img_preview_wrap" style="display:none;margin-bottom:12px">
+        <img id="city_img_preview_img" style="width:100%;height:130px;object-fit:cover;border-radius:10px">
+      </div>
+      <label class="form-label">Sort Order</label>
+      <input type="number" id="city_sort_order" value="0" class="form-control mb-3">
+      <div class="mb-3">
+        <label><input type="checkbox" id="city_active" checked style="margin-right:6px"> Active (shown in app)</label>
+      </div>
+      <div id="city_msg" style="margin-bottom:10px;color:green;font-weight:600;min-height:18px"></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn" onclick="saveCity()">Save City</button>
+        <button class="btn btn-secondary" onclick="closeCityModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 function showToast(msg, type='success') {
   const c = document.getElementById('offro-toast-container');
@@ -4637,6 +4755,186 @@ async function toggleAccountStatus(accountId, currentStatus) {
   } catch(e) { alert('Failed: ' + e.message); }
 }
 // ════ End Accounts ════
+
+
+
+// ════════════════════════════════════════
+// CITIES JS
+// ════════════════════════════════════════
+let _cities = [];
+
+async function loadCities() {
+  try {
+    const data = await req('GET', '/admin/cities');
+    _cities = Array.isArray(data) ? data : [];
+    renderCitiesTable(_cities);
+  } catch(e) { console.error('Cities load failed', e); }
+}
+
+function renderCitiesTable(cities) {
+  const tbody = document.getElementById('cities_body');
+  if (!tbody) return;
+  if (!cities.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No cities yet. Click Add City to start.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = cities.map(c => `
+    <tr>
+      <td><b>${c.name}</b></td>
+      <td>${c.image_url
+        ? `<img src="${c.image_url}" style="height:48px;width:80px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'">`
+        : '<span style="color:var(--muted);font-size:12px">No image</span>'
+      }</td>
+      <td>${c.sort_order ?? 0}</td>
+      <td><span style="background:${c.active !== false ? 'var(--primary)' : '#aaa'};color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">${c.active !== false ? 'Active' : 'Inactive'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn" style="font-size:11px;padding:4px 10px" onclick="editCity('${c.id}')">Edit</button>
+        <button class="btn" style="background:var(--danger);font-size:11px;padding:4px 10px;margin-left:5px" onclick="deleteCity('${c.id}','${c.name.replace(/'/g,"\\'")}')">Delete</button>
+        <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;margin-left:5px" onclick="uploadCityImageQuick('${c.id}')">Upload Image</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function openCityModal(id) {
+  const m = document.getElementById('cityModal');
+  document.getElementById('city_id').value = id || '';
+  document.getElementById('city_name').value = '';
+  document.getElementById('city_image_url').value = '';
+  document.getElementById('city_image_file').value = '';
+  document.getElementById('city_sort_order').value = '0';
+  document.getElementById('city_active').checked = true;
+  document.getElementById('city_img_preview_wrap').style.display = 'none';
+  document.getElementById('city_msg').textContent = '';
+  document.getElementById('cityModalTitle').textContent = id ? 'Edit City' : 'Add City';
+
+  if (id) {
+    const c = _cities.find(x => x.id === id);
+    if (c) {
+      document.getElementById('city_name').value = c.name || '';
+      document.getElementById('city_image_url').value = c.image_url || '';
+      document.getElementById('city_sort_order').value = c.sort_order || 0;
+      document.getElementById('city_active').checked = c.active !== false;
+      if (c.image_url) {
+        document.getElementById('city_img_preview_wrap').style.display = 'block';
+        document.getElementById('city_img_preview_img').src = c.image_url;
+      }
+    }
+  }
+  m.style.display = 'flex';
+}
+
+function closeCityModal() {
+  document.getElementById('cityModal').style.display = 'none';
+}
+
+function editCity(id) { openCityModal(id); }
+
+async function saveCity() {
+  const id        = document.getElementById('city_id').value;
+  const name      = document.getElementById('city_name').value.trim();
+  const imageUrl  = document.getElementById('city_image_url').value.trim();
+  const sortOrder = parseInt(document.getElementById('city_sort_order').value) || 0;
+  const active    = document.getElementById('city_active').checked;
+  const file      = document.getElementById('city_image_file').files[0];
+  const msg       = document.getElementById('city_msg');
+
+  if (!name) { msg.textContent = 'City name is required'; msg.style.color = 'red'; return; }
+  msg.textContent = 'Saving...'; msg.style.color = 'var(--primary)';
+
+  try {
+    let finalImg = imageUrl;
+    const token = localStorage.getItem('offro_admin_token');
+
+    if (id) {
+      await req('PUT', `/admin/cities/${id}`, { name, image_url: finalImg, sort_order: sortOrder, active });
+      // Upload image file if selected
+      if (file) {
+        const fd = new FormData(); fd.append('file', file);
+        const r = await fetch(`/admin/cities/${id}/upload-image`, { method:'POST', headers:{Authorization:'Bearer '+token}, body:fd });
+        if (r.ok) { const ud = await r.json(); finalImg = ud.image_url; await req('PUT', `/admin/cities/${id}`, { image_url: finalImg }); }
+      }
+      msg.textContent = '✓ City updated'; msg.style.color = 'green';
+    } else {
+      const res = await req('POST', '/admin/cities', { name, image_url: finalImg, sort_order: sortOrder, active });
+      if (file && res.id) {
+        const fd = new FormData(); fd.append('file', file);
+        const r = await fetch(`/admin/cities/${res.id}/upload-image`, { method:'POST', headers:{Authorization:'Bearer '+token}, body:fd });
+        if (r.ok) { const ud = await r.json(); await req('PUT', `/admin/cities/${res.id}`, { image_url: ud.image_url }); }
+      }
+      msg.textContent = '✓ City added'; msg.style.color = 'green';
+    }
+    await loadCities();
+    setTimeout(closeCityModal, 900);
+  } catch(e) {
+    msg.textContent = '✗ ' + (e.message || 'Failed'); msg.style.color = 'red';
+  }
+}
+
+async function deleteCity(id, name) {
+  if (!confirm(`Delete city "${name}"? This will remove the city image from the home screen.`)) return;
+  try { await req('DELETE', `/admin/cities/${id}`); await loadCities(); } catch(e) { alert('Delete failed: ' + e.message); }
+}
+
+function uploadCityImageQuick(id) {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*';
+  input.onchange = async () => {
+    const f = input.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append('file', f);
+    const token = localStorage.getItem('offro_admin_token');
+    await fetch(`/admin/cities/${id}/upload-image`, { method:'POST', headers:{Authorization:'Bearer '+token}, body:fd });
+    await loadCities();
+  };
+  input.click();
+}
+
+// ════════════════════════════════════════
+// DEFAULT IMAGES JS
+// ════════════════════════════════════════
+async function loadDefaultImages() {
+  try {
+    const d = await req('GET', '/admin/default-images');
+    for (const type of ['store', 'product', 'offer', 'city']) {
+      const url = d[type] || '';
+      const inputEl = document.getElementById(`di_${type}_url`);
+      const preview = document.getElementById(`di_${type}_preview`);
+      if (inputEl) inputEl.value = url;
+      if (preview) {
+        preview.innerHTML = url
+          ? `<img src="${url}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.innerHTML='<span style=color:#aaa;font-size:13px>Failed to load</span>'">`
+          : '<span style="color:#aaa;font-size:13px">No image set</span>';
+      }
+    }
+  } catch(e) { console.error('Default images load failed', e); }
+}
+
+async function saveDiUrl(type) {
+  const url = (document.getElementById(`di_${type}_url`).value || '').trim();
+  const msg = document.getElementById('di_msg');
+  if (!url) { msg.textContent = 'Please paste a URL first'; msg.style.color='red'; return; }
+  try {
+    await req('PUT', '/admin/default-images/urls', { [type]: url });
+    msg.textContent = `✓ Default ${type} image URL saved`; msg.style.color='green';
+    loadDefaultImages();
+  } catch(e) { msg.textContent = '✗ Failed: ' + e.message; msg.style.color='red'; }
+}
+
+async function saveDiFile(type) {
+  const file = document.getElementById(`di_${type}_file`).files[0];
+  const msg  = document.getElementById('di_msg');
+  if (!file) { msg.textContent = 'Please select a file first'; msg.style.color='red'; return; }
+  const fd = new FormData();
+  fd.append(`${type}_file`, file);
+  try {
+    msg.textContent = 'Uploading...'; msg.style.color='var(--primary)';
+    const token = localStorage.getItem('offro_admin_token');
+    const r = await fetch('/admin/default-images', { method:'PUT', headers:{Authorization:'Bearer '+token}, body:fd });
+    if (!r.ok) throw new Error(await r.text());
+    msg.textContent = `✓ Default ${type} image uploaded`; msg.style.color='green';
+    loadDefaultImages();
+  } catch(e) { msg.textContent = '✗ ' + (e.message || 'Upload failed'); msg.style.color='red'; }
+}
 
 </script>
 </body>
