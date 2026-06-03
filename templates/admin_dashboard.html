@@ -4768,7 +4768,9 @@ let _cities = [];
 
 async function loadCities() {
   try {
-    const data = await req('GET', '/admin/cities');
+    const r = await fetch('/admin/cities', {credentials:'include'});
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
     _cities = Array.isArray(data) ? data : [];
     renderCitiesTable(_cities);
   } catch(e) { console.error('Cities load failed', e); }
@@ -4847,23 +4849,36 @@ async function saveCity() {
 
   try {
     let finalImg = imageUrl;
-    const token = localStorage.getItem('offro_admin_token');
-
     if (id) {
-      await req('PUT', `/admin/cities/${id}`, { name, image_url: finalImg, sort_order: sortOrder, active });
+      // Update city
+      const pr = await fetch(`/admin/cities/${id}`, {
+        method:'PUT', credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name, image_url: finalImg, sort_order: sortOrder, active })
+      });
+      if (!pr.ok) throw new Error(await pr.text());
       // Upload image file if selected
       if (file) {
         const fd = new FormData(); fd.append('file', file);
-        const r = await fetch(`/admin/cities/${id}/upload-image`, { method:'POST', headers:{Authorization:'Bearer '+token}, body:fd });
-        if (r.ok) { const ud = await r.json(); finalImg = ud.image_url; await req('PUT', `/admin/cities/${id}`, { image_url: finalImg }); }
+        const ir = await fetch(`/admin/cities/${id}/upload-image`, { method:'POST', credentials:'include', body:fd });
+        if (ir.ok) { const ud = await ir.json(); finalImg = ud.image_url;
+          await fetch(`/admin/cities/${id}`, {method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image_url:finalImg})}); }
       }
       msg.textContent = '✓ City updated'; msg.style.color = 'green';
     } else {
-      const res = await req('POST', '/admin/cities', { name, image_url: finalImg, sort_order: sortOrder, active });
+      // Create city
+      const cr = await fetch('/admin/cities', {
+        method:'POST', credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name, image_url: finalImg, sort_order: sortOrder, active })
+      });
+      if (!cr.ok) throw new Error(await cr.text());
+      const res = await cr.json();
       if (file && res.id) {
         const fd = new FormData(); fd.append('file', file);
-        const r = await fetch(`/admin/cities/${res.id}/upload-image`, { method:'POST', headers:{Authorization:'Bearer '+token}, body:fd });
-        if (r.ok) { const ud = await r.json(); await req('PUT', `/admin/cities/${res.id}`, { image_url: ud.image_url }); }
+        const ir = await fetch(`/admin/cities/${res.id}/upload-image`, { method:'POST', credentials:'include', body:fd });
+        if (ir.ok) { const ud = await ir.json();
+          await fetch(`/admin/cities/${res.id}`, {method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image_url:ud.image_url})}); }
       }
       msg.textContent = '✓ City added'; msg.style.color = 'green';
     }
@@ -4876,7 +4891,11 @@ async function saveCity() {
 
 async function deleteCity(id, name) {
   if (!confirm(`Delete city "${name}"? This will remove the city image from the home screen.`)) return;
-  try { await req('DELETE', `/admin/cities/${id}`); await loadCities(); } catch(e) { alert('Delete failed: ' + e.message); }
+  try {
+    const r = await fetch(`/admin/cities/${id}`, {method:'DELETE', credentials:'include'});
+    if (!r.ok) throw new Error(await r.text());
+    await loadCities();
+  } catch(e) { alert('Delete failed: ' + e.message); }
 }
 
 function uploadCityImageQuick(id) {
@@ -4885,8 +4904,7 @@ function uploadCityImageQuick(id) {
   input.onchange = async () => {
     const f = input.files[0]; if (!f) return;
     const fd = new FormData(); fd.append('file', f);
-    const token = localStorage.getItem('offro_admin_token');
-    await fetch(`/admin/cities/${id}/upload-image`, { method:'POST', headers:{Authorization:'Bearer '+token}, body:fd });
+    await fetch(`/admin/cities/${id}/upload-image`, { method:'POST', credentials:'include', body:fd });
     await loadCities();
   };
   input.click();
@@ -4897,7 +4915,9 @@ function uploadCityImageQuick(id) {
 // ════════════════════════════════════════
 async function loadDefaultImages() {
   try {
-    const d = await req('GET', '/admin/default-images');
+    const r = await fetch('/admin/default-images', {credentials:'include'});
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
     for (const type of ['store', 'product', 'offer', 'city']) {
       const url = d[type] || '';
       const inputEl = document.getElementById(`di_${type}_url`);
@@ -4917,7 +4937,12 @@ async function saveDiUrl(type) {
   const msg = document.getElementById('di_msg');
   if (!url) { msg.textContent = 'Please paste a URL first'; msg.style.color='red'; return; }
   try {
-    await req('PUT', '/admin/default-images/urls', { [type]: url });
+    const r = await fetch('/admin/default-images/urls', {
+      method:'PUT', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ [type]: url })
+    });
+    if (!r.ok) throw new Error(await r.text());
     msg.textContent = `✓ Default ${type} image URL saved`; msg.style.color='green';
     loadDefaultImages();
   } catch(e) { msg.textContent = '✗ Failed: ' + e.message; msg.style.color='red'; }
@@ -4931,8 +4956,7 @@ async function saveDiFile(type) {
   fd.append(`${type}_file`, file);
   try {
     msg.textContent = 'Uploading...'; msg.style.color='var(--primary)';
-    const token = localStorage.getItem('offro_admin_token');
-    const r = await fetch('/admin/default-images', { method:'PUT', headers:{Authorization:'Bearer '+token}, body:fd });
+    const r = await fetch('/admin/default-images', { method:'PUT', credentials:'include', body:fd });
     if (!r.ok) throw new Error(await r.text());
     msg.textContent = `✓ Default ${type} image uploaded`; msg.style.color='green';
     loadDefaultImages();
