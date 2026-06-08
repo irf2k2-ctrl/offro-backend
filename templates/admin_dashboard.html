@@ -791,6 +791,99 @@ tr:hover td{background:#f7faf8;}
   </div>
 
 
+    <div id="section-cities" class="section">
+    <div class="section-header">
+      <h2><i class="fas fa-city"></i> Cities</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary" onclick="seedDefaultCities()" title="Auto-add Ballari, Bengaluru, Hyderabad, Hubli, Dharwad, Mysuru"><i class="fas fa-magic"></i> Seed Defaults</button>
+        <button class="btn" onclick="openCityModal()"><i class="fas fa-plus"></i> Add City</button>
+      </div>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">
+      Manage cities shown in the app. Each city has a hero image shown on the home screen.
+      The app automatically loads the image for the user's detected city. If no city image exists, the default city image is used.
+      <strong style="color:var(--primary)">Click "Seed Defaults" to auto-add the 6 default cities.</strong>
+    </p>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>City Name</th><th>Image</th><th>Sort Order</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="cities_body">
+        <tr><td colspan="5" style="text-align:center;color:var(--muted)">Loading...</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+    <!-- DEFAULT IMAGES SECTION -->
+  <div id="section-default_images" class="section">
+    <div class="section-header">
+      <h2><i class="fas fa-image"></i> Default Images</h2>
+      <button class="btn btn-secondary" onclick="loadDefaultImages()"><i class="fas fa-sync-alt"></i> Refresh</button>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:20px;">
+      Fallback images used when merchants don't upload their own. Paste a public HTTPS URL or upload a file for each type.
+      <strong style="color:var(--primary)">Use public image URLs (not base64) for best performance.</strong>
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">
+      <!-- Store -->
+      <div class="card" style="padding:20px">
+        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-store"></i> Default Store Image</h3>
+        <div id="di_store_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
+          <span style="color:#aaa;font-size:13px">No image set</span>
+        </div>
+        <input type="text" id="di_store_url" placeholder="Paste image URL..." class="form-control mb-2">
+        <input type="file" id="di_store_file" accept="image/*" class="form-control mb-2">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="saveDiUrl('store')">Save URL</button>
+          <button class="btn btn-secondary" onclick="saveDiFile('store')">Upload File</button>
+        </div>
+      </div>
+      <!-- Product -->
+      <div class="card" style="padding:20px">
+        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-box"></i> Default Product Image</h3>
+        <div id="di_product_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
+          <span style="color:#aaa;font-size:13px">No image set</span>
+        </div>
+        <input type="text" id="di_product_url" placeholder="Paste image URL..." class="form-control mb-2">
+        <input type="file" id="di_product_file" accept="image/*" class="form-control mb-2">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="saveDiUrl('product')">Save URL</button>
+          <button class="btn btn-secondary" onclick="saveDiFile('product')">Upload File</button>
+        </div>
+      </div>
+      <!-- Offer -->
+      <div class="card" style="padding:20px">
+        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-percent"></i> Default Offer Image</h3>
+        <div id="di_offer_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
+          <span style="color:#aaa;font-size:13px">No image set</span>
+        </div>
+        <input type="text" id="di_offer_url" placeholder="Paste image URL..." class="form-control mb-2">
+        <input type="file" id="di_offer_file" accept="image/*" class="form-control mb-2">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="saveDiUrl('offer')">Save URL</button>
+          <button class="btn btn-secondary" onclick="saveDiFile('offer')">Upload File</button>
+        </div>
+      </div>
+      <!-- City -->
+      <div class="card" style="padding:20px">
+        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-city"></i> Default City Image</h3>
+        <div id="di_city_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
+          <span style="color:#aaa;font-size:13px">No image set</span>
+        </div>
+        <input type="text" id="di_city_url" placeholder="Paste image URL..." class="form-control mb-2">
+        <input type="file" id="di_city_file" accept="image/*" class="form-control mb-2">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="saveDiUrl('city')">Save URL</button>
+          <button class="btn btn-secondary" onclick="saveDiFile('city')">Upload File</button>
+        </div>
+      </div>
+    </div>
+    <div id="di_msg" style="margin-top:16px;color:green;font-weight:600;font-size:14px"></div>
+  </div>
+
+
 </div>
 
 <!-- STORE MODAL -->
@@ -4391,95 +4484,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </div>
 
 <!-- CITIES SECTION -->
-  <div id="section-cities" class="section">
-    <div class="section-header">
-      <h2><i class="fas fa-city"></i> Cities</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-secondary" onclick="seedDefaultCities()" title="Auto-add Ballari, Bengaluru, Hyderabad, Hubli, Dharwad, Mysuru"><i class="fas fa-magic"></i> Seed Defaults</button>
-        <button class="btn" onclick="openCityModal()"><i class="fas fa-plus"></i> Add City</button>
-      </div>
-    </div>
-    <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">
-      Manage cities shown in the app. Each city has a hero image shown on the home screen.
-      The app automatically loads the image for the user's detected city. If no city image exists, the default city image is used.
-      <strong style="color:var(--primary)">Click "Seed Defaults" to auto-add the 6 default cities.</strong>
-    </p>
-    <table>
-      <thead>
-        <tr><th>City Name</th><th>Image</th><th>Sort Order</th><th>Status</th><th>Actions</th></tr>
-      </thead>
-      <tbody id="cities_body">
-        <tr><td colspan="5" style="text-align:center;color:var(--muted)">Loading...</td></tr>
-      </tbody>
-    </table>
-  </div>
 
-  <!-- DEFAULT IMAGES SECTION -->
-  <div id="section-default_images" class="section">
-    <div class="section-header">
-      <h2><i class="fas fa-image"></i> Default Images</h2>
-      <button class="btn btn-secondary" onclick="loadDefaultImages()"><i class="fas fa-sync-alt"></i> Refresh</button>
-    </div>
-    <p style="color:var(--muted);font-size:13px;margin-bottom:20px;">
-      Fallback images used when merchants don't upload their own. Paste a public HTTPS URL or upload a file for each type.
-      <strong style="color:var(--primary)">Use public image URLs (not base64) for best performance.</strong>
-    </p>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">
-      <!-- Store -->
-      <div class="card" style="padding:20px">
-        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-store"></i> Default Store Image</h3>
-        <div id="di_store_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
-          <span style="color:#aaa;font-size:13px">No image set</span>
-        </div>
-        <input type="text" id="di_store_url" placeholder="Paste image URL..." class="form-control mb-2">
-        <input type="file" id="di_store_file" accept="image/*" class="form-control mb-2">
-        <div style="display:flex;gap:8px">
-          <button class="btn" onclick="saveDiUrl('store')">Save URL</button>
-          <button class="btn btn-secondary" onclick="saveDiFile('store')">Upload File</button>
-        </div>
-      </div>
-      <!-- Product -->
-      <div class="card" style="padding:20px">
-        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-box"></i> Default Product Image</h3>
-        <div id="di_product_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
-          <span style="color:#aaa;font-size:13px">No image set</span>
-        </div>
-        <input type="text" id="di_product_url" placeholder="Paste image URL..." class="form-control mb-2">
-        <input type="file" id="di_product_file" accept="image/*" class="form-control mb-2">
-        <div style="display:flex;gap:8px">
-          <button class="btn" onclick="saveDiUrl('product')">Save URL</button>
-          <button class="btn btn-secondary" onclick="saveDiFile('product')">Upload File</button>
-        </div>
-      </div>
-      <!-- Offer -->
-      <div class="card" style="padding:20px">
-        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-percent"></i> Default Offer Image</h3>
-        <div id="di_offer_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
-          <span style="color:#aaa;font-size:13px">No image set</span>
-        </div>
-        <input type="text" id="di_offer_url" placeholder="Paste image URL..." class="form-control mb-2">
-        <input type="file" id="di_offer_file" accept="image/*" class="form-control mb-2">
-        <div style="display:flex;gap:8px">
-          <button class="btn" onclick="saveDiUrl('offer')">Save URL</button>
-          <button class="btn btn-secondary" onclick="saveDiFile('offer')">Upload File</button>
-        </div>
-      </div>
-      <!-- City -->
-      <div class="card" style="padding:20px">
-        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-city"></i> Default City Image</h3>
-        <div id="di_city_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
-          <span style="color:#aaa;font-size:13px">No image set</span>
-        </div>
-        <input type="text" id="di_city_url" placeholder="Paste image URL..." class="form-control mb-2">
-        <input type="file" id="di_city_file" accept="image/*" class="form-control mb-2">
-        <div style="display:flex;gap:8px">
-          <button class="btn" onclick="saveDiUrl('city')">Save URL</button>
-          <button class="btn btn-secondary" onclick="saveDiFile('city')">Upload File</button>
-        </div>
-      </div>
-    </div>
-    <div id="di_msg" style="margin-top:16px;color:green;font-weight:600;font-size:14px"></div>
-  </div>
 
   <!-- CITY MODAL -->
   <div id="cityModal" class="modal-overlay" style="display:none">
@@ -4807,7 +4812,7 @@ function renderCitiesTable(cities) {
   }
   tbody.innerHTML = cities.map(c => `
     <tr>
-      <td><b>${c.name}</b></td>
+      <td><b>${c.name || c.city_name || ''}</b></td>
       <td>${c.image_url
         ? `<img src="${c.image_url}" style="height:48px;width:80px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'">`
         : '<span style="color:var(--muted);font-size:12px">No image</span>'
