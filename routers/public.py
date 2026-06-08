@@ -439,7 +439,13 @@ def get_cities():
     Falls back to a default image if no image is configured for the city.
     """
     DEFAULT_CITY_IMAGE = "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=800&q=80"
-    docs = list(db.cities.find({"status": {"$ne": "inactive"}}).sort("sort_order", 1))
+    # Query supports both old ("active" bool) and new ("status" string) field formats
+    docs = list(db.cities.find({
+        "$or": [
+            {"status": {"$ne": "inactive"}},
+            {"active": True, "status": {"$exists": False}},
+        ]
+    }).sort("sort_order", 1))
     if docs:
         result = []
         for d in docs:

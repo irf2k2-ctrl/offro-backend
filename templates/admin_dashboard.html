@@ -4392,11 +4392,15 @@ document.addEventListener('DOMContentLoaded', () => {
   <div id="section-cities" class="section">
     <div class="section-header">
       <h2><i class="fas fa-city"></i> Cities</h2>
-      <button class="btn" onclick="openCityModal()"><i class="fas fa-plus"></i> Add City</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary" onclick="seedDefaultCities()" title="Auto-add Ballari, Bengaluru, Hyderabad, Hubli, Dharwad, Mysuru"><i class="fas fa-magic"></i> Seed Defaults</button>
+        <button class="btn" onclick="openCityModal()"><i class="fas fa-plus"></i> Add City</button>
+      </div>
     </div>
     <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">
-      Manage cities shown in the app. Each city has a hero image shown on the home screen. 
+      Manage cities shown in the app. Each city has a hero image shown on the home screen.
       The app automatically loads the image for the user's detected city. If no city image exists, the default city image is used.
+      <strong style="color:var(--primary)">Click "Seed Defaults" to auto-add the 6 default cities.</strong>
     </p>
     <table>
       <thead>
@@ -4412,9 +4416,11 @@ document.addEventListener('DOMContentLoaded', () => {
   <div id="section-default_images" class="section">
     <div class="section-header">
       <h2><i class="fas fa-image"></i> Default Images</h2>
+      <button class="btn btn-secondary" onclick="loadDefaultImages()"><i class="fas fa-sync-alt"></i> Refresh</button>
     </div>
     <p style="color:var(--muted);font-size:13px;margin-bottom:20px;">
-      Fallback images used automatically when merchants don't upload their own. Paste a URL or upload a file for each type.
+      Fallback images used when merchants don't upload their own. Paste a public HTTPS URL or upload a file for each type.
+      <strong style="color:var(--primary)">Use public image URLs (not base64) for best performance.</strong>
     </p>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">
       <!-- Store -->
@@ -4766,6 +4772,20 @@ async function toggleAccountStatus(accountId, currentStatus) {
 // ════════════════════════════════════════
 let _cities = [];
 
+async function seedDefaultCities() {
+  if (!confirm('This will auto-add Ballari, Bengaluru, Hyderabad, Hubli, Dharwad, and Mysuru. Existing cities are skipped. Continue?')) return;
+  try {
+    const r = await fetch('/admin/cities/seed', { method:'POST', credentials:'include' });
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    const msg = `✓ Added: ${d.added.length ? d.added.join(', ') : 'none'} | Skipped (already exist): ${d.skipped.length ? d.skipped.join(', ') : 'none'}`;
+    showToast(msg, 'success');
+    await loadCities();
+  } catch(e) {
+    showToast('✗ Seed failed: ' + e.message, 'danger');
+  }
+}
+
 async function loadCities() {
   try {
     const r = await fetch('/admin/cities', {credentials:'include'});
@@ -4780,7 +4800,7 @@ function renderCitiesTable(cities) {
   const tbody = document.getElementById('cities_body');
   if (!tbody) return;
   if (!cities.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No cities yet. Click Add City to start.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px"><i class="fas fa-city" style="font-size:28px;margin-bottom:8px;display:block;opacity:.3"></i>No cities yet.<br><small>Click <strong>Seed Defaults</strong> to auto-add 6 cities, or <strong>Add City</strong> to add manually.</small></td></tr>';
     return;
   }
   tbody.innerHTML = cities.map(c => `

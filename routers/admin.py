@@ -2350,6 +2350,47 @@ def admin_get_cities(a=Depends(get_current_admin)):
     } for c in cities]
 
 
+
+
+@router.post("/cities/seed")
+def admin_seed_cities(a=Depends(get_current_admin)):
+    """Auto-populate default cities with placeholder images. Skips existing cities."""
+    DEFAULT_CITIES = [
+        {"name": "Ballari",   "sort_order": 1, "image_url": ""},
+        {"name": "Bengaluru", "sort_order": 2, "image_url": ""},
+        {"name": "Hyderabad", "sort_order": 3, "image_url": ""},
+        {"name": "Hubli",     "sort_order": 4, "image_url": ""},
+        {"name": "Dharwad",   "sort_order": 5, "image_url": ""},
+        {"name": "Mysuru",    "sort_order": 6, "image_url": ""},
+    ]
+    added = []
+    skipped = []
+    for city in DEFAULT_CITIES:
+        existing = db.cities.find_one({"name": {"$regex": f"^{city['name']}$", "$options": "i"}})
+        if existing:
+            skipped.append(city["name"])
+            continue
+        doc = {
+            "name":       city["name"],
+            "image_url":  city["image_url"],
+            "sort_order": city["sort_order"],
+            "active":     True,
+            "status":     "active",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        db.cities.insert_one(doc)
+        added.append(city["name"])
+    # Also migrate any existing cities that have 'active' but no 'status'
+    db.cities.update_many(
+        {"active": True,  "status": {"$exists": False}},
+        {"$set": {"status": "active"}}
+    )
+    db.cities.update_many(
+        {"active": False, "status": {"$exists": False}},
+        {"$set": {"status": "inactive"}}
+    )
+    return {"ok": True, "added": added, "skipped": skipped}
+
 @router.post("/cities")
 def admin_create_city(body: dict, a=Depends(get_current_admin)):
     name = body.get("name", "").strip()
@@ -2358,11 +2399,13 @@ def admin_create_city(body: dict, a=Depends(get_current_admin)):
     existing = db.cities.find_one({"name": {"$regex": f"^{name}$", "$options": "i"}})
     if existing:
         raise HTTPException(400, "City already exists")
+    is_active = bool(body.get("active", True))
     doc = {
         "name":       name,
         "image_url":  body.get("image_url", ""),
         "sort_order": int(body.get("sort_order", 0)),
-        "active":     bool(body.get("active", True)),
+        "active":     is_active,
+        "status":     "active" if is_active else "inactive",
         "created_at": datetime.utcnow().isoformat(),
     }
     result = db.cities.insert_one(doc)
@@ -2375,6 +2418,9 @@ def admin_update_city(city_id: str, body: dict, a=Depends(get_current_admin)):
     for field in ["name", "image_url", "sort_order", "active"]:
         if field in body:
             update[field] = body[field]
+    # Sync 'status' field with 'active' so public API works correctly
+    if "active" in body:
+        update["status"] = "active" if bool(body["active"]) else "inactive"
     if not update:
         raise HTTPException(400, "Nothing to update")
     db.cities.update_one({"_id": ObjectId(city_id)}, {"$set": update})
