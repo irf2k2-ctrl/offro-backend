@@ -16,44 +16,33 @@ import os as _cld_os, hashlib as _cld_hash, time as _cld_time
 import requests as _cld_req
 
 def _cloudinary_upload(b64_or_url: str, folder: str = "offro") -> str:
-    """Upload base64/file data to Cloudinary → secure_url.
-    Returns the original value unchanged if already a URL or if not configured."""
+    """Upload base64 to Cloudinary → secure_url. No-op if not configured or already URL."""
     if not b64_or_url:
         return b64_or_url
-    cloud   = _cld_os.getenv("CLOUDINARY_CLOUD_NAME", "").strip()
-    api_key = _cld_os.getenv("CLOUDINARY_API_KEY", "").strip()
-    secret  = _cld_os.getenv("CLOUDINARY_API_SECRET", "").strip()
+    cloud  = _cld_os.getenv("CLOUDINARY_CLOUD_NAME", "")
+    api_key= _cld_os.getenv("CLOUDINARY_API_KEY", "")
+    secret = _cld_os.getenv("CLOUDINARY_API_SECRET", "")
     if not cloud or not api_key or not secret:
         return b64_or_url
     if b64_or_url.startswith("http://") or b64_or_url.startswith("https://"):
         return b64_or_url
     data_str  = b64_or_url.split(",", 1)[-1] if "," in b64_or_url else b64_or_url
     timestamp = str(int(_cld_time.time()))
-    # Cloudinary signature: sort all non-file params alphabetically, exclude api_key and file
-    params_to_sign = {"folder": folder, "timestamp": timestamp}
-    sig_str   = "&".join(f"{k}={v}" for k, v in sorted(params_to_sign.items())) + secret
+    sig_str   = f"folder={folder}&timestamp={timestamp}{secret}"
     signature = _cld_hash.sha1(sig_str.encode()).hexdigest()
     try:
         resp = _cld_req.post(
             f"https://api.cloudinary.com/v1_1/{cloud}/image/upload",
-            data={
-                "file":      f"data:image/jpeg;base64,{data_str}",
-                "folder":    folder,
-                "timestamp": timestamp,
-                "api_key":   api_key,
-                "signature": signature,
-            },
-            timeout=30,
+            data={"file": f"data:image/jpeg;base64,{data_str}",
+                  "folder": folder, "timestamp": timestamp,
+                  "api_key": api_key, "signature": signature},
+            timeout=25,
         )
         if resp.status_code == 200:
-            url = resp.json().get("secure_url", "")
-            if url:
-                return url
-        # Log Cloudinary error so it appears in Railway logs
-        print(f"[CDN] upload error {resp.status_code}: {resp.text[:300]}")
+            return resp.json().get("secure_url", b64_or_url)
     except Exception as e:
-        print(f"[CDN] upload exception: {e}")
-    return ""   # Return empty string — caller must handle this
+        print(f"[CDN] upload failed: {e}")
+    return b64_or_url
 
 def _make_thumb_url(cdn_url: str, w: int = 300) -> str:
     if "cloudinary.com" in str(cdn_url):
@@ -2615,6 +2604,21 @@ def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
                 upsert=True
             )
         else:
+            # Migrate string → array before $addToSet
+            doc = db.settings.find_one({"_type": "default_images"}) or {}
+            existing = doc.get(img_type)
+            if isinstance(existing, str):
+                db.settings.update_one(
+                    {"_type": "default_images"},
+                    {"$set": {img_type: [existing] if existing else []}},
+                    upsert=True
+                )
+            elif not isinstance(existing, list):
+                db.settings.update_one(
+                    {"_type": "default_images"},
+                    {"$set": {img_type: []}},
+                    upsert=True
+                )
             db.settings.update_one(
                 {"_type": "default_images"},
                 {"$addToSet": {img_type: url}},
@@ -2654,51 +2658,52 @@ async def admin_update_default_images(
     city_file: UploadFile = File(None),
     a=Depends(get_current_admin),
 ):
-    """Upload default images via Cloudinary and append the URL to the array."""
+    """Upload default images. Saves Cloudinary URL if configured, else base64 fallback."""
     import base64 as _b64mod, os as _di_os
-    try:
-        cloud   = _di_os.getenv("CLOUDINARY_CLOUD_NAME", "").strip()
-        api_key = _di_os.getenv("CLOUDINARY_API_KEY", "").strip()
-        secret  = _di_os.getenv("CLOUDINARY_API_SECRET", "").strip()
+    update = {}
+    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file)]:
+        if not f or not f.filename:
+            continue
+        raw  = await f.read()
+        mime = f.content_type or "image/jpeg"
+        b64_str = _b64mod.b64encode(raw).decode()
+        b64_data = f"data:{mime};base64,{b64_str}"
 
-        if not (cloud and api_key and secret):
-            raise HTTPException(
-                status_code=400,
-                detail="Cloudinary is not configured. Please paste an image URL instead."
-            )
+        # Try Cloudinary first (same as category image upload)
+        cloud  = _di_os.getenv("CLOUDINARY_CLOUD_NAME", "")
+        api_key= _di_os.getenv("CLOUDINARY_API_KEY", "")
+        secret = _di_os.getenv("CLOUDINARY_API_SECRET", "")
+        saved_value = b64_data  # fallback
+        if cloud and api_key and secret:
+            try:
+                cdn_url = _cloudinary_upload(b64_data, folder="offro/defaults")
+                if cdn_url and cdn_url.startswith("http"):
+                    saved_value = cdn_url
+                    print(f"[DEFAULT-IMG] {field} uploaded to Cloudinary: {cdn_url}")
+                else:
+                    print(f"[DEFAULT-IMG] Cloudinary returned no URL for {field}, falling back to base64")
+            except Exception as e:
+                print(f"[DEFAULT-IMG] Cloudinary upload failed for {field}: {e}, falling back to base64")
+        else:
+            print(f"[DEFAULT-IMG] Cloudinary not configured — saving {field} as base64 (size: {len(b64_data)} chars)")
 
+        update[field] = saved_value
+
+    if update:
+        # Migrate string → array, then append
         push_ops = {"$addToSet": {}}
-        uploaded = []
-
-        for img_type, f in [("store", store_file), ("product", product_file),
-                             ("offer", offer_file), ("city", city_file)]:
-            if not f or not f.filename:
-                continue
-            raw = await f.read()
-            if not raw:
-                continue
-            mime     = f.content_type or "image/jpeg"
-            b64_str  = _b64mod.b64encode(raw).decode()
-            b64_data = f"data:{mime};base64,{b64_str}"
-
-            cdn_url = _cloudinary_upload(b64_data, folder="offro/defaults")
-            if cdn_url and cdn_url.startswith("http"):
-                push_ops["$addToSet"][img_type] = cdn_url
-                uploaded.append(img_type)
-                print(f"[DEFAULT-IMG] {img_type} → {cdn_url}")
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Cloudinary upload failed for '{img_type}'. Check Railway logs for details."
-                )
-
+        for field, val in update.items():
+            push_ops["$addToSet"][field] = val
         if push_ops["$addToSet"]:
+            doc = db.settings.find_one({"_type": "default_images"}) or {}
+            set_fixes = {}
+            for img_type in push_ops["$addToSet"]:
+                existing = doc.get(img_type)
+                if isinstance(existing, str):
+                    set_fixes[img_type] = [existing] if existing else []
+                elif not isinstance(existing, list):
+                    set_fixes[img_type] = []
+            if set_fixes:
+                db.settings.update_one({"_type": "default_images"}, {"$set": set_fixes}, upsert=True)
             db.settings.update_one({"_type": "default_images"}, push_ops, upsert=True)
-
-        return {"ok": True, "uploaded": uploaded}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"[DEFAULT-IMG] Unexpected error: {e}")
-        raise HTTPException(status_code=500, detail=f"Upload error: {str(e)}")
+    return {"ok": True, "uploaded": list(update.keys())}
