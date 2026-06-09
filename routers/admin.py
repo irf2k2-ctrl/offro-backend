@@ -1,5 +1,5 @@
 import os
-from fastapi import UploadFile, File, APIRouter, HTTPException, Depends, Request
+from fastapi import UploadFile, File, Form, APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
@@ -2446,6 +2446,80 @@ async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=
 # ════════════════════════════════════════════════════════
 # DEFAULT IMAGES MANAGEMENT
 # ════════════════════════════════════════════════════════
+
+# ─── Admin Banners (home-screen banners managed by admin) ─────────────────────
+@router.get("/banners")
+def admin_list_banners(a=Depends(get_current_admin)):
+    docs = list(db.admin_banners.find().sort("sort_order", 1))
+    result = []
+    for d in docs:
+        img = d.get("image_url", "") or d.get("image", "")
+        result.append({
+            "id":         str(d["_id"]),
+            "title":      d.get("title", ""),
+            "subtitle":   d.get("subtitle", ""),
+            "image":      img,
+            "image_url":  img,
+            "link_url":   d.get("link_url", ""),
+            "sort_order": d.get("sort_order", 0),
+            "is_active":  d.get("is_active", True),
+            "created_at": d.get("created_at", ""),
+        })
+    return result
+
+
+@router.post("/banners")
+async def admin_create_banner(data: dict, a=Depends(get_current_admin)):
+    """Create admin banner. Accepts JSON body with image_url (base64 or http URL)."""
+    img = data.get("image_url") or data.get("image") or ""
+    doc = {
+        "title":      data.get("title", ""),
+        "subtitle":   data.get("subtitle", ""),
+        "image":      img,
+        "image_url":  img,
+        "link_url":   data.get("link_url", ""),
+        "sort_order": int(data.get("sort_order", 0)),
+        "is_active":  bool(data.get("is_active", True)),
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    r = db.admin_banners.insert_one(doc)
+    return {"ok": True, "id": str(r.inserted_id)}
+
+
+@router.put("/banners/{bid}")
+async def admin_update_banner(bid: str, data: dict, a=Depends(get_current_admin)):
+    """Update admin banner. Accepts JSON body."""
+    update: dict = {}
+    if "title"      in data: update["title"]      = data["title"]
+    if "subtitle"   in data: update["subtitle"]   = data["subtitle"]
+    if "link_url"   in data: update["link_url"]   = data["link_url"]
+    if "sort_order" in data: update["sort_order"] = int(data["sort_order"])
+    if "is_active"  in data: update["is_active"]  = bool(data["is_active"])
+    img = data.get("image_url") or data.get("image")
+    if img is not None:
+        update["image"]     = img
+        update["image_url"] = img
+    if update:
+        db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
+    return {"ok": True}
+
+
+@router.delete("/banners/{bid}")
+def admin_delete_banner(bid: str, a=Depends(get_current_admin)):
+    db.admin_banners.delete_one({"_id": ObjectId(bid)})
+    return {"ok": True}
+
+
+@router.patch("/banners/{bid}/toggle")
+def admin_toggle_banner(bid: str, a=Depends(get_current_admin)):
+    doc = db.admin_banners.find_one({"_id": ObjectId(bid)})
+    if not doc:
+        raise HTTPException(404, "Banner not found")
+    new_state = not doc.get("is_active", True)
+    db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
+    return {"ok": True, "is_active": new_state}
+
+
 
 @router.get("/default-images")
 def admin_get_default_images(a=Depends(get_current_admin)):
