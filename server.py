@@ -289,6 +289,66 @@ def serve_merchant_dashboard(request: Request):
         return HTMLResponse(f"<pre>Template Error:\n{traceback.format_exc()}</pre>", status_code=500)
 
 
+# ─── Admin Banners CRUD ──────────────────────────────────────────────────────
+from bson import ObjectId as _ObjId
+import base64 as _b64, uuid as _uuid
+
+@app.get("/admin/banners")
+def admin_list_banners():
+    docs = list(db.admin_banners.find().sort("sort_order", 1))
+    result = []
+    for d in docs:
+        img = d.get("image_url","") or d.get("image","")
+        result.append({
+            "id":         str(d["_id"]),
+            "title":      d.get("title",""),
+            "subtitle":   d.get("subtitle",""),
+            "image_url":  img,
+            "link_url":   d.get("link_url",""),
+            "sort_order": d.get("sort_order",0),
+            "is_active":  d.get("is_active",True),
+            "created_at": str(d.get("created_at","")),
+        })
+    return result
+
+@app.post("/admin/banners")
+async def admin_create_banner(request: Request):
+    from datetime import datetime
+    data = await request.json()
+    # Handle base64 image upload → store as URL string in DB
+    img_url = data.get("image_url","") or data.get("image","")
+    doc = {
+        "title":      data.get("title",""),
+        "subtitle":   data.get("subtitle",""),
+        "image_url":  img_url,
+        "link_url":   data.get("link_url",""),
+        "sort_order": int(data.get("sort_order",0)),
+        "is_active":  data.get("is_active",True),
+        "created_at": datetime.utcnow(),
+    }
+    r = db.admin_banners.insert_one(doc)
+    return {"ok":True,"id":str(r.inserted_id)}
+
+@app.put("/admin/banners/{banner_id}")
+async def admin_update_banner(banner_id: str, request: Request):
+    data = await request.json()
+    img_url = data.get("image_url","") or data.get("image","")
+    update = {
+        "title":      data.get("title",""),
+        "subtitle":   data.get("subtitle",""),
+        "image_url":  img_url,
+        "link_url":   data.get("link_url",""),
+        "sort_order": int(data.get("sort_order",0)),
+        "is_active":  data.get("is_active",True),
+    }
+    db.admin_banners.update_one({"_id": _ObjId(banner_id)}, {"$set": update})
+    return {"ok":True}
+
+@app.delete("/admin/banners/{banner_id}")
+def admin_delete_banner(banner_id: str):
+    db.admin_banners.delete_one({"_id": _ObjId(banner_id)})
+    return {"ok":True}
+
 @app.get("/health")
 def health():
     return {"status": "ok", "version": "5.0"}

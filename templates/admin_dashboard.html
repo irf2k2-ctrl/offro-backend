@@ -108,6 +108,7 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
   <a href="#" onclick="showSection('voucher_zone',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
+  <a href="#" onclick="showSection('admin_banners',this)"><i class="fas fa-ad fa-fw"></i> Admin Banners</a>
   <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
   <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <div class="sep"></div>
@@ -124,7 +125,7 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('social',this)"><i class="fab fa-whatsapp fa-fw"></i> Social Media</a>
   <a href="#" onclick="showSection('about',this)"><i class="fas fa-info-circle fa-fw"></i> About Us</a>
   <div class="sep"></div>
-  <a href="#" onclick="showSection('cities',this)"><i class="fas fa-city fa-fw"></i> Cities</a>
+
   <a href="#" onclick="showSection('default_images',this)"><i class="fas fa-image fa-fw"></i> Default Images</a>
   <div class="sep"></div>
   <!-- PHASE 1: Users + Merchants hidden — collections intact, sidebar entries removed -->
@@ -791,30 +792,89 @@ tr:hover td{background:#f7faf8;}
   </div>
 
 
-    <div id="section-cities" class="section">
+    
+
+    <!-- ADMIN BANNERS SECTION -->
+  <div id="section-admin_banners" class="section">
     <div class="section-header">
-      <h2><i class="fas fa-city"></i> Cities</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-secondary" onclick="seedDefaultCities()" title="Auto-add Ballari, Bengaluru, Hyderabad, Hubli, Dharwad, Mysuru"><i class="fas fa-magic"></i> Seed Defaults</button>
-        <button class="btn" onclick="openCityModal()"><i class="fas fa-plus"></i> Add City</button>
+      <div>
+        <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-ad me-2"></i>Admin Banners</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:2px;">Banners created by admin — shown on app home screen after categories</div>
       </div>
+      <button class="btn-p" onclick="openAdminBannerModal()"><i class="fas fa-plus me-1"></i> Add Banner</button>
     </div>
-    <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">
-      Manage cities shown in the app. Each city has a hero image shown on the home screen.
-      The app automatically loads the image for the user's detected city. If no city image exists, the default city image is used.
-      <strong style="color:var(--primary)">Click "Seed Defaults" to auto-add the 6 default cities.</strong>
-    </p>
+
     <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th>City Name</th><th>Image</th><th>Sort Order</th><th>Status</th><th>Actions</th></tr>
-      </thead>
-      <tbody id="cities_body">
-        <tr><td colspan="5" style="text-align:center;color:var(--muted)">Loading...</td></tr>
-      </tbody>
-    </table>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:120px">Image</th>
+            <th>Title</th>
+            <th>Subtitle</th>
+            <th>Link URL</th>
+            <th>Sort</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="admin_banners_body">
+          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
+
+  <!-- ADMIN BANNER MODAL -->
+  <div id="adminBannerModal" class="modal-overlay" style="display:none">
+    <div class="modal-box" style="max-width:520px">
+      <div class="modal-header">
+        <h3 id="abm_title">Add Admin Banner</h3>
+        <button class="btn-close" onclick="closeAdminBannerModal()"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="abm_id">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Banner Image</label>
+          <div id="abm_img_preview" style="width:100%;height:160px;background:#f5f5f5;border-radius:10px;overflow:hidden;margin-bottom:10px;display:flex;align-items:center;justify-content:center;">
+            <span style="color:#aaa;font-size:13px">No image selected</span>
+          </div>
+          <input type="text" id="abm_image_url" class="form-control mb-2" placeholder="Paste image URL (https://...)">
+          <input type="file" id="abm_image_file" accept="image/*" class="form-control mb-2" onchange="previewAdminBannerImage(this)">
+          <div style="font-size:11px;color:var(--muted)">Paste a URL <strong>or</strong> upload a file. Uploaded images are stored as base64.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Title</label>
+          <input type="text" id="abm_title_input" class="form-control" placeholder="Banner title (optional)">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Subtitle</label>
+          <input type="text" id="abm_subtitle" class="form-control" placeholder="Subtitle or tagline (optional)">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Link URL</label>
+          <input type="url" id="abm_link_url" class="form-control" placeholder="https://... (optional, tapped by user)">
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Sort Order</label>
+            <input type="number" id="abm_sort" class="form-control" value="0" min="0">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">Status</label>
+            <select id="abm_active" class="form-select">
+              <option value="true">Active</option>
+              <option value="false">Inactive</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeAdminBannerModal()">Cancel</button>
+        <button class="btn" onclick="saveAdminBanner()">Save Banner</button>
+      </div>
+    </div>
+  </div>
+
 
     <!-- DEFAULT IMAGES SECTION -->
   <div id="section-default_images" class="section">
@@ -1238,6 +1298,7 @@ async function submitFulfill(){
 function showSection(name, el){
   if (name === 'cities') loadCities();
   if (name === 'default_images') loadDefaultImages();
+  if (name === 'admin_banners') loadAdminBanners();
   document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));
   document.querySelectorAll(".sidebar a").forEach(a=>a.classList.remove("active"));
   document.getElementById("section-"+name).classList.add("active");
@@ -4483,37 +4544,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 </div>
 
-<!-- CITIES SECTION -->
 
-
-  <!-- CITY MODAL -->
-  <div id="cityModal" class="modal-overlay" style="display:none">
-    <div class="modal-box" style="max-width:460px">
-      <h3 id="cityModalTitle" style="margin-bottom:18px;color:var(--primary)">Add City</h3>
-      <input type="hidden" id="city_id">
-      <label class="form-label">City Name *</label>
-      <input type="text" id="city_name" placeholder="e.g. Ballari" class="form-control mb-3">
-      <label class="form-label">Image URL</label>
-      <input type="text" id="city_image_url" placeholder="https://... (or upload below)" class="form-control mb-3">
-      <label class="form-label">Upload Image</label>
-      <input type="file" id="city_image_file" accept="image/*" class="form-control mb-3">
-      <div id="city_img_preview_wrap" style="display:none;margin-bottom:12px">
-        <img id="city_img_preview_img" style="width:100%;height:130px;object-fit:cover;border-radius:10px">
-      </div>
-      <label class="form-label">Sort Order</label>
-      <input type="number" id="city_sort_order" value="0" class="form-control mb-3">
-      <div class="mb-3">
-        <label><input type="checkbox" id="city_active" checked style="margin-right:6px"> Active (shown in app)</label>
-      </div>
-      <div id="city_msg" style="margin-bottom:10px;color:green;font-weight:600;min-height:18px"></div>
-      <div style="display:flex;gap:10px">
-        <button class="btn" onclick="saveCity()">Save City</button>
-        <button class="btn btn-secondary" onclick="closeCityModal()">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-</div>
 
 <div id="offro-toast-container" style="position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;"></div>
 <script>
@@ -4775,167 +4806,138 @@ async function toggleAccountStatus(accountId, currentStatus) {
 
 
 // ════════════════════════════════════════
-// CITIES JS
-// ════════════════════════════════════════
-let _cities = [];
+async 
 
-async function seedDefaultCities() {
-  if (!confirm('This will auto-add Ballari, Bengaluru, Hyderabad, Hubli, Dharwad, and Mysuru. Existing cities are skipped. Continue?')) return;
+// ════════════════════════════════════════════════════════
+// ADMIN BANNERS JS
+// ════════════════════════════════════════════════════════
+let _adminBannersList = [];
+
+async function loadAdminBanners() {
+  const tbody = document.getElementById('admin_banners_body');
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>';
   try {
-    const r = await fetch('/admin/cities/seed', { method:'POST', credentials:'include' });
-    if (!r.ok) throw new Error(await r.text());
-    const d = await r.json();
-    const msg = `✓ Added: ${d.added.length ? d.added.join(', ') : 'none'} | Skipped (already exist): ${d.skipped.length ? d.skipped.join(', ') : 'none'}`;
-    showToast(msg, 'success');
-    await loadCities();
+    const data = await fetchJSON('/admin/banners');
+    _adminBannersList = Array.isArray(data) ? data : [];
+    renderAdminBanners();
   } catch(e) {
-    showToast('✗ Seed failed: ' + e.message, 'danger');
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:20px">${e.message}</td></tr>`;
   }
 }
 
-async function loadCities() {
-  try {
-    const r = await fetch('/admin/cities', {credentials:'include'});
-    if (!r.ok) throw new Error(await r.text());
-    const data = await r.json();
-    _cities = Array.isArray(data) ? data : [];
-    renderCitiesTable(_cities);
-  } catch(e) { console.error('Cities load failed', e); }
-}
-
-function renderCitiesTable(cities) {
-  const tbody = document.getElementById('cities_body');
-  if (!tbody) return;
-  if (!cities.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px"><i class="fas fa-city" style="font-size:28px;margin-bottom:8px;display:block;opacity:.3"></i>No cities yet.<br><small>Click <strong>Seed Defaults</strong> to auto-add 6 cities, or <strong>Add City</strong> to add manually.</small></td></tr>';
+function renderAdminBanners() {
+  const tbody = document.getElementById('admin_banners_body');
+  if (!_adminBannersList.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--muted)">No admin banners yet. Click + Add Banner.</td></tr>';
     return;
   }
-  tbody.innerHTML = cities.map(c => `
-    <tr>
-      <td><b>${c.name || c.city_name || ''}</b></td>
-      <td>${c.image_url
-        ? `<img src="${c.image_url}" style="height:48px;width:80px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'">`
-        : '<span style="color:var(--muted);font-size:12px">No image</span>'
-      }</td>
-      <td>${c.sort_order ?? 0}</td>
-      <td><span style="background:${c.active !== false ? 'var(--primary)' : '#aaa'};color:#fff;padding:3px 10px;border-radius:20px;font-size:11px">${c.active !== false ? 'Active' : 'Inactive'}</span></td>
-      <td style="white-space:nowrap">
-        <button class="btn" style="font-size:11px;padding:4px 10px" onclick="editCity('${c.id}')">Edit</button>
-        <button class="btn" style="background:var(--danger);font-size:11px;padding:4px 10px;margin-left:5px" onclick="deleteCity('${c.id}','${c.name.replace(/'/g,"\\'")}')">Delete</button>
-        <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;margin-left:5px" onclick="uploadCityImageQuick('${c.id}')">Upload Image</button>
+  tbody.innerHTML = _adminBannersList.map(b => {
+    const img = b.image_url || b.image || '';
+    const imgHtml = img
+      ? `<img src="${img}" style="width:90px;height:55px;object-fit:cover;border-radius:7px;border:1px solid var(--border)">`
+      : `<div style="width:90px;height:55px;border-radius:7px;background:#e8f5f0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">No image</div>`;
+    const active = b.is_active !== false;
+    const badge = active
+      ? `<span class="badge" style="background:#e8f5f0;color:#1a6640;border:1px solid #A9CDBA;font-size:11px">Active</span>`
+      : `<span class="badge" style="background:#fef3f2;color:#c0392b;border:1px solid #f5c6c6;font-size:11px">Inactive</span>`;
+    return `<tr>
+      <td>${imgHtml}</td>
+      <td style="font-weight:600;color:var(--text)">${b.title || '<span style="color:var(--muted);font-style:italic">—</span>'}</td>
+      <td style="color:var(--muted);font-size:12px">${b.subtitle || '—'}</td>
+      <td style="font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.link_url ? `<a href="${b.link_url}" target="_blank" style="color:var(--primary)">${b.link_url}</a>` : '—'}</td>
+      <td style="text-align:center">${b.sort_order ?? 0}</td>
+      <td>${badge}</td>
+      <td>
+        <button class="btn btn-sm" style="padding:4px 10px;font-size:12px" onclick='editAdminBanner(${JSON.stringify(b)})'>Edit</button>
+        <button class="btn btn-sm" style="padding:4px 10px;font-size:12px;background:var(--danger);color:#fff;border:none;margin-left:4px" onclick="deleteAdminBanner('${b.id}')">Delete</button>
       </td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
-function openCityModal(id) {
-  const m = document.getElementById('cityModal');
-  document.getElementById('city_id').value = id || '';
-  document.getElementById('city_name').value = '';
-  document.getElementById('city_image_url').value = '';
-  document.getElementById('city_image_file').value = '';
-  document.getElementById('city_sort_order').value = '0';
-  document.getElementById('city_active').checked = true;
-  document.getElementById('city_img_preview_wrap').style.display = 'none';
-  document.getElementById('city_msg').textContent = '';
-  document.getElementById('cityModalTitle').textContent = id ? 'Edit City' : 'Add City';
-
-  if (id) {
-    const c = _cities.find(x => x.id === id);
-    if (c) {
-      document.getElementById('city_name').value = c.name || '';
-      document.getElementById('city_image_url').value = c.image_url || '';
-      document.getElementById('city_sort_order').value = c.sort_order || 0;
-      document.getElementById('city_active').checked = c.active !== false;
-      if (c.image_url) {
-        document.getElementById('city_img_preview_wrap').style.display = 'block';
-        document.getElementById('city_img_preview_img').src = c.image_url;
-      }
-    }
-  }
-  m.style.display = 'flex';
+function openAdminBannerModal(data) {
+  document.getElementById('abm_id').value = data?.id || '';
+  document.getElementById('abm_title').textContent = data ? 'Edit Admin Banner' : 'Add Admin Banner';
+  document.getElementById('abm_title_input').value = data?.title || '';
+  document.getElementById('abm_subtitle').value = data?.subtitle || '';
+  document.getElementById('abm_image_url').value = data?.image_url || '';
+  document.getElementById('abm_link_url').value = data?.link_url || '';
+  document.getElementById('abm_sort').value = data?.sort_order ?? 0;
+  document.getElementById('abm_active').value = (data?.is_active !== false).toString();
+  // Preview
+  const img = data?.image_url || '';
+  const prev = document.getElementById('abm_img_preview');
+  prev.innerHTML = img
+    ? `<img src="${img}" style="width:100%;height:100%;object-fit:cover">`
+    : '<span style="color:#aaa;font-size:13px">No image selected</span>';
+  document.getElementById('adminBannerModal').style.display = 'flex';
 }
 
-function closeCityModal() {
-  document.getElementById('cityModal').style.display = 'none';
+function closeAdminBannerModal() {
+  document.getElementById('adminBannerModal').style.display = 'none';
+  document.getElementById('abm_image_file').value = '';
 }
 
-function editCity(id) { openCityModal(id); }
-
-async function saveCity() {
-  const id        = document.getElementById('city_id').value;
-  const name      = document.getElementById('city_name').value.trim();
-  const imageUrl  = document.getElementById('city_image_url').value.trim();
-  const sortOrder = parseInt(document.getElementById('city_sort_order').value) || 0;
-  const active    = document.getElementById('city_active').checked;
-  const file      = document.getElementById('city_image_file').files[0];
-  const msg       = document.getElementById('city_msg');
-
-  if (!name) { msg.textContent = 'City name is required'; msg.style.color = 'red'; return; }
-  msg.textContent = 'Saving...'; msg.style.color = 'var(--primary)';
-
-  try {
-    let finalImg = imageUrl;
-    if (id) {
-      // Update city
-      const pr = await fetch(`/admin/cities/${id}`, {
-        method:'PUT', credentials:'include',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ name, image_url: finalImg, sort_order: sortOrder, active })
-      });
-      if (!pr.ok) throw new Error(await pr.text());
-      // Upload image file if selected
-      if (file) {
-        const fd = new FormData(); fd.append('file', file);
-        const ir = await fetch(`/admin/cities/${id}/upload-image`, { method:'POST', credentials:'include', body:fd });
-        if (ir.ok) { const ud = await ir.json(); finalImg = ud.image_url;
-          await fetch(`/admin/cities/${id}`, {method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image_url:finalImg})}); }
-      }
-      msg.textContent = '✓ City updated'; msg.style.color = 'green';
-    } else {
-      // Create city
-      const cr = await fetch('/admin/cities', {
-        method:'POST', credentials:'include',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ name, image_url: finalImg, sort_order: sortOrder, active })
-      });
-      if (!cr.ok) throw new Error(await cr.text());
-      const res = await cr.json();
-      if (file && res.id) {
-        const fd = new FormData(); fd.append('file', file);
-        const ir = await fetch(`/admin/cities/${res.id}/upload-image`, { method:'POST', credentials:'include', body:fd });
-        if (ir.ok) { const ud = await ir.json();
-          await fetch(`/admin/cities/${res.id}`, {method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image_url:ud.image_url})}); }
-      }
-      msg.textContent = '✓ City added'; msg.style.color = 'green';
-    }
-    await loadCities();
-    setTimeout(closeCityModal, 900);
-  } catch(e) {
-    msg.textContent = '✗ ' + (e.message || 'Failed'); msg.style.color = 'red';
-  }
-}
-
-async function deleteCity(id, name) {
-  if (!confirm(`Delete city "${name}"? This will remove the city image from the home screen.`)) return;
-  try {
-    const r = await fetch(`/admin/cities/${id}`, {method:'DELETE', credentials:'include'});
-    if (!r.ok) throw new Error(await r.text());
-    await loadCities();
-  } catch(e) { alert('Delete failed: ' + e.message); }
-}
-
-function uploadCityImageQuick(id) {
-  const input = document.createElement('input');
-  input.type = 'file'; input.accept = 'image/*';
-  input.onchange = async () => {
-    const f = input.files[0]; if (!f) return;
-    const fd = new FormData(); fd.append('file', f);
-    await fetch(`/admin/cities/${id}/upload-image`, { method:'POST', credentials:'include', body:fd });
-    await loadCities();
+function previewAdminBannerImage(input) {
+  if (!input.files || !input.files[0]) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const prev = document.getElementById('abm_img_preview');
+    prev.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover">`;
   };
-  input.click();
+  reader.readAsDataURL(input.files[0]);
 }
+
+function editAdminBanner(data) {
+  openAdminBannerModal(data);
+}
+
+async function saveAdminBanner() {
+  const id       = document.getElementById('abm_id').value.trim();
+  const title    = document.getElementById('abm_title_input').value.trim();
+  const subtitle = document.getElementById('abm_subtitle').value.trim();
+  const linkUrl  = document.getElementById('abm_link_url').value.trim();
+  const sort     = parseInt(document.getElementById('abm_sort').value) || 0;
+  const isActive = document.getElementById('abm_active').value === 'true';
+  const fileInput = document.getElementById('abm_image_file');
+
+  // Resolve image: uploaded file → base64, else URL field
+  let imageUrl = document.getElementById('abm_image_url').value.trim();
+  if (fileInput.files && fileInput.files[0]) {
+    imageUrl = await new Promise(res => {
+      const r = new FileReader();
+      r.onload = e => res(e.target.result);
+      r.readAsDataURL(fileInput.files[0]);
+    });
+  }
+
+  const payload = { title, subtitle, image_url: imageUrl, link_url: linkUrl, sort_order: sort, is_active: isActive };
+  try {
+    if (id) {
+      await fetchJSON(`/admin/banners/${id}`, { method:'PUT', body: JSON.stringify(payload) });
+      showToast('Banner updated!', 'success');
+    } else {
+      await fetchJSON('/admin/banners', { method:'POST', body: JSON.stringify(payload) });
+      showToast('Banner created!', 'success');
+    }
+    closeAdminBannerModal();
+    loadAdminBanners();
+  } catch(e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteAdminBanner(id) {
+  if (!confirm('Delete this banner?')) return;
+  try {
+    await fetchJSON(`/admin/banners/${id}`, { method:'DELETE' });
+    showToast('Banner deleted', 'success');
+    loadAdminBanners();
+  } catch(e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
 
 // ════════════════════════════════════════
 // DEFAULT IMAGES JS

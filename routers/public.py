@@ -926,3 +926,22 @@ def get_default_images():
         "offer":   doc.get("offer", ""),
         "city":    doc.get("city", ""),
     }
+
+# ─── Admin Banners (public - for Flutter app home screen) ─────────────────────
+@router.get("/admin-banners")
+def get_admin_banners_public():
+    """Return active admin banners for the app home screen."""
+    docs = list(db.admin_banners.find({"is_active": True}).sort("sort_order", 1))
+    result = []
+    for d in docs:
+        img = d.get("image_url", "") or d.get("image", "")
+        result.append({
+            "id":         str(d["_id"]),
+            "title":      d.get("title", ""),
+            "subtitle":   d.get("subtitle", ""),
+            "image":      img,
+            "image_url":  img,
+            "link_url":   d.get("link_url", ""),
+            "sort_order": d.get("sort_order", 0),
+        })
+    return result
