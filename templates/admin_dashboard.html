@@ -835,12 +835,15 @@ tr:hover td{background:#f7faf8;}
         <input type="hidden" id="abm_id">
         <div class="mb-3">
           <label class="form-label fw-semibold">Banner Image</label>
-          <div id="abm_img_preview" style="width:100%;height:160px;background:#f5f5f5;border-radius:10px;overflow:hidden;margin-bottom:10px;display:flex;align-items:center;justify-content:center;">
+          <div id="abm_img_preview" style="width:100%;aspect-ratio:1080/420;background:#f5f5f5;border-radius:10px;overflow:hidden;margin-bottom:6px;display:flex;align-items:center;justify-content:center;">
             <span style="color:#aaa;font-size:13px">No image selected</span>
+          </div>
+          <div style="font-size:11px;color:var(--primary);margin-bottom:8px;font-weight:600">
+            <i class="fas fa-info-circle"></i> Recommended: <strong>1080 × 420 px</strong> (2.57:1 ratio). Image will be cropped to fit.
           </div>
           <input type="text" id="abm_image_url" class="form-control mb-2" placeholder="Paste image URL (https://...)">
           <input type="file" id="abm_image_file" accept="image/*" class="form-control mb-2" onchange="previewAdminBannerImage(this)">
-          <div style="font-size:11px;color:var(--muted)">Paste a URL <strong>or</strong> upload a file. Uploaded images are stored as base64.</div>
+          <div style="font-size:11px;color:var(--muted)">Paste a URL <strong>or</strong> upload a file.</div>
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Title</label>
@@ -929,8 +932,11 @@ tr:hover td{background:#f7faf8;}
       <!-- City -->
       <div class="card" style="padding:20px">
         <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-city"></i> Default City Image</h3>
-        <div id="di_city_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
+        <div id="di_city_preview" style="width:100%;aspect-ratio:3/2;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:6px;display:flex;align-items:center;justify-content:center;">
           <span style="color:#aaa;font-size:13px">No image set</span>
+        </div>
+        <div style="font-size:11px;color:var(--primary);margin-bottom:8px;font-weight:600">
+          <i class="fas fa-info-circle"></i> Recommended: <strong>1080 × 720 px</strong> (3:2 ratio).
         </div>
         <input type="text" id="di_city_url" placeholder="Paste image URL..." class="form-control mb-2">
         <input type="file" id="di_city_file" accept="image/*" class="form-control mb-2">
@@ -4884,7 +4890,7 @@ function openAdminBannerModal(data) {
   const img = data?.image_url || '';
   const prev = document.getElementById('abm_img_preview');
   prev.innerHTML = img
-    ? `<img src="${img}" style="width:100%;height:100%;object-fit:cover">`
+    ? `<img src="${img}" style="width:100%;height:100%;object-fit:cover;object-position:center">`
     : '<span style="color:#aaa;font-size:13px">No image selected</span>';
   document.getElementById('adminBannerModal').style.display = 'flex';
 }
@@ -4899,7 +4905,7 @@ function previewAdminBannerImage(input) {
   const reader = new FileReader();
   reader.onload = e => {
     const prev = document.getElementById('abm_img_preview');
-    prev.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover">`;
+    prev.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;object-position:center">`;
   };
   reader.readAsDataURL(input.files[0]);
 }
@@ -4973,7 +4979,7 @@ async function loadDefaultImages() {
       if (inputEl) inputEl.value = url;
       if (preview) {
         preview.innerHTML = url
-          ? `<img src="${url}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.innerHTML='<span style=color:#aaa;font-size:13px>Failed to load</span>'">`
+          ? `<img src="${url}" style="width:100%;height:100%;object-fit:cover;object-position:center" onerror="this.parentElement.innerHTML='<span style=color:#aaa;font-size:13px>Failed to load</span>'">`
           : '<span style="color:#aaa;font-size:13px">No image set</span>';
       }
     }
