@@ -2570,25 +2570,68 @@ def admin_toggle_banner(bid: str, a=Depends(get_current_admin)):
 
 @router.get("/default-images")
 def admin_get_default_images(a=Depends(get_current_admin)):
-    doc = db.settings.find_one({"_type": "default_images"})
-    if not doc:
-        return {"store": "", "product": "", "offer": "", "city": ""}
+    doc = db.settings.find_one({"_type": "default_images"}) or {}
+    def _to_list(val):
+        """Normalise legacy single-string or list → list of non-empty http URLs."""
+        if isinstance(val, list):
+            return [v for v in val if isinstance(v, str) and v.startswith("http")]
+        if isinstance(val, str) and val.startswith("http"):
+            return [val]
+        return []
     return {
-        "store":   doc.get("store", ""),
-        "product": doc.get("product", ""),
-        "offer":   doc.get("offer", ""),
-        "city":    doc.get("city", ""),
+        "store":   _to_list(doc.get("store",   doc.get("store_images",   []))),
+        "product": _to_list(doc.get("product", doc.get("product_images", []))),
+        "offer":   _to_list(doc.get("offer",   doc.get("offer_images",   []))),
+        "city":    _to_list(doc.get("city",    doc.get("city_images",    []))),
     }
 
 
 @router.put("/default-images/urls")
 def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
+    """Add a URL to the array for a given type.
+    Body: { "type": "store"|"product"|"offer"|"city", "url": "https://..." }
+    Also supports bulk legacy format: { "store": "url", ... }
+    """
+    action = body.get("action", "add")  # "add" or "remove"
+    img_type = body.get("type", "")
+    url = (body.get("url") or "").strip()
+
+    if img_type and url and img_type in ["store", "product", "offer", "city"]:
+        if action == "remove":
+            db.settings.update_one(
+                {"_type": "default_images"},
+                {"$pull": {img_type: url}},
+                upsert=True
+            )
+        else:
+            db.settings.update_one(
+                {"_type": "default_images"},
+                {"$addToSet": {img_type: url}},
+                upsert=True
+            )
+        return {"ok": True}
+
+    # Legacy bulk format fallback
     update = {}
     for field in ["store", "product", "offer", "city"]:
-        if field in body:
-            update[field] = body[field]
+        if field in body and isinstance(body[field], str) and body[field].startswith("http"):
+            update[field] = [body[field]]
     if update:
         db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
+    return {"ok": True}
+
+@router.delete("/default-images/url")
+def admin_remove_default_image_url(body: dict, a=Depends(get_current_admin)):
+    """Remove a single URL from a type array."""
+    img_type = body.get("type", "")
+    url = (body.get("url") or "").strip()
+    if not img_type or not url:
+        raise HTTPException(status_code=400, detail="type and url required")
+    db.settings.update_one(
+        {"_type": "default_images"},
+        {"$pull": {img_type: url}},
+        upsert=True
+    )
     return {"ok": True}
 
 
@@ -2632,5 +2675,9 @@ async def admin_update_default_images(
         update[field] = saved_value
 
     if update:
-        db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
-    return {"ok": True}
+        # Append each uploaded image URL to the array (don't overwrite)
+        push_ops = {"$addToSet": {}}
+        for field, val in update.items():
+            push_ops["$addToSet"][field] = val
+        db.settings.update_one({"_type": "default_images"}, push_ops, upsert=True)
+    return {"ok": True, "uploaded": list(update.keys())}

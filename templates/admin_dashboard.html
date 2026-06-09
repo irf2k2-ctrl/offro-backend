@@ -885,68 +885,107 @@ tr:hover td{background:#f7faf8;}
       <h2><i class="fas fa-image"></i> Default Images</h2>
       <button class="btn btn-secondary" onclick="loadDefaultImages()"><i class="fas fa-sync-alt"></i> Refresh</button>
     </div>
-    <p style="color:var(--muted);font-size:13px;margin-bottom:20px;">
-      Fallback images used when merchants don't upload their own. Paste a public HTTPS URL or upload a file for each type.
-      <strong style="color:var(--primary)">Use public image URLs (not base64) for best performance.</strong>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:6px;">
+      Fallback images used when merchants don't upload their own. Add multiple images per type — the app picks one randomly and rotates every 2 minutes.
+      <strong style="color:var(--primary)">Use public HTTPS URLs or upload files.</strong>
     </p>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">
-      <!-- Store -->
-      <div class="card" style="padding:20px">
-        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-store"></i> Default Store Image</h3>
-        <div id="di_store_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
-          <span style="color:#aaa;font-size:13px">No image set</span>
+    <div id="di_msg" style="margin-bottom:14px;font-weight:600;font-size:13px"></div>
+
+    <!-- One table-card per type -->
+    <div style="display:flex;flex-direction:column;gap:24px">
+
+      <!-- STORE -->
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--sidebar)">
+          <span style="color:#fff;font-weight:700;font-size:14px"><i class="fas fa-store me-2"></i>Default Store Images</span>
+          <span id="di_store_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0 images</span>
         </div>
-        <input type="text" id="di_store_url" placeholder="Paste image URL..." class="form-control mb-2">
-        <input type="file" id="di_store_file" accept="image/*" class="form-control mb-2">
-        <div style="display:flex;gap:8px">
-          <button class="btn" onclick="saveDiUrl('store')">Save URL</button>
-          <button class="btn btn-secondary" onclick="saveDiFile('store')">Upload File</button>
-        </div>
-      </div>
-      <!-- Product -->
-      <div class="card" style="padding:20px">
-        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-box"></i> Default Product Image</h3>
-        <div id="di_product_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
-          <span style="color:#aaa;font-size:13px">No image set</span>
-        </div>
-        <input type="text" id="di_product_url" placeholder="Paste image URL..." class="form-control mb-2">
-        <input type="file" id="di_product_file" accept="image/*" class="form-control mb-2">
-        <div style="display:flex;gap:8px">
-          <button class="btn" onclick="saveDiUrl('product')">Save URL</button>
-          <button class="btn btn-secondary" onclick="saveDiFile('product')">Upload File</button>
-        </div>
-      </div>
-      <!-- Offer -->
-      <div class="card" style="padding:20px">
-        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-percent"></i> Default Offer Image</h3>
-        <div id="di_offer_preview" style="width:100%;height:140px;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center;">
-          <span style="color:#aaa;font-size:13px">No image set</span>
-        </div>
-        <input type="text" id="di_offer_url" placeholder="Paste image URL..." class="form-control mb-2">
-        <input type="file" id="di_offer_file" accept="image/*" class="form-control mb-2">
-        <div style="display:flex;gap:8px">
-          <button class="btn" onclick="saveDiUrl('offer')">Save URL</button>
-          <button class="btn btn-secondary" onclick="saveDiFile('offer')">Upload File</button>
+        <table class="table table-sm mb-0" id="di_store_table">
+          <thead style="background:#f8f9fa"><tr>
+            <th style="width:70px">Preview</th>
+            <th>Image URL</th>
+            <th style="width:90px">Action</th>
+          </tr></thead>
+          <tbody id="di_store_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+        </table>
+        <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <input type="text" id="di_store_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste image URL (https://...)">
+          <input type="file" id="di_store_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
+          <button class="btn" onclick="diAddUrl('store')"><i class="fas fa-plus me-1"></i>Add URL</button>
+          <button class="btn btn-secondary" onclick="diUploadFile('store')"><i class="fas fa-upload me-1"></i>Upload</button>
         </div>
       </div>
-      <!-- City -->
-      <div class="card" style="padding:20px">
-        <h3 style="margin-bottom:12px;color:var(--primary);font-size:15px"><i class="fas fa-city"></i> Default City Image</h3>
-        <div id="di_city_preview" style="width:100%;aspect-ratio:3/2;background:#f5f5f5;border-radius:12px;overflow:hidden;margin-bottom:6px;display:flex;align-items:center;justify-content:center;">
-          <span style="color:#aaa;font-size:13px">No image set</span>
+
+      <!-- PRODUCT -->
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--sidebar)">
+          <span style="color:#fff;font-weight:700;font-size:14px"><i class="fas fa-box me-2"></i>Default Product Images</span>
+          <span id="di_product_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0 images</span>
         </div>
-        <div style="font-size:11px;color:var(--primary);margin-bottom:8px;font-weight:600">
-          <i class="fas fa-info-circle"></i> Recommended: <strong>1080 × 720 px</strong> (3:2 ratio).
-        </div>
-        <input type="text" id="di_city_url" placeholder="Paste image URL..." class="form-control mb-2">
-        <input type="file" id="di_city_file" accept="image/*" class="form-control mb-2">
-        <div style="display:flex;gap:8px">
-          <button class="btn" onclick="saveDiUrl('city')">Save URL</button>
-          <button class="btn btn-secondary" onclick="saveDiFile('city')">Upload File</button>
+        <table class="table table-sm mb-0" id="di_product_table">
+          <thead style="background:#f8f9fa"><tr>
+            <th style="width:70px">Preview</th>
+            <th>Image URL</th>
+            <th style="width:90px">Action</th>
+          </tr></thead>
+          <tbody id="di_product_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+        </table>
+        <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <input type="text" id="di_product_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste image URL (https://...)">
+          <input type="file" id="di_product_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
+          <button class="btn" onclick="diAddUrl('product')"><i class="fas fa-plus me-1"></i>Add URL</button>
+          <button class="btn btn-secondary" onclick="diUploadFile('product')"><i class="fas fa-upload me-1"></i>Upload</button>
         </div>
       </div>
+
+      <!-- OFFER -->
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--sidebar)">
+          <span style="color:#fff;font-weight:700;font-size:14px"><i class="fas fa-percent me-2"></i>Default Offer Images</span>
+          <span id="di_offer_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0 images</span>
+        </div>
+        <table class="table table-sm mb-0" id="di_offer_table">
+          <thead style="background:#f8f9fa"><tr>
+            <th style="width:70px">Preview</th>
+            <th>Image URL</th>
+            <th style="width:90px">Action</th>
+          </tr></thead>
+          <tbody id="di_offer_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+        </table>
+        <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <input type="text" id="di_offer_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste image URL (https://...)">
+          <input type="file" id="di_offer_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
+          <button class="btn" onclick="diAddUrl('offer')"><i class="fas fa-plus me-1"></i>Add URL</button>
+          <button class="btn btn-secondary" onclick="diUploadFile('offer')"><i class="fas fa-upload me-1"></i>Upload</button>
+        </div>
+      </div>
+
+      <!-- CITY -->
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--sidebar)">
+          <span style="color:#fff;font-weight:700;font-size:14px"><i class="fas fa-city me-2"></i>Default City Images</span>
+          <span id="di_city_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0 images</span>
+        </div>
+        <div style="padding:6px 16px 4px;background:#e8f5ee;font-size:11px;color:var(--primary);font-weight:600">
+          <i class="fas fa-info-circle me-1"></i>Recommended: <strong>1080 × 720 px</strong> (3:2). Hero background on app home screen.
+        </div>
+        <table class="table table-sm mb-0" id="di_city_table">
+          <thead style="background:#f8f9fa"><tr>
+            <th style="width:70px">Preview</th>
+            <th>Image URL</th>
+            <th style="width:90px">Action</th>
+          </tr></thead>
+          <tbody id="di_city_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+        </table>
+        <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <input type="text" id="di_city_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste image URL (https://...)">
+          <input type="file" id="di_city_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
+          <button class="btn" onclick="diAddUrl('city')"><i class="fas fa-plus me-1"></i>Add URL</button>
+          <button class="btn btn-secondary" onclick="diUploadFile('city')"><i class="fas fa-upload me-1"></i>Upload</button>
+        </div>
+      </div>
+
     </div>
-    <div id="di_msg" style="margin-top:16px;color:green;font-weight:600;font-size:14px"></div>
   </div>
 
 
@@ -4967,43 +5006,86 @@ async function deleteAdminBanner(id) {
 // ════════════════════════════════════════
 // DEFAULT IMAGES JS
 // ════════════════════════════════════════
+// ════════════════════════════════════════
+// DEFAULT IMAGES — multi-image table UI
+// ════════════════════════════════════════
 async function loadDefaultImages() {
   try {
     const r = await fetch('/admin/default-images', {credentials:'include'});
     if (!r.ok) throw new Error(await r.text());
     const d = await r.json();
     for (const type of ['store', 'product', 'offer', 'city']) {
-      const url = d[type] || '';
-      const inputEl = document.getElementById(`di_${type}_url`);
-      const preview = document.getElementById(`di_${type}_preview`);
-      if (inputEl) inputEl.value = url;
-      if (preview) {
-        preview.innerHTML = url
-          ? `<img src="${url}" style="width:100%;height:100%;object-fit:cover;object-position:center" onerror="this.parentElement.innerHTML='<span style=color:#aaa;font-size:13px>Failed to load</span>'">`
-          : '<span style="color:#aaa;font-size:13px">No image set</span>';
-      }
+      const urls = Array.isArray(d[type]) ? d[type] : (d[type] ? [d[type]] : []);
+      _renderDiTable(type, urls);
     }
   } catch(e) { console.error('Default images load failed', e); }
 }
 
-async function saveDiUrl(type) {
-  const url = (document.getElementById(`di_${type}_url`).value || '').trim();
+function _renderDiTable(type, urls) {
+  const tbody = document.getElementById(`di_${type}_body`);
+  const count = document.getElementById(`di_${type}_count`);
+  if (!tbody) return;
+  if (count) count.textContent = `${urls.length} image${urls.length !== 1 ? 's' : ''}`;
+  if (!urls.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = urls.map((url, i) => `
+    <tr>
+      <td style="padding:6px 10px;vertical-align:middle">
+        <img src="${url}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd"
+          onerror="this.style.display='none'">
+      </td>
+      <td style="padding:6px 10px;vertical-align:middle;word-break:break-all;font-size:12px;color:var(--muted)">
+        ${url}
+      </td>
+      <td style="padding:6px 10px;vertical-align:middle">
+        <button class="btn btn-sm" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px"
+          onclick="diRemoveUrl('${type}','${url.replace(/'/g,"\'")}')">
+          <i class="fas fa-trash-alt"></i>
+        </button>
+      </td>
+    </tr>`).join('');
+}
+
+async function diAddUrl(type) {
+  const inp = document.getElementById(`di_${type}_url_new`);
+  const url = (inp?.value || '').trim();
   const msg = document.getElementById('di_msg');
-  if (!url) { msg.textContent = 'Please paste a URL first'; msg.style.color='red'; return; }
+  if (!url || !url.startsWith('http')) {
+    msg.textContent = 'Please paste a valid https:// URL'; msg.style.color='red'; return;
+  }
   try {
     const r = await fetch('/admin/default-images/urls', {
       method:'PUT', credentials:'include',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ [type]: url })
+      body: JSON.stringify({ type, url, action:'add' })
     });
     if (!r.ok) throw new Error(await r.text());
-    msg.textContent = `✓ Default ${type} image URL saved`; msg.style.color='green';
+    msg.textContent = `✓ Added to ${type} images`; msg.style.color='green';
+    if (inp) inp.value = '';
     loadDefaultImages();
-  } catch(e) { msg.textContent = '✗ Failed: ' + e.message; msg.style.color='red'; }
+  } catch(e) { msg.textContent = '✗ ' + e.message; msg.style.color='red'; }
 }
 
-async function saveDiFile(type) {
-  const file = document.getElementById(`di_${type}_file`).files[0];
+async function diRemoveUrl(type, url) {
+  if (!confirm(`Remove this image from ${type}?`)) return;
+  const msg = document.getElementById('di_msg');
+  try {
+    const r = await fetch('/admin/default-images/urls', {
+      method:'PUT', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ type, url, action:'remove' })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    msg.textContent = `✓ Removed from ${type} images`; msg.style.color='green';
+    loadDefaultImages();
+  } catch(e) { msg.textContent = '✗ ' + e.message; msg.style.color='red'; }
+}
+
+async function diUploadFile(type) {
+  const fileInput = document.getElementById(`di_${type}_file_new`);
+  const file = fileInput?.files[0];
   const msg  = document.getElementById('di_msg');
   if (!file) { msg.textContent = 'Please select a file first'; msg.style.color='red'; return; }
   const fd = new FormData();
@@ -5012,10 +5094,15 @@ async function saveDiFile(type) {
     msg.textContent = 'Uploading...'; msg.style.color='var(--primary)';
     const r = await fetch('/admin/default-images', { method:'PUT', credentials:'include', body:fd });
     if (!r.ok) throw new Error(await r.text());
-    msg.textContent = `✓ Default ${type} image uploaded`; msg.style.color='green';
+    msg.textContent = `✓ Image uploaded and added to ${type}`; msg.style.color='green';
+    if (fileInput) fileInput.value = '';
     loadDefaultImages();
   } catch(e) { msg.textContent = '✗ ' + (e.message || 'Upload failed'); msg.style.color='red'; }
 }
+
+// Legacy aliases (not used by new UI but kept for safety)
+function saveDiUrl(type) { diAddUrl(type); }
+function saveDiFile(type) { diUploadFile(type); }
 
 </script>
 </body>

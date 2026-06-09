@@ -917,27 +917,24 @@ def get_gift_vouchers_public():
 @router.get("/default-images")
 def get_default_images():
     """Return default/fallback images configured by admin.
-    Only returns HTTP/HTTPS URLs — strips base64 data URLs since
-    Flutter CachedNetworkImage cannot render them."""
-    doc = db.settings.find_one({"_type": "default_images"})
-    if not doc:
-        return {"store": "", "product": "", "offer": "", "city": ""}
+    Returns lists of HTTP/HTTPS URLs for each type — strips base64.
+    Flutter picks a random one client-side and rotates every 2 minutes.
+    """
+    doc = db.settings.find_one({"_type": "default_images"}) or {}
 
-    def _safe_url(val: str) -> str:
-        """Return val only if it's a real http(s) URL, else empty string."""
-        v = (val or "").strip()
-        if v.startswith("http://") or v.startswith("https://"):
-            return v
-        # base64 data URL — not renderable by CachedNetworkImage
-        if v.startswith("data:"):
-            return ""
-        return ""
+    def _safe_list(val) -> list:
+        """Normalise legacy single-string or list → list of valid http(s) URLs."""
+        if isinstance(val, list):
+            return [v for v in val if isinstance(v, str) and v.startswith("http")]
+        if isinstance(val, str) and val.startswith("http"):
+            return [val]
+        return []
 
     return {
-        "store":   _safe_url(doc.get("store", "")),
-        "product": _safe_url(doc.get("product", "")),
-        "offer":   _safe_url(doc.get("offer", "")),
-        "city":    _safe_url(doc.get("city", "")),
+        "store":   _safe_list(doc.get("store",   doc.get("store_images",   []))),
+        "product": _safe_list(doc.get("product", doc.get("product_images", []))),
+        "offer":   _safe_list(doc.get("offer",   doc.get("offer_images",   []))),
+        "city":    _safe_list(doc.get("city",    doc.get("city_images",    []))),
     }
 
 # ─── Admin Banners (public - for Flutter app home screen) ─────────────────────
