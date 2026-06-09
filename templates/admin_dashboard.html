@@ -1092,6 +1092,7 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 let accountsList=[], _filteredAccounts=[], _acctPage=1;
+var _adminBannersList = [];  // Admin Banners
 let merchantsList=[], allStores=[], categoriesList=[], allUsers=[];
 let storeModal, qrModal, userHistoryModal, adjustModal_inst;
 let _ratingsCache=[], _ratingsSearch='';
@@ -4806,13 +4807,10 @@ async function toggleAccountStatus(accountId, currentStatus) {
 
 
 // ════════════════════════════════════════
-async 
 
 // ════════════════════════════════════════════════════════
 // ADMIN BANNERS JS
 // ════════════════════════════════════════════════════════
-let _adminBannersList = [];
-
 async function loadAdminBanners() {
   const tbody = document.getElementById('admin_banners_body');
   tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>';
