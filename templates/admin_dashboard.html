@@ -3182,7 +3182,7 @@ async function loadGiftCards() {
       }
       // ISSUE 1 FIX: gift_vouchers with source='merchant' are approved merchant products
       // — they must show as Merchant, not Admin, in the creator badge
-      const realSource = (v.source === 'merchant') ? 'merchant' : 'admin';
+      const realSource = v._collection === 'products' ? 'products' : (v.source === 'merchant') ? 'merchant' : 'admin';
       return {
         _id:        v.id || v._id,
         _source:    realSource,
@@ -3199,6 +3199,11 @@ async function loadGiftCards() {
         merchant_phone: v.merchant_phone || '',
         created_at: v.created_at || '',
         _raw: v,
+        // product-specific fields
+        price:       v.price || '',
+        discount:    v.discount || '',
+        category:    v.category || '',
+        description: v.description || '',
       };
     });
 
@@ -3347,7 +3352,8 @@ function renderVoucherZone() {
         + `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:none;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`
       : `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`;
 
-    const isAdmin = r._source === 'admin';
+    const isAdmin = r._source === 'admin' || r._source === 'products';
+    const isProduct = r._source === 'products';
     // ISSUE 1 FIX: 3-way creator badge
     // - pureAdmin: Admin created, no merchant link → show Admin only
     // - adminLinked: Admin created, linked to merchant → show Admin + 🔗 Merchant
@@ -3355,7 +3361,9 @@ function renderVoucherZone() {
     const phoneDisplay = r.merchant_phone ? `<div style="font-size:10px;color:var(--muted);font-family:monospace;margin-top:1px">📞 ${r.merchant_phone}</div>` : '';
     const pureAdmin   = isAdmin && !r.merchant_name;
     const adminLinked = isAdmin && r.merchant_name;
-    const creatorBadge = pureAdmin
+    const creatorBadge = isProduct
+      ? `<span style="background:#f0e8fe;color:#6b21a8;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-box" style="font-size:9px"></i> Products DB</span>`
+      : pureAdmin
       ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>`
       : adminLinked
       ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>
@@ -3383,16 +3391,24 @@ function renderVoucherZone() {
     // Strip heavy base64 logo + _raw before embedding in onclick attribute
     const _safeR = Object.assign({}, r, {logo: '', _raw: null});
     const viewJson = JSON.stringify(_safeR).replace(/"/g,'&quot;');
+    // Product-specific subtitle (price, category, discount)
+    const productSub = isProduct
+      ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">` +
+        (r.price ? `₹${r.price} ` : '') +
+        (r.discount ? `• ${r.discount}% OFF ` : '') +
+        (r.category ? `• ${r.category}` : '') +
+        `</div>`
+      : '';
     return `<tr>
       <td>${logoHtml}</td>
-      <td><strong style="font-size:13px">${r.title||'—'}</strong></td>
+      <td><strong style="font-size:13px">${r.title||'—'}</strong>${productSub}<div style="font-size:11px;color:var(--muted);margin-top:1px">${r.text||''}</div></td>
       <td>${creatorBadge}</td>
       <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
       <td>${statusBadge}</td>
       <td>
         <button class="btn-o me-1" onclick='openVZViewModal(${viewJson})'>View</button>
         ${approveBtn}
-        <button class="btn-o" style="border:none;padding:4px 8px" onclick='openVZMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>
+        ${!isProduct ? `<button class="btn-o" style="border:none;padding:4px 8px" onclick='openVZMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>` : ''}
       </td>
       <td style="font-size:11px;color:var(--muted);white-space:nowrap">${_fmtVZDate(r.created_at)}</td>
     </tr>`;

@@ -1290,22 +1290,23 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
 
 @router.get("/gift-vouchers")
 def list_gift_vouchers(a=Depends(get_current_admin)):
-    """List all gift vouchers shown in the app home screen."""
-    docs = list(db.gift_vouchers.find().sort("_id", -1))
+    """List all gift vouchers + products shown in the app home screen."""
     result = []
+
+    # ── 1. gift_vouchers collection (admin/merchant created cards) ──────────
+    docs = list(db.gift_vouchers.find().sort("_id", -1))
     for v in docs:
         mid = v.get("merchant_id", "")
         merchant_name  = ""
         merchant_phone = ""
-        # ISSUE 1: Resolve merchant_name from merchant_id for admin-created products
         if mid:
             try:
-                m = (db.accounts.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1}) or db.merchants.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1}))
+                m = (db.accounts.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1}) or
+                     db.merchants.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1}))
                 if m:
                     merchant_name  = m.get("name", "")
                     merchant_phone = str(m.get("phone", ""))
             except: pass
-        # ISSUE 3: Return full ISO datetime so frontend can convert to IST
         ca = v.get("created_at")
         if isinstance(ca, datetime):
             created_at_iso = ca.strftime("%Y-%m-%dT%H:%M:%S")
@@ -1325,12 +1326,58 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             "from_date":         v.get("from_date", ""),
             "end_date":          v.get("end_date", ""),
             "created_at":        created_at_iso,
-            # ISSUE 1 FIX: expose source so dashboard knows admin vs merchant-approved
             "source":            v.get("source", "admin"),
             "source_voucher_id": v.get("source_voucher_id", ""),
-            # ISSUE 2 FIX: duration_days for edit modal pre-population
             "duration_days":     v.get("duration_days", 0),
+            "_collection":       "gift_vouchers",
         })
+
+    # ── 2. products collection (seeded/imported product catalogue) ──────────
+    product_docs = list(db.products.find().sort("_id", -1))
+    for p in product_docs:
+        pid = str(p["_id"])
+        # Build offer text from price + discount if available
+        price    = p.get("price", "")
+        discount = p.get("discount", "")
+        text_parts = []
+        if discount: text_parts.append(f"{discount}% OFF")
+        if price:    text_parts.append(f"₹{price}")
+        offer_text = p.get("offer_text") or p.get("text") or (", ".join(text_parts) if text_parts else "")
+        # Resolve image
+        logo = (p.get("logo") or p.get("image_url") or p.get("image") or
+                p.get("logo_url") or p.get("thumbnail") or p.get("img") or "")
+        ca = p.get("created_at")
+        if isinstance(ca, datetime):
+            created_at_iso = ca.strftime("%Y-%m-%dT%H:%M:%S")
+        else:
+            created_at_iso = str(ca or "")[:19]
+        result.append({
+            "id":                pid,
+            "title":             p.get("name") or p.get("title") or "",
+            "text":              offer_text,
+            "validity":          p.get("validity") or p.get("valid_till") or "",
+            "logo":              logo,
+            "store_id":          str(p.get("store_id", "")),
+            "merchant_id":       str(p.get("merchant_id", "")),
+            "merchant_name":     p.get("merchant_name") or p.get("store_name") or "",
+            "merchant_phone":    str(p.get("phone", "")),
+            "is_active":         p.get("is_active", True),
+            "from_date":         p.get("from_date") or p.get("start_date") or "",
+            "end_date":          p.get("end_date") or p.get("expiry") or "",
+            "created_at":        created_at_iso,
+            "source":            "products",
+            "source_voucher_id": "",
+            "duration_days":     int(p.get("duration_days") or 0),
+            "_collection":       "products",
+            # Extra product-specific fields for display
+            "price":             str(price),
+            "discount":          str(discount),
+            "description":       p.get("description", ""),
+            "category":          p.get("category", ""),
+        })
+
+    # Sort all by created_at descending
+    result.sort(key=lambda x: x.get("created_at",""), reverse=True)
     return result
 
 @router.post("/gift-vouchers")
