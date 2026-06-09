@@ -2600,13 +2600,37 @@ async def admin_update_default_images(
     city_file: UploadFile = File(None),
     a=Depends(get_current_admin),
 ):
+    """Upload default images. Saves Cloudinary URL if configured, else base64 fallback."""
+    import base64 as _b64mod, os as _di_os
     update = {}
     for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file)]:
-        if f and f.filename:
-            content = await f.read()
-            mime = f.content_type or "image/jpeg"
-            b64 = base64.b64encode(content).decode()
-            update[field] = f"data:{mime};base64,{b64}"
+        if not f or not f.filename:
+            continue
+        raw  = await f.read()
+        mime = f.content_type or "image/jpeg"
+        b64_str = _b64mod.b64encode(raw).decode()
+        b64_data = f"data:{mime};base64,{b64_str}"
+
+        # Try Cloudinary first (same as category image upload)
+        cloud  = _di_os.getenv("CLOUDINARY_CLOUD_NAME", "")
+        api_key= _di_os.getenv("CLOUDINARY_API_KEY", "")
+        secret = _di_os.getenv("CLOUDINARY_API_SECRET", "")
+        saved_value = b64_data  # fallback
+        if cloud and api_key and secret:
+            try:
+                cdn_url = _cloudinary_upload(b64_data, folder="offro/defaults")
+                if cdn_url and cdn_url.startswith("http"):
+                    saved_value = cdn_url
+                    print(f"[DEFAULT-IMG] {field} uploaded to Cloudinary: {cdn_url}")
+                else:
+                    print(f"[DEFAULT-IMG] Cloudinary returned no URL for {field}, falling back to base64")
+            except Exception as e:
+                print(f"[DEFAULT-IMG] Cloudinary upload failed for {field}: {e}, falling back to base64")
+        else:
+            print(f"[DEFAULT-IMG] Cloudinary not configured — saving {field} as base64 (size: {len(b64_data)} chars)")
+
+        update[field] = saved_value
+
     if update:
         db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
     return {"ok": True}

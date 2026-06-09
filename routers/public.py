@@ -916,15 +916,28 @@ def get_gift_vouchers_public():
 # ─── Default Images (fallback for stores/products/offers/cities) ──────────────
 @router.get("/default-images")
 def get_default_images():
-    """Return default/fallback images configured by admin."""
+    """Return default/fallback images configured by admin.
+    Only returns HTTP/HTTPS URLs — strips base64 data URLs since
+    Flutter CachedNetworkImage cannot render them."""
     doc = db.settings.find_one({"_type": "default_images"})
     if not doc:
         return {"store": "", "product": "", "offer": "", "city": ""}
+
+    def _safe_url(val: str) -> str:
+        """Return val only if it's a real http(s) URL, else empty string."""
+        v = (val or "").strip()
+        if v.startswith("http://") or v.startswith("https://"):
+            return v
+        # base64 data URL — not renderable by CachedNetworkImage
+        if v.startswith("data:"):
+            return ""
+        return ""
+
     return {
-        "store":   doc.get("store", ""),
-        "product": doc.get("product", ""),
-        "offer":   doc.get("offer", ""),
-        "city":    doc.get("city", ""),
+        "store":   _safe_url(doc.get("store", "")),
+        "product": _safe_url(doc.get("product", "")),
+        "offer":   _safe_url(doc.get("offer", "")),
+        "city":    _safe_url(doc.get("city", "")),
     }
 
 # ─── Admin Banners (public - for Flutter app home screen) ─────────────────────
