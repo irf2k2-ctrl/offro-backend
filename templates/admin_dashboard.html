@@ -1838,7 +1838,7 @@ async function openCreateStore(){
   document.getElementById("store_visit_points_primary").value="0";
   document.getElementById("store_image_b64").value="";
   document.getElementById("store_image_preview").style.display="none";
-  document.getElementById("store_new_in_town").checked=false;
+  // store_new_in_town removed
   document.getElementById("store_msg").innerText="";
   populateCategoryDropdown("");
   if (storeModal) storeModal.show();
@@ -1870,7 +1870,7 @@ async function openEditStore(id){
   document.getElementById("store_visit_points_primary").value=s.visit_points||0;
   document.getElementById("store_lat").value=s.lat||"";
   document.getElementById("store_lng").value=s.lng||"";
-  document.getElementById("store_new_in_town").checked=s.is_new_in_town||false;
+  // store_new_in_town removed (is_new_in_town preserved via backend)
   document.getElementById("store_badge").value=s.badge||s.store_badge||"";
   document.getElementById("store_image_b64").value="";
   if(s.image){let p=document.getElementById("store_image_preview");p.src=s.image;p.style.display="block";}
@@ -1900,7 +1900,7 @@ async function submitStore(){
     visit_points:document.getElementById("store_visit_points_primary").value===""?0:parseInt(document.getElementById("store_visit_points_primary").value),
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
-    is_new_in_town:document.getElementById("store_new_in_town").checked,
+    is_new_in_town:false,
     badge:document.getElementById("store_badge").value||null};
   // Only send merchant_id if selected (prevents overwriting with empty on edit)
   if(mid) payloadBase.merchant_id=mid;
@@ -4009,7 +4009,7 @@ async function saveStore() {
         image:        document.getElementById("store_image_url").value.trim(),
         image2:       document.getElementById("store_image2_url").value.trim(),
         badge:        document.getElementById("store_badge").value||null,
-        is_new_in_town: document.getElementById("store_new_in_town").checked,
+        is_new_in_town: false,
     };
     try {
         let url  = editId ? `/admin/stores/${editId}` : "/admin/stores";

@@ -1382,6 +1382,19 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             created_at_iso = ca.strftime("%Y-%m-%dT%H:%M:%S")
         else:
             created_at_iso = str(ca or "")[:19]
+        # Resolve merchant_name from accounts if merchant_id exists but name not stored
+        p_mid = str(p.get("merchant_id", ""))
+        p_merchant_name  = p.get("merchant_name") or p.get("store_name") or ""
+        p_merchant_phone = str(p.get("phone") or p.get("merchant_phone") or "")
+        if p_mid and not p_merchant_name:
+            try:
+                pm = (db.accounts.find_one({"_id": ObjectId(p_mid)}, {"name":1,"phone":1}) or
+                      db.merchants.find_one({"_id": ObjectId(p_mid)}, {"name":1,"phone":1}))
+                if pm:
+                    p_merchant_name  = pm.get("name", "")
+                    p_merchant_phone = str(pm.get("phone", ""))
+            except Exception:
+                pass
         result.append({
             "id":                pid,
             "title":             p.get("name") or p.get("title") or "",
@@ -1389,9 +1402,9 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             "validity":          p.get("validity") or p.get("valid_till") or "",
             "logo":              logo,
             "store_id":          str(p.get("store_id", "")),
-            "merchant_id":       str(p.get("merchant_id", "")),
-            "merchant_name":     p.get("merchant_name") or p.get("store_name") or "",
-            "merchant_phone":    str(p.get("phone", "")),
+            "merchant_id":       p_mid,
+            "merchant_name":     p_merchant_name,
+            "merchant_phone":    p_merchant_phone,
             "is_active":         p.get("is_active", True),
             "from_date":         p.get("from_date") or p.get("start_date") or "",
             "end_date":          p.get("end_date") or p.get("expiry") or "",
@@ -1534,6 +1547,16 @@ def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
             upd["duration_days"] = 0
     if "is_active" in data:
         upd["is_active"] = bool(data["is_active"])
+    # Resolve and store merchant_name + phone when merchant_id is updated
+    if "merchant_id" in upd and upd["merchant_id"]:
+        try:
+            pm = (db.accounts.find_one({"_id": ObjectId(upd["merchant_id"])}, {"name":1,"phone":1}) or
+                  db.merchants.find_one({"_id": ObjectId(upd["merchant_id"])}, {"name":1,"phone":1}))
+            if pm:
+                upd["merchant_name"]  = pm.get("name", "")
+                upd["merchant_phone"] = str(pm.get("phone", ""))
+        except Exception:
+            pass
     if not upd:
         raise HTTPException(400, "Nothing to update")
     db.products.update_one({"_id": ObjectId(pid)}, {"$set": upd})
