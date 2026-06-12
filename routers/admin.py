@@ -320,11 +320,30 @@ def update_terms(type: str, data: dict, a=Depends(get_current_admin)):
 
 @router.get("/merchants")
 def list_merchants(a=Depends(get_current_admin)):
-    # DEPRECATED: Use /accounts?role=merchant instead. Kept for store creation dropdown.
-    return [{"_id": str(m["_id"]), "name": m.get("name"), "phone": m.get("phone"),
-             "city": m.get("city"), "area": m.get("area"), "status": m.get("status", "active"),
-             "store_count": db.stores.count_documents({"merchant_id": str(m["_id"])})}
-            for m in db.accounts.find({"roles": "merchant"})]
+    """Return all accounts — used for store/product merchant dropdowns.
+    Includes any account that has the merchant role OR has at least one store."""
+    # Gather IDs of all accounts that have stores (even without merchant role)
+    store_merchant_ids = set(
+        str(s["merchant_id"]) for s in db.stores.find({}, {"merchant_id": 1})
+        if s.get("merchant_id")
+    )
+    result = []
+    for m in db.accounts.find().sort("created_at", -1):
+        mid_str = str(m["_id"])
+        roles   = m.get("roles", [])
+        is_merchant = "merchant" in roles or mid_str in store_merchant_ids
+        if not is_merchant:
+            continue
+        result.append({
+            "_id":         mid_str,
+            "name":        m.get("name", m.get("full_name", "")),
+            "phone":       m.get("phone", m.get("mobile_number", "")),
+            "city":        m.get("city", ""),
+            "area":        m.get("area", ""),
+            "status":      m.get("status", "active"),
+            "store_count": db.stores.count_documents({"merchant_id": mid_str}),
+        })
+    return result
 
 @router.put("/merchants/{id}")
 def update_merchant(id: str, data: dict, a=Depends(get_current_admin)):
@@ -743,6 +762,16 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     sid = str(result.inserted_id)
     qr = generate_qr_base64(sid)
     db.stores.update_one({"_id": result.inserted_id}, {"$set": {"qr_code": qr}})
+    # Auto-grant merchant role to the account when a store is created under them
+    try:
+        acct = db.accounts.find_one({"_id": ObjectId(mid)})
+        if acct:
+            roles = acct.get("roles", [])
+            if "merchant" not in roles:
+                roles.append("merchant")
+                db.accounts.update_one({"_id": ObjectId(mid)}, {"$set": {"roles": roles}})
+    except Exception:
+        pass
     return {"message": "Store created", "store_id": sid, "qr_code": qr}
 
 @router.get("/stores/slim")
@@ -1481,6 +1510,34 @@ def delete_gift_voucher(vid: str, a=Depends(get_current_admin)):
     """Delete a gift voucher."""
     db.gift_vouchers.delete_one({"_id": ObjectId(vid)})
     return {"message": "Deleted"}
+
+
+@router.put("/products/{pid}")
+def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
+    """Update a product card (from the products collection) via admin dashboard."""
+    try:
+        p = db.products.find_one({"_id": ObjectId(pid)})
+    except Exception:
+        raise HTTPException(400, "Invalid product id")
+    if not p:
+        raise HTTPException(404, "Product not found")
+    upd = {}
+    for field in ["title", "name", "text", "offer_text", "validity", "logo",
+                  "merchant_id", "store_id", "from_date", "end_date",
+                  "category", "description", "price", "discount"]:
+        if field in data:
+            upd[field] = (data[field] or "").strip() if isinstance(data[field], str) else data[field]
+    if "duration_days" in data:
+        try:
+            upd["duration_days"] = int(data["duration_days"]) if data["duration_days"] else 0
+        except (TypeError, ValueError):
+            upd["duration_days"] = 0
+    if "is_active" in data:
+        upd["is_active"] = bool(data["is_active"])
+    if not upd:
+        raise HTTPException(400, "Nothing to update")
+    db.products.update_one({"_id": ObjectId(pid)}, {"$set": upd})
+    return {"message": "Product updated"}
 
 
 # ===================== PROMO SLIDERS =====================

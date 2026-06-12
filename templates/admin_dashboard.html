@@ -1049,14 +1049,7 @@ tr:hover td{background:#f7faf8;}
               <option value="limited_offer">⏳ Limited Offer</option>
             </select>
           </div>
-          <div class="col-md-6 d-flex align-items-end">
-            <div class="form-check mb-1">
-              <input class="form-check-input" type="checkbox" id="store_new_in_town">
-              <label class="form-check-label" for="store_new_in_town" style="font-size:13px;font-weight:600;color:var(--primary);">
-                📍 Mark as "New In Town"
-              </label>
-            </div>
-          </div>
+          <!-- New In Town checkbox removed -->
         </div>
         <p id="store_msg" class="mt-3 mb-0" style="color:#c0392b;font-size:12px;"></p>
       </div>
@@ -3673,6 +3666,7 @@ async function deleteVZVoucher(id, source) {
 async function openGiftCardModal() {
   if (merchantsList.length === 0) await loadMerchants();
   document.getElementById("gc_id").value = "";
+  document.getElementById("gc_collection").value = "gift_vouchers";
   document.getElementById("gc_title").value = "";
   document.getElementById("gc_text").value = "";
   document.getElementById("gc_validity").value      = "";
@@ -3693,6 +3687,7 @@ async function openGiftCardModal() {
 async function editGiftCard(v) {
   if (merchantsList.length === 0) await loadMerchants();
   document.getElementById("gc_id").value       = v.id||v._id||"";
+  document.getElementById("gc_collection").value = v._collection || "gift_vouchers";
   document.getElementById("gc_title").value    = v.title||"";
   document.getElementById("gc_text").value     = v.text||"";
   document.getElementById("gc_from_date").value     = v.from_date||"";
@@ -3704,8 +3699,10 @@ async function editGiftCard(v) {
   } else {
     document.getElementById("gc_validity").value = v.validity||"";
   }
-  document.getElementById("gc_logo").value          = v.logo||"";
-  if (v.logo) { document.getElementById("gc_logo_img").src=v.logo; document.getElementById("gc_logo_preview").style.display="block"; }
+  // Restore full logo from map (stripped during list build for performance)
+  const _realLogo = _vzLogoMap?.[v._id] || _vzLogoMap?.[v.id] || v.logo || "";
+  document.getElementById("gc_logo").value          = _realLogo;
+  if (_realLogo) { document.getElementById("gc_logo_img").src=_realLogo; document.getElementById("gc_logo_preview").style.display="block"; }
   else { document.getElementById("gc_logo_preview").style.display="none"; document.getElementById("gc_logo_file").value=""; }
   document.getElementById("gc_active").checked = v.is_active !== false;
   document.getElementById("gc_msg").innerText  = "";
@@ -3781,9 +3778,16 @@ async function saveGiftCard() {
     end_date:      _gcTo,
     duration_days: _gcDays || undefined,
   };
+  const _col = document.getElementById("gc_collection")?.value || "gift_vouchers";
   try {
-    let url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
-    let meth = vid ? "PUT" : "POST";
+    let url, meth;
+    if (vid && _col === "products") {
+      url  = `/admin/products/${vid}`;
+      meth = "PUT";
+    } else {
+      url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
+      meth = vid ? "PUT" : "POST";
+    }
     let res  = await fetch(url, {method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
     if (!res.ok) { const d = await res.json(); document.getElementById("gc_msg").innerText = d.detail||"Error"; return; }
     gcModalInst.hide();
@@ -4098,6 +4102,7 @@ async function saveStore() {
       </div>
       <div class="modal-body">
         <input type="hidden" id="gc_id" value="">
+        <input type="hidden" id="gc_collection" value="gift_vouchers">
         <div class="mb-3">
           <label class="form-label fw-semibold">Title (e.g. "₹999 DEALS")</label>
           <input id="gc_title" class="form-control" placeholder="₹999 DEALS">
