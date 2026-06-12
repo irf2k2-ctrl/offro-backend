@@ -2088,65 +2088,7 @@ function downloadInvoicePdf(inv) {
     <div style="margin-top:24px"><span class="badge">● Paid</span></div>
     <p style="font-size:11px;color:#6b8c7e;margin-top:40px">OFFRO — Discover • Save • Earn | This is a computer-generated invoice.</p>
     <button onclick="window.print()" style="margin-top:16px;background:#3E5F55;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button>
-    
-<!-- Adjust Points Modal (used from Accounts section) -->
-<div class="modal fade" id="adjustModal" tabindex="-1">
-  <div class="modal-dialog modal-sm">
-    <div class="modal-content">
-      <div class="modal-header" style="background:var(--sidebar);color:#fff;border:none;padding:14px 18px;">
-        <h6 class="modal-title">Adjust Points — <span id="adjUserName"></span></h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="adj_user_id">
-        <div class="mb-3">
-          <label class="form-label">Type</label>
-          <select id="adj_type" class="form-select">
-            <option value="credit">➕ Add Points</option>
-            <option value="debit">➖ Deduct Points</option>
-          </select>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Points</label>
-          <input id="adj_points" type="number" class="form-control" placeholder="e.g. 100" min="1">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Note</label>
-          <input id="adj_note" class="form-control" placeholder="Reason...">
-        </div>
-        <p id="adj_msg" style="color:var(--danger);font-size:13px;"></p>
-      </div>
-      <div class="modal-footer" style="border:none;padding:10px 18px;">
-        <button class="btn-p" onclick="submitAdjustment()">Save</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- User History Modal (used from Accounts section) -->
-<div class="modal fade" id="userHistoryModal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header" style="background:var(--sidebar);color:#fff;border:none;padding:14px 18px;">
-        <h6 class="modal-title">Transaction History — <span id="histUserName"></span></h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body p-0">
-        <div class="d-flex gap-4 p-3" style="background:#f8fdf9;border-bottom:1px solid var(--border);">
-          <div><small style="color:var(--muted)">Visit Pts</small><br><strong id="histVisit">--</strong></div>
-          <div><small style="color:var(--muted)">Pool Pts</small><br><strong id="histPool">--</strong></div>
-          <div><small style="color:var(--muted)">Total</small><br><strong id="histTotal" style="color:var(--primary)">--</strong></div>
-        </div>
-        <div class="table-wrap" style="margin:0;border-radius:0;box-shadow:none;">
-          <table><thead><tr><th>Type</th><th>Description</th><th>Points</th><th>Date</th></tr></thead>
-          <tbody id="hist_table"></tbody></table>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-</body></html>`;
+    </body></html>`;
   w.document.write(html);
   w.document.close();
 }
@@ -2745,18 +2687,18 @@ async function lookupMerchantByPhone(val) {
   clearTimeout(_merchantLookupTimer);
   _merchantLookupTimer = setTimeout(async () => {
     try {
-      const r = await fetch(`/admin/merchants`, {credentials:'include'});
+      const r = await fetch(`/admin/accounts`, {credentials:'include'});
       if (!r.ok) { preview.textContent = ''; return; }
-      const merchants = await r.json();
-      const match = merchants.find(m => {
-        const mp = String(m.phone||'').replace(/\D/g,'').slice(-10);
+      const accounts = await r.json();
+      const match = accounts.find(a => {
+        const mp = String(a.mobile_number||a.phone||'').replace(/\D/g,'').slice(-10);
         return mp === digits;
       });
       if (match) {
-        preview.textContent = `✅ ${match.name}`;
+        preview.textContent = `✅ ${match.full_name||match.name||'Account found'}`;
         preview.style.color = 'var(--primary)';
       } else {
-        preview.textContent = '⚠️ Merchant not found — phone not registered';
+        preview.textContent = '⚠️ Account not found — phone not registered';
         preview.style.color = '#c0392b';
       }
     } catch { preview.textContent = ''; }
@@ -3748,7 +3690,8 @@ async function openGiftCardModal() {
   gcModalInst.show();
 }
 
-function editGiftCard(v) {
+async function editGiftCard(v) {
+  if (merchantsList.length === 0) await loadMerchants();
   document.getElementById("gc_id").value       = v.id||v._id||"";
   document.getElementById("gc_title").value    = v.title||"";
   document.getElementById("gc_text").value     = v.text||"";
@@ -5104,6 +5047,64 @@ async function diUploadFile(type) {
 // Legacy aliases (not used by new UI but kept for safety)
 function saveDiUrl(type) { diAddUrl(type); }
 function saveDiFile(type) { diUploadFile(type); }
+
+
+<!-- Adjust Points Modal -->
+<div class="modal fade" id="adjustModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header" style="background:var(--sidebar);color:#fff;border:none;padding:14px 18px;">
+        <h6 class="modal-title">Adjust Points — <span id="adjUserName"></span></h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="adj_user_id">
+        <div class="mb-3">
+          <label class="form-label">Type</label>
+          <select id="adj_type" class="form-select">
+            <option value="credit">➕ Add Points</option>
+            <option value="debit">➖ Deduct Points</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Points</label>
+          <input id="adj_points" type="number" class="form-control" placeholder="e.g. 100" min="1">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Note</label>
+          <input id="adj_note" class="form-control" placeholder="Reason...">
+        </div>
+        <p id="adj_msg" style="color:var(--danger);font-size:13px;"></p>
+      </div>
+      <div class="modal-footer" style="border:none;padding:10px 18px;">
+        <button class="btn-p" onclick="submitAdjustment()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- User History Modal -->
+<div class="modal fade" id="userHistoryModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header" style="background:var(--sidebar);color:#fff;border:none;padding:14px 18px;">
+        <h6 class="modal-title">Transaction History — <span id="histUserName"></span></h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="d-flex gap-4 p-3" style="background:#f8fdf9;border-bottom:1px solid var(--border);">
+          <div><small style="color:var(--muted)">Visit Pts</small><br><strong id="histVisit">--</strong></div>
+          <div><small style="color:var(--muted)">Pool Pts</small><br><strong id="histPool">--</strong></div>
+          <div><small style="color:var(--muted)">Total</small><br><strong id="histTotal" style="color:var(--primary)">--</strong></div>
+        </div>
+        <div class="table-wrap" style="margin:0;border-radius:0;box-shadow:none;">
+          <table><thead><tr><th>Type</th><th>Description</th><th>Points</th><th>Date</th></tr></thead>
+          <tbody id="hist_table"></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 </script>
 </body>

@@ -1454,9 +1454,15 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
 def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
     """Update an existing gift voucher."""
     upd = {}
-    for field in ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date", "duration_days"]:
+    _str_fields = ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date"]
+    for field in _str_fields:
         if field in data:
             upd[field] = (data[field] or "").strip()
+    if "duration_days" in data:
+        try:
+            upd["duration_days"] = int(data["duration_days"]) if data["duration_days"] else 0
+        except (TypeError, ValueError):
+            upd["duration_days"] = 0
     if "store_id" in upd and upd["store_id"] and "logo" not in upd:
         try:
             s = db.stores.find_one({"_id": ObjectId(upd["store_id"])}, {"store_image2":1,"image2":1})
