@@ -2702,6 +2702,9 @@ async function saveSlider() {
   const sid = document.getElementById("sl_id").value;
   const img = document.getElementById("sl_image_url").value.trim();
   if (!img) { document.getElementById("sl_msg").innerText = "Please upload a banner image first"; return; }
+  // Extract merchant name from the preview element (set by lookupMerchantByPhone)
+  const _slMerchPreview = document.getElementById('sl_merchant_name_preview')?.textContent || '';
+  const _slMerchName = _slMerchPreview.startsWith('✅ ') ? _slMerchPreview.slice(3).trim() : '';
   const data = {
     title:           document.getElementById("sl_title").value.trim(),
     image_url:       img,
@@ -2712,6 +2715,7 @@ async function saveSlider() {
     days:            parseInt(document.getElementById("sl_days")?.value)||30,
     end_date:        document.getElementById("sl_end_date")?.value || '',
     merchant_phone:  (document.getElementById("sl_merchant_phone")?.value || '').trim(),
+    merchant_name:   _slMerchName,
   };
   try {
     let url  = sid ? `/admin/promo-sliders/${sid}` : "/admin/promo-sliders";
@@ -3342,6 +3346,7 @@ function renderVoucherZone() {
     const adminLinked = isAdmin && r.merchant_name;
     const creatorBadge = isProduct
       ? `<span style="background:#f0e8fe;color:#6b21a8;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-box" style="font-size:9px"></i> Products DB</span>`
+        + (r.merchant_name ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;font-weight:600">${r.merchant_name}</div>${phoneDisplay}` : '')
       : pureAdmin
       ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>`
       : adminLinked

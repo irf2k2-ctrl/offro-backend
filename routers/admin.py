@@ -1572,6 +1572,21 @@ def list_promo_sliders(a=Depends(get_current_admin)):
     for d in docs:
         created = d.get("created_at", "")
         created_str = created.strftime("%d %b %Y %H:%M") if isinstance(created, datetime) else str(created)[:16]
+        # Resolve merchant_name on-the-fly if not stored but phone exists
+        _sld_merch_name  = d.get("merchant_name", "")
+        _sld_merch_phone = d.get("merchant_phone", "")
+        if _sld_merch_phone and not _sld_merch_name:
+            try:
+                _sma = db.accounts.find_one(
+                    {"$or": [{"phone": _sld_merch_phone}, {"mobile_number": _sld_merch_phone},
+                             {"phone": {"$regex": _sld_merch_phone + "$"}},
+                             {"mobile_number": {"$regex": _sld_merch_phone + "$"}}]},
+                    {"name": 1, "full_name": 1}
+                )
+                if _sma:
+                    _sld_merch_name = _sma.get("name") or _sma.get("full_name") or ""
+            except Exception:
+                pass
         result.append({
             "id":            str(d["_id"]),
             "_id":           str(d["_id"]),
@@ -1586,8 +1601,8 @@ def list_promo_sliders(a=Depends(get_current_admin)):
             "expires_at":    d.get("end_date", d.get("expires_at", "")),
             "duration_days": d.get("duration_days", d.get("days", "")),
             # merchant attribution
-            "merchant_name":  d.get("merchant_name", ""),
-            "merchant_phone": d.get("merchant_phone", ""),
+            "merchant_name":  _sld_merch_name,
+            "merchant_phone": _sld_merch_phone,
             "source":         d.get("source", "admin"),
             "source_banner_id": d.get("source_banner_id", ""),
             # audit
@@ -1642,6 +1657,20 @@ def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     if "merchant_phone" in data:
         raw_p = str(data["merchant_phone"] or "").strip()
         upd["merchant_phone"] = _re.sub(r'\D', '', raw_p)[-10:] if raw_p else ""
+    # Resolve merchant_name from phone if not explicitly provided (or empty)
+    _upd_phone = upd.get("merchant_phone", "")
+    if _upd_phone and not upd.get("merchant_name", "").strip():
+        try:
+            _ma2 = db.accounts.find_one(
+                {"$or": [{"phone": _upd_phone}, {"mobile_number": _upd_phone},
+                         {"phone": {"$regex": _upd_phone + "$"}},
+                         {"mobile_number": {"$regex": _upd_phone + "$"}}]},
+                {"name": 1, "full_name": 1}
+            )
+            if _ma2:
+                upd["merchant_name"] = _ma2.get("name") or _ma2.get("full_name") or ""
+        except Exception:
+            pass
     if "sort_order"    in data: upd["sort_order"]    = int(data["sort_order"])
     if "is_active"     in data: upd["is_active"]     = bool(data["is_active"])
     if "days"          in data: upd["duration_days"]  = int(data["days"])
