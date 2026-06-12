@@ -280,7 +280,7 @@ tr:hover td{background:#f7faf8;}
           <option value="draft">Draft</option>
         </select>
         <button class="btn-p" onclick="openCreateStore()">+ Create Store</button>
-        <button onclick="migrateStoreImages()" style="background:#fff;border:1px solid var(--primary);color:var(--primary);padding:7px 14px;border-radius:8px;font-size:13px;cursor:pointer;margin-left:8px;" title="Upload base64 images to Cloudinary CDN">&#9729; Migrate Images</button>
+
       </div>
     </div>
     <div class="table-wrap"><table>
@@ -3304,8 +3304,7 @@ async function loadGiftCards() {
         .filter(Boolean)
     );
     const dedupedMerchantRows = merchantRows.filter(r =>
-      !approvedMerchantIds.has(r._id) &&   // not already copied to gift_vouchers
-      r.status !== 'approved'               // not in approved state (already shown via adminRows)
+      !approvedMerchantIds.has(r._id)       // not already copied to gift_vouchers
     );
 
     _allVoucherRows = [...adminRows, ...dedupedMerchantRows]
@@ -3453,7 +3452,7 @@ function renderVoucherZone() {
       <td>
         <button class="btn-o me-1" onclick='openVZViewModal(${viewJson})'>View</button>
         ${approveBtn}
-        ${!isProduct ? `<button class="btn-o" style="border:none;padding:4px 8px" onclick='openVZMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>` : ''}
+        <button class="btn-o" style="border:none;padding:4px 8px" onclick='openVZMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>
       </td>
       <td style="font-size:11px;color:var(--muted);white-space:nowrap">${_fmtVZDate(r.created_at)}</td>
     </tr>`;
@@ -3552,9 +3551,9 @@ function openVZMoreMenu(evt, id, source, status) {
 function openVZEdit(id, source) {
   const row = _allVoucherRows.find(r=>r._id===id);
   if (!row) return;
-  if (source==='admin') { editGiftCard(row._raw); }
+  if (source==='admin' || source==='products') { editGiftCard(row._raw); }
   else {
-    // FIX 10: Admin can now edit merchant vouchers directly
+    // Admin can edit merchant vouchers directly
     openVZMerchantEditModal(row);
   }
 }
@@ -3722,7 +3721,9 @@ async function saveVZMerchantEdit() {
 
 async function deleteVZVoucher(id, source) {
   if (!confirm('Delete this product?')) return;
-  const url = source==='admin' ? `/admin/gift-vouchers/${id}` : `/admin/merchant-vouchers/${id}`;
+  const url = (source==='admin' || source==='products') 
+    ? `/admin/gift-vouchers/${id}` 
+    : `/admin/merchant-vouchers/${id}`;
   await fetch(url, {method:'DELETE', credentials:'include'});
   loadGiftCards();
 }

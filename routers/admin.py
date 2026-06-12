@@ -381,7 +381,9 @@ def list_accounts(a=Depends(get_current_admin)):
             "visit_pts":     acct.get("visit_pts", acct.get("visit_points", 0) or 0),
             "pool_pts":      acct.get("pool_pts", 0),
             "scans":         acct.get("scans", 0),
-            "store_count":   db.stores.count_documents({"merchant_id": mid}) if mid else 0,
+            "store_count":   db.stores.count_documents(
+                {"merchant_id": {"$in": list(filter(None, [mid, acct_id, phone]))}}
+            ) if (mid or acct_id or phone) else 0,
             "created_at":    str(acct.get("created_at", ""))[:10],
         })
     return result
