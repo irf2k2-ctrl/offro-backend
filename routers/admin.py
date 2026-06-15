@@ -154,6 +154,18 @@ def admin_logout():
 
 # ===================== CATEGORIES =====================
 
+@router.get("/public/categories")
+def get_public_categories():
+    """Public (no-auth) endpoint — returns active categories for the Flutter app."""
+    cats = list(db.categories.find({"status": {"$ne": "deleted"}}, {"_id": 0}).sort("sort_order", 1))
+    return cats
+
+@router.get("/public-categories")
+def get_public_categories_alt():
+    """Alternate public path for backwards compatibility."""
+    cats = list(db.categories.find({"status": {"$ne": "deleted"}}, {"_id": 0}).sort("sort_order", 1))
+    return cats
+
 @router.get("/categories")
 def get_categories(a=Depends(get_current_admin)):
     cats = list(db.categories.find({"status":{"$ne":"deleted"}}, {"_id":0}).sort("sort_order",1))
