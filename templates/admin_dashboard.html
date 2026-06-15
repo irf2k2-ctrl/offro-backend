@@ -813,12 +813,13 @@ tr:hover td{background:#f7faf8;}
             <th>Subtitle</th>
             <th>Link URL</th>
             <th>Sort</th>
+            <th style="text-align:center">Pinned</th>
             <th>Status</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody id="admin_banners_body">
-          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
+          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -869,6 +870,16 @@ tr:hover td{background:#f7faf8;}
               <option value="false">Inactive</option>
             </select>
           </div>
+        </div>
+      </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Floating Stores on Banner</label>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Select stores to float as cards over this banner. Leave empty to show top stores automatically.</div>
+          <input type="text" id="abm_store_search" class="form-control mb-2" placeholder="Search stores..." oninput="filterAbmStores(this.value)" style="font-size:13px">
+          <div id="abm_stores_list" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:#fff;display:flex;flex-direction:column;gap:4px;">
+            <span style="color:var(--muted);font-size:12px">Loading stores...</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px"><span id="abm_selected_count">0</span> store(s) selected</div>
         </div>
       </div>
       <div class="modal-footer">
@@ -4843,7 +4854,7 @@ async function loadAdminBanners() {
 function renderAdminBanners() {
   const tbody = document.getElementById('admin_banners_body');
   if (!_adminBannersList.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--muted)">No admin banners yet. Click + Add Banner.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--muted)">No admin banners yet. Click + Add Banner.</td></tr>';
     return;
   }
   tbody.innerHTML = _adminBannersList.map(b => {
@@ -4861,6 +4872,7 @@ function renderAdminBanners() {
       <td style="color:var(--muted);font-size:12px">${b.subtitle || '—'}</td>
       <td style="font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.link_url ? `<a href="${b.link_url}" target="_blank" style="color:var(--primary)">${b.link_url}</a>` : '—'}</td>
       <td style="text-align:center">${b.sort_order ?? 0}</td>
+      <td style="text-align:center;font-size:12px;color:var(--primary);font-weight:600">${(b.floating_store_ids||[]).length || '<span style="color:var(--muted)">Auto</span>'}</td>
       <td>${badge}</td>
       <td>
         <button class="btn btn-sm" style="padding:4px 10px;font-size:12px" onclick='editAdminBanner(${JSON.stringify(b)})'>Edit</button>
@@ -4886,6 +4898,9 @@ function openAdminBannerModal(data) {
     ? `<img src="${img}" style="width:100%;height:100%;object-fit:cover;object-position:center">`
     : '<span style="color:#aaa;font-size:13px">No image selected</span>';
   document.getElementById('adminBannerModal').style.display = 'flex';
+  // Populate floating stores picker
+  const pinnedIds = Array.isArray(data?.floating_store_ids) ? data.floating_store_ids : [];
+  renderAbmStoresList(pinnedIds);
 }
 
 function closeAdminBannerModal() {
@@ -4926,7 +4941,11 @@ async function saveAdminBanner() {
     });
   }
 
-  const payload = { title, subtitle, image_url: imageUrl, link_url: linkUrl, sort_order: sort, is_active: isActive };
+  // Collect selected floating store IDs
+  const floatingIds = Array.from(
+    document.querySelectorAll('#abm_stores_list input[type=checkbox]:checked')
+  ).map(cb => cb.value);
+  const payload = { title, subtitle, image_url: imageUrl, link_url: linkUrl, sort_order: sort, is_active: isActive, floating_store_ids: floatingIds };
   try {
     if (id) {
       const r = await fetch(`/admin/banners/${id}`, {method:'PUT', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
@@ -4956,6 +4975,65 @@ async function deleteAdminBanner(id) {
   }
 }
 
+
+
+
+// ── Floating Stores Picker (Admin Banner Modal) ──────────────────────────
+function renderAbmStoresList(selectedIds = []) {
+  const container = document.getElementById('abm_stores_list');
+  if (!container) return;
+  // Use _storesList if available, else fallback to _adminBannersList stores or []
+  const allStores = window._storesList || [];
+  if (!allStores.length) {
+    // Try to fetch stores list
+    fetch('/admin/stores?limit=200', {credentials:'include'})
+      .then(r => r.json())
+      .then(data => {
+        window._storesList = Array.isArray(data) ? data : (data.stores || []);
+        renderAbmStoresList(selectedIds);
+      })
+      .catch(() => { container.innerHTML = '<span style="color:var(--muted);font-size:12px">Could not load stores.</span>'; });
+    return;
+  }
+  _renderAbmStoreCheckboxes(allStores, selectedIds, '');
+}
+
+function _renderAbmStoreCheckboxes(stores, selectedIds, filter) {
+  const container = document.getElementById('abm_stores_list');
+  if (!container) return;
+  const filtered = filter
+    ? stores.filter(s => (s.store_name||'').toLowerCase().includes(filter.toLowerCase()) || (s.area||'').toLowerCase().includes(filter.toLowerCase()))
+    : stores;
+  if (!filtered.length) {
+    container.innerHTML = '<span style="color:var(--muted);font-size:12px">No stores found.</span>';
+    updateAbmCount();
+    return;
+  }
+  container.innerHTML = filtered.map(s => {
+    const id = s._id || s.id || '';
+    const checked = selectedIds.includes(id) ? 'checked' : '';
+    const area = s.area ? ` · ${s.area}` : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--text)">
+      <input type="checkbox" value="${id}" ${checked} onchange="updateAbmCount()" style="width:15px;height:15px;accent-color:var(--primary)">
+      <span><strong>${s.store_name||'—'}</strong><span style="color:var(--muted)">${area}</span></span>
+    </label>`;
+  }).join('');
+  updateAbmCount();
+}
+
+function filterAbmStores(query) {
+  const allStores = window._storesList || [];
+  const selectedIds = Array.from(
+    document.querySelectorAll('#abm_stores_list input[type=checkbox]:checked')
+  ).map(cb => cb.value);
+  _renderAbmStoreCheckboxes(allStores, selectedIds, query);
+}
+
+function updateAbmCount() {
+  const count = document.querySelectorAll('#abm_stores_list input[type=checkbox]:checked').length;
+  const el = document.getElementById('abm_selected_count');
+  if (el) el.textContent = count;
+}
 
 // ════════════════════════════════════════
 // DEFAULT IMAGES JS
