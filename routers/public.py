@@ -913,6 +913,31 @@ def get_gift_vouchers_public():
     return result
 
 
+# =================== PRODUCTS (public — Discover Products on home screen) ===================
+@router.get("/products")
+def get_products_public(category: str = None, limit: int = 60, skip: int = 0):
+    """Returns active products for the Flutter app Discover Products section."""
+    query = {"status": {"$nin": ["deleted", "inactive"]}}
+    if category and category != "All":
+        query["category"] = category
+    docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
+    result = []
+    for d in docs:
+        pid = str(d.pop("_id", ""))
+        # Attach store name if missing
+        store_id = d.get("store_id", "")
+        store_name = d.get("store_name", "")
+        if store_id and not store_name:
+            try:
+                s = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1})
+                if s:
+                    d["store_name"] = s.get("store_name", "")
+            except Exception:
+                pass
+        result.append({"id": pid, **d})
+    return result
+
+
 # ─── Default Images (fallback for stores/products/offers/cities) ──────────────
 @router.get("/default-images")
 def get_default_images():
