@@ -980,3 +980,100 @@ def get_admin_banners_public():
             "sort_order": d.get("sort_order", 0),
         })
     return result
+
+
+# ─── Product Reviews ──────────────────────────────────────────────────────────
+@router.get("/products/{product_id}/reviews")
+def get_product_reviews(product_id: str, limit: int = 20, skip: int = 0):
+    """Get reviews for a product."""
+    reviews = list(db.product_reviews.find(
+        {"product_id": product_id}
+    ).sort("created_at", -1).limit(limit).skip(skip))
+    result = []
+    for r in reviews:
+        result.append({
+            "id":         str(r["_id"]),
+            "product_id": r.get("product_id", ""),
+            "user_id":    r.get("user_id", ""),
+            "user_name":  r.get("user_name", "Anonymous"),
+            "rating":     r.get("rating", 0),
+            "text":       r.get("text", ""),
+            "created_at": r["created_at"].isoformat() if r.get("created_at") else "",
+        })
+    return result
+
+
+@router.post("/products/{product_id}/review")
+def submit_product_review(product_id: str, data: dict, request: _Req):
+    """Submit a product review."""
+    from datetime import datetime
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    user_id   = ""
+    user_name = data.get("user_name", "Anonymous")
+    if token:
+        try:
+            user = db.users.find_one({"token": token})
+            if user:
+                user_id   = str(user["_id"])
+                user_name = user.get("name", user.get("full_name", user_name))
+        except Exception:
+            pass
+    rating = float(data.get("rating", 0))
+    text   = str(data.get("text", "")).strip()
+    if not rating or not text:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="rating and text are required")
+    now = datetime.utcnow()
+    review_doc = {
+        "product_id": product_id,
+        "user_id":    user_id,
+        "user_name":  user_name,
+        "rating":     rating,
+        "text":       text,
+        "created_at": now,
+    }
+    result = db.product_reviews.insert_one(review_doc)
+    # Recalculate product avg rating
+    all_reviews = list(db.product_reviews.find({"product_id": product_id}, {"rating": 1}))
+    if all_reviews:
+        avg = sum(r["rating"] for r in all_reviews) / len(all_reviews)
+        db.products.update_one(
+            {"_id": ObjectId(product_id)},
+            {"$set": {"rating": round(avg, 2), "rating_count": len(all_reviews)}}
+        )
+    return {"success": True, "id": str(result.inserted_id)}
+
+
+# ─── Product Favorites ────────────────────────────────────────────────────────
+@router.post("/user/product-favorites/{product_id}")
+def toggle_product_favorite(product_id: str, request: _Req):
+    """Toggle product favorite for authenticated user."""
+    from fastapi import HTTPException
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    user = db.users.find_one({"token": token})
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user_id  = str(user["_id"])
+    existing = db.product_favorites.find_one({"user_id": user_id, "product_id": product_id})
+    if existing:
+        db.product_favorites.delete_one({"_id": existing["_id"]})
+        return {"is_favorite": False}
+    else:
+        db.product_favorites.insert_one({"user_id": user_id, "product_id": product_id})
+        return {"is_favorite": True}
+
+
+@router.get("/user/product-favorites/{product_id}/check")
+def check_product_favorite(product_id: str, request: _Req):
+    """Check if a product is favorited by the current user."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not token:
+        return {"is_favorite": False}
+    user = db.users.find_one({"token": token})
+    if not user:
+        return {"is_favorite": False}
+    user_id = str(user["_id"])
+    exists  = db.product_favorites.find_one({"user_id": user_id, "product_id": product_id}) is not None
+    return {"is_favorite": exists}

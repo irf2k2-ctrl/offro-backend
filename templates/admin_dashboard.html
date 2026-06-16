@@ -3111,7 +3111,7 @@ function switchReviewTab(tab) {
   btnP.style.color       = tab === "products" ? "var(--primary)" : "var(--muted)";
   btnP.style.borderBottomColor = tab === "products" ? "var(--primary)" : "transparent";
   btnP.style.fontWeight  = tab === "products" ? "700" : "600";
-  if (tab === "products" && !_prodReviewsCache.length) loadProductReviews();
+  if (tab === "products") loadProductReviews();
   if (tab === "stores"   && !_reviewsCache.length)     loadReviews();
 }
 
