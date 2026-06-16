@@ -1549,7 +1549,8 @@ def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
     upd = {}
     for field in ["title", "name", "text", "offer_text", "validity", "logo",
                   "merchant_id", "store_id", "from_date", "end_date",
-                  "category", "description", "price", "discount"]:
+                  "category", "description", "price", "discount",
+                  "sale_price", "original_price"]:
         if field in data:
             upd[field] = (data[field] or "").strip() if isinstance(data[field], str) else data[field]
     if "duration_days" in data:
@@ -1573,6 +1574,62 @@ def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
         raise HTTPException(400, "Nothing to update")
     db.products.update_one({"_id": ObjectId(pid)}, {"$set": upd})
     return {"message": "Product updated"}
+
+
+# ===================== PRODUCT REVIEWS =====================
+
+@router.get("/product-reviews")
+def list_product_reviews(product_id: str = "", a=Depends(get_current_admin)):
+    """List all product reviews. Optionally filter by product_id."""
+    from datetime import datetime as _dt
+    query = {}
+    if product_id:
+        query["product_id"] = product_id
+    result = []
+    for r in db.product_reviews.find(query).sort("created_at", -1).limit(500):
+        product_title = ""
+        try:
+            p = db.products.find_one({"_id": ObjectId(r["product_id"])}, {"title": 1, "name": 1})
+            if p:
+                product_title = p.get("title") or p.get("name") or ""
+        except Exception:
+            pass
+        result.append({
+            "_id":           str(r["_id"]),
+            "product_id":    r.get("product_id", ""),
+            "product_title": product_title,
+            "user_id":       r.get("user_id", ""),
+            "user_name":     r.get("user_name", "Anonymous"),
+            "rating":        r.get("rating", 0),
+            "text":          r.get("text", ""),
+            "created_at":    r.get("created_at", ""),
+        })
+    return result
+
+
+@router.delete("/product-reviews/{review_id}")
+def delete_product_review(review_id: str, a=Depends(get_current_admin)):
+    """Delete a product review and recalculate product avg rating."""
+    try:
+        r = db.product_reviews.find_one({"_id": ObjectId(review_id)})
+        if not r:
+            raise HTTPException(404, "Product review not found")
+        product_id = r.get("product_id", "")
+        db.product_reviews.delete_one({"_id": ObjectId(review_id)})
+        # Recalculate avg rating for the product
+        if product_id:
+            all_reviews = list(db.product_reviews.find({"product_id": product_id}, {"rating": 1}))
+            ratings = [x["rating"] for x in all_reviews if x.get("rating")]
+            avg = round(sum(ratings) / len(ratings), 1) if ratings else 0
+            db.products.update_one(
+                {"_id": ObjectId(product_id)},
+                {"$set": {"rating": avg, "rating_count": len(ratings)}}
+            )
+        return {"ok": True, "message": "Product review deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # ===================== PROMO SLIDERS =====================

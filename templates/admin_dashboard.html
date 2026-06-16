@@ -192,32 +192,60 @@ tr:hover td{background:#f7faf8;}
 <div id="section-reviews" class="section">
   <div class="section-header">
     <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)">💬 User Reviews</div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)">💬 Reviews</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">View and moderate customer reviews submitted in the app</div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+  </div>
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:16px;">
+    <button id="rev_tab_stores" onclick="switchReviewTab('stores')"
+      style="padding:8px 22px;border:none;background:none;font-size:13px;font-weight:700;color:var(--primary);border-bottom:3px solid var(--primary);cursor:pointer;margin-bottom:-2px;">
+      🏪 Store Reviews
+    </button>
+    <button id="rev_tab_products" onclick="switchReviewTab('products')"
+      style="padding:8px 22px;border:none;background:none;font-size:13px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer;margin-bottom:-2px;">
+      📦 Product Reviews
+    </button>
+  </div>
+
+  <!-- Store Reviews Panel -->
+  <div id="rev_panel_stores">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
       <input type="text" id="reviews_store_filter" class="form-control"
         placeholder="Filter by store name..." style="max-width:220px;font-size:13px;"
         oninput="_reviewsStoreFilter=this.value;_renderReviews(_reviewsCache);">
       <button class="btn-p" onclick="loadReviews()"><i class="fas fa-sync me-1"></i> Refresh</button>
     </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
+        </thead>
+        <tbody id="reviews_table">
+          <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Store</th>
-          <th>User</th>
-          <th>Rating</th>
-          <th>Review</th>
-          <th>Date</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody id="reviews_table">
-        <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
-      </tbody>
-    </table>
+
+  <!-- Product Reviews Panel -->
+  <div id="rev_panel_products" style="display:none">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+      <input type="text" id="prod_reviews_filter" class="form-control"
+        placeholder="Filter by product name..." style="max-width:220px;font-size:13px;"
+        oninput="_prodReviewsFilter=this.value;_renderProductReviews(_prodReviewsCache);">
+      <button class="btn-p" onclick="loadProductReviews()"><i class="fas fa-sync me-1"></i> Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Product</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
+        </thead>
+        <tbody id="prod_reviews_table">
+          <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -3067,6 +3095,84 @@ async function setStoreRating(storeId, val, el) {
 // ═══════════ REVIEWS ═══════════
 let _reviewsCache = [];
 let _reviewsStoreFilter = "";
+let _prodReviewsCache = [];
+let _prodReviewsFilter = "";
+let _activeReviewTab = "stores";
+
+function switchReviewTab(tab) {
+  _activeReviewTab = tab;
+  document.getElementById("rev_panel_stores").style.display   = tab === "stores"   ? "" : "none";
+  document.getElementById("rev_panel_products").style.display = tab === "products" ? "" : "none";
+  const btnS = document.getElementById("rev_tab_stores");
+  const btnP = document.getElementById("rev_tab_products");
+  btnS.style.color       = tab === "stores"   ? "var(--primary)" : "var(--muted)";
+  btnS.style.borderBottomColor = tab === "stores"   ? "var(--primary)" : "transparent";
+  btnS.style.fontWeight  = tab === "stores"   ? "700" : "600";
+  btnP.style.color       = tab === "products" ? "var(--primary)" : "var(--muted)";
+  btnP.style.borderBottomColor = tab === "products" ? "var(--primary)" : "transparent";
+  btnP.style.fontWeight  = tab === "products" ? "700" : "600";
+  if (tab === "products" && !_prodReviewsCache.length) loadProductReviews();
+  if (tab === "stores"   && !_reviewsCache.length)     loadReviews();
+}
+
+async function loadProductReviews() {
+  const tbody = document.getElementById("prod_reviews_table");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading...</td></tr>`;
+  try {
+    const r = await fetch("/admin/product-reviews", { credentials:"include" });
+    _prodReviewsCache = await r.json();
+    _renderProductReviews(_prodReviewsCache);
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="6" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
+  }
+}
+
+function _renderProductReviews(data) {
+  const tbody = document.getElementById("prod_reviews_table");
+  if (!tbody) return;
+  let rows = data;
+  if (_prodReviewsFilter.trim()) {
+    const q = _prodReviewsFilter.toLowerCase();
+    rows = rows.filter(r => (r.product_title||"").toLowerCase().includes(q) || (r.product_id||"").includes(q));
+  }
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No product reviews found</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const stars = "★".repeat(Math.round(r.rating||0)) + "☆".repeat(5-Math.round(r.rating||0));
+    const starColor = (r.rating||0) >= 4 ? "#e67e22" : (r.rating||0) >= 3 ? "#f39c12" : "#e74c3c";
+    const date = r.created_at ? r.created_at.substring(0,10) : "—";
+    const text = (r.text||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    return `<tr>
+      <td><div style="font-weight:600;color:var(--text)">${r.product_title||r.product_id||"—"}</div></td>
+      <td><div style="font-size:13px;color:var(--text)">${r.user_name||"Anonymous"}</div>
+          <div style="font-size:11px;color:var(--muted)">${r.user_id||""}</div></td>
+      <td><span style="color:${starColor};font-size:15px;letter-spacing:1px">${stars}</span>
+          <span style="font-size:12px;color:var(--muted);margin-left:4px">${r.rating||0}/5</span></td>
+      <td style="max-width:260px;font-size:13px;color:var(--text)">${text||"<em style='color:var(--muted)'>No text</em>"}</td>
+      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${date}</td>
+      <td>
+        <button class="btn-sm" style="background:#c0392b;color:white;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px"
+          onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,"\'")}')">
+          <i class="fas fa-trash me-1"></i>Delete
+        </button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+async function deleteProductReview(reviewId, productTitle) {
+  if (!confirm(`Delete this review for "${productTitle}"? This cannot be undone.`)) return;
+  try {
+    const r = await fetch(`/admin/product-reviews/${reviewId}`, { method:"DELETE", credentials:"include" });
+    if (r.ok) {
+      _prodReviewsCache = _prodReviewsCache.filter(x => x._id !== reviewId);
+      _renderProductReviews(_prodReviewsCache);
+    } else { alert("Failed to delete review"); }
+  } catch(e) { alert("Error: " + e.message); }
+}
 
 async function loadReviews() {
   const tbody = document.getElementById("reviews_table");
@@ -3684,6 +3790,8 @@ async function openGiftCardModal() {
   document.getElementById("gc_id").value = "";
   document.getElementById("gc_collection").value = "gift_vouchers";
   document.getElementById("gc_title").value = "";
+  if (document.getElementById("gc_sale_price"))     document.getElementById("gc_sale_price").value     = "";
+  if (document.getElementById("gc_original_price")) document.getElementById("gc_original_price").value = "";
   document.getElementById("gc_text").value = "";
   document.getElementById("gc_validity").value      = "";
   document.getElementById("gc_from_date").value    = "";
@@ -3722,6 +3830,8 @@ async function editGiftCard(v) {
   else { document.getElementById("gc_logo_preview").style.display="none"; document.getElementById("gc_logo_file").value=""; }
   document.getElementById("gc_active").checked = v.is_active !== false;
   document.getElementById("gc_msg").innerText  = "";
+  if (document.getElementById("gc_sale_price"))     document.getElementById("gc_sale_price").value     = v.sale_price ?? v.price ?? "";
+  if (document.getElementById("gc_original_price")) document.getElementById("gc_original_price").value = v.original_price ?? v.mrp ?? "";
   _populateGcMerchants(v.merchant_id||"");
   gcModalInst.show();
 }
@@ -3783,16 +3893,20 @@ async function saveGiftCard() {
   const _gcFrom = document.getElementById("gc_from_date")?.value  || '';
   const _gcTo   = document.getElementById("gc_to_date")?.value    || ''; // computed by _gcUpdateValidity
   const _gcDays = parseInt(document.getElementById("gc_duration_days")?.value) || 0;
+  const _salePriceRaw = parseFloat(document.getElementById("gc_sale_price")?.value);
+  const _origPriceRaw = parseFloat(document.getElementById("gc_original_price")?.value);
   const data = {
-    title:         document.getElementById("gc_title").value.trim(),
+    title:          document.getElementById("gc_title").value.trim(),
     text,
-    validity:      document.getElementById("gc_validity").value.trim(),
-    logo:          document.getElementById("gc_logo").value.trim(),
-    merchant_id:   document.getElementById("gc_merchant").value,
-    is_active:     document.getElementById("gc_active").checked,
-    from_date:     _gcFrom,
-    end_date:      _gcTo,
-    duration_days: _gcDays || undefined,
+    validity:       document.getElementById("gc_validity").value.trim(),
+    logo:           document.getElementById("gc_logo").value.trim(),
+    merchant_id:    document.getElementById("gc_merchant").value,
+    is_active:      document.getElementById("gc_active").checked,
+    from_date:      _gcFrom,
+    end_date:       _gcTo,
+    duration_days:  _gcDays || undefined,
+    sale_price:     isNaN(_salePriceRaw) ? undefined : _salePriceRaw,
+    original_price: isNaN(_origPriceRaw) ? undefined : _origPriceRaw,
   };
   const _col = document.getElementById("gc_collection")?.value || "gift_vouchers";
   try {
@@ -4126,6 +4240,16 @@ async function saveStore() {
         <div class="mb-3">
           <label class="form-label fw-semibold">Offer Text *</label>
           <input id="gc_text" class="form-control" placeholder="FREE Voucher worth ₹150 OFF">
+        </div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Selling Price (₹)</label>
+            <input type="number" id="gc_sale_price" class="form-control" placeholder="e.g. 299" min="0" step="0.01">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">Original Price / MRP (₹)</label>
+            <input type="number" id="gc_original_price" class="form-control" placeholder="e.g. 499" min="0" step="0.01">
+          </div>
         </div>
         <div class="row mb-3">
           <div class="col-6">
