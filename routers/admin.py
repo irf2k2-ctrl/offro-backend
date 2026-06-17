@@ -2133,20 +2133,44 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     db.promo_sliders.update_one(
         {"source_banner_id": bid},
         {"$set": {
-            "title":         b.get("title",""),
-            "image_url":     b.get("image_url",""),
-            "is_active":     True,
-            "sort_order":    50,
-            "source":        "merchant",
+            "title":          b.get("title",""),
+            "image_url":      b.get("image_url",""),
+            "is_active":      True,
+            "sort_order":     50,
+            "source":         "merchant",
             "source_banner_id": bid,
-            "merchant_name": b.get("merchant_name",""),
-            "expires_at":    b.get("end_date",""),
-            "updated_at":    datetime.utcnow().isoformat(),
+            "merchant_name":  b.get("merchant_name",""),
+            "merchant_phone": str(b.get("merchant_phone", b.get("phone", ""))),
+            "from_date":      b.get("from_date",""),
+            "end_date":       b.get("end_date",""),
+            "duration_days":  b.get("duration_days",""),
+            "expires_at":     b.get("end_date",""),
+            "updated_at":     datetime.utcnow().isoformat(),
         },
          "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}},
         upsert=True
     )
     return {"ok": True, "message": "Banner approved and published to app."}
+
+
+@router.post("/merchant-banners/resync-sliders")
+def resync_merchant_banner_sliders(a=Depends(get_current_admin)):
+    """Re-sync all approved merchant banners into promo_sliders with latest fields (from_date, end_date, duration_days, merchant_phone)."""
+    updated = 0
+    for b in db.merchant_banners.find({"approval_status": "approved"}):
+        bid = str(b["_id"])
+        db.promo_sliders.update_one(
+            {"source_banner_id": bid},
+            {"$set": {
+                "merchant_phone": str(b.get("merchant_phone", b.get("phone", ""))),
+                "from_date":      b.get("from_date", ""),
+                "end_date":       b.get("end_date", ""),
+                "duration_days":  b.get("duration_days", ""),
+                "expires_at":     b.get("end_date", ""),
+            }}
+        )
+        updated += 1
+    return {"ok": True, "synced": updated}
 
 @router.put("/merchant-banners/{bid}/reject")
 def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admin)):

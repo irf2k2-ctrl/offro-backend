@@ -398,7 +398,10 @@ tr:hover td{background:#f7faf8;}
       <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-images me-2"></i>Banners</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage all banners created by admin and merchants</div>
     </div>
-    <button class="btn-p" onclick="openSliderModal()"><i class="fas fa-plus me-1"></i> Add Banner</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn-p" onclick="openSliderModal()"><i class="fas fa-plus me-1"></i> Add Banner</button>
+      <button class="btn-p" style="background:var(--accent);color:var(--text);font-size:12px;padding:6px 12px" onclick="resyncBannerDurations()" title="Re-sync duration &amp; phone for all approved merchant banners"><i class="fas fa-sync-alt me-1"></i> Sync Durations</button>
+    </div>
   </div>
 
   <!-- Stats row -->
@@ -4350,6 +4353,25 @@ async function loadMerchantBanners() {
   } catch(e) { if(el) el.innerHTML = `<tr><td colspan="8" style="color:red;text-align:center">${e.message}</td></tr>`; }
 }
 
+
+async function resyncBannerDurations() {
+  const btn = event?.target;
+  if (btn) { btn.disabled=true; btn.textContent='Syncing...'; }
+  try {
+    const r = await fetch('/admin/merchant-banners/resync-sliders', {method:'POST', credentials:'include'});
+    const d = await r.json();
+    if (r.ok) {
+      showToast(`✅ Synced ${d.synced} merchant banner(s) — durations & phone updated.`, 'success');
+      loadSliders();
+    } else {
+      showToast('❌ Sync failed: ' + (d.detail || 'unknown error'), 'danger');
+    }
+  } catch(e) {
+    showToast('❌ Network error: ' + e.message, 'danger');
+  } finally {
+    if (btn) { btn.disabled=false; btn.textContent='↻ Sync Durations'; }
+  }
+}
 async function approveMerchantBanner(id) {
   // TASK 7: Approve banner — update record, no duplicate, refresh immediately
   const btn = event?.target; if (btn) { btn.disabled=true; btn.textContent='Approving...'; }
