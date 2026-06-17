@@ -1321,6 +1321,50 @@ def get_my_vouchers(m=Depends(get_merchant)):
         })
     return result
 
+# ── PUT /merchant/vouchers/{vid}  — Merchant edit own product ────────────────
+@router.put("/vouchers/{vid}")
+def update_merchant_voucher(vid: str, data: dict, m=Depends(get_merchant)):
+    """Merchant updates their own product/voucher (title, offer text, prices)."""
+    mid = _mid(m)
+    try:
+        obj_id = ObjectId(vid)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid product ID")
+
+    # Verify this voucher belongs to this merchant
+    existing = db.merchant_vouchers.find_one({"_id": obj_id, "merchant_id": mid})
+    if not existing:
+        # Fallback: try matching by account_id in case of migration
+        existing = db.merchant_vouchers.find_one({"_id": obj_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Product not found")
+        # Check ownership via store
+        store = db.stores.find_one({"_id": ObjectId(existing.get("store_id", "xx")), "merchant_id": mid}) if existing.get("store_id") else None
+        if not store:
+            raise HTTPException(status_code=403, detail="Not authorised to edit this product")
+
+    allowed = {"title", "offer_text", "original_price", "price", "sale_price",
+                "original_amount", "offer_price"}
+    update_data = {k: v for k, v in data.items() if k in allowed}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    # Normalise price field names
+    if "price" in update_data and "sale_price" not in update_data:
+        update_data["sale_price"] = update_data["price"]
+    if "original_price" in update_data and "original_amount" not in update_data:
+        update_data["original_amount"] = update_data["original_price"]
+
+    update_data["updated_at"] = datetime.utcnow().isoformat()
+    db.merchant_vouchers.update_one({"_id": obj_id}, {"$set": update_data})
+
+    # Sync title to gift_vouchers if applicable
+    if "title" in update_data:
+        db.gift_vouchers.update_many({"source_voucher_id": vid}, {"$set": {"title": update_data["title"]}})
+
+    return {"ok": True, "updated": list(update_data.keys())}
+
+
 @router.get("/vouchers/pricing")
 def get_voucher_pricing_merchant(m=Depends(get_merchant)):
     doc = _pricing_doc()

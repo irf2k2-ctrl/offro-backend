@@ -20,7 +20,7 @@ def get_stores(city: str = None, category: str = None):
         "image":1,"image_url":1,"image_thumb":1,"_thumb":1,"store_image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
         "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1,
         "tags":1,"favorite_count":1,"favorites":1,"view_count":1,"views":1,
-        "created_at":1,"late_night":1
+        "created_at":1,"late_night":1,"open_time":1,"close_time":1,"logo_url":1,"logo_thumb":1
     }))
     if not stores:
         return []
@@ -119,6 +119,11 @@ def get_stores(city: str = None, category: str = None):
             "view_count":     int(s.get("view_count") or s.get("views") or 0),
             "created_at":     str(s.get("created_at", "") or ""),
             "late_night":     bool(s.get("late_night", False)),
+            "open_time":      s.get("open_time",  "") or "",
+            "close_time":     s.get("close_time", "") or "",
+            "logo_url":       s.get("logo_url", "") or s.get("logo_thumb", "") or "",
+            "lat":            s.get("lat") or None,
+            "lng":            s.get("lng") or None,
         })
     return result
 
