@@ -1124,6 +1124,29 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     }
 
 # ── POST /merchant/banners/activate-free  ──────────────────────────────────
+@router.put("/banners/{bid}")
+def update_merchant_banner(bid: str, data: dict, m=Depends(get_merchant)):
+    """Merchant updates their own banner title."""
+    merchant_id = _mid(m)
+    try:
+        obj_id = ObjectId(bid)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid banner ID")
+    existing = db.merchant_banners.find_one({"_id": obj_id, "merchant_id": merchant_id})
+    if not existing:
+        existing = db.merchant_banners.find_one({"_id": obj_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Banner not found")
+        if str(existing.get("merchant_id", "")) != merchant_id:
+            raise HTTPException(status_code=403, detail="Not authorised to edit this banner")
+    allowed = {"title"}
+    update_data = {k: v for k, v in data.items() if k in allowed and v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    update_data["updated_at"] = datetime.utcnow().isoformat()
+    db.merchant_banners.update_one({"_id": obj_id}, {"$set": update_data})
+    return {"ok": True, "message": "Banner updated"}
+
 @router.post("/banners/activate-free")
 def activate_free_banner(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)

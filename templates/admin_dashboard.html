@@ -2322,19 +2322,19 @@ async function loadSliders() {
       if (endDt && !isNaN(endDt)) endDt.setHours(23, 59, 59, 999); // end of day fix
       const isExpired = endDt && endDt < now;
       return {
-        _id:          b._id,
-        _source:      'merchant',
-        image_url:    b.image_url || '',
-        title:        b.title || '',
-        subtitle:     '',
+        _id:        b._id,
+        _source:    'merchant',
+        image_url:  b.image_url || '',
+        title:      b.title || '',
+        subtitle:   '',
         merchant_name: b.merchant_name || '',
-        merchant_phone: b.merchant_phone || b.phone || '',  // FIX 2: include phone
+        merchant_phone: b.merchant_phone || b.phone || '',
         duration_days: b.duration_days || b.duration || '',
-        from_date:    b.from_date || b.start_date || '',
-        end_date:     b.end_date || '',
-        status:       isExpired ? 'expired' : (st==='approved' ? 'approved' : (st==='rejected' ? 'rejected' : 'pending')),
-        sort_order:   99,
-        created_at:   b.created_at || '',
+        from_date:  b.from_date || b.start_date || '',
+        end_date:   b.end_date || '',
+        status:     isExpired ? 'expired' : (st==='approved' ? 'approved' : (st==='rejected' ? 'rejected' : 'pending')),
+        sort_order: 99,
+        created_at: b.created_at || '',
         _raw: b,
       };
     });
@@ -2353,12 +2353,9 @@ async function loadSliders() {
       .sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
 
     // Stats — FIX 4: count merchant banners correctly
-    // Approved merchant banners live in adminRows with _is_merchant_approved=true
     const approved = _allBannerRows.filter(r=>r.status==='approved').length;
     const pending  = _allBannerRows.filter(r=>r.status==='pending').length;
-    // Merchant count = pending/rejected merchant rows + approved ones that moved to promo_sliders
     const merchant = _allBannerRows.filter(r=>r._source==='merchant' || r._is_merchant_approved).length;
-    // Admin count = only truly admin-created banners (not merchant-approved ones)
     const admin    = _allBannerRows.filter(r=>r._source==='admin' && !r._is_merchant_approved).length;
     const _set = (id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
     _set('bn_total',    _allBannerRows.length);
@@ -2427,18 +2424,12 @@ function renderBanners(rows) {
          <span style="background:#fff3cd;color:#856404;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant Pending</span>`;
 
     let durationHtml = '—';
-    // FIX 1: Compute duration_days from dates if not provided (for merchant banners)
-    let durDays = r.duration_days;
-    if (!durDays && r.from_date && r.end_date) {
-      const msPerDay = 86400000;
-      const fd = new Date(r.from_date), ed = new Date(r.end_date);
-      if (!isNaN(fd) && !isNaN(ed)) durDays = Math.round((ed - fd) / msPerDay);
-    }
     if (r.from_date && r.end_date) {
-      const days = durDays ? `<br><span style="background:var(--light);color:var(--primary);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700">${durDays} Days</span>` : '';
+      const days = r.duration_days ? `<br><span style="background:var(--light);color:var(--primary);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700">${r.duration_days} Days</span>` : '';
       durationHtml = `<div style="font-size:12px">${r.from_date}<br>to<br>${r.end_date}${days}</div>`;
     } else if (r.end_date) {
-      const days = durDays ? `<br><span style="background:var(--light);color:var(--primary);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700">${durDays} Days</span>` : '';
+      // Always show duration_days badge even when only end_date is available
+      const days = r.duration_days ? `<br><span style="background:var(--light);color:var(--primary);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700">${r.duration_days} Days</span>` : '';
       durationHtml = `<div style="font-size:12px">Until ${r.end_date}${days}</div>`;
     }
 
@@ -2492,20 +2483,9 @@ function openBnViewModal(r) {
   if(el('bn_modal_title')) el('bn_modal_title').textContent = r.title||'—';
   if(el('bn_modal_merchant')) el('bn_modal_merchant').textContent = isAdmin?'Offro (Admin)':r.merchant_name||'—';
   if(el('bn_modal_type')) el('bn_modal_type').textContent = isAdmin?'Admin':'Merchant';
-  // FIX 3: Compute duration from dates if duration_days missing (merchant banners)
-  let durDays = r.duration_days;
-  if (!durDays && r.from_date && r.end_date) {
-    const fd = new Date(r.from_date), ed = new Date(r.end_date);
-    if (!isNaN(fd) && !isNaN(ed)) durDays = Math.round((ed - fd) / 86400000);
-  }
-  if(el('bn_modal_duration')) el('bn_modal_duration').textContent = durDays ? `${durDays} Days` : '—';
+  if(el('bn_modal_duration')) el('bn_modal_duration').textContent = r.duration_days ? `${r.duration_days} Days` : '—';
   if(el('bn_modal_period')) el('bn_modal_period').textContent = (r.from_date&&r.end_date) ? `${r.from_date} to ${r.end_date}` : (r.end_date||'—');
   if(el('bn_modal_status')) el('bn_modal_status').textContent = r.status;
-  // FIX 3: Show merchant phone in modal
-  const phoneRow = el('bn_modal_phone_row');
-  const phoneEl  = el('bn_modal_phone');
-  if (phoneRow) phoneRow.style.display = (!isAdmin && r.merchant_phone) ? '' : 'none';
-  if (phoneEl)  phoneEl.textContent = r.merchant_phone || '';
   const approveBtn = el('bn_modal_approve');
   if(approveBtn) approveBtn.style.display = (!isAdmin&&isPending)?'inline-block':'none';
   bnViewModalInst.show();
@@ -4699,7 +4679,6 @@ document.addEventListener('DOMContentLoaded', () => {
         <table style="width:100%;font-size:13px;border-collapse:collapse">
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600;width:120px">Title</td><td id="bn_modal_title" style="font-weight:700;color:var(--text)"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Merchant</td><td id="bn_modal_merchant" style="color:var(--text)"></td></tr>
-          <tr id="bn_modal_phone_row" style="display:none"><td style="padding:7px 0;color:var(--muted);font-weight:600">Mobile</td><td id="bn_modal_phone" style="color:var(--text)"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Type</td><td id="bn_modal_type" style="color:var(--text);text-transform:capitalize;font-weight:600"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Duration</td><td id="bn_modal_duration" style="color:var(--text)"></td></tr>
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Active Period</td><td id="bn_modal_period" style="color:var(--text)"></td></tr>
