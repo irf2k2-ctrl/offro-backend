@@ -4011,7 +4011,7 @@ function _renderRatings(stores) {
             <td>${parseFloat(ar)>0?`<span style="color:#3E5F55">★ ${ar}</span>`:"—"}</td>
             <td>
                 <div class="star-row d-flex gap-1 align-items-center" data-id="${s._id}">
-                    ${[1,2,3,4,5].map(n=>`<i class="fas fa-star ${parseFloat(ar)>=n?'on':''}" style="cursor:pointer;font-size:18px;" data-val="${n}" onclick="setRating('${s._id}',${n},this)"></i>`).join("")}
+                    ${[1,2,3,4,5].map(n=>`<i class="fas fa-star ${parseFloat(ar)>=n?'on':''}" style="cursor:pointer;font-size:18px;" data-val="${n}" onclick="setStoreRating('${s._id}',${n},this)"></i>`).join("")}
                     <button onclick="clearRating('${s._id}')" class="btn btn-sm ms-2" style="font-size:10px;padding:2px 7px;background:rgba(255,255,255,0.15);color:#2c3e35;border-radius:6px;">Clear</button>
                 </div>
             </td>
@@ -4199,7 +4199,7 @@ async function saveStore() {
         area:         document.getElementById("store_area").value,
         address:      document.getElementById("store_address").value,
         phone:        document.getElementById("store_phone").value,
-        visit_points: parseInt(document.getElementById("store_visit_points").value)||0,
+        visit_points: parseInt(document.getElementById("store_visit_points_primary").value)||0,
         image:        document.getElementById("store_image_url").value.trim(),
         image2:       document.getElementById("store_image2_url").value.trim(),
         badge:        document.getElementById("store_badge").value||null,

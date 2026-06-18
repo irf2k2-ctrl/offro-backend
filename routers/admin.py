@@ -415,6 +415,12 @@ def list_accounts(a=Depends(get_current_admin)):
             "store_count":   db.stores.count_documents(
                 {"merchant_id": {"$in": list(filter(None, [mid, acct_id, phone]))}}
             ) if (mid or acct_id or phone) else 0,
+            "product_count": db.merchant_vouchers.count_documents(
+                {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
+            ) if (mid or phone) else 0,
+            "banner_count":  db.merchant_banners.count_documents(
+                {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
+            ) if (mid or phone) else 0,
             "created_at":    str(acct.get("created_at", ""))[:10],
         })
     return result
