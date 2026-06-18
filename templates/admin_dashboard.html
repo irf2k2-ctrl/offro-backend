@@ -2432,8 +2432,12 @@ function renderBanners(rows) {
       let _cd = parseInt(r.duration_days) || 0;
       if (!_cd && r.from_date && r.end_date) {
         try {
-          const _fd = new Date(r.from_date + 'T00:00:00');
-          const _ed = new Date(r.end_date + 'T00:00:00');
+          const _fdStr = String(r.from_date).trim();
+          const _edStr = String(r.end_date).trim();
+          const _fdHasT = _fdStr.includes('T') || /\d{4}-\d{2}-\d{2} \d/.test(_fdStr);
+          const _edHasT = _edStr.includes('T') || /\d{4}-\d{2}-\d{2} \d/.test(_edStr);
+          const _fd = new Date(_fdHasT ? _fdStr.replace(' ','T') : _fdStr + 'T00:00:00');
+          const _ed = new Date(_edHasT ? _edStr.replace(' ','T') : _edStr + 'T00:00:00');
           if (!isNaN(_fd) && !isNaN(_ed)) _cd = Math.max(1, Math.round((_ed - _fd) / 86400000) + 1);
         } catch(_) {}
       }
@@ -2449,9 +2453,11 @@ function renderBanners(rows) {
 
     // JS-side expiry guard: if end_date is in the past, treat as expired regardless of stored status
     let st = r.status;
-    if (st === 'approved' && r.end_date) {
+    if (st !== 'rejected' && st !== 'pending' && r.end_date) {
       try {
-        const _endMs = new Date(r.end_date + (r.end_date.length <= 10 ? 'T23:59:59' : '')).getTime();
+        const _edStr = String(r.end_date).trim();
+        const _hasT = _edStr.includes('T') || /\d{4}-\d{2}-\d{2} \d/.test(_edStr);
+        const _endMs = new Date(_hasT ? _edStr.replace(' ','T') : _edStr + 'T23:59:59').getTime();
         if (!isNaN(_endMs) && _endMs < Date.now()) st = 'expired';
       } catch(_) {}
     }
@@ -3311,7 +3317,8 @@ async function loadGiftCards() {
       // Trust backend status for products (which now compute expiry server-side)
       let computedStatus = (v.status === 'expired') ? 'expired'
                          : isActive ? 'approved' : 'hidden';
-      if (computedStatus !== 'expired' && isActive && toD) {
+      // Check expiry even when isActive=false — expired should show "expired" not "hidden"
+      if (computedStatus !== 'expired' && toD) {
         try {
           // Support "22 May 2026", "2026-05-22", "22-05-2026", "13 Jun 2026" formats
           let endDt = _parseFlexDate(toD);
@@ -3555,7 +3562,12 @@ function renderVoucherZone() {
 function _fmtDate(s) {
   if (!s) return '';
   try {
-    const d = new Date(s + 'T00:00:00');
+    // Only append T00:00:00 for plain date strings (YYYY-MM-DD or DD Mon YYYY)
+    // Don't append if string already has a time component (space+time or T already)
+    let ds = String(s).trim();
+    const hasTime = ds.includes('T') || /\d{4}-\d{2}-\d{2} \d/.test(ds);
+    const d = new Date(hasTime ? ds.replace(' ', 'T') : ds + 'T00:00:00');
+    if (isNaN(d)) return ds.slice(0, 10); // fallback: show raw date portion
     const opts = {day:'numeric', month:'short', year:'numeric'};
     return d.toLocaleDateString('en-IN', opts);
   } catch(e) { return s; }

@@ -1337,11 +1337,8 @@ def _compute_product_status(p):
     # If explicitly rejected/hidden, respect that
     if stored in ("rejected", "hidden", "inactive"):
         return stored
-    is_active = p.get("is_active", True)
-    if not is_active:
-        return "hidden"
 
-    # Collect all possible end-date fields
+    # ── Expiry check FIRST (before is_active) so expired products show "expired" not "hidden" ──
     end_raw = (p.get("end_date") or p.get("expiry") or
                p.get("valid_till") or p.get("end") or "")
 
@@ -1352,11 +1349,8 @@ def _compute_product_status(p):
             end_raw = validity_str.split("→")[-1].strip()
         elif " to " in validity_str.lower():
             end_raw = validity_str.lower().split(" to ")[-1].strip()
-        elif "-" in validity_str and len(validity_str) > 8:
-            # "11 Jun 2026 - 13 Jun 2026"
-            parts = validity_str.split("-")
-            if len(parts) >= 2:
-                end_raw = parts[-1].strip()
+        elif " - " in validity_str and len(validity_str) > 8:
+            end_raw = validity_str.split(" - ")[-1].strip()
 
     if end_raw:
         try:
@@ -1365,8 +1359,7 @@ def _compute_product_status(p):
             end_dt = _dp(str(end_raw))
             if end_dt.tzinfo is None:
                 end_dt = end_dt.replace(tzinfo=pytz.UTC)
-            # Use end of day so product expires at midnight
-            from datetime import timedelta
+            # Use end of day so product expires at midnight of end date
             end_dt = end_dt.replace(hour=23, minute=59, second=59)
             now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
             if end_dt < now_utc:
@@ -1380,6 +1373,12 @@ def _compute_product_status(p):
                 return "expired"
         except Exception:
             pass
+
+    # ── Only check is_active AFTER expiry (so we don't hide expired products) ──
+    is_active = p.get("is_active", True)
+    if not is_active:
+        return "hidden"
+
     return "approved"
 
 @router.get("/gift-vouchers")
