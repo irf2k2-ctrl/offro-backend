@@ -1360,7 +1360,7 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             "title":             v.get("title", ""),
             "text":              v.get("text", ""),
             "validity":          v.get("validity", ""),
-            "logo":              v.get("logo", ""),
+            "logo":              (v.get("logo","") if str(v.get("logo","")).startswith("http") else ""),  # strip base64 from list
             "store_id":          v.get("store_id", ""),
             "merchant_id":       mid,
             "merchant_name":     merchant_name,
@@ -1420,8 +1420,11 @@ def _compute_product_status(p):
         if price:    text_parts.append(f"₹{price}")
         offer_text = p.get("offer_text") or p.get("text") or (", ".join(text_parts) if text_parts else "")
         # Resolve image
-        logo = (p.get("logo") or p.get("image_url") or p.get("image") or
-                p.get("logo_url") or p.get("thumbnail") or p.get("img") or "")
+        # Strip base64 — only return CDN/HTTP URLs to keep response lean
+        def _url_only(v): return v if v and str(v).startswith("http") else ""
+        logo = (_url_only(p.get("image_url")) or _url_only(p.get("logo_url")) or
+                _url_only(p.get("logo")) or _url_only(p.get("thumbnail")) or
+                _url_only(p.get("img")) or "")
         ca = p.get("created_at")
         if isinstance(ca, datetime):
             created_at_iso = ca.strftime("%Y-%m-%dT%H:%M:%S")
@@ -2284,7 +2287,7 @@ def list_merchant_vouchers(a=Depends(get_current_admin)):
             "merchant_phone": v.get("merchant_phone",""),
             "title":         v.get("title",""),
             "offer_text":    v.get("offer_text",""),
-            "logo_url":      v.get("logo_url",""),
+            "logo_url":      (v.get("logo_url","") if str(v.get("logo_url","")).startswith("http") else ""),  # strip base64
             "validity":      v.get("validity", f"{v.get('from_date','')} → {v.get('end_date','')}" if v.get("from_date") else ""),
             "duration_days": v.get("duration_days", v.get("duration",30)),
             "from_date":     v.get("from_date",""),
