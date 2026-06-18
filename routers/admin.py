@@ -1331,6 +1331,37 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
 
 # ===================== GIFT VOUCHERS (app-facing cards) =====================
 
+def _compute_product_status(p):
+    """Compute real-time product status — auto-expire if end_date has passed."""
+    stored = p.get("status", p.get("approval_status", ""))
+    # If explicitly rejected/hidden, respect that
+    if stored in ("rejected", "hidden", "inactive"):
+        return stored
+    is_active = p.get("is_active", True)
+    if not is_active:
+        return "hidden"
+    end_raw = p.get("end_date") or p.get("expiry") or ""
+    if end_raw:
+        try:
+            from dateutil.parser import parse as _dp
+            import pytz
+            end_dt = _dp(str(end_raw))
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=pytz.UTC)
+            now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
+            if end_dt < now_utc:
+                try:
+                    db.products.update_one(
+                        {"_id": p["_id"], "status": {"$ne": "expired"}},
+                        {"$set": {"status": "expired", "is_active": False}}
+                    )
+                except Exception:
+                    pass
+                return "expired"
+        except Exception:
+            pass
+    return "approved"
+
 @router.get("/gift-vouchers")
 def list_gift_vouchers(a=Depends(get_current_admin)):
     """List all gift vouchers + products shown in the app home screen."""
@@ -1374,39 +1405,6 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             "duration_days":     v.get("duration_days", 0),
             "_collection":       "gift_vouchers",
         })
-
-
-def _compute_product_status(p):
-    """Compute real-time product status — auto-expire if end_date has passed."""
-    stored = p.get("status", p.get("approval_status", ""))
-    # If explicitly rejected/hidden, respect that
-    if stored in ("rejected", "hidden", "inactive"):
-        return stored
-    is_active = p.get("is_active", True)
-    if not is_active:
-        return "hidden"
-    end_raw = p.get("end_date") or p.get("expiry") or ""
-    if end_raw:
-        try:
-            from dateutil.parser import parse as _dp
-            import pytz
-            end_dt = _dp(str(end_raw))
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=pytz.UTC)
-            now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
-            if end_dt < now_utc:
-                # Auto-write expired status to DB so it persists
-                try:
-                    db.products.update_one(
-                        {"_id": p["_id"], "status": {"$ne": "expired"}},
-                        {"$set": {"status": "expired", "is_active": False}}
-                    )
-                except Exception:
-                    pass
-                return "expired"
-        except Exception:
-            pass
-    return "approved"
 
     # ── 2. products collection (seeded/imported product catalogue) ──────────
     product_docs = list(db.products.find().sort("_id", -1))

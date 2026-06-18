@@ -2427,13 +2427,24 @@ function renderBanners(rows) {
          <span style="background:#fff3cd;color:#856404;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant Pending</span>`;
 
     let durationHtml = '—';
-    if (r.from_date && r.end_date) {
-      const days = r.duration_days ? `<br><span style="background:var(--light);color:var(--primary);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700">${r.duration_days} Days</span>` : '';
-      durationHtml = `<div style="font-size:12px">${r.from_date}<br>to<br>${r.end_date}${days}</div>`;
-    } else if (r.end_date) {
-      // Always show duration_days badge even when only end_date is available
-      const days = r.duration_days ? `<br><span style="background:var(--light);color:var(--primary);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700">${r.duration_days} Days</span>` : '';
-      durationHtml = `<div style="font-size:12px">Until ${r.end_date}${days}</div>`;
+    {
+      // Compute duration_days on-the-fly from dates if not stored
+      let _cd = parseInt(r.duration_days) || 0;
+      if (!_cd && r.from_date && r.end_date) {
+        try {
+          const _fd = new Date(r.from_date + 'T00:00:00');
+          const _ed = new Date(r.end_date + 'T00:00:00');
+          if (!isNaN(_fd) && !isNaN(_ed)) _cd = Math.max(1, Math.round((_ed - _fd) / 86400000) + 1);
+        } catch(_) {}
+      }
+      const _dBadge = _cd
+        ? `<br><span style="background:var(--light);color:var(--primary);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700">${_cd} Days</span>`
+        : '';
+      if (r.from_date && r.end_date) {
+        durationHtml = `<div style="font-size:12px">${_fmtDate(r.from_date)}<br>to<br>${_fmtDate(r.end_date)}${_dBadge}</div>`;
+      } else if (r.end_date) {
+        durationHtml = `<div style="font-size:12px">Until ${_fmtDate(r.end_date)}${_dBadge}</div>`;
+      }
     }
 
     const st = r.status;
