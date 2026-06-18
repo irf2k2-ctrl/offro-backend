@@ -3317,15 +3317,23 @@ async function loadGiftCards() {
       // Trust backend status for products (which now compute expiry server-side)
       let computedStatus = (v.status === 'expired') ? 'expired'
                          : isActive ? 'approved' : 'hidden';
-      // Check expiry even when isActive=false — expired should show "expired" not "hidden"
-      if (computedStatus !== 'expired' && toD) {
-        try {
-          // Support "22 May 2026", "2026-05-22", "22-05-2026", "13 Jun 2026" formats
-          let endDt = _parseFlexDate(toD);
-          // Compare end of end_date day (23:59:59) vs now — prevents off-by-one due to UTC/IST
-          if (endDt && !isNaN(endDt)) { endDt.setHours(23, 59, 59, 999); }
-          if (endDt && !isNaN(endDt) && endDt < new Date()) { computedStatus = 'expired'; isActive = false; }
-        } catch(e) {}
+      // Check expiry — fall back to parsing validity string when end_date is empty
+      if (computedStatus !== 'expired') {
+        let _adminExpStr = toD;
+        if (!_adminExpStr && v.validity) {
+          const _vs = String(v.validity);
+          if (_vs.includes('→'))                           _adminExpStr = _vs.split('→').pop().trim();
+          else if (_vs.includes('->'))                           _adminExpStr = _vs.split('->').pop().trim();
+          else if (_vs.toLowerCase().includes(' to '))           _adminExpStr = _vs.toLowerCase().split(' to ').pop().trim();
+          else if (_vs.includes(' - ') && _vs.length > 8)       _adminExpStr = _vs.split(' - ').pop().trim();
+        }
+        if (_adminExpStr) {
+          try {
+            let endDt = _parseFlexDate(_adminExpStr);
+            if (endDt && !isNaN(endDt)) { endDt.setHours(23, 59, 59, 999); }
+            if (endDt && !isNaN(endDt) && endDt < new Date()) { computedStatus = 'expired'; isActive = false; }
+          } catch(e) {}
+        }
       }
       // ISSUE 1 FIX: gift_vouchers with source='merchant' are approved merchant products
       // — they must show as Merchant, not Admin, in the creator badge

@@ -1431,6 +1431,42 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             created_at_iso = ca.strftime("%Y-%m-%dT%H:%M:%S")
         else:
             created_at_iso = str(ca or "")[:19]
+        # Compute real-time expiry status for gift_voucher records (same logic as products)
+        _gv_end_raw = v.get("end_date", "")
+        if not _gv_end_raw:
+            _gv_validity = str(v.get("validity") or "")
+            if "\u2192" in _gv_validity or "->" in _gv_validity:
+                _sep = "\u2192" if "\u2192" in _gv_validity else "->"
+                _gv_end_raw = _gv_validity.split(_sep)[-1].strip()
+            elif " to " in _gv_validity.lower():
+                _gv_end_raw = _gv_validity.lower().split(" to ")[-1].strip()
+            elif " - " in _gv_validity and len(_gv_validity) > 8:
+                _gv_end_raw = _gv_validity.split(" - ")[-1].strip()
+        _gv_status = v.get("status", "approved")
+        if _gv_status not in ("rejected", "hidden", "inactive", "pending"):
+            if _gv_end_raw:
+                import re as _gv_re
+                _gv_s = str(_gv_end_raw).strip()
+                if "T" in _gv_s: _gv_s = _gv_s.split("T")[0]
+                _gv_s = _gv_re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?$', '', _gv_s).strip()
+                _gv_end_dt = None
+                for _gv_fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"):
+                    try: _gv_end_dt = datetime.strptime(_gv_s, _gv_fmt); break
+                    except ValueError: pass
+                if not _gv_end_dt:
+                    _gv_m = _gv_re.match(r"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$", _gv_s)
+                    if _gv_m:
+                        try: _gv_end_dt = datetime.strptime(_gv_s, "%d %b %Y")
+                        except ValueError: pass
+                if _gv_end_dt and _gv_end_dt.replace(hour=23, minute=59, second=59) < datetime.utcnow():
+                    _gv_status = "expired"
+                    # Write back to DB so it persists
+                    try:
+                        db.gift_vouchers.update_one(
+                            {"_id": v["_id"], "status": {"$ne": "expired"}},
+                            {"$set": {"status": "expired", "is_active": False}}
+                        )
+                    except: pass
         result.append({
             "id":                str(v["_id"]),
             "title":             v.get("title", ""),
@@ -1441,9 +1477,10 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             "merchant_id":       mid,
             "merchant_name":     merchant_name,
             "merchant_phone":    merchant_phone,
-            "is_active":         v.get("is_active", True),
+            "is_active":         _gv_status == "approved",
+            "status":            _gv_status,
             "from_date":         v.get("from_date", ""),
-            "end_date":          v.get("end_date", ""),
+            "end_date":          v.get("end_date", _gv_end_raw),
             "created_at":        created_at_iso,
             "source":            v.get("source", "admin"),
             "source_voucher_id": v.get("source_voucher_id", ""),
@@ -2409,17 +2446,20 @@ def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
         }}
     )
     # TASK 1 FIX: upsert into gift_vouchers — update if exists, insert if not — NEVER duplicate
+    _v_from  = v.get("from_date", "")
+    _v_end   = v.get("end_date", "")
+    _v_valid = v.get("validity") or (f"{_v_from} \u2192 {_v_end}" if _v_from and _v_end else ("30 days" if not _v_from else ""))
     db.gift_vouchers.update_one(
         {"source_voucher_id": vid},
         {"$set": {
             "title":             v.get("title", ""),
             "text":              v.get("offer_text", ""),
             "logo":              v.get("logo_url", ""),
-            "validity":          v.get("validity") or (
-                                     f"{v.get('from_date', '')} → {v.get('end_date', '')}"
-                                     if v.get("from_date") else "30 days"
-                                 ),
-            "is_active":         True,
+            "validity":          _v_valid,
+            "from_date":         _v_from,
+            "end_date":          _v_end,
+            "is_active":         final_status == "approved",
+            "status":            final_status,
             "source":            "merchant",
             "source_voucher_id": vid,
             "merchant_id":       str(v.get("merchant_id", "")),
