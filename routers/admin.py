@@ -1332,37 +1332,65 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
 # ===================== GIFT VOUCHERS (app-facing cards) =====================
 
 def _compute_product_status(p):
-    """Compute real-time product status — auto-expire if end_date/valid_till has passed."""
+    """Compute real-time product status — stdlib-only date parsing, no third-party deps."""
     stored = p.get("status", p.get("approval_status", ""))
-    # If explicitly rejected/hidden, respect that
     if stored in ("rejected", "hidden", "inactive"):
         return stored
 
-    # ── Expiry check FIRST (before is_active) so expired products show "expired" not "hidden" ──
+    # ── Collect end date from all possible fields ──────────────────────────────
     end_raw = (p.get("end_date") or p.get("expiry") or
                p.get("valid_till") or p.get("end") or "")
 
-    # Also try to parse end date from a validity string like "11 Jun 2026 → 13 Jun 2026"
+    # Parse end from a validity string like "11 Jun 2026 → 13 Jun 2026"
     if not end_raw:
         validity_str = str(p.get("validity") or "")
-        if "→" in validity_str:
+        if "→" in validity_str:                           # → arrow
             end_raw = validity_str.split("→")[-1].strip()
         elif " to " in validity_str.lower():
             end_raw = validity_str.lower().split(" to ")[-1].strip()
         elif " - " in validity_str and len(validity_str) > 8:
             end_raw = validity_str.split(" - ")[-1].strip()
 
+    # ── Parse date using stdlib only (no dateutil / pytz needed) ──────────────
     if end_raw:
-        try:
-            from dateutil.parser import parse as _dp
-            import pytz
-            end_dt = _dp(str(end_raw))
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=pytz.UTC)
-            # Use end of day so product expires at midnight of end date
-            end_dt = end_dt.replace(hour=23, minute=59, second=59)
-            now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
-            if end_dt < now_utc:
+        end_dt = None
+        s = str(end_raw).strip()
+        # Strip ISO time portion (after T) — don't split on spaces (breaks '13 Jun 2026')
+        if "T" in s:
+            s = s.split("T")[0]
+        # Strip HH:MM:SS suffix for 'YYYY-MM-DD HH:MM:SS' format
+        import re as _re
+        s = _re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?$', '', s).strip()
+        # Try formats most common in this codebase
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"):
+            try:
+                end_dt = datetime.strptime(s, fmt)
+                break
+            except ValueError:
+                pass
+        # Handle "13 Jun 2026" / "Jun 13 2026"
+        if not end_dt:
+            import re as _re
+            m = _re.match(r"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$", s)
+            if m:
+                try:
+                    end_dt = datetime.strptime(s, "%d %b %Y")
+                except ValueError:
+                    pass
+            if not end_dt:
+                m2 = _re.match(r"^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})$", s)
+                if m2:
+                    try:
+                        end_dt = datetime.strptime(s, "%b %d %Y")
+                    except ValueError:
+                        pass
+
+        if end_dt:
+            # Set to end of day, compare against UTC now (both naive for simplicity)
+            end_of_day = end_dt.replace(hour=23, minute=59, second=59)
+            now = datetime.utcnow()
+            if end_of_day < now:
+                # Write expiry back to DB so it sticks
                 try:
                     db.products.update_one(
                         {"_id": p["_id"], "status": {"$ne": "expired"}},
@@ -1371,10 +1399,8 @@ def _compute_product_status(p):
                 except Exception:
                     pass
                 return "expired"
-        except Exception:
-            pass
 
-    # ── Only check is_active AFTER expiry (so we don't hide expired products) ──
+    # ── Only check is_active AFTER expiry (expired ≠ hidden) ──────────────────
     is_active = p.get("is_active", True)
     if not is_active:
         return "hidden"
