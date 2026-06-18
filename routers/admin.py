@@ -2675,59 +2675,6 @@ def update_banner_pricing(data: dict, a=Depends(get_current_admin)):
 # REVIEWS MANAGEMENT
 # ═══════════════════════════════════════════════════════════════
 
-@router.get("/reviews")
-def list_reviews(
-    store_id: str = None,
-    skip: int = 0,
-    limit: int = 50,
-    a=Depends(get_current_admin)
-):
-    """List all user reviews. Optionally filter by store_id."""
-    query = {}
-    if store_id:
-        query["store_id"] = store_id
-    reviews = list(
-        db.reviews.find(query)
-        .sort("created_at", -1)
-        .skip(skip)
-        .limit(limit)
-    )
-    total = db.reviews.count_documents(query)
-    result = []
-    for r in reviews:
-        # Enrich with store name
-        store_name = ""
-        try:
-            s = db.stores.find_one({"_id": ObjectId(r["store_id"])}, {"store_name": 1})
-            store_name = s.get("store_name", "") if s else ""
-        except Exception:
-            pass
-        result.append({
-            "_id":        str(r["_id"]),
-            "store_id":   r.get("store_id", ""),
-            "store_name": store_name,
-            "user_id":    r.get("user_id") or "",
-            "user_name":  r.get("user_name", "Anonymous"),
-            "rating":     float(r.get("rating", 0)),
-            "text":       r.get("text", ""),
-            "created_at": str(r.get("created_at", "")),
-            "updated_at": str(r.get("updated_at", "")),
-        })
-    return {"reviews": result, "total": total}
-
-
-@router.delete("/reviews/{review_id}")
-def delete_review(review_id: str, a=Depends(get_current_admin)):
-    """Admin deletes an inappropriate review."""
-    try:
-        res = db.reviews.delete_one({"_id": ObjectId(review_id)})
-    except Exception:
-        raise HTTPException(400, "Invalid review_id")
-    if res.deleted_count == 0:
-        raise HTTPException(404, "Review not found")
-    return {"ok": True, "message": "Review deleted"}
-
-
 @router.get("/reviews/stats")
 def review_stats(a=Depends(get_current_admin)):
     """Return review counts grouped by store."""

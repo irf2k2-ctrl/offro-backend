@@ -107,11 +107,11 @@ tr:hover td{background:#f7faf8;}
   <div class="sep"></div>
   <a href="#" onclick="showSection('accounts',this)"><i class="fas fa-id-badge fa-fw"></i> Accounts</a>
   <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
-  <a href="#" onclick="showSection('voucher_zone',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
+  <a href="#" onclick="showSection('product_cards',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
   <a href="#" onclick="showSection('admin_banners',this)"><i class="fas fa-ad fa-fw"></i> Admin Banners</a>
   <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
-  <a href="#" onclick="showSection('vouchers',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
+  <a href="#" onclick="showSection('gift_voucher_requests',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
@@ -150,17 +150,17 @@ tr:hover td{background:#f7faf8;}
   </div>
 
   <!-- MERCHANTS -->
-  <div id="section-vouchers" class="section">
+  <div id="section-gift_voucher_requests" class="section">
   <div class="section-header">
     <div>
       <div class="fw-bold" style="font-size:18px;color:var(--primary)">🎁 Gift Voucher Requests</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Pending and fulfilled gift voucher withdrawal requests</div>
     </div>
-    <button class="btn-p" onclick="loadVouchers()"><i class="fas fa-sync me-1"></i> Refresh</button>
+    <button class="btn-p" onclick="loadGiftVoucherRequests()"><i class="fas fa-sync me-1"></i> Refresh</button>
   </div>
   <div class="table-wrap"><table>
     <thead><tr><th>User</th><th>Phone</th><th>Points</th><th>Value</th><th>Requested</th><th>Status</th><th>Action</th></tr></thead>
-    <tbody id="vouchers_table"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+    <tbody id="gift_voucher_requests_table"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
   </table></div>
 </div>
 
@@ -321,7 +321,7 @@ tr:hover td{background:#f7faf8;}
 
   <!-- CATEGORIES -->
   
-<div id="section-voucher_zone" class="section">
+<div id="section-product_cards" class="section">
   <!-- ── Stat bar ── -->
   <div class="section-header">
     <div>
@@ -333,34 +333,34 @@ tr:hover td{background:#f7faf8;}
 
   <!-- Stats row -->
   <div class="row g-3 mb-4">
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="vz_total">—</h3><p>Total Cards</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="vz_approved" style="color:#1a6640">—</h3><p>Approved</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat warn"><h3 id="vz_pending">—</h3><p>Pending</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="vz_expired" style="color:var(--danger)">—</h3><p>Expired</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="vz_active" style="color:var(--primary)">—</h3><p>Active</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_total">—</h3><p>Total Cards</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_approved" style="color:#1a6640">—</h3><p>Approved</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat warn"><h3 id="pc_pending">—</h3><p>Pending</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_expired" style="color:var(--danger)">—</h3><p>Expired</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_active" style="color:var(--primary)">—</h3><p>Active</p></div></div>
   </div>
 
   <!-- Filters -->
   <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
-    <input id="vz_search" class="form-control" style="max-width:240px;font-size:13px" placeholder="Search by title or offer text..." oninput="filterVoucherZone()">
-    <select id="vz_merchant_filter" class="form-select" style="max-width:180px;font-size:13px" onchange="filterVoucherZone()">
+    <input id="pc_search" class="form-control" style="max-width:240px;font-size:13px" placeholder="Search by title or offer text..." oninput="filterProductCards()">
+    <select id="pc_merchant_filter" class="form-select" style="max-width:180px;font-size:13px" onchange="filterProductCards()">
       <option value="">All Merchants</option>
       <option value="admin">Admin</option>
       <option value="merchant">Merchant</option>
     </select>
-    <select id="vz_status_filter" class="form-select" style="max-width:160px;font-size:13px" onchange="filterVoucherZone()">
+    <select id="pc_status_filter" class="form-select" style="max-width:160px;font-size:13px" onchange="filterProductCards()">
       <option value="">All Status</option>
       <option value="approved">Approved</option>
       <option value="pending">Pending</option>
       <option value="expired">Expired</option>
     </select>
-    <input id="vz_date_from" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterVoucherZone()" placeholder="From">
-    <input id="vz_date_to" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterVoucherZone()" placeholder="To">
+    <input id="pc_date_from" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterProductCards()" placeholder="From">
+    <input id="pc_date_to" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterProductCards()" placeholder="To">
   </div>
 
   <!-- Unified table -->
   <div class="table-wrap">
-    <table id="vz_table">
+    <table id="pc_table">
       <thead><tr>
         <th style="width:60px">Preview</th>
         <th>Title</th>
@@ -370,13 +370,13 @@ tr:hover td{background:#f7faf8;}
         <th>Actions</th>
         <th>Created On</th>
       </tr></thead>
-      <tbody id="vz_unified_body"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+      <tbody id="pc_unified_body"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
     </table>
   </div>
   <!-- ISSUE 8: Pagination bar -->
   <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-    <div style="font-size:12px;color:var(--muted)" id="vz_showing"></div>
-    <div id="vz_pagination" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
+    <div style="font-size:12px;color:var(--muted)" id="pc_showing"></div>
+    <div id="pc_pagination" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
   </div>
 
   <!-- ℹ️ What is View? -->
@@ -614,7 +614,7 @@ tr:hover td{background:#f7faf8;}
       <p id="pricing_msg" class="mt-2" style="font-size:13px;color:var(--primary);"></p>
     </div>
 
-    <!-- ── Banner & Voucher Pricing (Per-Day Model) ── -->
+    <!-- ── Banner & Product Pricing (Per-Day Model) ── -->
     <div style="margin-top:20px;background:#fff8f0;border-radius:12px;padding:20px;border:1px solid #e8d5c0;max-width:640px;">
       <div class="fw-bold mb-3" style="color:#856404;font-size:15px;">🖼️ Banner Pricing — Per Day</div>
       <p style="font-size:12px;color:#856404;margin-bottom:14px;">Merchant selects any number of days + start date. Total = days × rate + GST</p>
@@ -637,7 +637,7 @@ tr:hover td{background:#f7faf8;}
           <small class="text-muted">e.g. 45 days × ₹10 = ₹450 base</small>
         </div>
       </div>
-      <button class="btn-p mt-2" onclick="saveBannerVoucherPricing()" style="font-size:13px;padding:6px 18px;">
+      <button class="btn-p mt-2" onclick="savePricingConfig()" style="font-size:13px;padding:6px 18px;">
         <i class="fas fa-save me-1"></i> Save Banner & Product Pricing
       </button>
       <p id="bv_pricing_msg" style="font-size:13px;color:var(--primary);margin-top:8px;"></p>
@@ -1320,9 +1320,9 @@ window.onload = () => {
   }, 60000);
 };
 
-// ─── GIFT VOUCHERS ───
-async function loadVouchers() {
-    const tbody = document.getElementById("vouchers_table");
+// ─── GIFT VOUCHER REQUESTS ───
+async function loadGiftVoucherRequests() {
+    const tbody = document.getElementById("gift_voucher_requests_table");
     tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>";
     try {
         let res = await fetch("/admin/withdraw-requests", { credentials:"include" });
@@ -1372,7 +1372,7 @@ async function submitFulfill(){
     body:JSON.stringify({voucher_code:code,voucher_type:type})
   });
   let d=await r.json();
-  if(r.ok){if (fulfillModal_inst) fulfillModal_inst.hide();loadVouchers();alert("✅ "+d.message);}
+  if(r.ok){if (fulfillModal_inst) fulfillModal_inst.hide();loadGiftVoucherRequests();alert("✅ "+d.message);}
   else alert("❌ "+(d.detail||"Error"));
 }
 
@@ -1387,7 +1387,7 @@ function showSection(name, el){
   if(name==="accounts") loadAccounts();
   if(name==="overview") { loadStats(); loadSliders(); }
   if(name==="stores") loadStores();
-  if(name==="vouchers") loadVouchers();
+  if(name==="gift_voucher_requests") loadGiftVoucherRequests();
   if(name==="categories"){ loadCategories().then(()=>renderCategories()); }
   if(name==="pricing") loadPricing();
   if(name==="terms") loadTerms();
@@ -1398,7 +1398,7 @@ function showSection(name, el){
   if(name==="about") loadAbout();
   if(name==="ratings") loadRatings();
   if(name==="reviews") loadReviews();
-  if(name==="voucher_zone") loadGiftCards();
+  if(name==="product_cards") loadGiftCards();
   if(name==="promo_sliders") { loadSliders(); }
   if(name==="notifications") loadNotifications();
 }
@@ -2004,7 +2004,7 @@ function renderUsersPage(){
   pageData.forEach(u=>{
     let totalColor=u.total_points>0?"color:#1a6640;font-weight:700;":"";
     html+=`<tr>
-      <td><strong>${u.name||"-"}</strong>${u.pending_withdraw?` <span onclick="showSection('vouchers',document.querySelector('[onclick*=vouchers]'))" title="Has pending gift voucher request" style="background:#fff3cd;color:#856404;font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid #ffc107;vertical-align:middle;cursor:pointer;">🎁 Voucher Pending</span>`:""}</td>
+      <td><strong>${u.name||"-"}</strong>${u.pending_withdraw?` <span onclick="showSection('gift_voucher_requests',document.querySelector('[onclick*=vouchers]'))" title="Has pending gift voucher request" style="background:#fff3cd;color:#856404;font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid #ffc107;vertical-align:middle;cursor:pointer;">🎁 Voucher Pending</span>`:""}</td>
       <td>${u.phone||"-"}</td><td>${u.city||"-"}</td>
       <td>${u.visit_points||0}</td><td>${u.pool_points||0}</td>
       <td style="${totalColor}">${u.total_points||0}</td>
@@ -3263,7 +3263,7 @@ async function deleteReview(reviewId, storeName) {
   } catch(e) { alert("Error: " + e.message); }
 }
 
-// ═══════════ VOUCHER ZONE (App Display) ═══════════
+// ═══════════ PRODUCT CARDS (App Display) ═══════════
 let gcModalInst;
 window.addEventListener("DOMContentLoaded", function() {
   if (document.getElementById("giftCardModal"))
@@ -3271,10 +3271,10 @@ window.addEventListener("DOMContentLoaded", function() {
 });
 
 // ── All products data cache + pagination ──
-let _allVoucherRows = [];
-let _vzLogoMap = {};  // stores logos separately to avoid huge base64 in onclick JSON
-let _vzFilteredRows = [];
-let _vzPage = 1;
+let _allProductRows = [];
+let _pcLogoMap = {};  // stores logos separately to avoid huge base64 in onclick JSON
+let _pcFilteredRows = [];
+let _pcPage = 1;
 const _VZ_PER_PAGE = 15;
 
 // ── Robust date parser: handles ISO, DD-MM-YYYY, "13 Jun 2026", "Jun 13 2026" ──
@@ -3297,11 +3297,11 @@ function _parseFlexDate(s) {
 }
 
 async function loadGiftCards() {
-  const tbody = document.getElementById('vz_unified_body');
+  const tbody = document.getElementById('pc_unified_body');
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
   try {
-    // Fetch admin vouchers + merchant submissions in parallel
+    // Fetch admin product cards + merchant product submissions in parallel
     const [adminR, merchantR] = await Promise.all([
       fetch("/admin/gift-vouchers", {credentials:"include"}),
       fetch("/admin/merchant-vouchers", {credentials:"include"}),
@@ -3422,59 +3422,59 @@ async function loadGiftCards() {
       !approvedMerchantIds.has(r._id)       // not already copied to gift_vouchers
     );
 
-    _allVoucherRows = [...adminRows, ...dedupedMerchantRows]
+    _allProductRows = [...adminRows, ...dedupedMerchantRows]
       .sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
     // Build logo lookup map — strip heavy base64 from row objects so onclick JSON stays small
-    _vzLogoMap = {};
-    _allVoucherRows.forEach(r => { if (r.logo) { _vzLogoMap[r._id] = r.logo; r.logo = ''; } });
+    _pcLogoMap = {};
+    _allProductRows.forEach(r => { if (r.logo) { _pcLogoMap[r._id] = r.logo; r.logo = ''; } });
 
     // Update stats — expired is computed at normalize time (Issue 7)
-    const approved = _allVoucherRows.filter(r=>r.status==='approved').length;
-    const pending  = _allVoucherRows.filter(r=>r.status==='pending').length;
-    const expired  = _allVoucherRows.filter(r=>r.status==='expired').length;
-    const active   = _allVoucherRows.filter(r=>r.is_active && r.status!=='expired').length;
+    const approved = _allProductRows.filter(r=>r.status==='approved').length;
+    const pending  = _allProductRows.filter(r=>r.status==='pending').length;
+    const expired  = _allProductRows.filter(r=>r.status==='expired').length;
+    const active   = _allProductRows.filter(r=>r.is_active && r.status!=='expired').length;
     const _s = id => { const el=document.getElementById(id); if(el) el.textContent=0; };
     const _set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-    _set('vz_total',    _allVoucherRows.length);
-    _set('vz_approved', approved);
-    _set('vz_pending',  pending);
-    _set('vz_expired',  expired);
-    _set('vz_active',   active);
+    _set('pc_total',    _allProductRows.length);
+    _set('pc_approved', approved);
+    _set('pc_pending',  pending);
+    _set('pc_expired',  expired);
+    _set('pc_active',   active);
 
-    _vzFilteredRows = _allVoucherRows;
-    _vzPage = 1;
-    filterVoucherZone();
+    _pcFilteredRows = _allProductRows;
+    _pcPage = 1;
+    filterProductCards();
   } catch(e) { console.error('loadGiftCards error', e); }
 }
 
-function filterVoucherZone() {
-  const q       = (document.getElementById('vz_search')?.value||'').toLowerCase();
-  const byWho   = document.getElementById('vz_merchant_filter')?.value||'';
-  const bySt    = document.getElementById('vz_status_filter')?.value||'';
-  const dateFrom= document.getElementById('vz_date_from')?.value||'';
-  const dateTo  = document.getElementById('vz_date_to')?.value||'';
+function filterProductCards() {
+  const q       = (document.getElementById('pc_search')?.value||'').toLowerCase();
+  const byWho   = document.getElementById('pc_merchant_filter')?.value||'';
+  const bySt    = document.getElementById('pc_status_filter')?.value||'';
+  const dateFrom= document.getElementById('pc_date_from')?.value||'';
+  const dateTo  = document.getElementById('pc_date_to')?.value||'';
 
-  let rows = _allVoucherRows;
+  let rows = _allProductRows;
   if (q)       rows = rows.filter(r=>(r.title||'').toLowerCase().includes(q)||(r.offer_text||'').toLowerCase().includes(q));
   if (byWho)   rows = rows.filter(r=>r._source===byWho);
   if (bySt)    rows = rows.filter(r=>r.status===bySt);
   if (dateFrom)rows = rows.filter(r=>(r.created_at||'')>=dateFrom);
   if (dateTo)  rows = rows.filter(r=>(r.created_at||'')<=dateTo+'z');
 
-  _vzFilteredRows = rows;
-  _vzPage = 1; // reset to page 1 on filter change
-  renderVoucherZone();
+  _pcFilteredRows = rows;
+  _pcPage = 1; // reset to page 1 on filter change
+  renderProductCards();
 }
-function goVZPage(p) { _vzPage = p; renderVoucherZone(); }
+function goVZPage(p) { _pcPage = p; renderProductCards(); }
 
-function renderVoucherZone() {
-  const tbody   = document.getElementById('vz_unified_body');
-  const showing = document.getElementById('vz_showing');
-  const pgBar   = document.getElementById('vz_pagination');
+function renderProductCards() {
+  const tbody   = document.getElementById('pc_unified_body');
+  const showing = document.getElementById('pc_showing');
+  const pgBar   = document.getElementById('pc_pagination');
   if (!tbody) return;
-  const rows = _vzFilteredRows;
+  const rows = _pcFilteredRows;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted)">No vouchers found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted)">No products found.</td></tr>';
     if(showing) showing.textContent = '';
     if(pgBar)   pgBar.innerHTML = '';
     return;
@@ -3482,8 +3482,8 @@ function renderVoucherZone() {
   // Pagination math
   const total  = rows.length;
   const pages  = Math.ceil(total / _VZ_PER_PAGE);
-  _vzPage      = Math.max(1, Math.min(_vzPage, pages));
-  const start  = (_vzPage-1)*_VZ_PER_PAGE;
+  _pcPage      = Math.max(1, Math.min(_pcPage, pages));
+  const start  = (_pcPage-1)*_VZ_PER_PAGE;
   const end    = Math.min(start+_VZ_PER_PAGE, total);
   const pageRows = rows.slice(start, end);
   if(showing) showing.textContent = `Showing ${start+1}–${end} of ${total} results`;
@@ -3491,21 +3491,21 @@ function renderVoucherZone() {
   if (pgBar) {
     const btnStyle = (active) => `style="border:1px solid ${active?'var(--primary)':'var(--border)'};background:${active?'var(--primary)':'#fff'};color:${active?'#fff':'var(--text)'};border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;"`;
     let pgHtml = '';
-    if (_vzPage > 1) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(${_vzPage-1})">‹ Prev</button>`;
+    if (_pcPage > 1) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(${_pcPage-1})">‹ Prev</button>`;
     const maxBtns = 7;
-    let lo = Math.max(1, _vzPage-3), hi = Math.min(pages, lo+maxBtns-1);
+    let lo = Math.max(1, _pcPage-3), hi = Math.min(pages, lo+maxBtns-1);
     if (hi-lo < maxBtns-1) lo = Math.max(1, hi-maxBtns+1);
     if (lo > 1) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(1)">1</button>${lo>2?'<span style="padding:4px 2px">…</span>':''}`;
-    for (let i=lo;i<=hi;i++) pgHtml += `<button ${btnStyle(i===_vzPage)} onclick="goVZPage(${i})">${i}</button>`;
+    for (let i=lo;i<=hi;i++) pgHtml += `<button ${btnStyle(i===_pcPage)} onclick="goVZPage(${i})">${i}</button>`;
     if (hi < pages) pgHtml += `${hi<pages-1?'<span style="padding:4px 2px">…</span>':''}<button ${btnStyle(false)} onclick="goVZPage(${pages})">${pages}</button>`;
-    if (_vzPage < pages) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(${_vzPage+1})">Next ›</button>`;
+    if (_pcPage < pages) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(${_pcPage+1})">Next ›</button>`;
     pgBar.innerHTML = pgHtml;
   }
 
   tbody.innerHTML = rows.map(r => {
     // TASK 2 FIX: handle both HTTPS URLs and base64 data: URIs
-    // Logo stored in _vzLogoMap to avoid huge base64 in onclick JSON
-    const _logoSrc = _vzLogoMap[r._id] || r.logo || '';
+    // Logo stored in _pcLogoMap to avoid huge base64 in onclick JSON
+    const _logoSrc = _pcLogoMap[r._id] || r.logo || '';
     const logoHtml = _logoSrc
       ? `<img src="${_logoSrc}" style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
         + `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:none;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`
@@ -3545,7 +3545,7 @@ function renderVoucherZone() {
 
     const isPending = (st==='pending'||st==='pending_approval');
     const approveBtn = (!isAdmin && isPending)
-      ? `<button class="btn-approve me-1" style="font-size:11px;padding:4px 10px" onclick="approveVZVoucher('${r._id}','${r._source}')">Approve</button>`
+      ? `<button class="btn-approve me-1" style="font-size:11px;padding:4px 10px" onclick="approveProductCard('${r._id}','${r._source}')">Approve</button>`
       : '';
 
     // Strip heavy base64 logo + _raw before embedding in onclick attribute
@@ -3620,35 +3620,35 @@ function openVZViewModal(r) {
   const isAdmin = r._source==='admin';
   const isPending = (r.status==='pending'||r.status==='pending_approval');
   // TASK 2 FIX: set logo in view — works for both URL and base64 data: URIs
-  const _vzLogo = document.getElementById('vz_modal_logo');
+  const _vzLogo = document.getElementById('pc_modal_logo');
   if (_vzLogo) {
-    const _modalLogoSrc = _vzLogoMap[r._id] || r.logo || '';
+    const _modalLogoSrc = _pcLogoMap[r._id] || r.logo || '';
     _vzLogo.src = _modalLogoSrc;
     _vzLogo.style.display = _modalLogoSrc ? 'block' : 'none';
   }
-  document.getElementById('vz_modal_title').textContent = r.title||'—';
-  document.getElementById('vz_modal_offer').textContent = r.offer_text||'—';
-  document.getElementById('vz_modal_from_date').textContent = r.from_date || '—';
-  document.getElementById('vz_modal_end_date').textContent  = r.end_date  || '—';
-  document.getElementById('vz_modal_validity').textContent = r.validity||'—';
+  document.getElementById('pc_modal_title').textContent = r.title||'—';
+  document.getElementById('pc_modal_offer').textContent = r.offer_text||'—';
+  document.getElementById('pc_modal_from_date').textContent = r.from_date || '—';
+  document.getElementById('pc_modal_end_date').textContent  = r.end_date  || '—';
+  document.getElementById('pc_modal_validity').textContent = r.validity||'—';
   // ISSUE 1: Show merchant mapping for admin-created products
   // ISSUE 1 FIX: match 3-way badge — merchant-approved products show Merchant only
   const _pureAdmin2   = isAdmin && !r.merchant_name;
   const _adminLinked2 = isAdmin && r.merchant_name;
-  document.getElementById('vz_modal_creator').textContent =
+  document.getElementById('pc_modal_creator').textContent =
     _pureAdmin2   ? 'Admin (Offro)' :
     _adminLinked2 ? `Admin → ${r.merchant_name}` :
     `Merchant — ${r.merchant_name||''}`;
-  document.getElementById('vz_modal_phone').textContent = r.merchant_phone || '—';
-  document.getElementById('vz_modal_status').textContent = r.status;
-  // Approve button: only show for pending merchant vouchers
-  const approveBtn = document.getElementById('vz_modal_approve');
+  document.getElementById('pc_modal_phone').textContent = r.merchant_phone || '—';
+  document.getElementById('pc_modal_status').textContent = r.status;
+  // Approve button: only show for pending merchant products
+  const approveBtn = document.getElementById('pc_modal_approve');
   if (approveBtn) approveBtn.style.display = (!isAdmin && isPending) ? 'inline-block' : 'none';
   vzViewModalInst.show();
 }
 
-function approveVZVoucher(id, source) {
-  if (source==='merchant') approveMerchantVoucher(id);
+function approveProductCard(id, source) {
+  if (source==='merchant') approveMerchantProduct(id);
   else if(confirm('Activate this product?')) loadGiftCards();
 }
 
@@ -3660,7 +3660,7 @@ function openVZMoreMenu(evt, id, source, status) {
   menu.style.cssText = 'position:fixed;background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px 0;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:130px';
   menu.innerHTML = `
     <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--text)" onmouseenter="this.style.background='#f7faf8'" onmouseleave="this.style.background=''" onclick="openVZEdit('${id}','${source}');this.closest('#_vzCtxMenu').remove()"><i class="fas fa-pen me-2" style="color:var(--primary)"></i>Edit</div>
-    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--danger)" onmouseenter="this.style.background='#fde8e6'" onmouseleave="this.style.background=''" onclick="deleteVZVoucher('${id}','${source}');this.closest('#_vzCtxMenu').remove()"><i class="fas fa-trash me-2"></i>Delete</div>
+    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--danger)" onmouseenter="this.style.background='#fde8e6'" onmouseleave="this.style.background=''" onclick="deleteProductCard('${id}','${source}');this.closest('#_vzCtxMenu').remove()"><i class="fas fa-trash me-2"></i>Delete</div>
   `;
   document.body.appendChild(menu);
   const rect = evt.target.getBoundingClientRect();
@@ -3670,112 +3670,112 @@ function openVZMoreMenu(evt, id, source, status) {
 }
 
 function openVZEdit(id, source) {
-  const row = _allVoucherRows.find(r=>r._id===id);
+  const row = _allProductRows.find(r=>r._id===id);
   if (!row) return;
   if (source==='admin' || source==='products') { editGiftCard(row._raw); }
   else {
-    // Admin can edit merchant vouchers directly
+    // Admin can edit merchant products directly
     openVZMerchantEditModal(row);
   }
 }
 
-// FIX 10: Merchant voucher edit modal (admin side)
+// FIX 10: Merchant product edit modal (admin side)
 let _vzMerchantEditCurrent = null;
 function openVZMerchantEditModal(row) {
   _vzMerchantEditCurrent = row;
   const el = id => document.getElementById(id);
-  if (!el('vz_merchant_edit_modal')) {
+  if (!el('pc_merchant_edit_modal')) {
     const modal = document.createElement('div');
-    modal.id = 'vz_merchant_edit_modal';
+    modal.id = 'pc_merchant_edit_modal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
     modal.innerHTML = `
       <div style="background:#fff;border-radius:16px;padding:28px;width:500px;max-height:92vh;overflow-y:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
           <h5 style="margin:0;color:var(--primary)">✏️ Edit Product</h5>
-          <button onclick="document.getElementById('vz_merchant_edit_modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">&times;</button>
+          <button onclick="document.getElementById('pc_merchant_edit_modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">&times;</button>
         </div>
 
         <!-- ISSUE 5: Same fields as App -->
         <div class="mb-3">
           <label style="font-size:12px;font-weight:600;color:var(--muted)">Product Title *</label>
-          <input id="vz_edit_title" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. ₹999 DEALS">
+          <input id="pc_edit_title" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. ₹999 DEALS">
         </div>
         <div class="mb-3">
           <label style="font-size:12px;font-weight:600;color:var(--muted)">Offer Text *</label>
-          <input id="vz_edit_offer" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 20% off on all items">
+          <input id="pc_edit_offer" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 20% off on all items">
         </div>
         <div class="row mb-3">
           <div class="col-6">
             <label style="font-size:12px;font-weight:600;color:var(--muted)">From Date</label>
-            <input id="vz_edit_from_date" type="date" class="form-control" style="margin-top:4px" onchange="_vzUpdateValidity()">
+            <input id="pc_edit_from_date" type="date" class="form-control" style="margin-top:4px" onchange="_vzUpdateValidity()">
           </div>
           <div class="col-6">
             <label style="font-size:12px;font-weight:600;color:var(--muted)">To Date (End)</label>
-            <input id="vz_edit_end_date" type="date" class="form-control" style="margin-top:4px" onchange="_vzUpdateValidity()">
+            <input id="pc_edit_end_date" type="date" class="form-control" style="margin-top:4px" onchange="_vzUpdateValidity()">
           </div>
         </div>
         <div class="mb-3">
           <label style="font-size:12px;font-weight:600;color:var(--muted)">Validity Display <small class="text-muted">(auto-filled)</small></label>
-          <input id="vz_edit_validity" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 22 May 2026 → 22 Jun 2026">
+          <input id="pc_edit_validity" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 22 May 2026 → 22 Jun 2026">
         </div>
 
         <!-- ISSUE 6: File upload + URL option for logo -->
         <div class="mb-3">
           <label style="font-size:12px;font-weight:600;color:var(--muted)">Product Image</label>
           <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="file" id="vz_edit_logo_file" class="form-control" accept="image/*"
+            <input type="file" id="pc_edit_logo_file" class="form-control" accept="image/*"
               style="flex:1;min-width:180px;font-size:12px" onchange="_vzPreviewUpload(this)">
             <span style="font-size:11px;color:var(--muted)">or</span>
-            <input id="vz_edit_logo" type="text" class="form-control" style="flex:1;min-width:180px;font-size:12px" placeholder="Paste image URL...">
+            <input id="pc_edit_logo" type="text" class="form-control" style="flex:1;min-width:180px;font-size:12px" placeholder="Paste image URL...">
           </div>
-          <div id="vz_edit_logo_wrap" style="margin-top:8px;display:none;align-items:center;gap:8px">
-            <img id="vz_edit_logo_preview" src="" style="width:60px;height:60px;object-fit:cover;border-radius:10px;border:1px solid var(--border)">
+          <div id="pc_edit_logo_wrap" style="margin-top:8px;display:none;align-items:center;gap:8px">
+            <img id="pc_edit_logo_preview" src="" style="width:60px;height:60px;object-fit:cover;border-radius:10px;border:1px solid var(--border)">
             <button type="button" onclick="_vzClearLogo()" style="font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer">✕ Remove</button>
           </div>
         </div>
 
         <div class="mb-3">
           <label style="font-size:12px;font-weight:600;color:var(--muted)">Status</label>
-          <select id="vz_edit_status" class="form-select" style="margin-top:4px">
+          <select id="pc_edit_status" class="form-select" style="margin-top:4px">
             <option value="pending">Pending Approval</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
             <option value="expired">Expired</option>
           </select>
         </div>
-        <div id="vz_edit_msg" style="font-size:12px;margin-bottom:8px"></div>
+        <div id="pc_edit_msg" style="font-size:12px;margin-bottom:8px"></div>
         <div style="display:flex;gap:10px">
-          <button class="btn-o" style="flex:1" onclick="document.getElementById('vz_merchant_edit_modal').remove()">Cancel</button>
+          <button class="btn-o" style="flex:1" onclick="document.getElementById('pc_merchant_edit_modal').remove()">Cancel</button>
           <button class="btn-approve" style="flex:2" onclick="saveVZMerchantEdit()">💾 Save Changes</button>
         </div>
       </div>`;
 
     // Logo URL input → preview
-    document.getElementById('vz_edit_logo').addEventListener('input', function(){
+    document.getElementById('pc_edit_logo').addEventListener('input', function(){
       _vzShowLogoPreview(this.value);
     });
     document.body.appendChild(modal);
 // Logo listener now inside modal build block above
   }
   const el2 = id => document.getElementById(id);
-  if(el2('vz_edit_title'))     el2('vz_edit_title').value     = row.title||'';
-  if(el2('vz_edit_offer'))     el2('vz_edit_offer').value     = row.offer_text||'';
-  if(el2('vz_edit_from_date')) el2('vz_edit_from_date').value = row.from_date||'';
-  if(el2('vz_edit_end_date'))  el2('vz_edit_end_date').value  = row.end_date||'';
-  if(el2('vz_edit_validity'))  el2('vz_edit_validity').value  = row.validity||'';
-  if(el2('vz_edit_logo'))      el2('vz_edit_logo').value      = row.logo||'';
+  if(el2('pc_edit_title'))     el2('pc_edit_title').value     = row.title||'';
+  if(el2('pc_edit_offer'))     el2('pc_edit_offer').value     = row.offer_text||'';
+  if(el2('pc_edit_from_date')) el2('pc_edit_from_date').value = row.from_date||'';
+  if(el2('pc_edit_end_date'))  el2('pc_edit_end_date').value  = row.end_date||'';
+  if(el2('pc_edit_validity'))  el2('pc_edit_validity').value  = row.validity||'';
+  if(el2('pc_edit_logo'))      el2('pc_edit_logo').value      = row.logo||'';
   if(row.logo) _vzShowLogoPreview(row.logo); else _vzClearLogo();
-  if(el2('vz_edit_logo_file')) el2('vz_edit_logo_file').value = '';
-  if(el2('vz_edit_status'))    el2('vz_edit_status').value    = row.status||'pending';
-  if(el2('vz_edit_msg'))       el2('vz_edit_msg').textContent = '';
-  el2('vz_merchant_edit_modal').style.display = 'flex';
+  if(el2('pc_edit_logo_file')) el2('pc_edit_logo_file').value = '';
+  if(el2('pc_edit_status'))    el2('pc_edit_status').value    = row.status||'pending';
+  if(el2('pc_edit_msg'))       el2('pc_edit_msg').textContent = '';
+  el2('pc_merchant_edit_modal').style.display = 'flex';
 }
 
 // ── Product Edit helpers (Issues 5+6) ──
 function _vzUpdateValidity() {
-  const from = document.getElementById('vz_edit_from_date')?.value;
-  const to   = document.getElementById('vz_edit_end_date')?.value;
-  const el   = document.getElementById('vz_edit_validity');
+  const from = document.getElementById('pc_edit_from_date')?.value;
+  const to   = document.getElementById('pc_edit_end_date')?.value;
+  const el   = document.getElementById('pc_edit_validity');
   if (!el) return;
   if (from && to) {
     const fmtD = d => { const o=new Date(d); return `${o.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][o.getMonth()]} ${o.getFullYear()}`; };
@@ -3783,15 +3783,15 @@ function _vzUpdateValidity() {
   }
 }
 function _vzShowLogoPreview(src) {
-  const wrap = document.getElementById('vz_edit_logo_wrap');
-  const img  = document.getElementById('vz_edit_logo_preview');
+  const wrap = document.getElementById('pc_edit_logo_wrap');
+  const img  = document.getElementById('pc_edit_logo_preview');
   if (!wrap || !img) return;
   if (src) { img.src = src; wrap.style.display = 'flex'; }
   else     { img.src = ''; wrap.style.display = 'none'; }
 }
 function _vzClearLogo() {
-  const urlInput  = document.getElementById('vz_edit_logo');
-  const fileInput = document.getElementById('vz_edit_logo_file');
+  const urlInput  = document.getElementById('pc_edit_logo');
+  const fileInput = document.getElementById('pc_edit_logo_file');
   if (urlInput)  urlInput.value  = '';
   if (fileInput) fileInput.value = '';
   _vzShowLogoPreview('');
@@ -3802,7 +3802,7 @@ function _vzPreviewUpload(input) {
   const reader = new FileReader();
   reader.onload = e => {
     const b64 = e.target.result;
-    const urlInput = document.getElementById('vz_edit_logo');
+    const urlInput = document.getElementById('pc_edit_logo');
     if (urlInput) urlInput.value = b64;
     _vzShowLogoPreview(b64);
   };
@@ -3813,17 +3813,17 @@ async function saveVZMerchantEdit() {
   const row = _vzMerchantEditCurrent;
   if (!row) return;
   const el = id => document.getElementById(id);
-  const logoVal = el('vz_edit_logo')?.value?.trim() || row.logo || '';
-  const fromVal = el('vz_edit_from_date')?.value?.trim() || row.from_date || '';
-  const toVal   = el('vz_edit_end_date')?.value?.trim()  || row.end_date  || '';
+  const logoVal = el('pc_edit_logo')?.value?.trim() || row.logo || '';
+  const fromVal = el('pc_edit_from_date')?.value?.trim() || row.from_date || '';
+  const toVal   = el('pc_edit_end_date')?.value?.trim()  || row.end_date  || '';
   const payload = {
-    title:      el('vz_edit_title')?.value?.trim()    || row.title,
-    offer_text: el('vz_edit_offer')?.value?.trim()    || row.offer_text,
-    validity:   el('vz_edit_validity')?.value?.trim() || row.validity,
+    title:      el('pc_edit_title')?.value?.trim()    || row.title,
+    offer_text: el('pc_edit_offer')?.value?.trim()    || row.offer_text,
+    validity:   el('pc_edit_validity')?.value?.trim() || row.validity,
     logo:       logoVal,
     from_date:  fromVal,
     end_date:   toVal,
-    status:     el('vz_edit_status')?.value           || row.status,
+    status:     el('pc_edit_status')?.value           || row.status,
   };
   try {
     const res = await fetch(`/admin/merchant-vouchers/${row._id}`, {
@@ -3833,14 +3833,14 @@ async function saveVZMerchantEdit() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Error');
-    if(el('vz_edit_msg')) { el('vz_edit_msg').style.color='#1a6640'; el('vz_edit_msg').textContent = '✅ Product updated!'; }
-    setTimeout(()=>{ document.getElementById('vz_merchant_edit_modal')?.remove(); loadGiftCards(); }, 800);
+    if(el('pc_edit_msg')) { el('pc_edit_msg').style.color='#1a6640'; el('pc_edit_msg').textContent = '✅ Product updated!'; }
+    setTimeout(()=>{ document.getElementById('pc_merchant_edit_modal')?.remove(); loadGiftCards(); }, 800);
   } catch(e) {
-    if(el('vz_edit_msg')) { el('vz_edit_msg').style.color='red'; el('vz_edit_msg').textContent = e.message; }
+    if(el('pc_edit_msg')) { el('pc_edit_msg').style.color='red'; el('pc_edit_msg').textContent = e.message; }
   }
 }
 
-async function deleteVZVoucher(id, source) {
+async function deleteProductCard(id, source) {
   if (!confirm('Delete this product?')) return;
   const url = (source==='admin' || source==='products') 
     ? `/admin/gift-vouchers/${id}` 
@@ -3888,7 +3888,7 @@ async function editGiftCard(v) {
     document.getElementById("gc_validity").value = v.validity||"";
   }
   // Restore full logo from map (stripped during list build for performance)
-  const _realLogo = _vzLogoMap?.[v._id] || _vzLogoMap?.[v.id] || v.logo || "";
+  const _realLogo = _pcLogoMap?.[v._id] || _pcLogoMap?.[v.id] || v.logo || "";
   document.getElementById("gc_logo").value          = _realLogo;
   if (_realLogo) { document.getElementById("gc_logo_img").src=_realLogo; document.getElementById("gc_logo_preview").style.display="block"; }
   else { document.getElementById("gc_logo_preview").style.display="none"; document.getElementById("gc_logo_file").value=""; }
@@ -3908,7 +3908,7 @@ function _populateGcMerchants(selectedId) {
   });
 }
 
-function previewVoucherLogo(input) {
+function previewProductLogo(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
@@ -3920,7 +3920,7 @@ function previewVoucherLogo(input) {
   };
   reader.readAsDataURL(file);
 }
-function clearVoucherLogo() {
+function clearProductLogo() {
   document.getElementById("gc_logo").value = "";
   document.getElementById("gc_logo_file").value = "";
   document.getElementById("gc_logo_preview").style.display = "none";
@@ -4035,27 +4035,27 @@ function closeSidebar() { document.getElementById("sidebar").classList.remove("o
 
 function openSidebar()  { document.getElementById("sidebar").classList.add("open"); }
 
-async function deleteVoucher(id) {
-    if (!confirm("Delete voucher?")) return;
+async function deleteProductCardAdmin(id) {
+    if (!confirm("Delete product card?")) return;
     await fetch(`/admin/gift-vouchers/${id}`, { method:"DELETE", credentials:"include" });
-    loadVouchers();
+    loadGiftVoucherRequests();
 }
 
-function editVoucher(v) {
+function editProductCard(v) {
     document.getElementById("edit_voucher_id").value = v.id||v._id||"";
     document.getElementById("v_title").value    = v.title||"";
     document.getElementById("v_text").value     = v.text||"";
     document.getElementById("v_validity").value = v.validity||"";
     // set store selector
     const storeSel2 = document.getElementById("v_store");
-    if (storeSel2) { storeSel2.value = v.store_id||""; onVoucherStoreChange(v.store_id||""); }
+    if (storeSel2) { storeSel2.value = v.store_id||""; onProductStoreChange(v.store_id||""); }
     document.getElementById("v_active").checked = v.is_active!==false;
     document.getElementById("v_msg").innerText  = "";
-    _populateVoucherMerchants(v.merchant_id||"");
+    _populateProductMerchants(v.merchant_id||"");
     voucherModalInst.show();
 }
 
-function onVoucherStoreChange(storeId) {
+function onProductStoreChange(storeId) {
     const preview = document.getElementById("v_store_img_preview");
     if (!storeId) { preview.innerHTML = ""; return; }
     // Find the store from allStoresList
@@ -4068,7 +4068,7 @@ function onVoucherStoreChange(storeId) {
     }
 }
 
-async function openVoucherModal() {
+async function openProductCardModal() {
     // Load stores for the dropdown
     if (!window.allStoresList) {
         try { const r = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = await r.json(); } catch(e) { window.allStoresList = []; }
@@ -4083,11 +4083,11 @@ async function openVoucherModal() {
     document.getElementById("v_store_img_preview").innerHTML = "";
     document.getElementById("v_active").checked = true;
     document.getElementById("v_msg").innerText = "";
-    _populateVoucherMerchants("");
+    _populateProductMerchants("");
     voucherModalInst.show();
 }
 
-async function saveVoucher() {
+async function saveProductCard() {
     const vid  = document.getElementById("edit_voucher_id").value;
     const text = document.getElementById("v_text").value.trim();
     if (!text) { document.getElementById("v_msg").innerText="Offer text required"; return; }
@@ -4105,7 +4105,7 @@ async function saveVoucher() {
         let res  = await fetch(url, { method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data) });
         if (!res.ok) { const d=await res.json(); document.getElementById("v_msg").innerText=d.detail||"Error"; return; }
         voucherModalInst.hide();
-        loadVouchers();
+        loadGiftVoucherRequests();
     } catch { document.getElementById("v_msg").innerText="Server error"; }
 }
 
@@ -4147,7 +4147,7 @@ function _populateMerchantSelect() {
     };
 }
 
-function _populateVoucherMerchants(selectedId) {
+function _populateProductMerchants(selectedId) {
     let sel = document.getElementById("v_merchant");
     sel.innerHTML = "<option value=''>None</option>";
     merchantsList.forEach(m => {
@@ -4303,7 +4303,7 @@ async function saveStore() {
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Offer Text *</label>
-          <input id="gc_text" class="form-control" placeholder="FREE Voucher worth ₹150 OFF">
+          <input id="gc_text" class="form-control" placeholder="FREE Product worth ₹150 OFF">
         </div>
         <div class="row mb-3">
           <div class="col-6">
@@ -4339,11 +4339,11 @@ async function saveStore() {
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Logo Image</label>
-          <input type="file" id="gc_logo_file" class="form-control" accept="image/*" onchange="previewVoucherLogo(this)">
+          <input type="file" id="gc_logo_file" class="form-control" accept="image/*" onchange="previewProductLogo(this)">
           <input type="hidden" id="gc_logo" value="">
           <div id="gc_logo_preview" style="margin-top:8px;display:none;">
             <img id="gc_logo_img" src="" style="height:60px;border-radius:8px;border:1px solid var(--border);object-fit:contain;background:#f8f8f8;padding:4px;">
-            <button type="button" onclick="clearVoucherLogo()" style="margin-left:8px;font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer;">✕ Remove</button>
+            <button type="button" onclick="clearProductLogo()" style="margin-left:8px;font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer;">✕ Remove</button>
           </div>
         </div>
         <div class="mb-3">
@@ -4466,9 +4466,9 @@ async function deleteMerchantBanner(id) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// MERCHANT VOUCHER SUBMISSIONS (merged into Products section)
+// MERCHANT PRODUCT SUBMISSIONS (merged into Products section)
 // ═══════════════════════════════════════════════════════════
-async function loadMerchantVouchers() {
+async function loadMerchantProducts() {
   const el = document.getElementById('merchant_vouchers_body');
   const cnt = document.getElementById('mvoucher_count');
   if (!el) return;
@@ -4497,9 +4497,9 @@ async function loadMerchantVouchers() {
         ? `<img src="${v.logo_url}" style="width:36px;height:36px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.outerHTML='<i class=fas fa-gift style=color:var(--primary)></i>'">`
         : `<div style="width:36px;height:36px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary)"></i></div>`;
       const actions = (st==='pending_approval'||st==='pending')
-        ? `<button class="btn-p me-1" style="font-size:11px;padding:4px 10px" onclick="approveMerchantVoucher('${v._id}')">✅ Approve</button>
-           <button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="rejectMerchantVoucher('${v._id}')">❌ Reject</button>`
-        : `<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantVoucher('${v._id}')">Del</button>`;
+        ? `<button class="btn-p me-1" style="font-size:11px;padding:4px 10px" onclick="approveMerchantProduct('${v._id}')">✅ Approve</button>
+           <button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="rejectMerchantProduct('${v._id}')">❌ Reject</button>`
+        : `<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantProduct('${v._id}')">Del</button>`;
       return `<tr>
         <td>${logo}</td>
         <td style="font-size:13px">${v.merchant_name||'—'}</td>
@@ -4514,7 +4514,7 @@ async function loadMerchantVouchers() {
   } catch(e) { if(el) el.innerHTML = `<tr><td colspan="8" style="color:red;text-align:center">${e.message}</td></tr>`; }
 }
 
-async function approveMerchantVoucher(id) {
+async function approveMerchantProduct(id) {
   // TASK 7: Approve product — upsert into gift_vouchers, no duplicate, refresh immediately
   const btn = event?.target; if (btn) { btn.disabled=true; btn.textContent='Approving...'; }
   try {
@@ -4527,29 +4527,29 @@ async function approveMerchantVoucher(id) {
     }
     showToast('✅ Product approved and added to Discover Products!', 'success');
     if (typeof loadGiftCards === 'function') loadGiftCards();
-    if (typeof loadMerchantVouchers === 'function') loadMerchantVouchers();
+    loadMerchantProducts();
   } catch(e) {
     showToast('❌ Network error: ' + e.message, 'danger');
     if (btn) { btn.disabled=false; btn.textContent='Approve'; }
   }
 }
-async function rejectMerchantVoucher(id) {
+async function rejectMerchantProduct(id) {
   const reason = prompt('Rejection reason (optional):') || '';
   await fetch(`/admin/merchant-vouchers/${id}/reject`, {method:'PUT', credentials:'include',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason})});
   if (typeof loadGiftCards === 'function') loadGiftCards();
-  if (typeof loadMerchantVouchers === 'function') loadMerchantVouchers();
+  loadMerchantProducts();
 }
-async function deleteMerchantVoucher(id) {
+async function deleteMerchantProduct(id) {
   if (!confirm('Delete this product?')) return;
   await fetch(`/admin/merchant-vouchers/${id}`, {method:'DELETE', credentials:'include'});
   loadGiftCards();
 }
 
 // ═══════════════════════════════════════════════════════════
-// BANNER & VOUCHER PRICING (merged into Pricing & GST section)
+// BANNER & PRODUCT PRICING (merged into Pricing & GST section)
 // ═══════════════════════════════════════════════════════════
-async function loadBannerVoucherPricing() {
+async function loadPricingConfig() {
   try {
     const r = await fetch('/admin/banner-pricing', {credentials:'include'});
     if (!r.ok) return;
@@ -4560,7 +4560,7 @@ async function loadBannerVoucherPricing() {
   } catch(_) {}
 }
 
-async function saveBannerVoucherPricing() {
+async function savePricingConfig() {
   const gv = id => parseFloat(document.getElementById(id)?.value) || 0;
   const body = {
     banner_price_per_day:  gv('banner_price_per_day'),
@@ -4570,18 +4570,18 @@ async function saveBannerVoucherPricing() {
     const r = await fetch('/admin/banner-pricing', {method:'PUT', credentials:'include',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const msg = document.getElementById('bv_pricing_msg');
-    if (msg) { msg.textContent = r.ok ? '✅ Banner & Voucher pricing saved!' : '❌ Error saving'; }
+    if (msg) { msg.textContent = r.ok ? '✅ Banner & Product pricing saved!' : '❌ Error saving'; }
     setTimeout(() => { if(msg) msg.textContent=''; }, 2500);
   } catch(e) { console.error(e); }
 }
 
 // ═══════════════════════════════════════════════════════════
-// EXTENDED loadMerchantTxns — adds banner & voucher invoices
+// EXTENDED loadMerchantTxns — adds banner & product invoices
 // ═══════════════════════════════════════════════════════════
 let _allTxnRows = [];
 
 async function loadMerchantTxnsFull() {
-  // Fetch all invoices (store + banner + voucher)
+  // Fetch all invoices (store + banner + product)
   try {
     const [invR, subR] = await Promise.all([
       fetch('/admin/invoices/full', {credentials:'include'}),
@@ -4697,8 +4697,8 @@ const _origShowSec = window.showSection;
 window.showSection = function(name, el) {
   if (_origShowSec) _origShowSec(name, el);
   if (name === 'promo_sliders')   { loadMerchantBanners(); }
-  if (name === 'voucher_zone')    { loadMerchantVouchers(); }
-  if (name === 'pricing')         { loadBannerVoucherPricing(); }
+  if (name === 'product_cards')    { loadMerchantProducts(); }
+  if (name === 'pricing')         { loadPricingConfig(); }
   if (name === 'merchant_txns')   { loadMerchantTxnsFull(); }
 };
 
@@ -4707,8 +4707,8 @@ window.loadMerchantTxns = loadMerchantTxnsFull;
 
 // On initial page load — if payments section is active, load full data
 document.addEventListener('DOMContentLoaded', () => {
-  // Load banner/voucher pricing into Pricing section automatically
-  setTimeout(loadBannerVoucherPricing, 800);
+  // Load banner/product pricing into Pricing section automatically
+  setTimeout(loadPricingConfig, 800);
 });
 </script>
 
@@ -4723,23 +4723,23 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
       <div class="modal-body">
         <div style="text-align:center;margin-bottom:16px">
-          <img id="vz_modal_logo" src="" style="width:72px;height:72px;border-radius:14px;object-fit:cover;border:2px solid var(--border)" onerror="this.style.display='none'">
+          <img id="pc_modal_logo" src="" style="width:72px;height:72px;border-radius:14px;object-fit:cover;border:2px solid var(--border)" onerror="this.style.display='none'">
         </div>
         <table style="width:100%;font-size:13px;border-collapse:collapse">
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600;width:110px">Title</td><td id="vz_modal_title" style="font-weight:700;color:var(--text)"></td></tr>
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Offer</td><td id="vz_modal_offer" style="color:var(--text)"></td></tr>
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">From Date</td><td id="vz_modal_from_date" style="color:var(--text);font-weight:600"></td></tr>
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">To Date</td><td id="vz_modal_end_date" style="color:var(--text);font-weight:600"></td></tr>
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Validity</td><td id="vz_modal_validity" style="color:var(--text)"></td></tr>
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Created By</td><td id="vz_modal_creator" style="color:var(--text)"></td></tr>
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Mobile</td><td id="vz_modal_phone" style="color:var(--text);font-family:monospace"></td></tr>
-          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Status</td><td id="vz_modal_status" style="text-transform:capitalize;color:var(--primary);font-weight:600"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600;width:110px">Title</td><td id="pc_modal_title" style="font-weight:700;color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Offer</td><td id="pc_modal_offer" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">From Date</td><td id="pc_modal_from_date" style="color:var(--text);font-weight:600"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">To Date</td><td id="pc_modal_end_date" style="color:var(--text);font-weight:600"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Validity</td><td id="pc_modal_validity" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Created By</td><td id="pc_modal_creator" style="color:var(--text)"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Mobile</td><td id="pc_modal_phone" style="color:var(--text);font-family:monospace"></td></tr>
+          <tr><td style="padding:7px 0;color:var(--muted);font-weight:600">Status</td><td id="pc_modal_status" style="text-transform:capitalize;color:var(--primary);font-weight:600"></td></tr>
         </table>
       </div>
       <div class="modal-footer" style="gap:8px;flex-wrap:wrap">
-        <button id="vz_modal_approve" class="btn-approve" style="padding:7px 18px" onclick="approveVZVoucher(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()">Approve</button>
+        <button id="pc_modal_approve" class="btn-approve" style="padding:7px 18px" onclick="approveProductCard(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()">Approve</button>
         <button class="btn-o" onclick="openVZEdit(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()"><i class="fas fa-pen me-1"></i>Edit</button>
-        <button class="btn-d" onclick="deleteVZVoucher(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()"><i class="fas fa-trash me-1"></i>Delete</button>
+        <button class="btn-d" onclick="deleteProductCard(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()"><i class="fas fa-trash me-1"></i>Delete</button>
         <button class="btn-p ms-auto" data-bs-dismiss="modal">Close</button>
       </div>
     </div>
