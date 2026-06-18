@@ -947,11 +947,20 @@ def get_products_public(category: str = None, limit: int = 60, skip: int = 0):
                         d["store_id"] = str(s["_id"])
             except Exception:
                 pass
-        # ITEM10: normalise pricing fields so Flutter always finds them
+        # FIX3: normalise pricing fields so Flutter always finds them
         if d.get("offer_price") and not d.get("sale_price"):
             d["sale_price"] = d["offer_price"]
-        if not d.get("price") and d.get("offer_price"):
-            d["price"] = d["offer_price"]
+        if not d.get("price") and d.get("sale_price"):
+            d["price"] = d["sale_price"]
+        # Ensure original_price is always set from mrp if missing
+        if not d.get("original_price") and d.get("mrp"):
+            d["original_price"] = d["mrp"]
+        # Ensure sale_price < original_price (otherwise hide strikethrough)
+        if d.get("original_price") and d.get("sale_price"):
+            try:
+                if float(d["original_price"]) <= float(d["sale_price"]):
+                    d["original_price"] = None
+            except: pass
         result.append({"id": pid, **d})
     return result
 
