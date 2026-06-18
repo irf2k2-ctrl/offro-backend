@@ -3253,6 +3253,25 @@ let _vzFilteredRows = [];
 let _vzPage = 1;
 const _VZ_PER_PAGE = 15;
 
+// ── Robust date parser: handles ISO, DD-MM-YYYY, "13 Jun 2026", "Jun 13 2026" ──
+function _parseFlexDate(s) {
+  if (!s) return null;
+  s = String(s).trim();
+  // Already ISO — just parse
+  let d = new Date(s);
+  if (!isNaN(d)) return d;
+  // DD-MM-YYYY or DD/MM/YYYY → YYYY-MM-DD
+  const dmy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (dmy) { d = new Date(`${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`); if (!isNaN(d)) return d; }
+  // "13 Jun 2026" or "Jun 13 2026"
+  const months = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  const named = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+  if (named) { const m = months[named[2].toLowerCase()]; if (m) { d = new Date(`${named[3]}-${String(m).padStart(2,'0')}-${named[1].padStart(2,'0')}`); if (!isNaN(d)) return d; } }
+  const named2 = s.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})$/);
+  if (named2) { const m = months[named2[1].toLowerCase()]; if (m) { d = new Date(`${named2[3]}-${String(m).padStart(2,'0')}-${named2[2].padStart(2,'0')}`); if (!isNaN(d)) return d; } }
+  return null;
+}
+
 async function loadGiftCards() {
   const tbody = document.getElementById('vz_unified_body');
   if (!tbody) return;
@@ -3271,18 +3290,16 @@ async function loadGiftCards() {
       const fromD = v.from_date || '';
       const toD   = v.end_date   || '';
       let isActive = v.is_active !== false;
-      let computedStatus = isActive ? 'approved' : 'hidden';
-      if (isActive && toD) {
+      // Trust backend status for products (which now compute expiry server-side)
+      let computedStatus = (v.status === 'expired') ? 'expired'
+                         : isActive ? 'approved' : 'hidden';
+      if (computedStatus !== 'expired' && isActive && toD) {
         try {
-          // Support "22 May 2026", "2026-05-22", "22-05-2026" formats
-          let endDt = new Date(toD);
-          if (isNaN(endDt)) {
-            const cleaned = toD.replace(/(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1');
-            endDt = new Date(cleaned);
-          }
+          // Support "22 May 2026", "2026-05-22", "22-05-2026", "13 Jun 2026" formats
+          let endDt = _parseFlexDate(toD);
           // Compare end of end_date day (23:59:59) vs now — prevents off-by-one due to UTC/IST
-          if (!isNaN(endDt)) { endDt.setHours(23, 59, 59, 999); }
-          if (!isNaN(endDt) && endDt < new Date()) { computedStatus = 'expired'; isActive = false; }
+          if (endDt && !isNaN(endDt)) { endDt.setHours(23, 59, 59, 999); }
+          if (endDt && !isNaN(endDt) && endDt < new Date()) { computedStatus = 'expired'; isActive = false; }
         } catch(e) {}
       }
       // ISSUE 1 FIX: gift_vouchers with source='merchant' are approved merchant products
@@ -3325,15 +3342,10 @@ async function loadGiftCards() {
       let computedStatus = st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending');
       if (computedStatus === 'approved' && toD) {
         try {
-          // Support "22 May 2026", "2026-05-22", "22-05-2026" formats
-          let endDt = new Date(toD);
-          if (isNaN(endDt)) {
-            const cleaned = toD.replace(/(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1');
-            endDt = new Date(cleaned);
-          }
+          let endDt = _parseFlexDate(toD);
           // Compare end of end_date day (23:59:59) vs now — prevents off-by-one due to UTC/IST
-          if (!isNaN(endDt)) { endDt.setHours(23, 59, 59, 999); }
-          if (!isNaN(endDt) && endDt < new Date()) computedStatus = 'expired';
+          if (endDt && !isNaN(endDt)) { endDt.setHours(23, 59, 59, 999); }
+          if (endDt && !isNaN(endDt) && endDt < new Date()) computedStatus = 'expired';
         } catch(e) {}
       }
       return {

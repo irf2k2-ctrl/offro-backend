@@ -1375,6 +1375,39 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             "_collection":       "gift_vouchers",
         })
 
+
+def _compute_product_status(p):
+    """Compute real-time product status — auto-expire if end_date has passed."""
+    stored = p.get("status", p.get("approval_status", ""))
+    # If explicitly rejected/hidden, respect that
+    if stored in ("rejected", "hidden", "inactive"):
+        return stored
+    is_active = p.get("is_active", True)
+    if not is_active:
+        return "hidden"
+    end_raw = p.get("end_date") or p.get("expiry") or ""
+    if end_raw:
+        try:
+            from dateutil.parser import parse as _dp
+            import pytz
+            end_dt = _dp(str(end_raw))
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=pytz.UTC)
+            now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
+            if end_dt < now_utc:
+                # Auto-write expired status to DB so it persists
+                try:
+                    db.products.update_one(
+                        {"_id": p["_id"], "status": {"$ne": "expired"}},
+                        {"$set": {"status": "expired", "is_active": False}}
+                    )
+                except Exception:
+                    pass
+                return "expired"
+        except Exception:
+            pass
+    return "approved"
+
     # ── 2. products collection (seeded/imported product catalogue) ──────────
     product_docs = list(db.products.find().sort("_id", -1))
     for p in product_docs:
@@ -1407,6 +1440,7 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
                     p_merchant_phone = str(pm.get("phone", ""))
             except Exception:
                 pass
+        _p_status = _compute_product_status(p)
         result.append({
             "id":                pid,
             "title":             p.get("name") or p.get("title") or "",
@@ -1417,7 +1451,8 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             "merchant_id":       p_mid,
             "merchant_name":     p_merchant_name,
             "merchant_phone":    p_merchant_phone,
-            "is_active":         p.get("is_active", True),
+            "is_active":         _p_status == "approved",
+            "status":            _p_status,
             "from_date":         p.get("from_date") or p.get("start_date") or "",
             "end_date":          p.get("end_date") or p.get("expiry") or "",
             "created_at":        created_at_iso,
