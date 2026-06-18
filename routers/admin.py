@@ -1332,7 +1332,7 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
 # ===================== GIFT VOUCHERS (app-facing cards) =====================
 
 def _compute_product_status(p):
-    """Compute real-time product status — auto-expire if end_date has passed."""
+    """Compute real-time product status — auto-expire if end_date/valid_till has passed."""
     stored = p.get("status", p.get("approval_status", ""))
     # If explicitly rejected/hidden, respect that
     if stored in ("rejected", "hidden", "inactive"):
@@ -1340,7 +1340,24 @@ def _compute_product_status(p):
     is_active = p.get("is_active", True)
     if not is_active:
         return "hidden"
-    end_raw = p.get("end_date") or p.get("expiry") or ""
+
+    # Collect all possible end-date fields
+    end_raw = (p.get("end_date") or p.get("expiry") or
+               p.get("valid_till") or p.get("end") or "")
+
+    # Also try to parse end date from a validity string like "11 Jun 2026 → 13 Jun 2026"
+    if not end_raw:
+        validity_str = str(p.get("validity") or "")
+        if "→" in validity_str:
+            end_raw = validity_str.split("→")[-1].strip()
+        elif " to " in validity_str.lower():
+            end_raw = validity_str.lower().split(" to ")[-1].strip()
+        elif "-" in validity_str and len(validity_str) > 8:
+            # "11 Jun 2026 - 13 Jun 2026"
+            parts = validity_str.split("-")
+            if len(parts) >= 2:
+                end_raw = parts[-1].strip()
+
     if end_raw:
         try:
             from dateutil.parser import parse as _dp
@@ -1348,6 +1365,9 @@ def _compute_product_status(p):
             end_dt = _dp(str(end_raw))
             if end_dt.tzinfo is None:
                 end_dt = end_dt.replace(tzinfo=pytz.UTC)
+            # Use end of day so product expires at midnight
+            from datetime import timedelta
+            end_dt = end_dt.replace(hour=23, minute=59, second=59)
             now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
             if end_dt < now_utc:
                 try:
@@ -1455,7 +1475,12 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             "is_active":         _p_status == "approved",
             "status":            _p_status,
             "from_date":         p.get("from_date") or p.get("start_date") or "",
-            "end_date":          p.get("end_date") or p.get("expiry") or "",
+            "end_date":          (p.get("end_date") or p.get("expiry") or
+                                     p.get("valid_till") or
+                                     # Parse end from "DD Mon YYYY → DD Mon YYYY"
+                                     (lambda v: v.split("→")[-1].strip() if v and "→" in v else
+                                      (v.split(" to ")[-1].strip() if v and " to " in v.lower() else "")
+                                     )(str(p.get("validity") or "")) or ""),
             "created_at":        created_at_iso,
             "source":            "products",
             "source_voucher_id": "",

@@ -2447,7 +2447,14 @@ function renderBanners(rows) {
       }
     }
 
-    const st = r.status;
+    // JS-side expiry guard: if end_date is in the past, treat as expired regardless of stored status
+    let st = r.status;
+    if (st === 'approved' && r.end_date) {
+      try {
+        const _endMs = new Date(r.end_date + (r.end_date.length <= 10 ? 'T23:59:59' : '')).getTime();
+        if (!isNaN(_endMs) && _endMs < Date.now()) st = 'expired';
+      } catch(_) {}
+    }
     const statusBadge = st==='approved'
       ? `<div><span style="background:#d1f0e0;color:#1a6640;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Approved</span>
          <div style="font-size:10px;color:var(--muted);margin-top:3px">(${isAdmin?'Admin':'Merchant'})</div></div>`
