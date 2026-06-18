@@ -1408,7 +1408,7 @@ def _compute_product_status(p):
     return "approved"
 
 @router.get("/gift-vouchers")
-def list_gift_vouchers(a=Depends(get_current_admin)):
+def list_product_cards(a=Depends(get_current_admin)):
     """List all gift vouchers + products shown in the app home screen."""
     result = []
 
@@ -1560,8 +1560,8 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
     return result
 
 @router.post("/gift-vouchers")
-def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
-    """Create a new gift voucher card visible in the app."""
+def create_product_card(data: dict, a=Depends(get_current_admin)):
+    """Create a new product card visible in the app."""
     text = (data.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "Offer text is required")
@@ -1628,8 +1628,8 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
     return {"message": "Product created", "id": new_id}
 
 @router.put("/gift-vouchers/{vid}")
-def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
-    """Update an existing gift voucher."""
+def update_product_card(vid: str, data: dict, a=Depends(get_current_admin)):
+    """Update an existing product card."""
     upd = {}
     _str_fields = ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date"]
     for field in _str_fields:
@@ -1654,8 +1654,8 @@ def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
     return {"message": "Voucher updated"}
 
 @router.delete("/gift-vouchers/{vid}")
-def delete_gift_voucher(vid: str, a=Depends(get_current_admin)):
-    """Delete a gift voucher."""
+def delete_product_card(vid: str, a=Depends(get_current_admin)):
+    """Delete a product card."""
     db.gift_vouchers.delete_one({"_id": ObjectId(vid)})
     return {"message": "Deleted"}
 
@@ -2332,11 +2332,11 @@ def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
 
 
 # ═══════════════════════════════════════════════════════════
-# ADMIN — MERCHANT VOUCHER APPROVAL
+# ADMIN — MERCHANT PRODUCT APPROVAL
 # ═══════════════════════════════════════════════════════════
 
 
-def _compute_voucher_status(v):
+def _compute_product_status_mv(v):
     """Return real-time status — stdlib-only date parsing, no third-party deps."""
     stored = v.get("approval_status", v.get("status", "pending_approval"))
     if stored in ("pending_approval", "rejected"):
@@ -2390,7 +2390,7 @@ def _compute_voucher_status(v):
     return stored
 
 @router.get("/merchant-vouchers")
-def list_merchant_vouchers(a=Depends(get_current_admin)):
+def list_merchant_products(a=Depends(get_current_admin)):
     result = []
     for v in db.merchant_vouchers.find().sort("created_at", -1):
         result.append({
@@ -2404,7 +2404,7 @@ def list_merchant_vouchers(a=Depends(get_current_admin)):
             "duration_days": v.get("duration_days", v.get("duration",30)),
             "from_date":     v.get("from_date",""),
             "end_date":      v.get("end_date",""),
-            "status":        _compute_voucher_status(v),
+            "status":        _compute_product_status_mv(v),
             "invoice_no":    v.get("invoice_no",""),
             "amount":        v.get("total",0),
             "created_at":    v["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if isinstance(v.get("created_at"), datetime) else str(v.get("created_at",""))[:16],
@@ -2412,7 +2412,7 @@ def list_merchant_vouchers(a=Depends(get_current_admin)):
     return result
 
 @router.put("/merchant-vouchers/{vid}/approve")
-def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
+def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
     v = db.merchant_vouchers.find_one({"_id": ObjectId(vid)})
     if not v: raise HTTPException(404, "Voucher not found")
     # TASK 8: check if product has already expired before setting status
@@ -2475,7 +2475,7 @@ def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
     return {"ok": True, "message": "Voucher approved and published to Voucher Zone."}
 
 @router.put("/merchant-vouchers/{vid}/reject")
-def reject_merchant_voucher(vid: str, body: dict = {}, a=Depends(get_current_admin)):
+def reject_merchant_product(vid: str, body: dict = {}, a=Depends(get_current_admin)):
     reason = body.get("reason","")
     db.merchant_vouchers.update_one({"_id": ObjectId(vid)}, {"$set":{
         "approval_status":"rejected","rejection_reason":reason,"rejected_at":datetime.utcnow()
@@ -2484,8 +2484,8 @@ def reject_merchant_voucher(vid: str, body: dict = {}, a=Depends(get_current_adm
     return {"ok": True, "message": "Voucher rejected."}
 
 @router.put("/merchant-vouchers/{vid}")
-def update_merchant_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
-    """FIX 10: Admin edit merchant voucher fields + status."""
+def update_merchant_product(vid: str, data: dict, a=Depends(get_current_admin)):
+    """FIX 10: Admin edit merchant product fields + status."""
     # ISSUES 5+7: also allow from_date, end_date, logo_url updates
     allowed = {"title", "offer_text", "validity", "logo", "logo_url", "from_date", "end_date", "status", "approval_status"}
     update_data = {k: v for k, v in data.items() if k in allowed}
@@ -2522,7 +2522,7 @@ def update_merchant_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
 
 
 @router.delete("/merchant-vouchers/{vid}")
-def delete_merchant_voucher(vid: str, a=Depends(get_current_admin)):
+def delete_merchant_product(vid: str, a=Depends(get_current_admin)):
     db.merchant_vouchers.delete_one({"_id": ObjectId(vid)})
     db.gift_vouchers.delete_many({"source_voucher_id": vid})
     return {"ok": True}

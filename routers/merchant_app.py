@@ -1313,12 +1313,12 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MERCHANT VOUCHERS — self-service voucher ordering
+# MERCHANT PRODUCTS — self-service product listing ordering
 # Issue 3: now uses `days` + `from_date` instead of fixed 30/60/90 plans
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/vouchers")
-def get_my_vouchers(m=Depends(get_merchant)):
+def get_my_products(m=Depends(get_merchant)):
     merchant_id = _mid(m)
     merchant_phone = str(m.get("phone", ""))
     # Unified auth: match by merchant_id OR merchant_phone
@@ -1346,15 +1346,15 @@ def get_my_vouchers(m=Depends(get_merchant)):
 
 # ── PUT /merchant/vouchers/{vid}  — Merchant edit own product ────────────────
 @router.put("/vouchers/{vid}")
-def update_merchant_voucher(vid: str, data: dict, m=Depends(get_merchant)):
-    """Merchant updates their own product/voucher (title, offer text, prices)."""
+def update_merchant_product(vid: str, data: dict, m=Depends(get_merchant)):
+    """Merchant updates their own product listing (title, offer text, prices)."""
     mid = _mid(m)
     try:
         obj_id = ObjectId(vid)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid product ID")
 
-    # Verify this voucher belongs to this merchant
+    # Verify this product belongs to this merchant
     existing = db.merchant_vouchers.find_one({"_id": obj_id, "merchant_id": mid})
     if not existing:
         # Fallback: try matching by account_id in case of migration
@@ -1389,7 +1389,7 @@ def update_merchant_voucher(vid: str, data: dict, m=Depends(get_merchant)):
 
 
 @router.get("/vouchers/pricing")
-def get_voucher_pricing_merchant(m=Depends(get_merchant)):
+def get_product_pricing_merchant(m=Depends(get_merchant)):
     doc = _pricing_doc()
     gst_pct = float(doc.get("gst_percent", 18))
     return {
@@ -1398,7 +1398,7 @@ def get_voucher_pricing_merchant(m=Depends(get_merchant)):
     }
 
 @router.post("/vouchers/order")
-def create_voucher_order(data: dict, m=Depends(get_merchant)):
+def create_product_order(data: dict, m=Depends(get_merchant)):
     """
     Issue 3: accepts { "days": int, "from_date": "YYYY-MM-DD" }
     No fixed plan chips — merchant chooses exact number of days and start date.
@@ -1518,7 +1518,7 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
     }
 
 @router.post("/vouchers/activate-free")
-def activate_free_voucher(data: dict, m=Depends(get_merchant)):
+def activate_free_product(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id    = data.get("order_id", "")
     title       = data.get("title", "")
@@ -1547,7 +1547,7 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     if disc_code:
         db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
 
-    voucher = {
+    product_doc = {
         "merchant_id":    merchant_id,
         "merchant_name":  m.get("name", ""),
         "merchant_phone": str(m.get("phone", "")),
@@ -1573,7 +1573,7 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
         "approval_status":"pending",
         "created_at":     datetime.utcnow().isoformat(),
     }
-    res = db.merchant_vouchers.insert_one(voucher)
+    res = db.merchant_vouchers.insert_one(product_doc)
     db.voucher_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "submitted", "voucher_id": str(res.inserted_id)}})
 
@@ -1608,7 +1608,7 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     return {"message": "Product submitted for review", "voucher_id": str(res.inserted_id), "invoice_no": invoice_no}
 
 @router.post("/vouchers/verify")
-def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
+def verify_product_payment(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id            = data.get("order_id", "")
     title               = data.get("title", "")
@@ -1647,7 +1647,7 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
 
-    voucher = {
+    product_doc = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
         "merchant_phone":   str(m.get("phone", "")),
@@ -1676,7 +1676,7 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         "approval_status":  "pending",
         "created_at":       datetime.utcnow().isoformat(),
     }
-    res = db.merchant_vouchers.insert_one(voucher)
+    res = db.merchant_vouchers.insert_one(product_doc)
     db.voucher_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "paid", "voucher_id": str(res.inserted_id)}})
 
@@ -1805,7 +1805,7 @@ def get_full_invoices(m=Depends(get_merchant)):
             "created_at":      _fmt_dt(b.get("created_at")),
         })
 
-    # 4. Fallback: voucher/product invoices not in central invoices
+    # 4. Fallback: product invoices not in central invoices
     for v in db.merchant_vouchers.find({"merchant_id": merchant_id, "payment_status": "paid"}).sort("created_at", -1):
         ino = v.get("invoice_no", str(v["_id"])[:8].upper())
         if ino in inv_ids: continue
