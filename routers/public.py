@@ -20,7 +20,7 @@ def get_stores(city: str = None, category: str = None):
         "image":1,"image_url":1,"image_thumb":1,"_thumb":1,"store_image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
         "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1,
         "tags":1,"favorite_count":1,"favorites":1,"view_count":1,"views":1,
-        "created_at":1,"late_night":1,"open_time":1,"close_time":1,"logo_url":1,"logo_thumb":1
+        "created_at":1,"late_night":1,"open_time":1,"close_time":1,"logo_url":1,"logo_thumb":1,"logo":1,"logo_image":1
     }))
     if not stores:
         return []
@@ -121,7 +121,7 @@ def get_stores(city: str = None, category: str = None):
             "late_night":     bool(s.get("late_night", False)),
             "open_time":      s.get("open_time",  "") or "",
             "close_time":     s.get("close_time", "") or "",
-            "logo_url":       s.get("logo_url", "") or s.get("logo_thumb", "") or "",
+            "logo_url":       s.get("logo_url", "") or s.get("logo_thumb", "") or s.get("logo", "") or s.get("logo_image", "") or "", # ITEM3
             "lat":            s.get("lat") or None,
             "lng":            s.get("lng") or None,
         })
@@ -931,14 +931,27 @@ def get_products_public(category: str = None, limit: int = 60, skip: int = 0):
         pid = str(d.pop("_id", ""))
         # Attach store name if missing
         store_id = d.get("store_id", "")
+        merchant_id = d.get("merchant_id", "")
         store_name = d.get("store_name", "")
-        if store_id and not store_name:
+        # ITEM7: resolve store_name via store_id first, then merchant_id fallback
+        if not store_name:
             try:
-                s = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1})
+                s = None
+                if store_id:
+                    s = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1, "_id": 1})
+                if not s and merchant_id:
+                    s = db.stores.find_one({"merchant_id": merchant_id}, {"store_name": 1, "_id": 1})
                 if s:
                     d["store_name"] = s.get("store_name", "")
+                    if not store_id:
+                        d["store_id"] = str(s["_id"])
             except Exception:
                 pass
+        # ITEM10: normalise pricing fields so Flutter always finds them
+        if d.get("offer_price") and not d.get("sale_price"):
+            d["sale_price"] = d["offer_price"]
+        if not d.get("price") and d.get("offer_price"):
+            d["price"] = d["offer_price"]
         result.append({"id": pid, **d})
     return result
 
