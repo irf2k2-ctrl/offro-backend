@@ -195,7 +195,7 @@ async def register_fcm_token(request: Request):
 
 @app.on_event("startup")
 def startup():
-    admin.seed_admin()
+    # seed_admin removed (function no longer in admin module)
     _ensure_indexes()
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
