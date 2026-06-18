@@ -3365,13 +3365,23 @@ async function loadGiftCards() {
         : (v.validity || (v.end_date ? _fmtDate(v.end_date) : '—'));
       // ISSUE 7: Check expiry at render time
       let computedStatus = st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending');
-      if (computedStatus === 'approved' && toD) {
-        try {
-          let endDt = _parseFlexDate(toD);
-          // Compare end of end_date day (23:59:59) vs now — prevents off-by-one due to UTC/IST
-          if (endDt && !isNaN(endDt)) { endDt.setHours(23, 59, 59, 999); }
-          if (endDt && !isNaN(endDt) && endDt < new Date()) computedStatus = 'expired';
-        } catch(e) {}
+      if (computedStatus === 'approved') {
+        // Use end_date directly; fall back to parsing the validity string if end_date is empty
+        let _expiryStr = toD;
+        if (!_expiryStr && v.validity) {
+          const _vStr = String(v.validity);
+          if (_vStr.includes('\u2192'))      _expiryStr = _vStr.split('\u2192').pop().trim();
+          else if (_vStr.includes('->'))      _expiryStr = _vStr.split('->').pop().trim();
+          else if (_vStr.toLowerCase().includes(' to ')) _expiryStr = _vStr.toLowerCase().split(' to ').pop().trim();
+          else if (_vStr.includes(' - ') && _vStr.length > 8) _expiryStr = _vStr.split(' - ').pop().trim();
+        }
+        if (_expiryStr) {
+          try {
+            let endDt = _parseFlexDate(_expiryStr);
+            if (endDt && !isNaN(endDt)) { endDt.setHours(23, 59, 59, 999); }
+            if (endDt && !isNaN(endDt) && endDt < new Date()) computedStatus = 'expired';
+          } catch(e) {}
+        }
       }
       return {
         _id:        v._id,

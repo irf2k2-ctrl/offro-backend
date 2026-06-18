@@ -2300,20 +2300,49 @@ def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
 
 
 def _compute_voucher_status(v):
-    """Return real-time status — auto-expire if end_date has passed."""
+    """Return real-time status — stdlib-only date parsing, no third-party deps."""
     stored = v.get("approval_status", v.get("status", "pending_approval"))
     if stored in ("pending_approval", "rejected"):
         return stored
+
+    # ── Collect end date — also parse from validity string if end_date is empty ──
     end_raw = v.get("end_date", "")
+    if not end_raw:
+        validity_str = str(v.get("validity") or "")
+        if "\u2192" in validity_str or "->" in validity_str:
+            sep = "\u2192" if "\u2192" in validity_str else "->"
+            end_raw = validity_str.split(sep)[-1].strip()
+        elif " to " in validity_str.lower():
+            end_raw = validity_str.lower().split(" to ")[-1].strip()
+        elif " - " in validity_str and len(validity_str) > 8:
+            end_raw = validity_str.split(" - ")[-1].strip()
+
     if end_raw:
-        try:
-            from dateutil.parser import parse as _dp
-            import pytz
-            end_dt = _dp(str(end_raw))
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=pytz.UTC)
-            now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
-            if end_dt < now_utc:
+        end_dt = None
+        import re as _re
+        s = str(end_raw).strip()
+        if "T" in s:
+            s = s.split("T")[0]
+        s = _re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?$', '', s).strip()
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"):
+            try:
+                end_dt = datetime.strptime(s, fmt)
+                break
+            except ValueError:
+                pass
+        if not end_dt:
+            m1 = _re.match(r"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$", s)
+            if m1:
+                try: end_dt = datetime.strptime(s, "%d %b %Y")
+                except ValueError: pass
+        if not end_dt:
+            m2 = _re.match(r"^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})$", s)
+            if m2:
+                try: end_dt = datetime.strptime(s, "%b %d %Y")
+                except ValueError: pass
+        if end_dt:
+            end_of_day = end_dt.replace(hour=23, minute=59, second=59)
+            if end_of_day < datetime.utcnow():
                 try:
                     db.merchant_vouchers.update_one(
                         {"_id": v["_id"], "approval_status": {"$ne": "expired"}},
@@ -2321,8 +2350,6 @@ def _compute_voucher_status(v):
                     )
                 except: pass
                 return "expired"
-        except:
-            pass
     return stored
 
 @router.get("/merchant-vouchers")
@@ -2356,9 +2383,20 @@ def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
     final_status = "approved"
     if end_date_raw:
         try:
-            from dateutil.parser import parse as _parse_dt
-            end_dt = _parse_dt(str(end_date_raw))
-            if end_dt < datetime.utcnow():
+            import re as _re2
+            _s = str(end_date_raw).strip()
+            if "T" in _s: _s = _s.split("T")[0]
+            _s = _re2.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?$', '', _s).strip()
+            _end_dt = None
+            for _fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
+                try: _end_dt = datetime.strptime(_s, _fmt); break
+                except ValueError: pass
+            if not _end_dt:
+                _m = _re2.match(r"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$", _s)
+                if _m:
+                    try: _end_dt = datetime.strptime(_s, "%d %b %Y")
+                    except ValueError: pass
+            if _end_dt and _end_dt.replace(hour=23, minute=59, second=59) < datetime.utcnow():
                 final_status = "expired"
         except:
             pass
