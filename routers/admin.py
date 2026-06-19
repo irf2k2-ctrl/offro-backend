@@ -798,10 +798,13 @@ def get_stores_slim(a=Depends(get_current_admin)):
     """Lightweight store list for ratings — no images, no heavy data."""
     stores = list(db.stores.find({}, {
         "_id":1,"store_name":1,"category":1,"city":1,"area":1,
+        "merchant_id":1,"phone":1,"owner_phone":1,
         "rating":1,"admin_rating":1,"user_rating":1,"rating_count":1,"status":1
     }))
     return [{
         "_id": str(s["_id"]),
+        "merchant_id": str(s.get("merchant_id","") or ""),
+        "phone": s.get("phone","") or s.get("owner_phone",""),
         "store_name": s.get("store_name",""),
         "category": s.get("category",""),
         "city": s.get("city",""),
@@ -1492,6 +1495,7 @@ def list_product_cards(a=Depends(get_current_admin)):
             "source":            v.get("source", "admin"),
             "source_voucher_id": v.get("source_voucher_id", ""),
             "duration_days":     v.get("duration_days", 0),
+            "city":              v.get("city", ""),
             "_collection":       "gift_vouchers",
         })
 
@@ -1554,6 +1558,7 @@ def list_product_cards(a=Depends(get_current_admin)):
             "source":            "products",
             "source_voucher_id": "",
             "duration_days":     int(p.get("duration_days") or 0),
+            "city":              p.get("city", ""),
             "_collection":       "products",
             # Extra product-specific fields for display
             "price":             str(price),
@@ -1588,6 +1593,7 @@ def create_product_card(data: dict, a=Depends(get_current_admin)):
         "logo":          logo,
         "store_id":      store_id,
         "merchant_id":   merchant_id,
+        "city":          (data.get("city") or "").strip().lower(),
         "is_active":     bool(data.get("is_active", True)),
         "from_date":     (data.get("from_date") or "").strip(),
         "end_date":      (data.get("end_date") or "").strip(),
@@ -1638,7 +1644,7 @@ def create_product_card(data: dict, a=Depends(get_current_admin)):
 def update_product_card(vid: str, data: dict, a=Depends(get_current_admin)):
     """Update an existing product card."""
     upd = {}
-    _str_fields = ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date"]
+    _str_fields = ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date", "city"]
     for field in _str_fields:
         if field in data:
             upd[field] = (data[field] or "").strip()

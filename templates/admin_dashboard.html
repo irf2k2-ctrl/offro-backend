@@ -365,6 +365,7 @@ tr:hover td{background:#f7faf8;}
         <th style="width:60px">Preview</th>
         <th>Title</th>
         <th>Created By</th>
+        <th>City</th>
         <th>Validity</th>
         <th>Status</th>
         <th>Actions</th>
@@ -443,6 +444,7 @@ tr:hover td{background:#f7faf8;}
         <th style="width:110px">Preview</th>
         <th>Title</th>
         <th>Merchant / Type</th>
+        <th>City</th>
         <th>Duration</th>
         <th>Status</th>
         <th>Created On</th>
@@ -2399,7 +2401,7 @@ function renderBanners(rows) {
   const showing = document.getElementById('bn_showing');
   if (!tbody) return;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted)">No banners found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--muted)">No banners found.</td></tr>';
     if(showing) showing.textContent='';
     return;
   }
@@ -2481,6 +2483,7 @@ function renderBanners(rows) {
       : '';
 
     const viewJson = JSON.stringify({...r, _raw:undefined}).replace(/"/g,'&quot;');
+    const _bnCity = r.city ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${r.city}</span>` : `<span style="color:var(--muted);font-size:11px">All Cities</span>`;
     return `<tr>
       <td>${thumb}</td>
       <td>
@@ -2488,6 +2491,7 @@ function renderBanners(rows) {
         ${r.subtitle?`<div style="font-size:11px;color:var(--muted)">${r.subtitle}</div>`:''}
       </td>
       <td>${creatorBadge}</td>
+      <td>${_bnCity}</td>
       <td>${durationHtml}</td>
       <td>${statusBadge}</td>
       <td style="font-size:12px;color:var(--muted);white-space:nowrap">${createdFmt}</td>
@@ -3474,7 +3478,7 @@ function renderProductCards() {
   if (!tbody) return;
   const rows = _pcFilteredRows;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--muted)">No products found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--muted)">No products found.</td></tr>';
     if(showing) showing.textContent = '';
     if(pgBar)   pgBar.innerHTML = '';
     return;
@@ -3559,10 +3563,12 @@ function renderProductCards() {
         (r.category ? `• ${r.category}` : '') +
         `</div>`
       : '';
+    const _pcCity = r.city ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${r.city}</span>` : `<span style="color:var(--muted);font-size:11px">—</span>`;
     return `<tr>
       <td>${logoHtml}</td>
       <td><strong style="font-size:13px">${r.title||'—'}</strong>${productSub}<div style="font-size:11px;color:var(--muted);margin-top:1px">${r.text||''}</div></td>
       <td>${creatorBadge}</td>
+      <td>${_pcCity}</td>
       <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
       <td>${statusBadge}</td>
       <td>
@@ -3868,6 +3874,7 @@ async function openGiftCardModal() {
   document.getElementById("gc_logo_img").src="";
   document.getElementById("gc_active").checked = true;
   document.getElementById("gc_msg").innerText = "";
+  if (document.getElementById("gc_city")) document.getElementById("gc_city").value = '';
   _populateGcMerchants("");
   gcModalInst.show();
 }
@@ -3897,6 +3904,7 @@ async function editGiftCard(v) {
   if (document.getElementById("gc_sale_price"))     document.getElementById("gc_sale_price").value     = v.sale_price ?? v.price ?? "";
   if (document.getElementById("gc_original_price")) document.getElementById("gc_original_price").value = v.original_price ?? v.mrp ?? "";
   _populateGcMerchants(v.merchant_id||"");
+  if (document.getElementById("gc_city")) document.getElementById("gc_city").value = v.city || '';
   gcModalInst.show();
 }
 
@@ -3959,12 +3967,14 @@ async function saveGiftCard() {
   const _gcDays = parseInt(document.getElementById("gc_duration_days")?.value) || 0;
   const _salePriceRaw = parseFloat(document.getElementById("gc_sale_price")?.value);
   const _origPriceRaw = parseFloat(document.getElementById("gc_original_price")?.value);
+  const _gcCity = (document.getElementById("gc_city")?.value || '').trim();
   const data = {
     title:          document.getElementById("gc_title").value.trim(),
     text,
     validity:       document.getElementById("gc_validity").value.trim(),
     logo:           document.getElementById("gc_logo").value.trim(),
     merchant_id:    document.getElementById("gc_merchant").value,
+    city:           _gcCity,
     is_active:      document.getElementById("gc_active").checked,
     from_date:      _gcFrom,
     end_date:       _gcTo,
@@ -4348,9 +4358,14 @@ async function saveStore() {
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Linked Merchant (optional)</label>
-          <select id="gc_merchant" class="form-select">
+          <select id="gc_merchant" class="form-select" onchange="gcAutoFillCity()">
             <option value="">None</option>
           </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">City</label>
+          <input type="text" id="gc_city" class="form-control" placeholder="e.g. Ballari (auto-filled from merchant's first store)">
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">Auto-filled when a merchant is selected. Can be edited manually.</div>
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="gc_active" checked>
@@ -5342,6 +5357,28 @@ async function diUploadFile(type) {
 // Legacy aliases (not used by new UI but kept for safety)
 function saveDiUrl(type) { diAddUrl(type); }
 function saveDiFile(type) { diUploadFile(type); }
+
+// ── City auto-fill from merchant's first store ──────────────────────
+async function gcAutoFillCity() {
+  const merchantId = document.getElementById("gc_merchant")?.value || '';
+  const cityInput  = document.getElementById("gc_city");
+  if (!cityInput) return;
+  if (!merchantId) { cityInput.value = ''; return; }
+  try {
+    const r = await fetch('/admin/stores/slim', {credentials:'include'});
+    if (!r.ok) return;
+    const stores = await r.json();
+    // Find the first store belonging to this merchant (by merchant_id field)
+    const match = stores.find(s => s.merchant_id && s.merchant_id === merchantId);
+    if (match && match.city) { cityInput.value = match.city; return; }
+    // Fallback: match by merchant phone from merchantsList
+    const acct = (window.merchantsList||[]).find(m => (m.id||m._id) === merchantId);
+    if (acct && acct.phone) {
+      const byPhone = stores.find(s => s.phone === acct.phone);
+      if (byPhone && byPhone.city) { cityInput.value = byPhone.city; }
+    }
+  } catch(e) { console.warn('gcAutoFillCity:', e); }
+}
 </script>
 
 <!-- Adjust Points Modal -->
