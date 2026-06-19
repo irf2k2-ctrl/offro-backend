@@ -585,6 +585,7 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "is_popular":     s.get("is_popular", False),
         "badge":          s.get("badge", ""),
         "points_per_scan":s.get("points_per_scan", 0),
+        "visit_points":   s.get("visit_points", 0),
         "rating":         s.get("admin_rating") or s.get("rating") or 0,
         "image":          image,
         "image_url":      image,  # also expose as image_url for JS consistency

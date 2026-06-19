@@ -1072,6 +1072,21 @@ def submit_product_review(product_id: str, data: dict, request: _Req):
 
 
 # ─── Product Favorites ────────────────────────────────────────────────────────
+
+@router.get("/user/product-favorites")
+def get_user_favorites(request: _Req):
+    """Get all product IDs favorited by the current user."""
+    from fastapi import HTTPException as _HTTPEx
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not token:
+        return {"product_ids": []}
+    acct = db.accounts.find_one({"token": token})
+    if not acct:
+        return {"product_ids": []}
+    user_id = str(acct["_id"])
+    favs = list(db.product_favorites.find({"user_id": user_id}, {"product_id": 1}))
+    return {"product_ids": [f["product_id"] for f in favs]}
+
 @router.post("/user/product-favorites/{product_id}")
 def toggle_product_favorite(product_id: str, request: _Req):
     """Toggle product favorite for authenticated user."""
