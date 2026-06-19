@@ -936,11 +936,30 @@ def get_gift_vouchers_public():
 
 # =================== PRODUCTS (public — Discover Products on home screen) ===================
 @router.get("/products")
-def get_products_public(category: str = None, limit: int = 60, skip: int = 0):
+def get_products_public(category: str = None, city: str = None, limit: int = 60, skip: int = 0):
     """Returns active products for the Flutter app Discover Products section."""
     query = {"status": {"$nin": ["deleted", "inactive"]}}
     if category and category != "All":
         query["category"] = category
+    # FIX2: filter by city — look up store_ids matching the city, then filter products
+    if city and city.strip():
+        city_re = {"$regex": city.strip(), "$options": "i"}
+        # Find stores in the city
+        city_store_ids = [
+            str(s["_id"]) for s in db.stores.find(
+                {"$or": [{"city": city_re}, {"area": city_re}]}, {"_id": 1}
+            )
+        ]
+        # Also allow products that have a city/store_city field directly
+        city_cond = {
+            "$or": [
+                {"store_id":   {"$in": city_store_ids}},
+                {"city":       city_re},
+                {"store_city": city_re},
+            ]
+        }
+        # Merge with existing query using $and
+        query = {"$and": [query, city_cond]}
     docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
     result = []
     for d in docs:
@@ -1007,9 +1026,18 @@ def get_default_images():
 
 # ─── Admin Banners (public - for Flutter app home screen) ─────────────────────
 @router.get("/admin-banners")
-def get_admin_banners_public():
+def get_admin_banners_public(city: str = None):
     """Return active admin banners for the app home screen."""
-    docs = list(db.admin_banners.find({"is_active": True}).sort("sort_order", 1))
+    # FIX4: filter banners by city if provided; banners with no city field show everywhere
+    banner_query = {"is_active": True}
+    if city and city.strip():
+        banner_query["$or"] = [
+            {"city": {"$regex": city.strip(), "$options": "i"}},
+            {"city": {"$exists": False}},
+            {"city": ""},
+            {"city": None},
+        ]
+    docs = list(db.admin_banners.find(banner_query).sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
