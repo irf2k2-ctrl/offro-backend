@@ -1027,17 +1027,8 @@ def get_default_images():
 # ─── Admin Banners (public - for Flutter app home screen) ─────────────────────
 @router.get("/admin-banners")
 def get_admin_banners_public(city: str = None):
-    """Return active admin banners for the app home screen."""
-    # FIX4: filter banners by city if provided; banners with no city field show everywhere
-    banner_query = {"is_active": True}
-    if city and city.strip():
-        banner_query["$or"] = [
-            {"city": {"$regex": city.strip(), "$options": "i"}},
-            {"city": {"$exists": False}},
-            {"city": ""},
-            {"city": None},
-        ]
-    docs = list(db.admin_banners.find(banner_query).sort("sort_order", 1))
+    """Return active admin banners for the app home screen — shown globally regardless of city."""
+    docs = list(db.admin_banners.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
