@@ -252,6 +252,22 @@ def get_store_reviews(store_id: str, limit: int = 10, skip: int = 0):
     return {"reviews": result, "total": total}
 
 
+
+@router.get("/stores/{store_id}/user-review")
+def get_user_review(store_id: str, request: _Req):
+    """Get the current user's own review for a store."""
+    user = _get_user_optional(request)
+    if not user:
+        return {"review": None}
+    user_id = str(user["_id"])
+    r = db.reviews.find_one({"store_id": store_id, "user_id": user_id})
+    if not r:
+        return {"review": None}
+    r["_id"] = str(r["_id"])
+    r.setdefault("created_at", "")
+    r.setdefault("updated_at", "")
+    return {"review": r}
+
 @router.post("/stores/{store_id}/review")
 def submit_store_review(store_id: str, data: dict, request: _Req):
     """Authenticated user submits a review (rating + text)."""
