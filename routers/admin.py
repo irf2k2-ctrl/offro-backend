@@ -1808,6 +1808,7 @@ def list_promo_sliders(a=Depends(get_current_admin)):
             # merchant attribution
             "merchant_name":  _sld_merch_name,
             "merchant_phone": _sld_merch_phone,
+            "city":           d.get("city", ""),
             "source":         d.get("source", "admin"),
             "source_banner_id": d.get("source_banner_id", ""),
             # audit
@@ -1847,6 +1848,7 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
         "duration_days":  days,
         "merchant_name":  data.get("merchant_name", ""),
         "merchant_phone": merchant_phone_norm,
+        "city":           (data.get("city") or "").strip().lower(),
         "source":         "admin",
         "created_at":     datetime.utcnow(),
     }
@@ -1857,7 +1859,7 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
 def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     upd = {}
     import re as _re
-    for f in ["title", "image_url", "link_url", "from_date", "end_date", "merchant_name"]:
+    for f in ["title", "image_url", "link_url", "from_date", "end_date", "merchant_name", "city"]:
         if f in data: upd[f] = data[f]
     if "merchant_phone" in data:
         raw_p = str(data["merchant_phone"] or "").strip()

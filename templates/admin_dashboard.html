@@ -2691,6 +2691,7 @@ function openSliderModal() {
   if (document.getElementById("sl_days"))      { document.getElementById("sl_days").value = "30"; }
   slUpdateEndDate();
   document.getElementById("sl_msg").innerText = "";
+  if (document.getElementById("sl_city")) document.getElementById("sl_city").value = "";
   // Reset upload UI
   document.getElementById("sl_preview_wrap").style.display = "none";
   document.getElementById("sl_preview_img").src = "";
@@ -2726,6 +2727,7 @@ function editSlider(s) {
     document.getElementById("sl_preview_img").src = "";
     document.getElementById("sl_upload_label").style.display = "";
   }
+  if (document.getElementById("sl_city")) document.getElementById("sl_city").value = s.city || '';
   sliderModalInst.show();
 }
 
@@ -2776,6 +2778,7 @@ async function saveSlider() {
   // Extract merchant name from the preview element (set by lookupMerchantByPhone)
   const _slMerchPreview = document.getElementById('sl_merchant_name_preview')?.textContent || '';
   const _slMerchName = _slMerchPreview.startsWith('✅ ') ? _slMerchPreview.slice(3).trim() : '';
+  const _slCity = (document.getElementById("sl_city")?.value || '').trim();
   const data = {
     title:           document.getElementById("sl_title").value.trim(),
     image_url:       img,
@@ -2787,6 +2790,7 @@ async function saveSlider() {
     end_date:        document.getElementById("sl_end_date")?.value || '',
     merchant_phone:  (document.getElementById("sl_merchant_phone")?.value || '').trim(),
     merchant_name:   _slMerchName,
+    city:            _slCity,
   };
   try {
     let url  = sid ? `/admin/promo-sliders/${sid}` : "/admin/promo-sliders";
@@ -3875,13 +3879,15 @@ async function openGiftCardModal() {
   document.getElementById("gc_active").checked = true;
   document.getElementById("gc_msg").innerText = "";
   if (document.getElementById("gc_city")) document.getElementById("gc_city").value = '';
+  _gcEditingId = '';
   _populateGcMerchants("");
   gcModalInst.show();
 }
 
 async function editGiftCard(v) {
   if (merchantsList.length === 0) await loadMerchants();
-  document.getElementById("gc_id").value       = v.id||v._id||"";
+  _gcEditingId = v.id||v._id||"";
+  document.getElementById("gc_id").value       = _gcEditingId;
   document.getElementById("gc_collection").value = v._collection || "gift_vouchers";
   document.getElementById("gc_title").value    = v.title||"";
   document.getElementById("gc_text").value     = v.text||"";
@@ -3958,8 +3964,9 @@ function _gcUpdateValidity() {
     if (previewEl) previewEl.textContent = '';
   }
 }
+let _gcEditingId = '';  // backup for edit id in case DOM is stale
 async function saveGiftCard() {
-  const vid  = document.getElementById("gc_id").value;
+  const vid  = (document.getElementById("gc_id").value || _gcEditingId).trim();
   const text = document.getElementById("gc_text").value.trim();
   if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
   const _gcFrom = document.getElementById("gc_from_date")?.value  || '';
@@ -4282,6 +4289,11 @@ async function saveStore() {
           <small class="text-muted">If filled, this banner will appear in that merchant's banner screen.</small>
         </div>
         <input type="hidden" id="sl_order" value="0">
+        <div class="mb-3">
+          <label class="form-label">City <span style="color:var(--muted);font-size:11px">(optional)</span></label>
+          <input id="sl_city" class="form-control" placeholder="e.g. Ballari — leave empty for all cities">
+          <small class="text-muted">If filled, this banner only shows for users in that city.</small>
+        </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="sl_active" checked>
           <label class="form-check-label" for="sl_active">Active (show in app)</label>
@@ -4753,7 +4765,7 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
       <div class="modal-footer" style="gap:8px;flex-wrap:wrap">
         <button id="pc_modal_approve" class="btn-approve" style="padding:7px 18px" onclick="approveProductCard(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()">Approve</button>
-        <button class="btn-o" onclick="openVZEdit(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()"><i class="fas fa-pen me-1"></i>Edit</button>
+        <button class="btn-o" onclick="vzViewModalInst.hide();setTimeout(()=>openVZEdit(_vzViewCurrent?._id,_vzViewCurrent?._source),350)"><i class="fas fa-pen me-1"></i>Edit</button>
         <button class="btn-d" onclick="deleteProductCard(_vzViewCurrent?._id,_vzViewCurrent?._source);vzViewModalInst.hide()"><i class="fas fa-trash me-1"></i>Delete</button>
         <button class="btn-p ms-auto" data-bs-dismiss="modal">Close</button>
       </div>
