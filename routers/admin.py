@@ -2258,6 +2258,7 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             "invoice_no":     b.get("invoice_no", ""),
             "amount":         b.get("total", 0),
             "created_at":     b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at",""))[:16],
+            "city":           b.get("city", ""),
         })
     return result
 

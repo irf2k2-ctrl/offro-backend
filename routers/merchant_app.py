@@ -964,6 +964,7 @@ def get_my_banners(m=Depends(get_merchant)):
                 "created_at":      _safe_str_date(b.get("created_at", "")),
                 "source":          "merchant",
                 "is_expired":      is_expired,
+                "city":            b.get("city", ""),
             })
     except Exception as e:
         print(f"[BANNERS] merchant_banners query error: {e}")
@@ -1164,10 +1165,15 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     if disc_code:
         db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
 
+    # Auto-assign city from merchant's first store
+    _ba_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
+    _ba_city  = (_ba_store.get("city", "") if _ba_store else "").strip().lower()
+
     banner = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
         "merchant_phone":   str(m.get("phone", "")),
+        "city":             _ba_city,
         "title":            title,
         "image_url":        image_url,
         "image_thumb":      image_thumb,
@@ -1249,10 +1255,15 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
 
+    # Auto-assign city from merchant's first store
+    _bv_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
+    _bv_city  = (_bv_store.get("city", "") if _bv_store else "").strip().lower()
+
     banner = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
         "merchant_phone":   str(m.get("phone", "")),
+        "city":             _bv_city,
         "title":            title,
         "image_url":        image_url,
         "image_thumb":      image_thumb,
