@@ -1044,10 +1044,18 @@ def get_default_images():
 @router.get("/admin-banners")
 def get_admin_banners_public(city: str = None):
     """Return active admin banners for the app home screen — shown globally regardless of city."""
-    docs = list(db.admin_banners.find({"is_active": {"$ne": False}}).sort("sort_order", 1))
+    # FIX: return ALL banners where is_active is not explicitly False
+    # Also handles docs where is_active field doesn't exist
+    docs = list(db.admin_banners.find(
+        {"$or": [{"is_active": True}, {"is_active": {"$exists": False}}]}
+    ).sort("sort_order", 1))
+    print(f"[OFFRO] /admin-banners — total docs in collection: {db.admin_banners.count_documents({})}, active: {len(docs)}")
     result = []
     for d in docs:
-        img = d.get("image_url", "") or d.get("image", "")
+        img = d.get("image_url", "") or d.get("image", "") or ""
+        # Normalise base64 — ensure header is present
+        if img and not img.startswith("http") and not img.startswith("data:"):
+            img = "data:image/jpeg;base64," + img
         result.append({
             "id":         str(d["_id"]),
             "title":      d.get("title", ""),
@@ -1056,6 +1064,7 @@ def get_admin_banners_public(city: str = None):
             "image_url":  img,
             "link_url":   d.get("link_url", ""),
             "sort_order": d.get("sort_order", 0),
+            "is_active":  d.get("is_active", True),
         })
     return result
 
