@@ -1033,7 +1033,7 @@ def get_default_images():
 @router.get("/admin-banners")
 def get_admin_banners_public(city: str = None):
     """Return active admin banners for the app home screen — shown globally regardless of city."""
-    docs = list(db.admin_banners.find({"is_active": True}).sort("sort_order", 1))
+    docs = list(db.admin_banners.find({"is_active": {"$ne": False}}).sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
