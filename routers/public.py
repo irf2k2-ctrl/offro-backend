@@ -884,9 +884,19 @@ def get_about_public():
 
 # =================== PROMO SLIDERS (public - for Flutter app) ===================
 @router.get("/promo-sliders")
-def get_promo_sliders_public():
-    """Returns active promo slider banners for the app home screen."""
-    docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
+def get_promo_sliders_public(city: str = None):
+    """Returns active promo slider banners for the app home screen, optionally filtered by city."""
+    base_query = {"is_active": {"$ne": False}}
+    docs = []
+    if city and city.strip():
+        city_re = {"$regex": city.strip(), "$options": "i"}
+        city_query = {"$and": [base_query, {"$or": [{"city": city_re}, {"store_city": city_re}]}]}
+        docs = list(db.promo_sliders.find(city_query).sort("sort_order", 1))
+        # Fallback: if no city-specific banners, show all active banners
+        if not docs:
+            docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
+    else:
+        docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
@@ -899,6 +909,7 @@ def get_promo_sliders_public():
             "link_url": d.get("link_url", ""),
             "bg_color": d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
+            "city": d.get("city", ""),
         })
     return result
 
