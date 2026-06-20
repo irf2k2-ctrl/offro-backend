@@ -1341,6 +1341,7 @@ def get_my_products(m=Depends(get_merchant)):
             "status":          v.get("status", "pending"),
             "approval_status": v.get("approval_status", "pending"),
             "created_at":      v.get("created_at", ""),
+            "city":            v.get("city", ""),
         })
     return result
 
@@ -1547,10 +1548,15 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
     if disc_code:
         db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
 
+    # Auto-assign city from merchant's first store
+    _af_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
+    _af_city  = (_af_store.get("city", "") if _af_store else "").strip().lower()
+
     product_doc = {
         "merchant_id":    merchant_id,
         "merchant_name":  m.get("name", ""),
         "merchant_phone": str(m.get("phone", "")),
+        "city":           _af_city,
         "title":          title,
         "offer_text":     offer_text,
         "logo_url":       logo_url,
@@ -1647,10 +1653,15 @@ def verify_product_payment(data: dict, m=Depends(get_merchant)):
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
 
+    # Auto-assign city from merchant's first store
+    _vf_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
+    _vf_city  = (_vf_store.get("city", "") if _vf_store else "").strip().lower()
+
     product_doc = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
         "merchant_phone":   str(m.get("phone", "")),
+        "city":             _vf_city,
         "title":            title,
         "offer_text":       offer_text,
         "logo_url":         logo_url,

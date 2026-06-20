@@ -2412,6 +2412,7 @@ def list_merchant_products(a=Depends(get_current_admin)):
             "_id":           str(v["_id"]),
             "merchant_name": v.get("merchant_name",""),
             "merchant_phone": v.get("merchant_phone",""),
+            "city":          v.get("city",""),
             "title":         v.get("title",""),
             "offer_text":    v.get("offer_text",""),
             "logo_url":      (v.get("logo_url","") if str(v.get("logo_url","")).startswith("http") else ""),  # strip base64
@@ -2984,6 +2985,66 @@ def admin_remove_default_image_url(body: dict, a=Depends(get_current_admin)):
         upsert=True
     )
     return {"ok": True}
+
+
+@router.post("/seed-city-field")
+def seed_city_field(a=Depends(get_current_admin)):
+    """
+    One-time migration: backfill city field on all gift_vouchers, merchant_vouchers,
+    and promo_sliders from the merchant's first registered store.
+    """
+    from bson import ObjectId as ObjId
+    updated = {"gift_vouchers": 0, "merchant_vouchers": 0, "promo_sliders": 0}
+
+    def _get_merchant_city(merchant_id_str, merchant_phone_str=""):
+        """Look up city from the merchant's first store."""
+        query = {}
+        if merchant_id_str:
+            try:
+                query = {"merchant_id": merchant_id_str}
+            except Exception:
+                pass
+        store = None
+        if query:
+            store = db.stores.find_one(query, {"city": 1}, sort=[("created_at", 1)])
+        if not store and merchant_phone_str:
+            store = db.stores.find_one(
+                {"$or": [{"phone": merchant_phone_str[-10:]},
+                         {"owner_phone": merchant_phone_str[-10:]}]},
+                {"city": 1}, sort=[("created_at", 1)]
+            )
+        return (store.get("city", "") if store else "").strip().lower()
+
+    # ── gift_vouchers ──
+    for doc in db.gift_vouchers.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):
+        city = _get_merchant_city(str(doc.get("merchant_id", "") or ""), str(doc.get("merchant_phone", "") or ""))
+        if city:
+            db.gift_vouchers.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
+            updated["gift_vouchers"] += 1
+
+    # ── merchant_vouchers ──
+    for doc in db.merchant_vouchers.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):
+        city = _get_merchant_city(str(doc.get("merchant_id", "") or ""), str(doc.get("merchant_phone", "") or ""))
+        if city:
+            db.merchant_vouchers.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
+            updated["merchant_vouchers"] += 1
+
+    # ── promo_sliders (merchant banners) ──
+    for doc in db.promo_sliders.find({"city": {"$in": [None, "", []]}}, {"merchant_phone": 1, "merchant_name": 1}):
+        phone = str(doc.get("merchant_phone", "") or "")
+        city = ""
+        if phone:
+            store = db.stores.find_one(
+                {"$or": [{"phone": phone[-10:]}, {"owner_phone": phone[-10:]}]},
+                {"city": 1}, sort=[("created_at", 1)]
+            )
+            if store:
+                city = store.get("city", "").strip().lower()
+        if city:
+            db.promo_sliders.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
+            updated["promo_sliders"] += 1
+
+    return {"message": "City seed complete", "updated": updated}
 
 
 @router.put("/default-images")
