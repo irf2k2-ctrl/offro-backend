@@ -1046,10 +1046,10 @@ def get_admin_banners_public(city: str = None):
     """Return active admin banners for the app home screen — shown globally regardless of city."""
     # FIX: return ALL banners where is_active is not explicitly False
     # Also handles docs where is_active field doesn't exist
-    docs = list(db.admin_banners.find(
+    docs = list(db.banners.find(
         {"$or": [{"is_active": True}, {"is_active": {"$exists": False}}]}
     ).sort("sort_order", 1))
-    print(f"[OFFRO] /admin-banners — total docs in collection: {db.admin_banners.count_documents({})}, active: {len(docs)}")
+    print(f"[OFFRO] /admin-banners — total docs in collection: {db.banners.count_documents({})}, active: {len(docs)}")
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "") or ""

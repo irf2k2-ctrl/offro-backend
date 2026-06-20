@@ -2835,7 +2835,7 @@ async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=
 # ─── Admin Banners (home-screen banners managed by admin) ─────────────────────
 @router.get("/banners")
 def admin_list_banners(a=Depends(get_current_admin)):
-    docs = list(db.admin_banners.find().sort("sort_order", 1))
+    docs = list(db.banners.find().sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
@@ -2867,7 +2867,7 @@ async def admin_create_banner(data: dict, a=Depends(get_current_admin)):
         "is_active":  bool(data.get("is_active", True)),
         "created_at": datetime.utcnow().isoformat(),
     }
-    r = db.admin_banners.insert_one(doc)
+    r = db.banners.insert_one(doc)
     return {"ok": True, "id": str(r.inserted_id)}
 
 
@@ -2885,23 +2885,23 @@ async def admin_update_banner(bid: str, data: dict, a=Depends(get_current_admin)
         update["image"]     = img
         update["image_url"] = img
     if update:
-        db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
+        db.banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
     return {"ok": True}
 
 
 @router.delete("/banners/{bid}")
 def admin_delete_banner(bid: str, a=Depends(get_current_admin)):
-    db.admin_banners.delete_one({"_id": ObjectId(bid)})
+    db.banners.delete_one({"_id": ObjectId(bid)})
     return {"ok": True}
 
 
 @router.patch("/banners/{bid}/toggle")
 def admin_toggle_banner(bid: str, a=Depends(get_current_admin)):
-    doc = db.admin_banners.find_one({"_id": ObjectId(bid)})
+    doc = db.banners.find_one({"_id": ObjectId(bid)})
     if not doc:
         raise HTTPException(404, "Banner not found")
     new_state = not doc.get("is_active", True)
-    db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
+    db.banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
     return {"ok": True, "is_active": new_state}
 
 
