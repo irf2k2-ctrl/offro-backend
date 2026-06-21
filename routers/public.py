@@ -892,25 +892,24 @@ def get_promo_sliders_public(city: str = None):
         city_re = {"$regex": city.strip(), "$options": "i"}
         city_query = {"$and": [base_query, {"$or": [{"city": city_re}, {"store_city": city_re}]}]}
         docs = list(db.promo_sliders.find(city_query).sort("sort_order", 1))
-        # Fallback: no city-specific sliders — return one default offer image
+        # Fallback: no city-specific sliders — return default merchant banner image
         if not docs:
             default_doc = db.settings.find_one({"_type": "default_images"}) or {}
-            offer_imgs = default_doc.get("offer", default_doc.get("offer_images", []))
-            if isinstance(offer_imgs, str): offer_imgs = [offer_imgs]
-            offer_imgs = [v for v in offer_imgs if isinstance(v, str) and v.startswith("http")]
-            if offer_imgs:
+            banner_imgs = default_doc.get("merchant_banner", [])
+            if isinstance(banner_imgs, str): banner_imgs = [banner_imgs]
+            banner_imgs = [v for v in banner_imgs if isinstance(v, str) and v.startswith("http")]
+            if banner_imgs:
                 return [{
-                    "id": "default_offer",
+                    "id": "default_merchant_banner",
                     "title": "",
                     "subtitle": "",
-                    "image": offer_imgs[0],
-                    "image_url": offer_imgs[0],
+                    "image": banner_imgs[0],
+                    "image_url": banner_imgs[0],
                     "link_url": "",
                     "bg_color": "",
                     "sort_order": 0,
                     "city": "",
                 }]
-            # No default image configured either — return empty
             return []
     else:
         docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
@@ -989,28 +988,9 @@ def get_products_public(category: str = None, city: str = None, limit: int = 60,
         query = {"$and": [query, city_cond]}
         # Try city-filtered query first
         docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
-        # Fallback: no city-tagged products — return default product image placeholder
+        # Fallback: if no results (products not tagged with city), return all products
         if not docs:
-            default_doc = db.settings.find_one({"_type": "default_images"}) or {}
-            prod_imgs = default_doc.get("product", default_doc.get("product_images", []))
-            if isinstance(prod_imgs, str): prod_imgs = [prod_imgs]
-            prod_imgs = [v for v in prod_imgs if isinstance(v, str) and v.startswith("http")]
-            if prod_imgs:
-                return [{
-                    "id": "default_product",
-                    "name": "Coming Soon",
-                    "description": "Products coming soon for this city.",
-                    "image_url": prod_imgs[0],
-                    "image": prod_imgs[0],
-                    "price": "",
-                    "sale_price": "",
-                    "original_price": "",
-                    "store_name": "",
-                    "city": city.strip() if city else "",
-                    "status": "active",
-                }]
-            # No default configured — return empty (section hides itself)
-            return []
+            docs = list(db.products.find(base_query).sort("_id", -1).skip(skip).limit(limit))
     else:
         docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
     result = []
@@ -1070,10 +1050,11 @@ def get_default_images():
         return []
 
     return {
-        "store":   _safe_list(doc.get("store",   doc.get("store_images",   []))),
-        "product": _safe_list(doc.get("product", doc.get("product_images", []))),
-        "offer":   _safe_list(doc.get("offer",   doc.get("offer_images",   []))),
-        "city":    _safe_list(doc.get("city",    doc.get("city_images",    []))),
+        "store":           _safe_list(doc.get("store",           doc.get("store_images",   []))),
+        "product":         _safe_list(doc.get("product",         doc.get("product_images", []))),
+        "offer":           _safe_list(doc.get("offer",           doc.get("offer_images",   []))),
+        "city":            _safe_list(doc.get("city",            doc.get("city_images",    []))),
+        "merchant_banner": _safe_list(doc.get("merchant_banner", [])),
     }
 
 # ─── Admin Banners (public - for Flutter app home screen) ─────────────────────

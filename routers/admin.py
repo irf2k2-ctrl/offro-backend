@@ -2917,10 +2917,11 @@ def admin_get_default_images(a=Depends(get_current_admin)):
             return [val]
         return []
     return {
-        "store":   _to_list(doc.get("store",   doc.get("store_images",   []))),
-        "product": _to_list(doc.get("product", doc.get("product_images", []))),
-        "offer":   _to_list(doc.get("offer",   doc.get("offer_images",   []))),
-        "city":    _to_list(doc.get("city",    doc.get("city_images",    []))),
+        "store":           _to_list(doc.get("store",           doc.get("store_images",   []))),
+        "product":         _to_list(doc.get("product",         doc.get("product_images", []))),
+        "offer":           _to_list(doc.get("offer",           doc.get("offer_images",   []))),
+        "city":            _to_list(doc.get("city",            doc.get("city_images",    []))),
+        "merchant_banner": _to_list(doc.get("merchant_banner", [])),
     }
 
 
@@ -2934,7 +2935,7 @@ def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
     img_type = body.get("type", "")
     url = (body.get("url") or "").strip()
 
-    if img_type and url and img_type in ["store", "product", "offer", "city"]:
+    if img_type and url and img_type in ["store", "product", "offer", "city", "merchant_banner"]:
         if action == "remove":
             db.settings.update_one(
                 {"_type": "default_images"},
@@ -2966,7 +2967,7 @@ def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
 
     # Legacy bulk format fallback
     update = {}
-    for field in ["store", "product", "offer", "city"]:
+    for field in ["store", "product", "offer", "city", "merchant_banner"]:
         if field in body and isinstance(body[field], str) and body[field].startswith("http"):
             update[field] = [body[field]]
     if update:
@@ -3054,12 +3055,13 @@ async def admin_update_default_images(
     product_file: UploadFile = File(None),
     offer_file: UploadFile = File(None),
     city_file: UploadFile = File(None),
+    merchant_banner_file: UploadFile = File(None),
     a=Depends(get_current_admin),
 ):
     """Upload default images. Saves Cloudinary URL if configured, else base64 fallback."""
     import base64 as _b64mod, os as _di_os
     update = {}
-    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file)]:
+    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file), ("merchant_banner", merchant_banner_file)]:
         if not f or not f.filename:
             continue
         raw  = await f.read()

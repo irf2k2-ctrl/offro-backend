@@ -1029,6 +1029,32 @@ tr:hover td{background:#f7faf8;}
         </div>
       </div>
 
+      <!-- MERCHANT BANNER -->
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--sidebar)">
+          <span style="color:#fff;font-weight:700;font-size:14px"><i class="fas fa-bullhorn me-2"></i>Default Merchant Banner Image</span>
+          <span id="di_merchant_banner_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0</span>
+        </div>
+        <div style="padding:6px 16px 4px;background:#e8f5ee;font-size:11px;color:var(--primary);font-weight:600">
+          <i class="fas fa-info-circle me-1"></i>Shown on the app home screen when no city-specific promo slider exists. Recommended: <strong>1200 × 400 px</strong> (3:1 banner ratio).
+        </div>
+        <table class="table table-sm mb-0" id="di_merchant_banner_table">
+          <thead style="background:#f8f9fa"><tr>
+            <th style="width:70px">Preview</th>
+            <th>Image URL</th>
+            <th style="width:90px">Action</th>
+          </tr></thead>
+          <tbody id="di_merchant_banner_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+        </table>
+        <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="text" id="di_merchant_banner_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste HTTPS image URL…">
+          <input type="file" id="di_merchant_banner_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
+          <button class="btn" onclick="diAddUrl('merchant_banner')"><i class="fas fa-plus me-1"></i>Add URL</button>
+          <button class="btn btn-secondary" onclick="diUploadFile('merchant_banner')"><i class="fas fa-upload me-1"></i>Upload</button>
+        </div>
+      </div>
+
+
     </div>
   </div>
 
@@ -5284,7 +5310,7 @@ async function loadDefaultImages() {
     const r = await fetch('/admin/default-images', {credentials:'include'});
     if (!r.ok) throw new Error(await r.text());
     const d = await r.json();
-    for (const type of ['store', 'product', 'offer', 'city']) {
+    for (const type of ['store', 'product', 'offer', 'city', 'merchant_banner']) {
       const urls = Array.isArray(d[type]) ? d[type] : (d[type] ? [d[type]] : []);
       _renderDiTable(type, urls);
     }
