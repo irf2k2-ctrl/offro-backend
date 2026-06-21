@@ -892,8 +892,26 @@ def get_promo_sliders_public(city: str = None):
         city_re = {"$regex": city.strip(), "$options": "i"}
         city_query = {"$and": [base_query, {"$or": [{"city": city_re}, {"store_city": city_re}]}]}
         docs = list(db.promo_sliders.find(city_query).sort("sort_order", 1))
-        # City-filtered — strict, no all-city fallback
-        print(f"[OFFRO] /promo-sliders city={city!r} docs={len(docs)}")
+        # Fallback: no city-specific sliders — return one default offer image
+        if not docs:
+            default_doc = db.settings.find_one({"_type": "default_images"}) or {}
+            offer_imgs = default_doc.get("offer", default_doc.get("offer_images", []))
+            if isinstance(offer_imgs, str): offer_imgs = [offer_imgs]
+            offer_imgs = [v for v in offer_imgs if isinstance(v, str) and v.startswith("http")]
+            if offer_imgs:
+                return [{
+                    "id": "default_offer",
+                    "title": "",
+                    "subtitle": "",
+                    "image": offer_imgs[0],
+                    "image_url": offer_imgs[0],
+                    "link_url": "",
+                    "bg_color": "",
+                    "sort_order": 0,
+                    "city": "",
+                }]
+            # No default image configured either — return empty
+            return []
     else:
         docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
     result = []
@@ -969,9 +987,30 @@ def get_products_public(category: str = None, city: str = None, limit: int = 60,
             ]
         }
         query = {"$and": [query, city_cond]}
-        # City-filtered query — strict, no all-city fallback
+        # Try city-filtered query first
         docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
-        print(f"[OFFRO] /products city={city!r} store_ids={len(city_store_ids)} docs={len(docs)}")
+        # Fallback: no city-tagged products — return default product image placeholder
+        if not docs:
+            default_doc = db.settings.find_one({"_type": "default_images"}) or {}
+            prod_imgs = default_doc.get("product", default_doc.get("product_images", []))
+            if isinstance(prod_imgs, str): prod_imgs = [prod_imgs]
+            prod_imgs = [v for v in prod_imgs if isinstance(v, str) and v.startswith("http")]
+            if prod_imgs:
+                return [{
+                    "id": "default_product",
+                    "name": "Coming Soon",
+                    "description": "Products coming soon for this city.",
+                    "image_url": prod_imgs[0],
+                    "image": prod_imgs[0],
+                    "price": "",
+                    "sale_price": "",
+                    "original_price": "",
+                    "store_name": "",
+                    "city": city.strip() if city else "",
+                    "status": "active",
+                }]
+            # No default configured — return empty (section hides itself)
+            return []
     else:
         docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
     result = []
