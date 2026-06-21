@@ -10,34 +10,12 @@ def get_stores(city: str = None, category: str = None):
     """Public endpoint - Flutter app fetches this"""
     query = {"status": "active"}
     if city:
+        city = _normalize_city(city)  # FIX: map GPS alternate spellings (Bellary→Ballari etc.)
         query["city"] = {"$regex": city, "$options": "i"}
     if category and category.strip() and category.strip() != "All":
         # Case-insensitive match so "Restaurant" matches "restaurant", "RESTAURANT" etc.
         query["category"] = {"$regex": f"^{category.strip()}$", "$options": "i"}
 
-
-# ── City name normalization (handles GPS alternate spellings) ──────────────────
-_CITY_ALIASES: dict = {
-    "bellary":       "Ballari",
-    "bijapur":       "Vijayapura",
-    "gulbarga":      "Kalaburagi",
-    "shimoga":       "Shivamogga",
-    "hospet":        "Hosapete",
-    "tumkur":        "Tumakuru",
-    "mysore":        "Mysuru",
-    "belgaum":       "Belagavi",
-    "mangalore":     "Mangaluru",
-    "hubli":         "Hubballi",
-    "dharwad":       "Hubballi",
-    "davangere":     "Davanagere",
-}
-
-def _normalize_city(city: str) -> str:
-    """Map GPS/old city spellings to the canonical name used in the database."""
-    if not city:
-        return city
-    lower = city.strip().lower()
-    return _CITY_ALIASES.get(lower, city.strip())
 
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
@@ -152,6 +130,32 @@ def _normalize_city(city: str) -> str:
     return result
 
 # =================== SINGLE STORE ===================
+
+
+# ── City name normalization (handles GPS alternate spellings) ──────────────────
+_CITY_ALIASES: dict = {
+    "bellary":       "Ballari",
+    "bijapur":       "Vijayapura",
+    "gulbarga":      "Kalaburagi",
+    "shimoga":       "Shivamogga",
+    "hospet":        "Hosapete",
+    "tumkur":        "Tumakuru",
+    "mysore":        "Mysuru",
+    "belgaum":       "Belagavi",
+    "mangalore":     "Mangaluru",
+    "hubli":         "Hubballi",
+    "dharwad":       "Hubballi",
+    "davangere":     "Davanagere",
+}
+
+def _normalize_city(city: str) -> str:
+    """Map GPS/old city spellings to the canonical name used in the database."""
+    if not city:
+        return city
+    lower = city.strip().lower()
+    return _CITY_ALIASES.get(lower, city.strip())
+
+
 @router.get("/stores/{store_id}")
 def get_store(store_id: str):
     from fastapi import HTTPException as _HTTPEx
