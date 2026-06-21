@@ -1808,7 +1808,6 @@ def list_promo_sliders(a=Depends(get_current_admin)):
             # merchant attribution
             "merchant_name":  _sld_merch_name,
             "merchant_phone": _sld_merch_phone,
-            "city":           d.get("city", ""),
             "source":         d.get("source", "admin"),
             "source_banner_id": d.get("source_banner_id", ""),
             # audit
@@ -1848,7 +1847,6 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
         "duration_days":  days,
         "merchant_name":  data.get("merchant_name", ""),
         "merchant_phone": merchant_phone_norm,
-        "city":           (data.get("city") or "").strip().lower(),
         "source":         "admin",
         "created_at":     datetime.utcnow(),
     }
@@ -1859,7 +1857,7 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
 def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     upd = {}
     import re as _re
-    for f in ["title", "image_url", "link_url", "from_date", "end_date", "merchant_name", "city"]:
+    for f in ["title", "image_url", "link_url", "from_date", "end_date", "merchant_name"]:
         if f in data: upd[f] = data[f]
     if "merchant_phone" in data:
         raw_p = str(data["merchant_phone"] or "").strip()
@@ -2258,7 +2256,6 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             "invoice_no":     b.get("invoice_no", ""),
             "amount":         b.get("total", 0),
             "created_at":     b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at",""))[:16],
-            "city":           b.get("city", ""),
         })
     return result
 
@@ -2413,7 +2410,6 @@ def list_merchant_products(a=Depends(get_current_admin)):
             "_id":           str(v["_id"]),
             "merchant_name": v.get("merchant_name",""),
             "merchant_phone": v.get("merchant_phone",""),
-            "city":          v.get("city",""),
             "title":         v.get("title",""),
             "offer_text":    v.get("offer_text",""),
             "logo_url":      (v.get("logo_url","") if str(v.get("logo_url","")).startswith("http") else ""),  # strip base64
@@ -2835,7 +2831,7 @@ async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=
 # ─── Admin Banners (home-screen banners managed by admin) ─────────────────────
 @router.get("/banners")
 def admin_list_banners(a=Depends(get_current_admin)):
-    docs = list(db.banners.find().sort("sort_order", 1))
+    docs = list(db.admin_banners.find().sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
@@ -2867,7 +2863,7 @@ async def admin_create_banner(data: dict, a=Depends(get_current_admin)):
         "is_active":  bool(data.get("is_active", True)),
         "created_at": datetime.utcnow().isoformat(),
     }
-    r = db.banners.insert_one(doc)
+    r = db.admin_banners.insert_one(doc)
     return {"ok": True, "id": str(r.inserted_id)}
 
 
@@ -2885,23 +2881,23 @@ async def admin_update_banner(bid: str, data: dict, a=Depends(get_current_admin)
         update["image"]     = img
         update["image_url"] = img
     if update:
-        db.banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
+        db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
     return {"ok": True}
 
 
 @router.delete("/banners/{bid}")
 def admin_delete_banner(bid: str, a=Depends(get_current_admin)):
-    db.banners.delete_one({"_id": ObjectId(bid)})
+    db.admin_banners.delete_one({"_id": ObjectId(bid)})
     return {"ok": True}
 
 
 @router.patch("/banners/{bid}/toggle")
 def admin_toggle_banner(bid: str, a=Depends(get_current_admin)):
-    doc = db.banners.find_one({"_id": ObjectId(bid)})
+    doc = db.admin_banners.find_one({"_id": ObjectId(bid)})
     if not doc:
         raise HTTPException(404, "Banner not found")
     new_state = not doc.get("is_active", True)
-    db.banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
+    db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
     return {"ok": True, "is_active": new_state}
 
 
@@ -2917,11 +2913,10 @@ def admin_get_default_images(a=Depends(get_current_admin)):
             return [val]
         return []
     return {
-        "store":           _to_list(doc.get("store",           doc.get("store_images",   []))),
-        "product":         _to_list(doc.get("product",         doc.get("product_images", []))),
-        "offer":           _to_list(doc.get("offer",           doc.get("offer_images",   []))),
-        "city":            _to_list(doc.get("city",            doc.get("city_images",    []))),
-        "merchant_banner": _to_list(doc.get("merchant_banner", [])),
+        "store":   _to_list(doc.get("store",   doc.get("store_images",   []))),
+        "product": _to_list(doc.get("product", doc.get("product_images", []))),
+        "offer":   _to_list(doc.get("offer",   doc.get("offer_images",   []))),
+        "city":    _to_list(doc.get("city",    doc.get("city_images",    []))),
     }
 
 
@@ -2935,7 +2930,7 @@ def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
     img_type = body.get("type", "")
     url = (body.get("url") or "").strip()
 
-    if img_type and url and img_type in ["store", "product", "offer", "city", "merchant_banner"]:
+    if img_type and url and img_type in ["store", "product", "offer", "city"]:
         if action == "remove":
             db.settings.update_one(
                 {"_type": "default_images"},
@@ -2967,7 +2962,7 @@ def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
 
     # Legacy bulk format fallback
     update = {}
-    for field in ["store", "product", "offer", "city", "merchant_banner"]:
+    for field in ["store", "product", "offer", "city"]:
         if field in body and isinstance(body[field], str) and body[field].startswith("http"):
             update[field] = [body[field]]
     if update:
@@ -2989,79 +2984,18 @@ def admin_remove_default_image_url(body: dict, a=Depends(get_current_admin)):
     return {"ok": True}
 
 
-@router.post("/seed-city-field")
-def seed_city_field(a=Depends(get_current_admin)):
-    """
-    One-time migration: backfill city field on all gift_vouchers, merchant_vouchers,
-    and promo_sliders from the merchant's first registered store.
-    """
-    from bson import ObjectId as ObjId
-    updated = {"gift_vouchers": 0, "merchant_vouchers": 0, "promo_sliders": 0}
-
-    def _get_merchant_city(merchant_id_str, merchant_phone_str=""):
-        """Look up city from the merchant's first store."""
-        query = {}
-        if merchant_id_str:
-            try:
-                query = {"merchant_id": merchant_id_str}
-            except Exception:
-                pass
-        store = None
-        if query:
-            store = db.stores.find_one(query, {"city": 1}, sort=[("created_at", 1)])
-        if not store and merchant_phone_str:
-            store = db.stores.find_one(
-                {"$or": [{"phone": merchant_phone_str[-10:]},
-                         {"owner_phone": merchant_phone_str[-10:]}]},
-                {"city": 1}, sort=[("created_at", 1)]
-            )
-        return (store.get("city", "") if store else "").strip().lower()
-
-    # ── gift_vouchers ──
-    for doc in db.gift_vouchers.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):
-        city = _get_merchant_city(str(doc.get("merchant_id", "") or ""), str(doc.get("merchant_phone", "") or ""))
-        if city:
-            db.gift_vouchers.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
-            updated["gift_vouchers"] += 1
-
-    # ── merchant_vouchers ──
-    for doc in db.merchant_vouchers.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):
-        city = _get_merchant_city(str(doc.get("merchant_id", "") or ""), str(doc.get("merchant_phone", "") or ""))
-        if city:
-            db.merchant_vouchers.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
-            updated["merchant_vouchers"] += 1
-
-    # ── promo_sliders (merchant banners) ──
-    for doc in db.promo_sliders.find({"city": {"$in": [None, "", []]}}, {"merchant_phone": 1, "merchant_name": 1}):
-        phone = str(doc.get("merchant_phone", "") or "")
-        city = ""
-        if phone:
-            store = db.stores.find_one(
-                {"$or": [{"phone": phone[-10:]}, {"owner_phone": phone[-10:]}]},
-                {"city": 1}, sort=[("created_at", 1)]
-            )
-            if store:
-                city = store.get("city", "").strip().lower()
-        if city:
-            db.promo_sliders.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
-            updated["promo_sliders"] += 1
-
-    return {"message": "City seed complete", "updated": updated}
-
-
 @router.put("/default-images")
 async def admin_update_default_images(
     store_file: UploadFile = File(None),
     product_file: UploadFile = File(None),
     offer_file: UploadFile = File(None),
     city_file: UploadFile = File(None),
-    merchant_banner_file: UploadFile = File(None),
     a=Depends(get_current_admin),
 ):
     """Upload default images. Saves Cloudinary URL if configured, else base64 fallback."""
     import base64 as _b64mod, os as _di_os
     update = {}
-    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file), ("merchant_banner", merchant_banner_file)]:
+    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file)]:
         if not f or not f.filename:
             continue
         raw  = await f.read()
@@ -3107,3 +3041,32 @@ async def admin_update_default_images(
                 db.settings.update_one({"_type": "default_images"}, {"$set": set_fixes}, upsert=True)
             db.settings.update_one({"_type": "default_images"}, push_ops, upsert=True)
     return {"ok": True, "uploaded": list(update.keys())}
+
+
+# ── One-time DB cleanup: drop legacy collections ──────────────────────────────
+@router.get("/admin/drop-legacy-collections")
+def drop_legacy_collections(secret: str = ""):
+    """Drop confirmed-orphaned collections: admin_banners, merchant_banners.
+       Pass ?secret=offro_cleanup_2026 to confirm.
+    """
+    if secret != "offro_cleanup_2026":
+        return {"status": "error", "detail": "Pass ?secret=offro_cleanup_2026 to confirm"}
+    
+    dropped = []
+    skipped = []
+    legacy = ["admin_banners", "merchant_banners"]
+    
+    existing = db.list_collection_names()
+    for col in legacy:
+        if col in existing:
+            count = db[col].count_documents({})
+            db[col].drop()
+            dropped.append({"collection": col, "had_documents": count})
+        else:
+            skipped.append(col)
+    
+    return {
+        "status": "done",
+        "dropped": dropped,
+        "skipped_not_found": skipped
+    }

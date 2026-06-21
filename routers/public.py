@@ -995,32 +995,9 @@ def get_products_public(category: str = None, city: str = None, limit: int = 60,
     query = {"status": {"$nin": ["deleted", "inactive"]}}
     if category and category != "All":
         query["category"] = category
-    # FIX2: filter by city — look up store_ids matching the city, then filter products
-    # Fallback: if city yields zero products, show all (products may not have city recorded)
-    base_query = dict(query)  # save unfiltered query
-    if city and city.strip():
-        city = _normalize_city(city)  # FIX: map GPS alternate spellings (Bellary→Ballari etc.)
-        city_re = {"$regex": city.strip(), "$options": "i"}
-        city_store_ids = [
-            str(s["_id"]) for s in db.stores.find(
-                {"$or": [{"city": city_re}, {"area": city_re}]}, {"_id": 1}
-            )
-        ]
-        city_cond = {
-            "$or": [
-                {"store_id":   {"$in": city_store_ids}},
-                {"city":       city_re},
-                {"store_city": city_re},
-            ]
-        }
-        query = {"$and": [query, city_cond]}
-        # Try city-filtered query first
-        docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
-        # Fallback: if no results (products not tagged with city), return all products
-        if not docs:
-            docs = list(db.products.find(base_query).sort("_id", -1).skip(skip).limit(limit))
-    else:
-        docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
+    # SIMPLIFIED: show all active products regardless of city
+    # City filtering removed — products are global discovery content
+    docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
     result = []
     for d in docs:
         pid = str(d.pop("_id", ""))
