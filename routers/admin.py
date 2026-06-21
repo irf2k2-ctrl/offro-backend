@@ -433,7 +433,7 @@ def list_accounts(a=Depends(get_current_admin)):
             "product_count": db.merchant_vouchers.count_documents(
                 {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
             ) if (mid or phone) else 0,
-            "banner_count":  db.merchant_banners.count_documents(
+            "banner_count":  db.promo_sliders.count_documents(
                 {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
             ) if (mid or phone) else 0,
             "created_at":    str(acct.get("created_at", ""))[:10],
@@ -473,7 +473,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
 
     if is_merchant and mid:
         store_count   = db.stores.count_documents({"merchant_id": mid})
-        banner_count  = db.merchant_banners.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
+        banner_count  = db.promo_sliders.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
         voucher_count = db.merchant_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
 
         for s in db.subscriptions.find(
@@ -2252,7 +2252,7 @@ def list_merchant_banners(a=Depends(get_current_admin)):
     """All merchant-submitted banners with approval status.
     Only returns pending/rejected — approved ones live in promo_sliders to avoid duplicates."""
     result = []
-    for b in db.merchant_banners.find().sort("created_at", -1):
+    for b in db.promo_sliders.find().sort("created_at", -1):
         approval_status = b.get("approval_status", "pending_approval")
         # Skip approved — they are already in promo_sliders (source_banner_id links them)
         if approval_status == "approved":
@@ -2277,9 +2277,9 @@ def list_merchant_banners(a=Depends(get_current_admin)):
 @router.put("/merchant-banners/{bid}/approve")
 def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     """Approve a merchant banner — publishes it as a promo slider."""
-    b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
+    b = db.promo_sliders.find_one({"_id": ObjectId(bid)})
     if not b: raise HTTPException(404, "Banner not found")
-    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"approval_status":"approved","approved_at":datetime.utcnow()}})
+    db.promo_sliders.update_one({"_id": ObjectId(bid)}, {"$set": {"approval_status":"approved","approved_at":datetime.utcnow()}})
     # TASK 9 FIX: upsert into promo_sliders — never create duplicates
     db.promo_sliders.update_one(
         {"source_banner_id": bid},
@@ -2308,7 +2308,7 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
 def resync_merchant_banner_sliders(a=Depends(get_current_admin)):
     """Re-sync all approved merchant banners into promo_sliders with latest fields (from_date, end_date, duration_days, merchant_phone)."""
     updated = 0
-    for b in db.merchant_banners.find({"approval_status": "approved"}):
+    for b in db.promo_sliders.find({"approval_status": "approved"}):
         bid = str(b["_id"])
         db.promo_sliders.update_one(
             {"source_banner_id": bid},
@@ -2326,7 +2326,7 @@ def resync_merchant_banner_sliders(a=Depends(get_current_admin)):
 @router.put("/merchant-banners/{bid}/reject")
 def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admin)):
     reason = body.get("reason","")
-    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
+    db.promo_sliders.update_one({"_id": ObjectId(bid)}, {"$set": {
         "approval_status":"rejected",
         "rejection_reason": reason,
         "rejected_at": datetime.utcnow()
@@ -2343,7 +2343,7 @@ def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")
     update_data["updated_at"] = datetime.utcnow().isoformat()
-    result = db.merchant_banners.update_one(
+    result = db.promo_sliders.update_one(
         {"_id": ObjectId(bid)},
         {"$set": update_data}
     )
@@ -2354,7 +2354,7 @@ def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.delete("/merchant-banners/{bid}")
 def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
-    db.merchant_banners.delete_one({"_id": ObjectId(bid)})
+    db.promo_sliders.delete_one({"_id": ObjectId(bid)})
     db.promo_sliders.delete_many({"source_banner_id": bid})
     return {"ok": True}
 
@@ -2607,7 +2607,7 @@ def list_all_invoices(a=Depends(get_current_admin)):
         })
 
     # 2. Paid banners not already in invoices collection
-    for b in db.merchant_banners.find({"payment_status":"paid"}).sort("created_at",-1):
+    for b in db.promo_sliders.find({"payment_status":"paid"}).sort("created_at",-1):
         ino = b.get("invoice_no", str(b["_id"])[:8].upper())
         if ino and ino in seen_invoice_nos: continue   # FIX T1: skip if invoice already in set
         if ino: seen_invoice_nos.add(ino)
@@ -2846,7 +2846,7 @@ async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=
 # ─── Admin Banners (home-screen banners managed by admin) ─────────────────────
 @router.get("/banners")
 def admin_list_banners(a=Depends(get_current_admin)):
-    docs = list(db.admin_banners.find().sort("sort_order", 1))
+    docs = list(db.banners.find().sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
@@ -2878,7 +2878,7 @@ async def admin_create_banner(data: dict, a=Depends(get_current_admin)):
         "is_active":  bool(data.get("is_active", True)),
         "created_at": datetime.utcnow().isoformat(),
     }
-    r = db.admin_banners.insert_one(doc)
+    r = db.banners.insert_one(doc)
     return {"ok": True, "id": str(r.inserted_id)}
 
 
@@ -2896,23 +2896,23 @@ async def admin_update_banner(bid: str, data: dict, a=Depends(get_current_admin)
         update["image"]     = img
         update["image_url"] = img
     if update:
-        db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
+        db.banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
     return {"ok": True}
 
 
 @router.delete("/banners/{bid}")
 def admin_delete_banner(bid: str, a=Depends(get_current_admin)):
-    db.admin_banners.delete_one({"_id": ObjectId(bid)})
+    db.banners.delete_one({"_id": ObjectId(bid)})
     return {"ok": True}
 
 
 @router.patch("/banners/{bid}/toggle")
 def admin_toggle_banner(bid: str, a=Depends(get_current_admin)):
-    doc = db.admin_banners.find_one({"_id": ObjectId(bid)})
+    doc = db.banners.find_one({"_id": ObjectId(bid)})
     if not doc:
         raise HTTPException(404, "Banner not found")
     new_state = not doc.get("is_active", True)
-    db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
+    db.banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
     return {"ok": True, "is_active": new_state}
 
 
