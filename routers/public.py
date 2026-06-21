@@ -15,6 +15,30 @@ def get_stores(city: str = None, category: str = None):
         # Case-insensitive match so "Restaurant" matches "restaurant", "RESTAURANT" etc.
         query["category"] = {"$regex": f"^{category.strip()}$", "$options": "i"}
 
+
+# ── City name normalization (handles GPS alternate spellings) ──────────────────
+_CITY_ALIASES: dict = {
+    "bellary":       "Ballari",
+    "bijapur":       "Vijayapura",
+    "gulbarga":      "Kalaburagi",
+    "shimoga":       "Shivamogga",
+    "hospet":        "Hosapete",
+    "tumkur":        "Tumakuru",
+    "mysore":        "Mysuru",
+    "belgaum":       "Belagavi",
+    "mangalore":     "Mangaluru",
+    "hubli":         "Hubballi",
+    "dharwad":       "Hubballi",
+    "davangere":     "Davanagere",
+}
+
+def _normalize_city(city: str) -> str:
+    """Map GPS/old city spellings to the canonical name used in the database."""
+    if not city:
+        return city
+    lower = city.strip().lower()
+    return _CITY_ALIASES.get(lower, city.strip())
+
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
         "image":1,"image_url":1,"image_thumb":1,"_thumb":1,"store_image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
@@ -889,6 +913,7 @@ def get_promo_sliders_public(city: str = None):
     base_query = {"is_active": {"$ne": False}}
     docs = []
     if city and city.strip():
+        city = _normalize_city(city)  # FIX: map GPS alternate spellings (Bellary→Ballari etc.)
         city_re = {"$regex": city.strip(), "$options": "i"}
         city_query = {"$and": [base_query, {"$or": [{"city": city_re}, {"store_city": city_re}]}]}
         docs = list(db.promo_sliders.find(city_query).sort("sort_order", 1))
@@ -972,6 +997,7 @@ def get_products_public(category: str = None, city: str = None, limit: int = 60,
     # Fallback: if city yields zero products, show all (products may not have city recorded)
     base_query = dict(query)  # save unfiltered query
     if city and city.strip():
+        city = _normalize_city(city)  # FIX: map GPS alternate spellings (Bellary→Ballari etc.)
         city_re = {"$regex": city.strip(), "$options": "i"}
         city_store_ids = [
             str(s["_id"]) for s in db.stores.find(
