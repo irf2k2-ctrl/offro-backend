@@ -892,9 +892,8 @@ def get_promo_sliders_public(city: str = None):
         city_re = {"$regex": city.strip(), "$options": "i"}
         city_query = {"$and": [base_query, {"$or": [{"city": city_re}, {"store_city": city_re}]}]}
         docs = list(db.promo_sliders.find(city_query).sort("sort_order", 1))
-        # Fallback: if no city-specific banners, show all active banners
-        if not docs:
-            docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
+        # City-filtered — strict, no all-city fallback
+        print(f"[OFFRO] /promo-sliders city={city!r} docs={len(docs)}")
     else:
         docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
     result = []
@@ -970,11 +969,9 @@ def get_products_public(category: str = None, city: str = None, limit: int = 60,
             ]
         }
         query = {"$and": [query, city_cond]}
-        # Try city-filtered query first
+        # City-filtered query — strict, no all-city fallback
         docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
-        # Fallback: if no results (products not tagged with city), return all products
-        if not docs:
-            docs = list(db.products.find(base_query).sort("_id", -1).skip(skip).limit(limit))
+        print(f"[OFFRO] /products city={city!r} store_ids={len(city_store_ids)} docs={len(docs)}")
     else:
         docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
     result = []
