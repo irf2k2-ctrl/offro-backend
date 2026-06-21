@@ -134,7 +134,12 @@ def get_stores(city: str = None, category: str = None):
 
 # ── City name normalization (handles GPS alternate spellings) ──────────────────
 _CITY_ALIASES: dict = {
+    # Ballari variants (GPS returns multiple spellings)
     "bellary":       "Ballari",
+    "ballary":       "Ballari",
+    "vijayanagara":  "Ballari",   # new district name (2021) that geocoders return
+    "vijayanagar":   "Ballari",
+    # Other Karnataka dual-name cities
     "bijapur":       "Vijayapura",
     "gulbarga":      "Kalaburagi",
     "shimoga":       "Shivamogga",
@@ -146,6 +151,7 @@ _CITY_ALIASES: dict = {
     "hubli":         "Hubballi",
     "dharwad":       "Hubballi",
     "davangere":     "Davanagere",
+    "udupi":         "Udupi",
 }
 
 def _normalize_city(city: str) -> str:
@@ -153,7 +159,14 @@ def _normalize_city(city: str) -> str:
     if not city:
         return city
     lower = city.strip().lower()
-    return _CITY_ALIASES.get(lower, city.strip())
+    # Exact alias match first
+    if lower in _CITY_ALIASES:
+        return _CITY_ALIASES[lower]
+    # Substring match — e.g. "Ballari District" or "Bellary Urban" → "Ballari"
+    for alias, canonical in _CITY_ALIASES.items():
+        if alias in lower:
+            return canonical
+    return city.strip()
 
 
 @router.get("/stores/{store_id}")
@@ -921,25 +934,10 @@ def get_promo_sliders_public(city: str = None):
         city_re = {"$regex": city.strip(), "$options": "i"}
         city_query = {"$and": [base_query, {"$or": [{"city": city_re}, {"store_city": city_re}]}]}
         docs = list(db.promo_sliders.find(city_query).sort("sort_order", 1))
-        # Fallback: no city-specific sliders — return default merchant banner image
+        # Fallback: no city-specific sliders — return ALL active sliders
+        # (better than a placeholder; user sees real content even if GPS city name mismatches)
         if not docs:
-            default_doc = db.settings.find_one({"_type": "default_images"}) or {}
-            banner_imgs = default_doc.get("merchant_banner", [])
-            if isinstance(banner_imgs, str): banner_imgs = [banner_imgs]
-            banner_imgs = [v for v in banner_imgs if isinstance(v, str) and v.startswith("http")]
-            if banner_imgs:
-                return [{
-                    "id": "default_merchant_banner",
-                    "title": "",
-                    "subtitle": "",
-                    "image": banner_imgs[0],
-                    "image_url": banner_imgs[0],
-                    "link_url": "",
-                    "bg_color": "",
-                    "sort_order": 0,
-                    "city": "",
-                }]
-            return []
+            docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
     else:
         docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
     result = []
