@@ -7,6 +7,21 @@ from datetime import datetime, timedelta
 import uuid, qrcode, io, base64
 import time as _time
 
+# ── One-time startup cleanup: drop legacy collections ─────────────────────────
+try:
+    _existing_cols = db.list_collection_names()
+    for _legacy_col in ["admin_banners", "merchant_banners"]:
+        if _legacy_col in _existing_cols:
+            _count = db[_legacy_col].count_documents({})
+            db[_legacy_col].drop()
+            print(f"[OFFRO] Dropped legacy collection: {_legacy_col} ({_count} docs)")
+        else:
+            print(f"[OFFRO] Legacy collection not found (already clean): {_legacy_col}")
+except Exception as _ce:
+    print(f"[OFFRO] Startup cleanup error: {_ce}")
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 # In-memory cache for /stores list (15-second TTL)
 _store_cache = {"data": None, "ts": 0.0}
 _STORE_CACHE_TTL = 15
@@ -3042,31 +3057,3 @@ async def admin_update_default_images(
             db.settings.update_one({"_type": "default_images"}, push_ops, upsert=True)
     return {"ok": True, "uploaded": list(update.keys())}
 
-
-# ── One-time DB cleanup: drop legacy collections ──────────────────────────────
-@router.get("/admin/drop-legacy-collections")
-def drop_legacy_collections(secret: str = ""):
-    """Drop confirmed-orphaned collections: admin_banners, merchant_banners.
-       Pass ?secret=offro_cleanup_2026 to confirm.
-    """
-    if secret != "offro_cleanup_2026":
-        return {"status": "error", "detail": "Pass ?secret=offro_cleanup_2026 to confirm"}
-    
-    dropped = []
-    skipped = []
-    legacy = ["admin_banners", "merchant_banners"]
-    
-    existing = db.list_collection_names()
-    for col in legacy:
-        if col in existing:
-            count = db[col].count_documents({})
-            db[col].drop()
-            dropped.append({"collection": col, "had_documents": count})
-        else:
-            skipped.append(col)
-    
-    return {
-        "status": "done",
-        "dropped": dropped,
-        "skipped_not_found": skipped
-    }
