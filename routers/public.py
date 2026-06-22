@@ -193,7 +193,7 @@ def get_store(store_id: str):
         "end_date":    d.get("end_date"),
     } for d in deals]
 
-    # Approved products (merchant_vouchers) for this store
+    # Approved products (from merchant_vouchers collection) for this store
     products_list = []
     if "merchant_vouchers" in cols:
         merchant_id = store.get("merchant_id", "")
@@ -943,10 +943,10 @@ def get_promo_sliders_public(city: str = None):
 
 # =================== GIFT VOUCHERS (public - for Flutter app home screen) ===================
 @router.get("/products-public")
-def get_gift_vouchers_public():
-    """Returns active gift vouchers shown on the app home screen (Voucher Zone)."""
+def get_public_products():
+    """Returns active products shown on the app home screen."""
     # Fetch all, then filter in Python to handle bool/string/missing is_active variants
-    docs = list(db.gift_vouchers.find({}).sort("_id", -1))
+    docs = list(db.products.find({}).sort("_id", -1))
     docs = [d for d in docs if d.get("is_active", True) not in (False, "false", "0", 0)]
     result = []
     for d in docs:

@@ -27,17 +27,17 @@ app.include_router(users.router,        prefix="/user")
 app.include_router(public.router)       # /stores /categories /store-image — public
 
 
-# ── Public gift-voucher endpoint ──
-@app.get("/gift-vouchers")
-def public_gift_vouchers():
-    docs = list(db.gift_vouchers.find({"is_active": True}).sort("_id", -1))
+# ── Public products endpoint ──
+@app.get("/products-public")
+def public_products():
+    docs = list(db.products.find({"is_active": True}).sort("_id", -1))
     result = []
     for v in docs:
         # Voucher image: proxy if base64
         logo = v.get("logo","") or ""
         vid  = str(v["_id"])
         if logo.startswith("data:image"):
-            logo_out = f"/voucher-image/{vid}"
+            logo_out = f"/product-image/{vid}"
         elif logo.startswith("http"):
             logo_out = logo
         else:
@@ -53,14 +53,14 @@ def public_gift_vouchers():
     return result
 
 
-# ── Voucher image proxy ──
-@app.get("/voucher-image/{vid}")
-def get_voucher_image(vid: str):
+# ── Product image proxy ──
+@app.get("/product-image/{vid}")
+def get_product_image(vid: str):
     from fastapi.responses import Response
     from fastapi import HTTPException
     from bson import ObjectId
     try:
-        doc = db.gift_vouchers.find_one({"_id": ObjectId(vid)}, {"logo": 1})
+        doc = db.products.find_one({"_id": ObjectId(vid)}, {"logo": 1})
     except Exception:
         raise HTTPException(400, "Bad id")
     if not doc:
@@ -89,25 +89,25 @@ def get_home_data(
     limit:    int = 50,
     skip:     int = 0,
 ):
-    """Returns stores + categories + gift-vouchers + promo-sliders in one call."""
+    """Returns stores + categories + products + promo-sliders in one call."""
     from routers.public import get_stores, get_categories, get_promo_sliders_public
 
     stores_resp = get_stores(city=city, category=category, limit=limit, skip=skip)
     cats = get_categories()
 
-    # Gift vouchers — lightweight (no base64, just proxy URLs)
-    gv_docs = list(db.gift_vouchers.find({"is_active": True}).sort("_id", -1))
-    gift_vouchers = []
-    for v in gv_docs:
+    # Products — lightweight (no base64, just proxy URLs)
+    prod_docs = list(db.products.find({"is_active": True}).sort("_id", -1))
+    products = []
+    for v in prod_docs:
         logo = v.get("logo","") or ""
         vid  = str(v["_id"])
         if logo.startswith("data:image"):
-            logo_out = f"/voucher-image/{vid}"
+            logo_out = f"/product-image/{vid}"
         elif logo.startswith("http"):
             logo_out = logo
         else:
             logo_out = ""
-        gift_vouchers.append({
+        products.append({
             "id":       vid,
             "title":    v.get("title",""),
             "text":     v.get("text",""),
@@ -125,7 +125,7 @@ def get_home_data(
         "total":        stores_resp.get("total", 0),
         "has_more":     stores_resp.get("has_more", False),
         "categories":   cats,
-        "gift_vouchers": gift_vouchers,
+        "products": products,
         "promo_sliders": promo_sliders,
     }
 
@@ -195,7 +195,7 @@ async def register_fcm_token(request: Request):
 
 @app.on_event("startup")
 def startup():
-    # seed_admin removed (function no longer in admin module)
+    admin.seed_admin()
     _ensure_indexes()
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
@@ -295,7 +295,7 @@ import base64 as _b64, uuid as _uuid
 
 @app.get("/admin/banners")
 def admin_list_banners():
-    docs = list(db.banners.find().sort("sort_order", 1))
+    docs = list(db.admin_banners.find().sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url","") or d.get("image","")
@@ -326,7 +326,7 @@ async def admin_create_banner(request: Request):
         "is_active":  data.get("is_active",True),
         "created_at": datetime.utcnow(),
     }
-    r = db.banners.insert_one(doc)
+    r = db.admin_banners.insert_one(doc)
     return {"ok":True,"id":str(r.inserted_id)}
 
 @app.put("/admin/banners/{banner_id}")
@@ -341,12 +341,12 @@ async def admin_update_banner(banner_id: str, request: Request):
         "sort_order": int(data.get("sort_order",0)),
         "is_active":  data.get("is_active",True),
     }
-    db.banners.update_one({"_id": _ObjId(banner_id)}, {"$set": update})
+    db.admin_banners.update_one({"_id": _ObjId(banner_id)}, {"$set": update})
     return {"ok":True}
 
 @app.delete("/admin/banners/{banner_id}")
 def admin_delete_banner(banner_id: str):
-    db.banners.delete_one({"_id": _ObjId(banner_id)})
+    db.admin_banners.delete_one({"_id": _ObjId(banner_id)})
     return {"ok":True}
 
 @app.get("/health")

@@ -282,7 +282,7 @@ def withdraw(data: dict, user=Depends(get_current_user)):
         "phone":        user.get("phone"),
         "email":        user.get("email", ""),
         "points":       amount,
-        "voucher_value": round(amount / 10, 2),
+        "reward_cash_value": round(amount / 10, 2),
         "status":       "pending",
         "created_at":   datetime.utcnow(),
     })

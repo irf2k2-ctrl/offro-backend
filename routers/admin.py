@@ -452,7 +452,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
 
     store_count   = 0
     banner_count  = 0
-    voucher_count = 0
+    product_count = 0
     subscriptions = []
     invoices      = []
 
@@ -502,7 +502,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
         "scans":         acct.get("scans", 0),
         "store_count":   store_count,
         "banner_count":  banner_count,
-        "voucher_count": voucher_count,
+        "product_count": product_count,
         "subscriptions": subscriptions,
         "invoices":      invoices,
     }
@@ -1422,8 +1422,8 @@ def list_product_cards(a=Depends(get_current_admin)):
     """List all gift vouchers + products shown in the app home screen."""
     result = []
 
-    # ── 1. gift_vouchers collection (admin/merchant created cards) ──────────
-    docs = list(db.gift_vouchers.find().sort("_id", -1))
+    # ── 1. products collection (admin/merchant created cards) ──────────
+    docs = list(db.products.find().sort("_id", -1))
     for v in docs:
         mid = v.get("merchant_id", "")
         merchant_name  = ""
@@ -1472,7 +1472,7 @@ def list_product_cards(a=Depends(get_current_admin)):
                     _gv_status = "expired"
                     # Write back to DB so it persists
                     try:
-                        db.gift_vouchers.update_one(
+                        db.products.update_one(
                             {"_id": v["_id"], "status": {"$ne": "expired"}},
                             {"$set": {"status": "expired", "is_active": False}}
                         )
@@ -1493,10 +1493,10 @@ def list_product_cards(a=Depends(get_current_admin)):
             "end_date":          v.get("end_date", _gv_end_raw),
             "created_at":        created_at_iso,
             "source":            v.get("source", "admin"),
-            "source_voucher_id": v.get("source_voucher_id", ""),
+            "source_product_id": v.get("source_product_id", ""),
             "duration_days":     v.get("duration_days", 0),
             "city":              v.get("city", ""),
-            "_collection":       "gift_vouchers",
+            "_collection":       "products",
         })
 
     # ── 2. products collection (seeded/imported product catalogue) ──────────
@@ -1556,7 +1556,7 @@ def list_product_cards(a=Depends(get_current_admin)):
                                      )(str(p.get("validity") or "")) or ""),
             "created_at":        created_at_iso,
             "source":            "products",
-            "source_voucher_id": "",
+            "source_product_id": "",
             "duration_days":     int(p.get("duration_days") or 0),
             "city":              p.get("city", ""),
             "_collection":       "products",
@@ -1601,7 +1601,7 @@ def create_product_card(data: dict, a=Depends(get_current_admin)):
         "source":        "admin",
         "created_at":    datetime.utcnow(),
     }
-    result = db.gift_vouchers.insert_one(doc)
+    result = db.products.insert_one(doc)
     new_id = str(result.inserted_id)
 
     # ISSUE 1: If linked to a merchant, also create a mirror record in merchant_vouchers
@@ -1631,7 +1631,7 @@ def create_product_card(data: dict, a=Depends(get_current_admin)):
                 }
                 db.merchant_vouchers.insert_one(mv_doc)
                 # Also tag the gift_voucher with source_voucher_id for dedup
-                db.gift_vouchers.update_one(
+                db.products.update_one(
                     {"_id": result.inserted_id},
                     {"$set": {"source": "admin", "merchant_name": m.get("name",""), "merchant_phone": str(m.get("phone",""))}}
                 )
@@ -1663,13 +1663,13 @@ def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
         upd["is_active"] = bool(data["is_active"])
     if not upd:
         raise HTTPException(400, "Nothing to update")
-    db.gift_vouchers.update_one({"_id": ObjectId(vid)}, {"$set": upd})
-    return {"message": "Voucher updated"}
+    db.products.update_one({"_id": ObjectId(vid)}, {"$set": upd})
+    return {"message": "Product updated"}
 
 @router.delete("/products/{pid}")
 def delete_product_card(pid: str, a=Depends(get_current_admin)):
     """Delete a product card."""
-    db.gift_vouchers.delete_one({"_id": ObjectId(vid)})
+    db.products.delete_one({"_id": ObjectId(vid)})
     return {"message": "Deleted"}
 
 
@@ -2405,7 +2405,7 @@ def _compute_product_status_mv(v):
                 return "expired"
     return stored
 
-@router.get("/merchant-vouchers")
+@router.get("/merchant-products")
 def list_merchant_products(a=Depends(get_current_admin)):
     result = []
     for v in db.merchant_vouchers.find().sort("created_at", -1):
@@ -2428,10 +2428,10 @@ def list_merchant_products(a=Depends(get_current_admin)):
         })
     return result
 
-@router.put("/merchant-vouchers/{vid}/approve")
+@router.put("/merchant-products/{vid}/approve")
 def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
     v = db.merchant_vouchers.find_one({"_id": ObjectId(vid)})
-    if not v: raise HTTPException(404, "Voucher not found")
+    if not v: raise HTTPException(404, "Product not found")
     # TASK 8: check if product has already expired before setting status
     end_date_raw = v.get("end_date", "")
     final_status = "approved"
@@ -2462,12 +2462,12 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
             "approved_at":     datetime.utcnow().isoformat(),
         }}
     )
-    # TASK 1 FIX: upsert into gift_vouchers — update if exists, insert if not — NEVER duplicate
+    # TASK 1 FIX: upsert into products — update if exists, insert if not — NEVER duplicate
     _v_from  = v.get("from_date", "")
     _v_end   = v.get("end_date", "")
     _v_valid = v.get("validity") or (f"{_v_from} \u2192 {_v_end}" if _v_from and _v_end else ("30 days" if not _v_from else ""))
-    db.gift_vouchers.update_one(
-        {"source_voucher_id": vid},
+    db.products.update_one(
+        {"source_product_id": vid},
         {"$set": {
             "title":             v.get("title", ""),
             "text":              v.get("offer_text", ""),
@@ -2478,7 +2478,7 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
             "is_active":         final_status == "approved",
             "status":            final_status,
             "source":            "merchant",
-            "source_voucher_id": vid,
+            "source_product_id": vid,
             "merchant_id":       str(v.get("merchant_id", "")),
             "merchant_name":     v.get("merchant_name", ""),
             "amount":            v.get("amount", 0),
@@ -2489,18 +2489,18 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
         }},
         upsert=True
     )
-    return {"ok": True, "message": "Voucher approved and published to Voucher Zone."}
+    return {"ok": True, "message": "Product approved and published."}
 
-@router.put("/merchant-vouchers/{vid}/reject")
+@router.put("/merchant-products/{vid}/reject")
 def reject_merchant_product(vid: str, body: dict = {}, a=Depends(get_current_admin)):
     reason = body.get("reason","")
     db.merchant_vouchers.update_one({"_id": ObjectId(vid)}, {"$set":{
         "approval_status":"rejected","rejection_reason":reason,"rejected_at":datetime.utcnow()
     }})
-    db.gift_vouchers.delete_many({"source_voucher_id": vid})
-    return {"ok": True, "message": "Voucher rejected."}
+    db.products.delete_many({"source_product_id": vid})
+    return {"ok": True, "message": "Product rejected."}
 
-@router.put("/merchant-vouchers/{vid}")
+@router.put("/merchant-products/{vid}")
 def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
     """FIX 10: Admin edit merchant product fields + status."""
     # ISSUES 5+7: also allow from_date, end_date, logo_url updates
@@ -2518,9 +2518,9 @@ def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
         {"$set": update_data}
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Voucher not found")
+        raise HTTPException(status_code=404, detail="Product not found")
 
-    # ISSUE 7: if status updated, sync to gift_vouchers record
+    # ISSUE 7: if status updated, sync to products record
     if "status" in update_data or "validity" in update_data or "from_date" in update_data or "end_date" in update_data:
         sync_fields = {}
         if "validity"   in update_data: sync_fields["validity"]  = update_data["validity"]
@@ -2533,15 +2533,15 @@ def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
         if "title"      in update_data: sync_fields["title"]     = update_data["title"]
         if "offer_text" in update_data: sync_fields["text"]      = update_data["offer_text"]
         if sync_fields:
-            db.gift_vouchers.update_many({"source_voucher_id": vid}, {"$set": sync_fields})
+            db.products.update_many({"source_product_id": vid}, {"$set": sync_fields})
 
     return {"ok": True, "updated": update_data}
 
 
-@router.delete("/merchant-vouchers/{vid}")
+@router.delete("/merchant-products/{vid}")
 def delete_merchant_product(pid: str, a=Depends(get_current_admin)):
     db.merchant_vouchers.delete_one({"_id": ObjectId(vid)})
-    db.gift_vouchers.delete_many({"source_voucher_id": vid})
+    db.products.delete_many({"source_product_id": vid})
     return {"ok": True}
 
 
@@ -2551,7 +2551,7 @@ def delete_merchant_product(pid: str, a=Depends(get_current_admin)):
 
 @router.get("/invoices/full")
 def list_all_invoices(a=Depends(get_current_admin)):
-    """All merchant invoices: stores, banners, and vouchers — TASK 10: no zero amounts."""
+    """All merchant invoices: stores, banners, and products — TASK 10: no zero amounts."""
     def _fmt(v):
         if not v: return ""
         if isinstance(v, datetime): return v.strftime("%d %b %Y")
@@ -2665,22 +2665,22 @@ def get_banner_pricing(a=Depends(get_current_admin)):
     return {
         # Per-day pricing (Issue 4)
         "banner_price_per_day":  float(doc.get("banner_price_per_day",  15)),
-        "voucher_price_per_day": float(doc.get("voucher_price_per_day", 10)),
+        "product_price_per_day": float(doc.get("product_price_per_day", 10)),
         "gst_percent": gst,
         # Legacy fields kept for backward compat
         "banner_price_7":   doc.get("banner_price_7",  149),
         "banner_price_14":  doc.get("banner_price_14", 249),
         "banner_price_30":  doc.get("banner_price_30", 399),
-        "voucher_price_30": doc.get("voucher_price_30",199),
-        "voucher_price_60": doc.get("voucher_price_60",349),
-        "voucher_price_90": doc.get("voucher_price_90",499),
+        "product_price_30": doc.get("product_price_30",199),
+        "product_price_60": doc.get("product_price_60",349),
+        "product_price_90": doc.get("product_price_90",499),
     }
 
 @router.put("/banner-pricing")
 def update_banner_pricing(data: dict, a=Depends(get_current_admin)):
-    fields = ["banner_price_per_day","voucher_price_per_day",
+    fields = ["banner_price_per_day","product_price_per_day",
               "banner_price_7","banner_price_14","banner_price_30",
-              "voucher_price_30","voucher_price_60","voucher_price_90"]
+              "product_price_30","product_price_60","product_price_90"]
     upd = {f: float(data[f]) for f in fields if f in data}
     doc = db.pricing.find_one({})
     if doc: db.pricing.update_one({"_id":doc["_id"]},{"$set":upd})
@@ -2991,11 +2991,11 @@ def admin_remove_default_image_url(body: dict, a=Depends(get_current_admin)):
 @router.post("/seed-city-field")
 def seed_city_field(a=Depends(get_current_admin)):
     """
-    One-time migration: backfill city field on all gift_vouchers, merchant_vouchers,
+    One-time migration: backfill city field on all products, merchant_vouchers,
     and promo_sliders from the merchant's first registered store.
     """
     from bson import ObjectId as ObjId
-    updated = {"gift_vouchers": 0, "merchant_vouchers": 0, "promo_sliders": 0}
+    updated = {"products": 0, "merchant_vouchers": 0, "promo_sliders": 0}
 
     def _get_merchant_city(merchant_id_str, merchant_phone_str=""):
         """Look up city from the merchant's first store."""
@@ -3016,12 +3016,12 @@ def seed_city_field(a=Depends(get_current_admin)):
             )
         return (store.get("city", "") if store else "").strip().lower()
 
-    # ── gift_vouchers ──
-    for doc in db.gift_vouchers.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):
+    # ── products ──
+    for doc in db.products.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):
         city = _get_merchant_city(str(doc.get("merchant_id", "") or ""), str(doc.get("merchant_phone", "") or ""))
         if city:
-            db.gift_vouchers.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
-            updated["gift_vouchers"] += 1
+            db.products.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
+            updated["products"] += 1
 
     # ── merchant_vouchers ──
     for doc in db.merchant_vouchers.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):

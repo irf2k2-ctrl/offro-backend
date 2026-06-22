@@ -111,7 +111,7 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
   <a href="#" onclick="showSection('admin_banners',this)"><i class="fas fa-ad fa-fw"></i> Admin Banners</a>
   <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
-  <a href="#" onclick="showSection('gift_voucher_requests',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
+  <a href="#" onclick="showSection('gift_product_requests',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
@@ -150,17 +150,17 @@ tr:hover td{background:#f7faf8;}
   </div>
 
   <!-- MERCHANTS -->
-  <div id="section-gift_voucher_requests" class="section">
+  <div id="section-gift_product_requests" class="section">
   <div class="section-header">
     <div>
       <div class="fw-bold" style="font-size:18px;color:var(--primary)">🎁 Gift Voucher Requests</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Pending and fulfilled gift voucher withdrawal requests</div>
     </div>
-    <button class="btn-p" onclick="loadGiftVoucherRequests()"><i class="fas fa-sync me-1"></i> Refresh</button>
+    <button class="btn-p" onclick="loadGiftProductRequests()"><i class="fas fa-sync me-1"></i> Refresh</button>
   </div>
   <div class="table-wrap"><table>
     <thead><tr><th>User</th><th>Phone</th><th>Points</th><th>Value</th><th>Requested</th><th>Status</th><th>Action</th></tr></thead>
-    <tbody id="gift_voucher_requests_table"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+    <tbody id="gift_product_requests_table"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
   </table></div>
 </div>
 
@@ -388,8 +388,8 @@ tr:hover td{background:#f7faf8;}
   </div>
 
   <!-- hidden spans kept for JS back-compat -->
-  <span id="mvoucher_count" style="display:none"></span>
-  <tbody id="merchant_vouchers_body" style="display:none"></tbody>
+  <span id="mproduct_count" style="display:none"></span>
+  <tbody id="merchant_products_body" style="display:none"></tbody>
 </div>
 
 <!-- PROMO SLIDERS -->
@@ -635,7 +635,7 @@ tr:hover td{background:#f7faf8;}
       <div class="row g-3 mb-2">
         <div class="col-md-4">
           <label class="form-label" style="font-size:13px">Product Price per Day (₹)</label>
-          <input id="voucher_price_per_day" class="form-control" type="number" min="0" step="0.50" placeholder="10">
+          <input id="product_price_per_day" class="form-control" type="number" min="0" step="0.50" placeholder="10">
           <small class="text-muted">e.g. 45 days × ₹10 = ₹450 base</small>
         </div>
       </div>
@@ -1169,14 +1169,14 @@ tr:hover td{background:#f7faf8;}
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Voucher Type</label>
-          <select id="fulfill_voucher_type" class="form-control">
+          <select id="fulfill_product_type" class="form-control">
             <option value="Amazon">Amazon Gift Voucher</option>
             <option value="Flipkart">Flipkart Gift Voucher</option>
           </select>
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Voucher Code</label>
-          <input type="text" id="fulfill_voucher_code" class="form-control" placeholder="Enter voucher code" style="text-transform:uppercase;">
+          <input type="text" id="fulfill_product_code" class="form-control" placeholder="Enter voucher code" style="text-transform:uppercase;">
           <small class="text-muted">This code will be stored against the user's account</small>
         </div>
       </div>
@@ -1349,8 +1349,8 @@ window.onload = () => {
 };
 
 // ─── GIFT VOUCHER REQUESTS ───
-async function loadGiftVoucherRequests() {
-    const tbody = document.getElementById("gift_voucher_requests_table");
+async function loadGiftProductRequests() {
+    const tbody = document.getElementById("gift_product_requests_table");
     tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>";
     try {
         let res = await fetch("/admin/withdraw-requests", { credentials:"include" });
@@ -1384,23 +1384,23 @@ function openFulfillModal(reqId, userName, points, value){
   document.getElementById("fulfill_req_id").value=reqId;
   document.getElementById("fulfillUserName").innerText=userName;
   document.getElementById("fulfillPoints").innerText=points+" pts = ₹"+value;
-  document.getElementById("fulfill_voucher_code").value="";
-  document.getElementById("fulfill_voucher_type").value="Amazon";
+  document.getElementById("fulfill_product_code").value="";
+  document.getElementById("fulfill_product_type").value="Amazon";
   if (fulfillModal_inst) fulfillModal_inst.show();
 }
 
 async function submitFulfill(){
   let reqId=document.getElementById("fulfill_req_id").value;
-  let code=document.getElementById("fulfill_voucher_code").value.trim();
-  let type=document.getElementById("fulfill_voucher_type").value;
+  let code=document.getElementById("fulfill_product_code").value.trim();
+  let type=document.getElementById("fulfill_product_type").value;
   if(!code){alert("Please enter the voucher code");return;}
   let r=await fetch(`/admin/withdraw-requests/${reqId}/fulfill`,{
     method:"POST",credentials:"include",
     headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({voucher_code:code,voucher_type:type})
+    body:JSON.stringify({product_code:code,product_type:type})
   });
   let d=await r.json();
-  if(r.ok){if (fulfillModal_inst) fulfillModal_inst.hide();loadGiftVoucherRequests();alert("✅ "+d.message);}
+  if(r.ok){if (fulfillModal_inst) fulfillModal_inst.hide();loadGiftProductRequests();alert("✅ "+d.message);}
   else alert("❌ "+(d.detail||"Error"));
 }
 
@@ -1415,7 +1415,7 @@ function showSection(name, el){
   if(name==="accounts") loadAccounts();
   if(name==="overview") { loadStats(); loadSliders(); }
   if(name==="stores") loadStores();
-  if(name==="gift_voucher_requests") loadGiftVoucherRequests();
+  if(name==="gift_product_requests") loadGiftProductRequests();
   if(name==="categories"){ loadCategories().then(()=>renderCategories()); }
   if(name==="pricing") loadPricing();
   if(name==="terms") loadTerms();
@@ -2032,7 +2032,7 @@ function renderUsersPage(){
   pageData.forEach(u=>{
     let totalColor=u.total_points>0?"color:#1a6640;font-weight:700;":"";
     html+=`<tr>
-      <td><strong>${u.name||"-"}</strong>${u.pending_withdraw?` <span onclick="showSection('gift_voucher_requests',document.querySelector('[onclick*=vouchers]'))" title="Has pending gift voucher request" style="background:#fff3cd;color:#856404;font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid #ffc107;vertical-align:middle;cursor:pointer;">🎁 Voucher Pending</span>`:""}</td>
+      <td><strong>${u.name||"-"}</strong>${u.pending_withdraw?` <span onclick="showSection('gift_product_requests',document.querySelector('[onclick*=vouchers]'))" title="Has pending gift voucher request" style="background:#fff3cd;color:#856404;font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid #ffc107;vertical-align:middle;cursor:pointer;">🎁 Voucher Pending</span>`:""}</td>
       <td>${u.phone||"-"}</td><td>${u.city||"-"}</td>
       <td>${u.visit_points||0}</td><td>${u.pool_points||0}</td>
       <td style="${totalColor}">${u.total_points||0}</td>
@@ -3340,7 +3340,7 @@ async function loadGiftCards() {
     // Fetch admin product cards + merchant product submissions in parallel
     const [adminR, merchantR] = await Promise.all([
       fetch("/admin/products", {credentials:"include"}),
-      fetch("/admin/merchant-vouchers", {credentials:"include"}),
+      fetch("/admin/merchant-products", {credentials:"include"}),
     ]);
     const adminCards    = adminR.ok    ? await adminR.json()    : [];
     const merchantCards = merchantR.ok ? await merchantR.json() : [];
@@ -3449,11 +3449,11 @@ async function loadGiftCards() {
     });
 
     // ISSUE 1 FIX: Strict dedup — merchant voucher already in gift_vouchers OR already approved
-    // Two-layer check: source_voucher_id AND merchant row status === approved
+    // Two-layer check: source_product_id AND merchant row status === approved
     const approvedMerchantIds = new Set(
       adminCards
-        .filter(v => v.source_voucher_id)
-        .map(v => v.source_voucher_id)
+        .filter(v => v.source_product_id)
+        .map(v => v.source_product_id)
         .filter(Boolean)
     );
     const dedupedMerchantRows = merchantRows.filter(r =>
@@ -3866,7 +3866,7 @@ async function saveVZMerchantEdit() {
     status:     el('pc_edit_status')?.value           || row.status,
   };
   try {
-    const res = await fetch(`/admin/merchant-vouchers/${row._id}`, {
+    const res = await fetch(`/admin/merchant-products/${row._id}`, {
       method:'PUT', credentials:'include',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(payload)
@@ -3884,7 +3884,7 @@ async function deleteProductCard(id, source) {
   if (!confirm('Delete this product?')) return;
   const url = (source==='admin' || source==='products') 
     ? `/admin/products/${id}` 
-    : `/admin/merchant-vouchers/${id}`;
+    : `/admin/merchant-products/${id}`;
   await fetch(url, {method:'DELETE', credentials:'include'});
   loadGiftCards();
 }
@@ -4085,11 +4085,11 @@ function openSidebar()  { document.getElementById("sidebar").classList.add("open
 async function deleteProductCardAdmin(id) {
     if (!confirm("Delete product card?")) return;
     await fetch(`/admin/products/${id}`, { method:"DELETE", credentials:"include" });
-    loadGiftVoucherRequests();
+    loadGiftProductRequests();
 }
 
 function editProductCard(v) {
-    document.getElementById("edit_voucher_id").value = v.id||v._id||"";
+    document.getElementById("edit_product_id").value = v.id||v._id||"";
     document.getElementById("v_title").value    = v.title||"";
     document.getElementById("v_text").value     = v.text||"";
     document.getElementById("v_validity").value = v.validity||"";
@@ -4099,7 +4099,7 @@ function editProductCard(v) {
     document.getElementById("v_active").checked = v.is_active!==false;
     document.getElementById("v_msg").innerText  = "";
     _populateProductMerchants(v.merchant_id||"");
-    voucherModalInst.show();
+    productModalInst.show();
 }
 
 function onProductStoreChange(storeId) {
@@ -4123,7 +4123,7 @@ async function openProductCardModal() {
     const storeSel = document.getElementById("v_store");
     storeSel.innerHTML = `<option value="">None</option>` + (window.allStoresList||[]).map(s=>`<option value="${s._id}">${s.store_name||s._id}</option>`).join("");
     
-    document.getElementById("edit_voucher_id").value = "";
+    document.getElementById("edit_product_id").value = "";
     document.getElementById("v_title").value = "";
     document.getElementById("v_text").value  = "";
     document.getElementById("v_validity").value = "";
@@ -4131,11 +4131,11 @@ async function openProductCardModal() {
     document.getElementById("v_active").checked = true;
     document.getElementById("v_msg").innerText = "";
     _populateProductMerchants("");
-    voucherModalInst.show();
+    productModalInst.show();
 }
 
 async function saveProductCard() {
-    const vid  = document.getElementById("edit_voucher_id").value;
+    const vid  = document.getElementById("edit_product_id").value;
     const text = document.getElementById("v_text").value.trim();
     if (!text) { document.getElementById("v_msg").innerText="Offer text required"; return; }
     const data = {
@@ -4151,8 +4151,8 @@ async function saveProductCard() {
         let meth = vid ? "PUT" : "POST";
         let res  = await fetch(url, { method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data) });
         if (!res.ok) { const d=await res.json(); document.getElementById("v_msg").innerText=d.detail||"Error"; return; }
-        voucherModalInst.hide();
-        loadGiftVoucherRequests();
+        productModalInst.hide();
+        loadGiftProductRequests();
     } catch { document.getElementById("v_msg").innerText="Server error"; }
 }
 
@@ -4526,11 +4526,11 @@ async function deleteMerchantBanner(id) {
 // MERCHANT PRODUCT SUBMISSIONS (merged into Products section)
 // ═══════════════════════════════════════════════════════════
 async function loadMerchantProducts() {
-  const el = document.getElementById('merchant_vouchers_body');
-  const cnt = document.getElementById('mvoucher_count');
+  const el = document.getElementById('merchant_products_body');
+  const cnt = document.getElementById('mproduct_count');
   if (!el) return;
   try {
-    const r = await fetch('/admin/merchant-vouchers', {credentials:'include'});
+    const r = await fetch('/admin/merchant-products', {credentials:'include'});
     const data = r.ok ? await r.json() : [];
     if (cnt) cnt.textContent = `${data.length} submitted`;
     if (!data.length) {
@@ -4575,7 +4575,7 @@ async function approveMerchantProduct(id) {
   // TASK 7: Approve product — upsert into gift_vouchers, no duplicate, refresh immediately
   const btn = event?.target; if (btn) { btn.disabled=true; btn.textContent='Approving...'; }
   try {
-    const _vApprRes = await fetch(`/admin/merchant-vouchers/${id}/approve`, {method:'PUT', credentials:'include'});
+    const _vApprRes = await fetch(`/admin/merchant-products/${id}/approve`, {method:'PUT', credentials:'include'});
     if (!_vApprRes.ok) {
       const errText = await _vApprRes.text();
       showToast('❌ Approve failed: ' + errText, 'danger');
@@ -4592,14 +4592,14 @@ async function approveMerchantProduct(id) {
 }
 async function rejectMerchantProduct(id) {
   const reason = prompt('Rejection reason (optional):') || '';
-  await fetch(`/admin/merchant-vouchers/${id}/reject`, {method:'PUT', credentials:'include',
+  await fetch(`/admin/merchant-products/${id}/reject`, {method:'PUT', credentials:'include',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason})});
   if (typeof loadGiftCards === 'function') loadGiftCards();
   loadMerchantProducts();
 }
 async function deleteMerchantProduct(id) {
   if (!confirm('Delete this product?')) return;
-  await fetch(`/admin/merchant-vouchers/${id}`, {method:'DELETE', credentials:'include'});
+  await fetch(`/admin/merchant-products/${id}`, {method:'DELETE', credentials:'include'});
   loadGiftCards();
 }
 
@@ -4613,7 +4613,7 @@ async function loadPricingConfig() {
     const d = await r.json();
     const safe = (id, val) => { const el = document.getElementById(id); if(el) el.value = val ?? ''; };
     safe('banner_price_per_day',  d.banner_price_per_day  ?? 15);
-    safe('voucher_price_per_day', d.voucher_price_per_day ?? 10);
+    safe('product_price_per_day', d.product_price_per_day ?? 10);
   } catch(_) {}
 }
 
@@ -4621,7 +4621,7 @@ async function savePricingConfig() {
   const gv = id => parseFloat(document.getElementById(id)?.value) || 0;
   const body = {
     banner_price_per_day:  gv('banner_price_per_day'),
-    voucher_price_per_day: gv('voucher_price_per_day'),
+    product_price_per_day: gv('product_price_per_day'),
   };
   try {
     const r = await fetch('/admin/banner-pricing', {method:'PUT', credentials:'include',
@@ -5058,7 +5058,7 @@ function renderAccountDetailHTML(d) {
       <div class="row g-2" style="font-size:13px;">
         <div class="col-md-3"><span style="color:var(--muted);">Stores</span><br><strong>${d.store_count||0}</strong></div>
         <div class="col-md-3"><span style="color:var(--muted);">Banners</span><br><strong>${d.banner_count||0}</strong></div>
-        <div class="col-md-3"><span style="color:var(--muted);">Products</span><br><strong>${d.voucher_count||0}</strong></div>
+        <div class="col-md-3"><span style="color:var(--muted);">Products</span><br><strong>${d.product_count||0}</strong></div>
         <div class="col-md-3"><span style="color:var(--muted);">Subscription</span><br>${subBadge}</div>
       </div>
     </div>
