@@ -416,34 +416,19 @@ def get_all_active_deals(city: str = ""):
     from datetime import datetime as _dt
     _now = _dt.utcnow()
 
-    # Step 1: Active subscription store IDs
-    _active_store_ids = set()
-    for _sub in db.subscriptions.find({}, {"store_id": 1, "end_date": 1}):
-        _ed = _sub.get("end_date")
-        if _ed is None:
-            continue
-        try:
-            _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
-            if _ed_dt >= _now:
-                _active_store_ids.add(str(_sub["store_id"]))
-        except Exception:
-            pass
-
-    # Step 2: Active stores in city
+    # Step 1: All active stores (no subscription gating — show all stores with deals)
     store_q = {"status": "active"}
     if city:
-        store_q["city"] = {"$regex": city, "$options": "i"}
+        _norm = normalize_city(city)
+        store_q["city"] = {"$regex": _norm, "$options": "i"}
 
     stores_raw = list(db.stores.find(store_q, {
         "store_name": 1, "category": 1, "city": 1, "area": 1, "address": 1, "phone": 1,
         "image_url": 1, "image_thumb": 1, "_thumb": 1, "image": 1, "images": 1,
     }))
-    stores_map = {
-        str(s["_id"]): s for s in stores_raw
-        if str(s["_id"]) in _active_store_ids
-    }
+    stores_map = {str(s["_id"]): s for s in stores_raw}
 
-    # Step 3: Active deals only (no products)
+    # Step 2: Active deals only (no products)
     result = []
     deal_q = {"status": "active"}
     if stores_map:
@@ -957,7 +942,7 @@ def get_promo_sliders_public(city: str = None):
     return result
 
 # =================== GIFT VOUCHERS (public - for Flutter app home screen) ===================
-@router.get("/gift-vouchers-public")
+@router.get("/products-public")
 def get_gift_vouchers_public():
     """Returns active gift vouchers shown on the app home screen (Voucher Zone)."""
     # Fetch all, then filter in Python to handle bool/string/missing is_active variants

@@ -7,21 +7,6 @@ from datetime import datetime, timedelta
 import uuid, qrcode, io, base64
 import time as _time
 
-# ── One-time startup cleanup: drop legacy collections ─────────────────────────
-try:
-    _existing_cols = db.list_collection_names()
-    for _legacy_col in ["admin_banners", "merchant_banners"]:
-        if _legacy_col in _existing_cols:
-            _count = db[_legacy_col].count_documents({})
-            db[_legacy_col].drop()
-            print(f"[OFFRO] Dropped legacy collection: {_legacy_col} ({_count} docs)")
-        else:
-            print(f"[OFFRO] Legacy collection not found (already clean): {_legacy_col}")
-except Exception as _ce:
-    print(f"[OFFRO] Startup cleanup error: {_ce}")
-# ──────────────────────────────────────────────────────────────────────────────
-
-
 # In-memory cache for /stores list (15-second TTL)
 _store_cache = {"data": None, "ts": 0.0}
 _STORE_CACHE_TTL = 15
@@ -433,7 +418,7 @@ def list_accounts(a=Depends(get_current_admin)):
             "product_count": db.merchant_vouchers.count_documents(
                 {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
             ) if (mid or phone) else 0,
-            "banner_count":  db.promo_sliders.count_documents(
+            "banner_count":  db.merchant_banners.count_documents(
                 {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
             ) if (mid or phone) else 0,
             "created_at":    str(acct.get("created_at", ""))[:10],
@@ -473,7 +458,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
 
     if is_merchant and mid:
         store_count   = db.stores.count_documents({"merchant_id": mid})
-        banner_count  = db.promo_sliders.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
+        banner_count  = db.merchant_banners.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
         voucher_count = db.merchant_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
 
         for s in db.subscriptions.find(
@@ -1432,7 +1417,7 @@ def _compute_product_status(p):
 
     return "approved"
 
-@router.get("/gift-vouchers")
+@router.get("/products")
 def list_product_cards(a=Depends(get_current_admin)):
     """List all gift vouchers + products shown in the app home screen."""
     result = []
@@ -1586,7 +1571,7 @@ def list_product_cards(a=Depends(get_current_admin)):
     result.sort(key=lambda x: x.get("created_at",""), reverse=True)
     return result
 
-@router.post("/gift-vouchers")
+@router.post("/products")
 def create_product_card(data: dict, a=Depends(get_current_admin)):
     """Create a new product card visible in the app."""
     text = (data.get("text") or "").strip()
@@ -1655,8 +1640,8 @@ def create_product_card(data: dict, a=Depends(get_current_admin)):
 
     return {"message": "Product created", "id": new_id}
 
-@router.put("/gift-vouchers/{vid}")
-def update_product_card(vid: str, data: dict, a=Depends(get_current_admin)):
+@router.put("/products/{pid}")
+def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
     """Update an existing product card."""
     upd = {}
     _str_fields = ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date", "city"]
@@ -1678,13 +1663,13 @@ def update_product_card(vid: str, data: dict, a=Depends(get_current_admin)):
         upd["is_active"] = bool(data["is_active"])
     if not upd:
         raise HTTPException(400, "Nothing to update")
-    db.gift_vouchers.update_one({"_id": ObjectId(vid)}, {"$set": upd})
+    db.gift_vouchers.update_one({"_id": ObjectId(pid)}, {"$set": upd})
     return {"message": "Voucher updated"}
 
-@router.delete("/gift-vouchers/{vid}")
-def delete_product_card(vid: str, a=Depends(get_current_admin)):
+@router.delete("/products/{pid}")
+def delete_product_card(pid: str, a=Depends(get_current_admin)):
     """Delete a product card."""
-    db.gift_vouchers.delete_one({"_id": ObjectId(vid)})
+    db.gift_vouchers.delete_one({"_id": ObjectId(pid)})
     return {"message": "Deleted"}
 
 
@@ -1823,6 +1808,7 @@ def list_promo_sliders(a=Depends(get_current_admin)):
             # merchant attribution
             "merchant_name":  _sld_merch_name,
             "merchant_phone": _sld_merch_phone,
+            "city":           d.get("city", ""),
             "source":         d.get("source", "admin"),
             "source_banner_id": d.get("source_banner_id", ""),
             # audit
@@ -1862,6 +1848,7 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
         "duration_days":  days,
         "merchant_name":  data.get("merchant_name", ""),
         "merchant_phone": merchant_phone_norm,
+        "city":           (data.get("city") or "").strip().lower(),
         "source":         "admin",
         "created_at":     datetime.utcnow(),
     }
@@ -1872,7 +1859,7 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
 def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     upd = {}
     import re as _re
-    for f in ["title", "image_url", "link_url", "from_date", "end_date", "merchant_name"]:
+    for f in ["title", "image_url", "link_url", "from_date", "end_date", "merchant_name", "city"]:
         if f in data: upd[f] = data[f]
     if "merchant_phone" in data:
         raw_p = str(data["merchant_phone"] or "").strip()
@@ -2252,7 +2239,7 @@ def list_merchant_banners(a=Depends(get_current_admin)):
     """All merchant-submitted banners with approval status.
     Only returns pending/rejected — approved ones live in promo_sliders to avoid duplicates."""
     result = []
-    for b in db.promo_sliders.find().sort("created_at", -1):
+    for b in db.merchant_banners.find().sort("created_at", -1):
         approval_status = b.get("approval_status", "pending_approval")
         # Skip approved — they are already in promo_sliders (source_banner_id links them)
         if approval_status == "approved":
@@ -2271,15 +2258,16 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             "invoice_no":     b.get("invoice_no", ""),
             "amount":         b.get("total", 0),
             "created_at":     b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at",""))[:16],
+            "city":           b.get("city", ""),
         })
     return result
 
 @router.put("/merchant-banners/{bid}/approve")
 def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     """Approve a merchant banner — publishes it as a promo slider."""
-    b = db.promo_sliders.find_one({"_id": ObjectId(bid)})
+    b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
     if not b: raise HTTPException(404, "Banner not found")
-    db.promo_sliders.update_one({"_id": ObjectId(bid)}, {"$set": {"approval_status":"approved","approved_at":datetime.utcnow()}})
+    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"approval_status":"approved","approved_at":datetime.utcnow()}})
     # TASK 9 FIX: upsert into promo_sliders — never create duplicates
     db.promo_sliders.update_one(
         {"source_banner_id": bid},
@@ -2308,7 +2296,7 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
 def resync_merchant_banner_sliders(a=Depends(get_current_admin)):
     """Re-sync all approved merchant banners into promo_sliders with latest fields (from_date, end_date, duration_days, merchant_phone)."""
     updated = 0
-    for b in db.promo_sliders.find({"approval_status": "approved"}):
+    for b in db.merchant_banners.find({"approval_status": "approved"}):
         bid = str(b["_id"])
         db.promo_sliders.update_one(
             {"source_banner_id": bid},
@@ -2326,7 +2314,7 @@ def resync_merchant_banner_sliders(a=Depends(get_current_admin)):
 @router.put("/merchant-banners/{bid}/reject")
 def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admin)):
     reason = body.get("reason","")
-    db.promo_sliders.update_one({"_id": ObjectId(bid)}, {"$set": {
+    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
         "approval_status":"rejected",
         "rejection_reason": reason,
         "rejected_at": datetime.utcnow()
@@ -2343,7 +2331,7 @@ def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")
     update_data["updated_at"] = datetime.utcnow().isoformat()
-    result = db.promo_sliders.update_one(
+    result = db.merchant_banners.update_one(
         {"_id": ObjectId(bid)},
         {"$set": update_data}
     )
@@ -2354,7 +2342,7 @@ def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.delete("/merchant-banners/{bid}")
 def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
-    db.promo_sliders.delete_one({"_id": ObjectId(bid)})
+    db.merchant_banners.delete_one({"_id": ObjectId(bid)})
     db.promo_sliders.delete_many({"source_banner_id": bid})
     return {"ok": True}
 
@@ -2425,6 +2413,7 @@ def list_merchant_products(a=Depends(get_current_admin)):
             "_id":           str(v["_id"]),
             "merchant_name": v.get("merchant_name",""),
             "merchant_phone": v.get("merchant_phone",""),
+            "city":          v.get("city",""),
             "title":         v.get("title",""),
             "offer_text":    v.get("offer_text",""),
             "logo_url":      (v.get("logo_url","") if str(v.get("logo_url","")).startswith("http") else ""),  # strip base64
@@ -2440,8 +2429,8 @@ def list_merchant_products(a=Depends(get_current_admin)):
     return result
 
 @router.put("/merchant-vouchers/{vid}/approve")
-def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
-    v = db.merchant_vouchers.find_one({"_id": ObjectId(vid)})
+def approve_merchant_product(pid: str, a=Depends(get_current_admin)):
+    v = db.merchant_vouchers.find_one({"_id": ObjectId(pid)})
     if not v: raise HTTPException(404, "Voucher not found")
     # TASK 8: check if product has already expired before setting status
     end_date_raw = v.get("end_date", "")
@@ -2466,7 +2455,7 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
         except:
             pass
     db.merchant_vouchers.update_one(
-        {"_id": ObjectId(vid)},
+        {"_id": ObjectId(pid)},
         {"$set": {
             "approval_status": final_status,
             "status":          final_status,
@@ -2505,14 +2494,14 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
 @router.put("/merchant-vouchers/{vid}/reject")
 def reject_merchant_product(vid: str, body: dict = {}, a=Depends(get_current_admin)):
     reason = body.get("reason","")
-    db.merchant_vouchers.update_one({"_id": ObjectId(vid)}, {"$set":{
+    db.merchant_vouchers.update_one({"_id": ObjectId(pid)}, {"$set":{
         "approval_status":"rejected","rejection_reason":reason,"rejected_at":datetime.utcnow()
     }})
     db.gift_vouchers.delete_many({"source_voucher_id": vid})
     return {"ok": True, "message": "Voucher rejected."}
 
 @router.put("/merchant-vouchers/{vid}")
-def update_merchant_product(vid: str, data: dict, a=Depends(get_current_admin)):
+def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
     """FIX 10: Admin edit merchant product fields + status."""
     # ISSUES 5+7: also allow from_date, end_date, logo_url updates
     allowed = {"title", "offer_text", "validity", "logo", "logo_url", "from_date", "end_date", "status", "approval_status"}
@@ -2525,7 +2514,7 @@ def update_merchant_product(vid: str, data: dict, a=Depends(get_current_admin)):
         update_data["logo_url"] = update_data["logo"]
 
     result = db.merchant_vouchers.update_one(
-        {"_id": ObjectId(vid)},
+        {"_id": ObjectId(pid)},
         {"$set": update_data}
     )
     if result.matched_count == 0:
@@ -2550,8 +2539,8 @@ def update_merchant_product(vid: str, data: dict, a=Depends(get_current_admin)):
 
 
 @router.delete("/merchant-vouchers/{vid}")
-def delete_merchant_product(vid: str, a=Depends(get_current_admin)):
-    db.merchant_vouchers.delete_one({"_id": ObjectId(vid)})
+def delete_merchant_product(pid: str, a=Depends(get_current_admin)):
+    db.merchant_vouchers.delete_one({"_id": ObjectId(pid)})
     db.gift_vouchers.delete_many({"source_voucher_id": vid})
     return {"ok": True}
 
@@ -2607,7 +2596,7 @@ def list_all_invoices(a=Depends(get_current_admin)):
         })
 
     # 2. Paid banners not already in invoices collection
-    for b in db.promo_sliders.find({"payment_status":"paid"}).sort("created_at",-1):
+    for b in db.merchant_banners.find({"payment_status":"paid"}).sort("created_at",-1):
         ino = b.get("invoice_no", str(b["_id"])[:8].upper())
         if ino and ino in seen_invoice_nos: continue   # FIX T1: skip if invoice already in set
         if ino: seen_invoice_nos.add(ino)
@@ -2846,7 +2835,7 @@ async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=
 # ─── Admin Banners (home-screen banners managed by admin) ─────────────────────
 @router.get("/banners")
 def admin_list_banners(a=Depends(get_current_admin)):
-    docs = list(db.banners.find().sort("sort_order", 1))
+    docs = list(db.admin_banners.find().sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
@@ -2878,7 +2867,7 @@ async def admin_create_banner(data: dict, a=Depends(get_current_admin)):
         "is_active":  bool(data.get("is_active", True)),
         "created_at": datetime.utcnow().isoformat(),
     }
-    r = db.banners.insert_one(doc)
+    r = db.admin_banners.insert_one(doc)
     return {"ok": True, "id": str(r.inserted_id)}
 
 
@@ -2896,23 +2885,23 @@ async def admin_update_banner(bid: str, data: dict, a=Depends(get_current_admin)
         update["image"]     = img
         update["image_url"] = img
     if update:
-        db.banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
+        db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
     return {"ok": True}
 
 
 @router.delete("/banners/{bid}")
 def admin_delete_banner(bid: str, a=Depends(get_current_admin)):
-    db.banners.delete_one({"_id": ObjectId(bid)})
+    db.admin_banners.delete_one({"_id": ObjectId(bid)})
     return {"ok": True}
 
 
 @router.patch("/banners/{bid}/toggle")
 def admin_toggle_banner(bid: str, a=Depends(get_current_admin)):
-    doc = db.banners.find_one({"_id": ObjectId(bid)})
+    doc = db.admin_banners.find_one({"_id": ObjectId(bid)})
     if not doc:
         raise HTTPException(404, "Banner not found")
     new_state = not doc.get("is_active", True)
-    db.banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
+    db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
     return {"ok": True, "is_active": new_state}
 
 
@@ -2999,6 +2988,66 @@ def admin_remove_default_image_url(body: dict, a=Depends(get_current_admin)):
     return {"ok": True}
 
 
+@router.post("/seed-city-field")
+def seed_city_field(a=Depends(get_current_admin)):
+    """
+    One-time migration: backfill city field on all gift_vouchers, merchant_vouchers,
+    and promo_sliders from the merchant's first registered store.
+    """
+    from bson import ObjectId as ObjId
+    updated = {"gift_vouchers": 0, "merchant_vouchers": 0, "promo_sliders": 0}
+
+    def _get_merchant_city(merchant_id_str, merchant_phone_str=""):
+        """Look up city from the merchant's first store."""
+        query = {}
+        if merchant_id_str:
+            try:
+                query = {"merchant_id": merchant_id_str}
+            except Exception:
+                pass
+        store = None
+        if query:
+            store = db.stores.find_one(query, {"city": 1}, sort=[("created_at", 1)])
+        if not store and merchant_phone_str:
+            store = db.stores.find_one(
+                {"$or": [{"phone": merchant_phone_str[-10:]},
+                         {"owner_phone": merchant_phone_str[-10:]}]},
+                {"city": 1}, sort=[("created_at", 1)]
+            )
+        return (store.get("city", "") if store else "").strip().lower()
+
+    # ── gift_vouchers ──
+    for doc in db.gift_vouchers.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):
+        city = _get_merchant_city(str(doc.get("merchant_id", "") or ""), str(doc.get("merchant_phone", "") or ""))
+        if city:
+            db.gift_vouchers.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
+            updated["gift_vouchers"] += 1
+
+    # ── merchant_vouchers ──
+    for doc in db.merchant_vouchers.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):
+        city = _get_merchant_city(str(doc.get("merchant_id", "") or ""), str(doc.get("merchant_phone", "") or ""))
+        if city:
+            db.merchant_vouchers.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
+            updated["merchant_vouchers"] += 1
+
+    # ── promo_sliders (merchant banners) ──
+    for doc in db.promo_sliders.find({"city": {"$in": [None, "", []]}}, {"merchant_phone": 1, "merchant_name": 1}):
+        phone = str(doc.get("merchant_phone", "") or "")
+        city = ""
+        if phone:
+            store = db.stores.find_one(
+                {"$or": [{"phone": phone[-10:]}, {"owner_phone": phone[-10:]}]},
+                {"city": 1}, sort=[("created_at", 1)]
+            )
+            if store:
+                city = store.get("city", "").strip().lower()
+        if city:
+            db.promo_sliders.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
+            updated["promo_sliders"] += 1
+
+    return {"message": "City seed complete", "updated": updated}
+
+
 @router.put("/default-images")
 async def admin_update_default_images(
     store_file: UploadFile = File(None),
@@ -3056,4 +3105,3 @@ async def admin_update_default_images(
                 db.settings.update_one({"_type": "default_images"}, {"$set": set_fixes}, upsert=True)
             db.settings.update_one({"_type": "default_images"}, push_ops, upsert=True)
     return {"ok": True, "uploaded": list(update.keys())}
-

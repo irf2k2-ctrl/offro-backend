@@ -964,7 +964,6 @@ def get_my_banners(m=Depends(get_merchant)):
                 "created_at":      _safe_str_date(b.get("created_at", "")),
                 "source":          "merchant",
                 "is_expired":      is_expired,
-                "city":            b.get("city", ""),
             })
     except Exception as e:
         print(f"[BANNERS] merchant_banners query error: {e}")
@@ -1165,15 +1164,10 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     if disc_code:
         db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
 
-    # Auto-assign city from merchant's first store
-    _ba_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
-    _ba_city  = (_ba_store.get("city", "") if _ba_store else "").strip().lower()
-
     banner = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
         "merchant_phone":   str(m.get("phone", "")),
-        "city":             _ba_city,
         "title":            title,
         "image_url":        image_url,
         "image_thumb":      image_thumb,
@@ -1255,15 +1249,10 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
 
-    # Auto-assign city from merchant's first store
-    _bv_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
-    _bv_city  = (_bv_store.get("city", "") if _bv_store else "").strip().lower()
-
     banner = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
         "merchant_phone":   str(m.get("phone", "")),
-        "city":             _bv_city,
         "title":            title,
         "image_url":        image_url,
         "image_thumb":      image_thumb,
@@ -1328,7 +1317,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
 # Issue 3: now uses `days` + `from_date` instead of fixed 30/60/90 plans
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@router.get("/vouchers")
+@router.get("/products")
 def get_my_products(m=Depends(get_merchant)):
     merchant_id = _mid(m)
     merchant_phone = str(m.get("phone", ""))
@@ -1357,12 +1346,12 @@ def get_my_products(m=Depends(get_merchant)):
     return result
 
 # ── PUT /merchant/vouchers/{vid}  — Merchant edit own product ────────────────
-@router.put("/vouchers/{vid}")
-def update_merchant_product(vid: str, data: dict, m=Depends(get_merchant)):
+@router.put("/products/{pid}")
+def update_merchant_product(pid: str, data: dict, m=Depends(get_merchant)):
     """Merchant updates their own product listing (title, offer text, prices)."""
     mid = _mid(m)
     try:
-        obj_id = ObjectId(vid)
+        obj_id = ObjectId(pid)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid product ID")
 
@@ -1400,7 +1389,7 @@ def update_merchant_product(vid: str, data: dict, m=Depends(get_merchant)):
     return {"ok": True, "updated": list(update_data.keys())}
 
 
-@router.get("/vouchers/pricing")
+@router.get("/products/pricing")
 def get_product_pricing_merchant(m=Depends(get_merchant)):
     doc = _pricing_doc()
     gst_pct = float(doc.get("gst_percent", 18))
@@ -1409,7 +1398,7 @@ def get_product_pricing_merchant(m=Depends(get_merchant)):
         "gst_pct":       gst_pct,
     }
 
-@router.post("/vouchers/order")
+@router.post("/products/order")
 def create_product_order(data: dict, m=Depends(get_merchant)):
     """
     Issue 3: accepts { "days": int, "from_date": "YYYY-MM-DD" }
@@ -1529,7 +1518,7 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
         "razorpay_order_id": rp_order_id,
     }
 
-@router.post("/vouchers/activate-free")
+@router.post("/products/activate-free")
 def activate_free_product(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id    = data.get("order_id", "")
@@ -1624,7 +1613,7 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
             amount=0, meta={"voucher_id": str(res.inserted_id)})
     return {"message": "Product submitted for review", "voucher_id": str(res.inserted_id), "invoice_no": invoice_no}
 
-@router.post("/vouchers/verify")
+@router.post("/products/verify")
 def verify_product_payment(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id            = data.get("order_id", "")
