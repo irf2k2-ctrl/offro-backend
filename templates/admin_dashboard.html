@@ -3339,7 +3339,7 @@ async function loadGiftCards() {
   try {
     // Fetch admin product cards + merchant product submissions in parallel
     const [adminR, merchantR] = await Promise.all([
-      fetch("/admin/gift-vouchers", {credentials:"include"}),
+      fetch("/admin/products", {credentials:"include"}),
       fetch("/admin/merchant-vouchers", {credentials:"include"}),
     ]);
     const adminCards    = adminR.ok    ? await adminR.json()    : [];
@@ -3883,7 +3883,7 @@ async function saveVZMerchantEdit() {
 async function deleteProductCard(id, source) {
   if (!confirm('Delete this product?')) return;
   const url = (source==='admin' || source==='products') 
-    ? `/admin/gift-vouchers/${id}` 
+    ? `/admin/products/${id}` 
     : `/admin/merchant-vouchers/${id}`;
   await fetch(url, {method:'DELETE', credentials:'include'});
   loadGiftCards();
@@ -4026,7 +4026,7 @@ async function saveGiftCard() {
       url  = `/admin/products/${vid}`;
       meth = "PUT";
     } else {
-      url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
+      url  = vid ? `/admin/products/${vid}` : "/admin/products";
       meth = vid ? "PUT" : "POST";
     }
     let res  = await fetch(url, {method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
@@ -4038,7 +4038,7 @@ async function saveGiftCard() {
 
 async function deleteGiftCard(id) {
   if (!confirm("Delete this product?")) return;
-  await fetch(`/admin/gift-vouchers/${id}`, {method:"DELETE", credentials:"include"});
+  await fetch(`/admin/products/${id}`, {method:"DELETE", credentials:"include"});
   loadGiftCards();
 }
 
@@ -4084,7 +4084,7 @@ function openSidebar()  { document.getElementById("sidebar").classList.add("open
 
 async function deleteProductCardAdmin(id) {
     if (!confirm("Delete product card?")) return;
-    await fetch(`/admin/gift-vouchers/${id}`, { method:"DELETE", credentials:"include" });
+    await fetch(`/admin/products/${id}`, { method:"DELETE", credentials:"include" });
     loadGiftVoucherRequests();
 }
 
@@ -4147,7 +4147,7 @@ async function saveProductCard() {
         is_active:   document.getElementById("v_active").checked,
     };
     try {
-        let url  = vid ? `/admin/gift-vouchers/${vid}` : "/admin/gift-vouchers";
+        let url  = vid ? `/admin/products/${vid}` : "/admin/products";
         let meth = vid ? "PUT" : "POST";
         let res  = await fetch(url, { method:meth, credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data) });
         if (!res.ok) { const d=await res.json(); document.getElementById("v_msg").innerText=d.detail||"Error"; return; }
