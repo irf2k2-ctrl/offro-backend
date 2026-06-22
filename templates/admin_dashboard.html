@@ -4348,7 +4348,7 @@ async function saveStore() {
       </div>
       <div class="modal-body">
         <input type="hidden" id="gc_id" value="">
-        <input type="hidden" id="gc_collection" value="gift_vouchers">
+        <input type="hidden" id="gc_collection" value="products">
         <div class="mb-3">
           <label class="form-label fw-semibold">Title (e.g. "₹999 DEALS")</label>
           <input id="gc_title" class="form-control" placeholder="₹999 DEALS">
@@ -4699,7 +4699,7 @@ function renderTxnRows(rows) {
   if (!tbody) return;
   if (!rows.length) { tbody.innerHTML = '<tr><td colspan="16" style="text-align:center;padding:24px;color:var(--muted)">No transactions found.</td></tr>'; return; }
 
-  const typeColor = {store:'#3E5F55', banner:'#c0392b', voucher:'#856404', product:'#856404'};
+  const typeColor = {store:'#3E5F55', banner:'#c0392b', voucher:'#856404', product:'#856404', 'merchant-product':'#856404'};
   tbody.innerHTML = rows.map(inv => {
     const st = inv._status || (inv.invoice_no==='PENDING'?'pending':(inv.invoice_no==='FREE'?'free':'paid'));
     const statusBadge = st==='paid'

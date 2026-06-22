@@ -1499,74 +1499,6 @@ def list_product_cards(a=Depends(get_current_admin)):
             "_collection":       "products",
         })
 
-    # ── 2. products collection (seeded/imported product catalogue) ──────────
-    product_docs = list(db.products.find().sort("_id", -1))
-    for p in product_docs:
-        pid = str(p["_id"])
-        # Build offer text from price + discount if available
-        price    = p.get("price", "")
-        discount = p.get("discount", "")
-        text_parts = []
-        if discount: text_parts.append(f"{discount}% OFF")
-        if price:    text_parts.append(f"₹{price}")
-        offer_text = p.get("offer_text") or p.get("text") or (", ".join(text_parts) if text_parts else "")
-        # Resolve image
-        # Strip base64 — only return CDN/HTTP URLs to keep response lean
-        def _url_only(v): return v if v and str(v).startswith("http") else ""
-        logo = (_url_only(p.get("image_url")) or _url_only(p.get("logo_url")) or
-                _url_only(p.get("logo")) or _url_only(p.get("thumbnail")) or
-                _url_only(p.get("img")) or "")
-        ca = p.get("created_at")
-        if isinstance(ca, datetime):
-            created_at_iso = ca.strftime("%Y-%m-%dT%H:%M:%S")
-        else:
-            created_at_iso = str(ca or "")[:19]
-        # Resolve merchant_name from accounts if merchant_id exists but name not stored
-        p_mid = str(p.get("merchant_id", ""))
-        p_merchant_name  = p.get("merchant_name") or p.get("store_name") or ""
-        p_merchant_phone = str(p.get("phone") or p.get("merchant_phone") or "")
-        if p_mid and not p_merchant_name:
-            try:
-                pm = (db.accounts.find_one({"_id": ObjectId(p_mid)}, {"name":1,"phone":1}) or
-                      db.merchants.find_one({"_id": ObjectId(p_mid)}, {"name":1,"phone":1}))
-                if pm:
-                    p_merchant_name  = pm.get("name", "")
-                    p_merchant_phone = str(pm.get("phone", ""))
-            except Exception:
-                pass
-        _p_status = _compute_product_status(p)
-        result.append({
-            "id":                pid,
-            "title":             p.get("name") or p.get("title") or "",
-            "text":              offer_text,
-            "validity":          p.get("validity") or p.get("valid_till") or "",
-            "logo":              logo,
-            "store_id":          str(p.get("store_id", "")),
-            "merchant_id":       p_mid,
-            "merchant_name":     p_merchant_name,
-            "merchant_phone":    p_merchant_phone,
-            "is_active":         _p_status == "approved",
-            "status":            _p_status,
-            "from_date":         p.get("from_date") or p.get("start_date") or "",
-            "end_date":          (p.get("end_date") or p.get("expiry") or
-                                     p.get("valid_till") or
-                                     # Parse end from "DD Mon YYYY → DD Mon YYYY"
-                                     (lambda v: v.split("→")[-1].strip() if v and "→" in v else
-                                      (v.split(" to ")[-1].strip() if v and " to " in v.lower() else "")
-                                     )(str(p.get("validity") or "")) or ""),
-            "created_at":        created_at_iso,
-            "source":            "products",
-            "source_product_id": "",
-            "duration_days":     int(p.get("duration_days") or 0),
-            "city":              p.get("city", ""),
-            "_collection":       "products",
-            # Extra product-specific fields for display
-            "price":             str(price),
-            "discount":          str(discount),
-            "description":       p.get("description", ""),
-            "category":          p.get("category", ""),
-        })
-
     # Sort all by created_at descending
     result.sort(key=lambda x: x.get("created_at",""), reverse=True)
     return result
@@ -1663,13 +1595,13 @@ def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
         upd["is_active"] = bool(data["is_active"])
     if not upd:
         raise HTTPException(400, "Nothing to update")
-    db.products.update_one({"_id": ObjectId(vid)}, {"$set": upd})
+    db.products.update_one({"_id": ObjectId(pid)}, {"$set": upd})
     return {"message": "Product updated"}
 
 @router.delete("/products/{pid}")
 def delete_product_card(pid: str, a=Depends(get_current_admin)):
     """Delete a product card."""
-    db.products.delete_one({"_id": ObjectId(vid)})
+    db.products.delete_one({"_id": ObjectId(pid)})
     return {"message": "Deleted"}
 
 
