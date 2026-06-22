@@ -1663,13 +1663,13 @@ def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
         upd["is_active"] = bool(data["is_active"])
     if not upd:
         raise HTTPException(400, "Nothing to update")
-    db.gift_vouchers.update_one({"_id": ObjectId(pid)}, {"$set": upd})
+    db.gift_vouchers.update_one({"_id": ObjectId(vid)}, {"$set": upd})
     return {"message": "Voucher updated"}
 
 @router.delete("/products/{pid}")
 def delete_product_card(pid: str, a=Depends(get_current_admin)):
     """Delete a product card."""
-    db.gift_vouchers.delete_one({"_id": ObjectId(pid)})
+    db.gift_vouchers.delete_one({"_id": ObjectId(vid)})
     return {"message": "Deleted"}
 
 
@@ -1677,7 +1677,7 @@ def delete_product_card(pid: str, a=Depends(get_current_admin)):
 def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
     """Update a product card (from the products collection) via admin dashboard."""
     try:
-        p = db.products.find_one({"_id": ObjectId(pid)})
+        p = db.products.find_one({"_id": ObjectId(vid)})
     except Exception:
         raise HTTPException(400, "Invalid product id")
     if not p:
@@ -1708,7 +1708,7 @@ def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
             pass
     if not upd:
         raise HTTPException(400, "Nothing to update")
-    db.products.update_one({"_id": ObjectId(pid)}, {"$set": upd})
+    db.products.update_one({"_id": ObjectId(vid)}, {"$set": upd})
     return {"message": "Product updated"}
 
 
@@ -2429,8 +2429,8 @@ def list_merchant_products(a=Depends(get_current_admin)):
     return result
 
 @router.put("/merchant-vouchers/{vid}/approve")
-def approve_merchant_product(pid: str, a=Depends(get_current_admin)):
-    v = db.merchant_vouchers.find_one({"_id": ObjectId(pid)})
+def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
+    v = db.merchant_vouchers.find_one({"_id": ObjectId(vid)})
     if not v: raise HTTPException(404, "Voucher not found")
     # TASK 8: check if product has already expired before setting status
     end_date_raw = v.get("end_date", "")
@@ -2455,7 +2455,7 @@ def approve_merchant_product(pid: str, a=Depends(get_current_admin)):
         except:
             pass
     db.merchant_vouchers.update_one(
-        {"_id": ObjectId(pid)},
+        {"_id": ObjectId(vid)},
         {"$set": {
             "approval_status": final_status,
             "status":          final_status,
@@ -2494,7 +2494,7 @@ def approve_merchant_product(pid: str, a=Depends(get_current_admin)):
 @router.put("/merchant-vouchers/{vid}/reject")
 def reject_merchant_product(vid: str, body: dict = {}, a=Depends(get_current_admin)):
     reason = body.get("reason","")
-    db.merchant_vouchers.update_one({"_id": ObjectId(pid)}, {"$set":{
+    db.merchant_vouchers.update_one({"_id": ObjectId(vid)}, {"$set":{
         "approval_status":"rejected","rejection_reason":reason,"rejected_at":datetime.utcnow()
     }})
     db.gift_vouchers.delete_many({"source_voucher_id": vid})
@@ -2514,7 +2514,7 @@ def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
         update_data["logo_url"] = update_data["logo"]
 
     result = db.merchant_vouchers.update_one(
-        {"_id": ObjectId(pid)},
+        {"_id": ObjectId(vid)},
         {"$set": update_data}
     )
     if result.matched_count == 0:
@@ -2540,7 +2540,7 @@ def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.delete("/merchant-vouchers/{vid}")
 def delete_merchant_product(pid: str, a=Depends(get_current_admin)):
-    db.merchant_vouchers.delete_one({"_id": ObjectId(pid)})
+    db.merchant_vouchers.delete_one({"_id": ObjectId(vid)})
     db.gift_vouchers.delete_many({"source_voucher_id": vid})
     return {"ok": True}
 
@@ -2835,7 +2835,7 @@ async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=
 # ─── Admin Banners (home-screen banners managed by admin) ─────────────────────
 @router.get("/banners")
 def admin_list_banners(a=Depends(get_current_admin)):
-    docs = list(db.admin_banners.find().sort("sort_order", 1))
+    docs = list(db.banners.find().sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
@@ -2867,7 +2867,7 @@ async def admin_create_banner(data: dict, a=Depends(get_current_admin)):
         "is_active":  bool(data.get("is_active", True)),
         "created_at": datetime.utcnow().isoformat(),
     }
-    r = db.admin_banners.insert_one(doc)
+    r = db.banners.insert_one(doc)
     return {"ok": True, "id": str(r.inserted_id)}
 
 
@@ -2885,23 +2885,23 @@ async def admin_update_banner(bid: str, data: dict, a=Depends(get_current_admin)
         update["image"]     = img
         update["image_url"] = img
     if update:
-        db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
+        db.banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
     return {"ok": True}
 
 
 @router.delete("/banners/{bid}")
 def admin_delete_banner(bid: str, a=Depends(get_current_admin)):
-    db.admin_banners.delete_one({"_id": ObjectId(bid)})
+    db.banners.delete_one({"_id": ObjectId(bid)})
     return {"ok": True}
 
 
 @router.patch("/banners/{bid}/toggle")
 def admin_toggle_banner(bid: str, a=Depends(get_current_admin)):
-    doc = db.admin_banners.find_one({"_id": ObjectId(bid)})
+    doc = db.banners.find_one({"_id": ObjectId(bid)})
     if not doc:
         raise HTTPException(404, "Banner not found")
     new_state = not doc.get("is_active", True)
-    db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
+    db.banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
     return {"ok": True, "is_active": new_state}
 
 

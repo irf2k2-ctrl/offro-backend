@@ -295,7 +295,7 @@ import base64 as _b64, uuid as _uuid
 
 @app.get("/admin/banners")
 def admin_list_banners():
-    docs = list(db.admin_banners.find().sort("sort_order", 1))
+    docs = list(db.banners.find().sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url","") or d.get("image","")
@@ -326,7 +326,7 @@ async def admin_create_banner(request: Request):
         "is_active":  data.get("is_active",True),
         "created_at": datetime.utcnow(),
     }
-    r = db.admin_banners.insert_one(doc)
+    r = db.banners.insert_one(doc)
     return {"ok":True,"id":str(r.inserted_id)}
 
 @app.put("/admin/banners/{banner_id}")
@@ -341,12 +341,12 @@ async def admin_update_banner(banner_id: str, request: Request):
         "sort_order": int(data.get("sort_order",0)),
         "is_active":  data.get("is_active",True),
     }
-    db.admin_banners.update_one({"_id": _ObjId(banner_id)}, {"$set": update})
+    db.banners.update_one({"_id": _ObjId(banner_id)}, {"$set": update})
     return {"ok":True}
 
 @app.delete("/admin/banners/{banner_id}")
 def admin_delete_banner(banner_id: str):
-    db.admin_banners.delete_one({"_id": _ObjId(banner_id)})
+    db.banners.delete_one({"_id": _ObjId(banner_id)})
     return {"ok":True}
 
 @app.get("/health")
