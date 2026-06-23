@@ -1663,7 +1663,7 @@ def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
         upd["is_active"] = bool(data["is_active"])
     if not upd:
         raise HTTPException(400, "Nothing to update")
-    db.gift_vouchers.update_one({"_id": ObjectId(vid)}, {"$set": upd})
+    db.gift_vouchers.update_one({"_id": ObjectId(pid)}, {"$set": upd})
     return {"message": "Voucher updated"}
 
 @router.delete("/products/{pid}")
@@ -1677,7 +1677,7 @@ def delete_product_card(pid: str, a=Depends(get_current_admin)):
 def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
     """Update a product card (from the products collection) via admin dashboard."""
     try:
-        p = db.products.find_one({"_id": ObjectId(vid)})
+        p = db.products.find_one({"_id": ObjectId(pid)})
     except Exception:
         raise HTTPException(400, "Invalid product id")
     if not p:
@@ -1708,7 +1708,7 @@ def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
             pass
     if not upd:
         raise HTTPException(400, "Nothing to update")
-    db.products.update_one({"_id": ObjectId(vid)}, {"$set": upd})
+    db.products.update_one({"_id": ObjectId(pid)}, {"$set": upd})
     return {"message": "Product updated"}
 
 
