@@ -1053,7 +1053,7 @@ def get_default_images():
         "store":           _safe_list(doc.get("store",           doc.get("store_images",   []))),
         "product":         _safe_list(doc.get("product",         doc.get("product_images", []))),
         "offer":           _safe_list(doc.get("offer",           doc.get("offer_images",   []))),
-        "city":            _safe_list(doc.get("city",            doc.get("city_images",    []))),
+        "city":            _safe_list(doc.get("city",            doc.get("city_images",    []))) or ["https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1200&q=80"],
         "merchant_banner": _safe_list(doc.get("merchant_banner", [])),
     }
 

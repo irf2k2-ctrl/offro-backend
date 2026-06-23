@@ -765,6 +765,7 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     store = {
         "merchant_id": mid, "store_name": name,
         "category": data.get("category",""),
+        "state": data.get("state","") or merchant.get("state",""),
         "city": data.get("city") or merchant.get("city",""),
         "area": data.get("area") or merchant.get("area",""),
         "address": data.get("address",""),
@@ -1973,8 +1974,9 @@ def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     if data.get("end_date"):  upd["end_date"]  = str(data["end_date"]).strip()
     if data.get("city"):      upd["city"]       = str(data["city"]).strip()
     # Store / merchant fields
-    if "store_id"   in data: upd["store_id"]   = str(data["store_id"]   or "").strip()
-    if "store_name" in data: upd["store_name"]  = str(data["store_name"] or "").strip()
+    # Only update store_id/store_name when non-empty — prevents clearing existing link on edit
+    if data.get("store_id",  "").strip(): upd["store_id"]  = data["store_id"].strip()
+    if data.get("store_name","").strip(): upd["store_name"] = data["store_name"].strip()
     if "merchant_id" in data: upd["merchant_id"] = str(data["merchant_id"] or "").strip()
     if "merchant_phone" in data:
         raw_p = str(data["merchant_phone"] or "").strip()
@@ -3035,7 +3037,7 @@ def admin_get_default_images(a=Depends(get_current_admin)):
         "store":   _to_list(doc.get("store",   doc.get("store_images",   []))),
         "product": _to_list(doc.get("product", doc.get("product_images", []))),
         "offer":   _to_list(doc.get("offer",   doc.get("offer_images",   []))),
-        "city":    _to_list(doc.get("city",    doc.get("city_images",    []))),
+        "city":    _to_list(doc.get("city",    doc.get("city_images",    []))) or ["https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1200&q=80"],
     }
 
 

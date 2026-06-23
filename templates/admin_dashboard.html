@@ -1078,8 +1078,10 @@ tr:hover td{background:#f7faf8;}
             <input id="store_name" class="form-control" placeholder="Store name"></div>
           <div class="col-md-6"><label class="form-label">Category</label>
             <select id="store_category" class="form-select"></select></div>
+          <div class="col-md-6"><label class="form-label">State</label>
+            <select id="store_state" class="form-select" onchange="onStoreStateChange()"><option value="">— Select State —</option></select></div>
           <div class="col-md-6"><label class="form-label">City</label>
-            <input id="store_city" class="form-control" placeholder="City" onchange="loadAreasForCity(this.value)"></div>
+            <select id="store_city" class="form-select" onchange="loadAreasForCity(this.value)"><option value="">— Select City —</option></select></div>
           <div class="col-md-6"><label class="form-label">Area</label>
             <select id="store_area" class="form-select">
               <option value="">— Select Area —</option>
@@ -1914,6 +1916,91 @@ function populateCityFilter(elId,data,field){
   sel.innerHTML='<option value="">All Cities</option>';
   cities.forEach(c=>{let o=document.createElement("option");o.value=c;o.innerText=c;if(c===cur)o.selected=true;sel.appendChild(o);});
 }
+
+// ── India States & Cities data (for Store create/edit dropdowns) ──────────────
+const INDIA_STATES_CITIES = {
+  "Andhra Pradesh":["Vijayawada","Visakhapatnam","Guntur","Nellore","Kurnool","Rajahmundry","Tirupati","Kakinada","Eluru","Ongole","Anantapur","Vizianagaram","Chittoor","Srikakulam","Kadapa","Tenali","Machilipatnam","Proddatur","Adoni","Hindupur"],
+  "Arunachal Pradesh":["Itanagar","Naharlagun","Pasighat","Tawang","Ziro"],
+  "Assam":["Guwahati","Silchar","Dibrugarh","Jorhat","Nagaon","Tinsukia","Tezpur","Bongaigaon","Dhubri","Diphu"],
+  "Bihar":["Patna","Gaya","Bhagalpur","Muzaffarpur","Purnia","Darbhanga","Bihar Sharif","Arrah","Begusarai","Katihar","Munger","Chhapra","Hajipur","Saharsa","Sasaram","Dehri","Siwan","Bettiah","Motihari"],
+  "Chhattisgarh":["Raipur","Bhilai","Korba","Bilaspur","Durg","Rajnandgaon","Jagdalpur","Raigarh","Ambikapur","Mahasamund"],
+  "Goa":["Panaji","Margao","Vasco da Gama","Mapusa","Ponda","Bicholim","Curchorem"],
+  "Gujarat":["Ahmedabad","Surat","Vadodara","Rajkot","Bhavnagar","Jamnagar","Gandhinagar","Junagadh","Anand","Navsari","Morbi","Nadiad","Mehsana","Bharuch","Gandhidham","Ankleshwar","Vapi","Botad","Surendranagar"],
+  "Haryana":["Faridabad","Gurgaon","Panipat","Ambala","Yamunanagar","Rohtak","Hisar","Karnal","Sonipat","Panchkula","Bhiwani","Bahadurgarh","Jind","Sirsa","Thanesar","Kaithal","Rewari","Palwal"],
+  "Himachal Pradesh":["Shimla","Dharamshala","Solan","Mandi","Palampur","Baddi","Nahan","Sundernagar","Chamba","Una"],
+  "Jharkhand":["Ranchi","Jamshedpur","Dhanbad","Bokaro","Deoghar","Phusro","Hazaribagh","Giridih","Ramgarh","Medininagar"],
+  "Karnataka":["Bengaluru","Hubli","Dharwad","Mysuru","Mangaluru","Kalaburagi","Belagavi","Davanagere","Ballari","Shivamogga","Tumkur","Raichur","Bidar","Vijayapura","Udupi","Hassan","Bellary","Gadag","Chitradurga","Hospet","Bagalkot"],
+  "Kerala":["Thiruvananthapuram","Kochi","Kozhikode","Thrissur","Kollam","Alappuzha","Palakkad","Malappuram","Kannur","Kasaragod","Kottayam","Idukki","Pathanamthitta","Wayanad"],
+  "Madhya Pradesh":["Bhopal","Indore","Jabalpur","Gwalior","Ujjain","Sagar","Dewas","Satna","Ratlam","Rewa","Murwara","Singrauli","Burhanpur","Khandwa","Bhind","Chhindwara","Guna","Shivpuri","Vidisha","Mandsaur","Morena"],
+  "Maharashtra":["Mumbai","Pune","Nagpur","Thane","Nashik","Aurangabad","Solapur","Amravati","Kolhapur","Navi Mumbai","Pimpri-Chinchwad","Akola","Latur","Dhule","Ahmednagar","Chandrapur","Jalgaon","Bhiwandi","Nanded","Malegaon","Vasai-Virar","Raigad","Satara","Ratnagiri","Sangli"],
+  "Manipur":["Imphal","Thoubal","Bishnupur","Churachandpur","Senapati"],
+  "Meghalaya":["Shillong","Tura","Jowai","Nongpoh"],
+  "Mizoram":["Aizawl","Lunglei","Champhai","Kolasib"],
+  "Nagaland":["Kohima","Dimapur","Mokokchung","Tuensang"],
+  "Odisha":["Bhubaneswar","Cuttack","Rourkela","Brahmapur","Sambalpur","Puri","Balasore","Bhadrak","Baripada","Jharsuguda","Bargarh","Jeypore","Koraput"],
+  "Punjab":["Ludhiana","Amritsar","Jalandhar","Patiala","Bathinda","Hoshiarpur","Batala","Pathankot","Moga","Abohar","Malerkotla","Khanna","Phagwara","Muktsar","Barnala","Rajpura","Firozpur"],
+  "Rajasthan":["Jaipur","Jodhpur","Kota","Bikaner","Ajmer","Udaipur","Bhilwara","Alwar","Bharatpur","Sikar","Pali","Nagaur","Barmer","Tonk","Chittorgarh","Jhunjhunu","Sri Ganganagar","Hanumangarh","Sawai Madhopur"],
+  "Sikkim":["Gangtok","Namchi","Gyalshing","Mangan"],
+  "Tamil Nadu":["Chennai","Coimbatore","Madurai","Tiruchirappalli","Salem","Tirunelveli","Tiruppur","Erode","Vellore","Thoothukudi","Dindigul","Thanjavur","Ranipet","Sivakasi","Karur","Udhagamandalam","Hosur","Nagercoil","Kanchipuram","Kumarakoil","Pollachi","Rajapalayam"],
+  "Telangana":["Hyderabad","Warangal","Nizamabad","Karimnagar","Ramagundam","Khammam","Mahbubnagar","Nalgonda","Adilabad","Suryapet","Miryalaguda","Jagtial","Mancherial","Siddipet","Sangareddy"],
+  "Tripura":["Agartala","Dharmanagar","Udaipur","Kailasahar","Belonia"],
+  "Uttar Pradesh":["Lucknow","Kanpur","Agra","Varanasi","Meerut","Prayagraj","Bareilly","Aligarh","Moradabad","Saharanpur","Gorakhpur","Noida","Ghaziabad","Firozabad","Jhansi","Muzaffarnagar","Mathura","Hapur","Rampur","Shahjahanpur","Farrukhabad","Mau","Haridwar","Etawah","Mirzapur","Bulandshahr","Sambhal","Amroha","Hardoi","Fatehpur","Raebareli","Orai","Sitapur","Bahraich","Modinagar","Unnao","Jaunpur","Lakhimpur","Hathras","Banda","Pilibhit","Barabanki","Khurja","Gonda","Mainpuri","Lalitpur","Etah","Deoria","Bijnor"],
+  "Uttarakhand":["Dehradun","Haridwar","Roorkee","Haldwani","Kashipur","Rudrapur","Rishikesh","Kotdwar","Nainital","Almora"],
+  "West Bengal":["Kolkata","Howrah","Durgapur","Asansol","Siliguri","Bardhaman","Malda","Baharampur","Habra","Kharagpur","Shantipur","Dankuni","Dhulian","Ranaghat","Haldia","Raiganj","Krishnanagar","Nabadwip","Medinipur","Jalpaiguri"],
+  "Delhi":["New Delhi","Delhi","North Delhi","South Delhi","East Delhi","West Delhi","Central Delhi","Dwarka","Rohini","Janakpuri","Lajpat Nagar","Saket","Vasant Kunj","Karol Bagh","Pitampura","Shahadra"],
+  "Chandigarh":["Chandigarh"],
+  "Puducherry":["Puducherry","Karaikal","Mahe","Yanam"],
+  "Andaman and Nicobar Islands":["Port Blair","Diglipur","Rangat"],
+  "Dadra and Nagar Haveli":["Silvassa"],
+  "Daman and Diu":["Daman","Diu"],
+  "Jammu and Kashmir":["Srinagar","Jammu","Anantnag","Baramulla","Sopore","Kathua","Udhampur","Poonch","Rajouri"],
+  "Ladakh":["Leh","Kargil"],
+  "Lakshadweep":["Kavaratti"]
+};
+
+function populateStoreStateDropdown(selectedState) {
+  const sel = document.getElementById("store_state");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Select State —</option>' +
+    Object.keys(INDIA_STATES_CITIES).sort().map(s =>
+      `<option value="${s}"${s === selectedState ? ' selected' : ''}>${s}</option>`
+    ).join('');
+}
+
+function onStoreStateChange() {
+  const state = document.getElementById("store_state")?.value || "";
+  const citySel = document.getElementById("store_city");
+  if (!citySel) return;
+  citySel.innerHTML = '<option value="">— Select City —</option>';
+  if (state && INDIA_STATES_CITIES[state]) {
+    INDIA_STATES_CITIES[state].sort().forEach(c => {
+      const o = document.createElement("option");
+      o.value = c; o.innerText = c;
+      citySel.appendChild(o);
+    });
+  }
+  loadAreasForCity(""); // reset areas when state changes
+}
+
+function setStoreCityDropdown(state, city, area) {
+  populateStoreStateDropdown(state || "");
+  const citySel = document.getElementById("store_city");
+  if (!citySel) return;
+  // Populate cities for the given state
+  if (state && INDIA_STATES_CITIES[state]) {
+    citySel.innerHTML = '<option value="">— Select City —</option>' +
+      INDIA_STATES_CITIES[state].sort().map(c =>
+        `<option value="${c}"${c === city ? ' selected' : ''}>${c}</option>`
+      ).join('');
+  } else if (city) {
+    // Legacy: state unknown — just show the city as-is
+    citySel.innerHTML = `<option value="${city}" selected>${city}</option>`;
+  } else {
+    citySel.innerHTML = '<option value="">— Select City —</option>';
+  }
+  if (city) loadAreasForCity(city, area || "");
+}
+
 async function loadAreasForCity(city, selectedArea=""){
   const sel = document.getElementById("store_area");
   if (!sel) return;
@@ -1940,7 +2027,7 @@ async function loadAreasForCity(city, selectedArea=""){
   } catch(e){ console.warn("loadAreasForCity error:",e); }
 }
 
-async function openCreateStore(){
+async async function openCreateStore(){
   editingStore=false;
   document.getElementById("storeModalTitle").innerText="Create New Store";
   document.getElementById("storeSubmitBtn").innerText="Create Store";
@@ -1949,8 +2036,11 @@ async function openCreateStore(){
   let sel=document.getElementById("store_merchant");
   sel.innerHTML='<option value="">-- Select Merchant --</option>';
   merchantsList.forEach(m=>{sel.innerHTML+=`<option value="${m._id}">${m.name} (${m.phone})</option>`;});
-  sel.onchange=function(){let m=merchantsList.find(x=>x._id===this.value);if(m){document.getElementById("store_city").value=m.city||"";document.getElementById("store_phone").value=m.phone||"";loadAreasForCity(m.city||"",m.area||"");}};
-  ["store_name","store_city","store_address","store_phone","store_lat","store_lng"].forEach(id=>document.getElementById(id).value="");
+  sel.onchange=function(){let m=merchantsList.find(x=>x._id===this.value);if(m){setStoreCityDropdown(m.state||"",m.city||"",m.area||"");document.getElementById("store_phone").value=m.phone||"";}};
+  ["store_name","store_address","store_phone","store_lat","store_lng"].forEach(id=>document.getElementById(id).value="");
+  populateStoreStateDropdown("");
+  const _csCitySel = document.getElementById("store_city");
+  if (_csCitySel) _csCitySel.innerHTML = '<option value="">— Select City —</option>';
   loadAreasForCity(""); // reset area dropdown
   document.getElementById("store_points").value="10";
   document.getElementById("store_visit_points_primary").value="0";
@@ -1985,9 +2075,8 @@ async function openEditStore(id){
   });
   sel.onchange=null;
   document.getElementById("store_name").value=s.store_name||"";
-  document.getElementById("store_city").value=s.city||"";
   document.getElementById("store_address").value=s.address||"";
-  await loadAreasForCity(s.city||"", s.area||""); // populate area dropdown
+  setStoreCityDropdown(s.state||"", s.city||"", s.area||"");
   document.getElementById("store_phone").value=s.phone||"";
   document.getElementById("store_points").value=(s.points_per_scan!=null&&s.points_per_scan!==undefined)?s.points_per_scan:10;
   document.getElementById("store_visit_points_primary").value=s.visit_points||0;
@@ -2020,6 +2109,7 @@ async function submitStore(){
   document.getElementById("store_msg").innerText="Saving...";
   // When editing, only include merchant_id if a merchant was explicitly selected
   let payloadBase={store_name:name,category:document.getElementById("store_category").value,
+    state:document.getElementById("store_state")?.value||"",
     city:document.getElementById("store_city").value,area:document.getElementById("store_area").value,
     address:document.getElementById("store_address").value,phone:document.getElementById("store_phone").value,
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
@@ -3125,8 +3215,8 @@ async function saveSlider() {
     merchant_phone:  (document.getElementById("sl_merchant_phone")?.value || '').trim(),
     merchant_name:   _slMerchName,
     merchant_id:     _slMerchId,
-    store_id:        _slStoreId,
-    store_name:      _slStoreName,
+    ...((_slStoreId) ? {store_id: _slStoreId} : {}),
+    ...((_slStoreName) ? {store_name: _slStoreName} : {}),
     city:            _slCity,
   };
   // Only send dates if they have values — prevent overwriting valid DB dates with blanks
