@@ -1506,9 +1506,6 @@ def list_product_cards(a=Depends(get_current_admin)):
             "source_product_id": v.get("source_product_id", ""),
             "duration_days":     v.get("duration_days", 0),
             "city":              v.get("city", ""),
-            "store_name":        v.get("store_name", ""),
-            "price":             v.get("price", ""),
-            "original_price":    v.get("original_price", ""),
             "_collection":       "products",
         })
 
@@ -1618,6 +1615,46 @@ def delete_product_card(pid: str, a=Depends(get_current_admin)):
     return {"message": "Deleted"}
 
 
+@router.put("/products/{pid}")
+def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
+    """Update a product card (from the products collection) via admin dashboard."""
+    try:
+        p = db.products.find_one({"_id": ObjectId(vid)})
+    except Exception:
+        raise HTTPException(400, "Invalid product id")
+    if not p:
+        raise HTTPException(404, "Product not found")
+    upd = {}
+    for field in ["title", "name", "text", "offer_text", "validity", "logo",
+                  "merchant_id", "store_id", "from_date", "end_date",
+                  "category", "description", "price", "discount",
+                  "sale_price", "original_price"]:
+        if field in data:
+            upd[field] = (data[field] or "").strip() if isinstance(data[field], str) else data[field]
+    if "duration_days" in data:
+        try:
+            upd["duration_days"] = int(data["duration_days"]) if data["duration_days"] else 0
+        except (TypeError, ValueError):
+            upd["duration_days"] = 0
+    if "is_active" in data:
+        upd["is_active"] = bool(data["is_active"])
+    # Resolve and store merchant_name + phone when merchant_id is updated
+    if "merchant_id" in upd and upd["merchant_id"]:
+        try:
+            pm = (db.accounts.find_one({"_id": ObjectId(upd["merchant_id"])}, {"name":1,"phone":1}) or
+                  db.merchants.find_one({"_id": ObjectId(upd["merchant_id"])}, {"name":1,"phone":1}))
+            if pm:
+                upd["merchant_name"]  = pm.get("name", "")
+                upd["merchant_phone"] = str(pm.get("phone", ""))
+        except Exception:
+            pass
+    if not upd:
+        raise HTTPException(400, "Nothing to update")
+    db.products.update_one({"_id": ObjectId(vid)}, {"$set": upd})
+    return {"message": "Product updated"}
+
+
+# ===================== PRODUCT REVIEWS =====================
 
 @router.get("/product-reviews")
 def list_product_reviews(product_id: str = "", a=Depends(get_current_admin)):
@@ -2371,25 +2408,6 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
     _v_from  = v.get("from_date", "")
     _v_end   = v.get("end_date", "")
     _v_valid = v.get("validity") or (f"{_v_from} \u2192 {_v_end}" if _v_from and _v_end else ("30 days" if not _v_from else ""))
-    # Resolve city from stored store_id if city field is empty
-    _v_city = str(v.get("city", "") or "").strip().lower()
-    _v_store_id = str(v.get("store_id", "") or "").strip()
-    if not _v_city and _v_store_id:
-        try:
-            _st = db.stores.find_one({"_id": ObjectId(_v_store_id)}, {"city": 1})
-            if _st and _st.get("city"):
-                _v_city = str(_st["city"]).strip().lower()
-        except Exception:
-            pass
-    if not _v_city:
-        # last resort: merchant's first store
-        _fallback = db.stores.find_one(
-            {"merchant_id": str(v.get("merchant_id", ""))}, {"city": 1},
-            sort=[("created_at", 1)]
-        )
-        if _fallback and _fallback.get("city"):
-            _v_city = str(_fallback["city"]).strip().lower()
-
     db.products.update_one(
         {"source_product_id": vid},
         {"$set": {
@@ -2405,12 +2423,6 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
             "source_product_id": vid,
             "merchant_id":       str(v.get("merchant_id", "")),
             "merchant_name":     v.get("merchant_name", ""),
-            "merchant_phone":    str(v.get("merchant_phone", "") or ""),
-            "store_id":          _v_store_id,
-            "store_name":        str(v.get("store_name", "") or ""),
-            "city":              _v_city,
-            "price":             str(v.get("price", "") or ""),
-            "original_price":    str(v.get("original_price", "") or ""),
             "amount":            v.get("amount", 0),
             "updated_at":        datetime.utcnow().isoformat(),
         },
@@ -2444,7 +2456,7 @@ def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
         update_data["logo_url"] = update_data["logo"]
 
     result = db.merchant_vouchers.update_one(
-        {"_id": ObjectId(vid)},
+        {"_id": ObjectId(pid)},
         {"$set": update_data}
     )
     if result.matched_count == 0:

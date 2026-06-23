@@ -2343,7 +2343,9 @@ async function loadSliders() {
         sort_order:    s.sort_order || 0,
         created_at:    s.created_at || '',
         source_banner_id: s.source_banner_id || '',
-        city:          s.city || '',
+        city:          s.city       || '',
+        store_id:      s.store_id   || '',
+        store_name:    s.store_name || '',
         _raw: s,
       };
     });
@@ -2368,7 +2370,9 @@ async function loadSliders() {
         status:     isExpired ? 'expired' : (st==='approved' ? 'approved' : (st==='rejected' ? 'rejected' : 'pending')),
         sort_order: 99,
         created_at: b.created_at || '',
-        city:       b.city || '',
+        city:       b.city       || '',
+        store_id:   b.store_id   || '',
+        store_name: b.store_name || '',
         _raw: b,
       };
     });
@@ -2430,7 +2434,7 @@ function renderBanners(rows) {
   const showing = document.getElementById('bn_showing');
   if (!tbody) return;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--muted)">No banners found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:28px;color:var(--muted)">No banners found.</td></tr>';
     if(showing) showing.textContent='';
     return;
   }
@@ -2513,6 +2517,9 @@ function renderBanners(rows) {
 
     const viewJson = JSON.stringify({...r, _raw:undefined}).replace(/"/g,'&quot;');
     const _bnCity = r.city ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${r.city}</span>` : `<span style="color:var(--muted);font-size:11px">All Cities</span>`;
+    const _bnStore = r.store_name
+      ? `<span style="font-size:12px;font-weight:600;color:var(--text)">${r.store_name}</span>`
+      : `<span style="color:var(--muted);font-size:11px">—</span>`;
     return `<tr>
       <td>${thumb}</td>
       <td>
@@ -2520,6 +2527,7 @@ function renderBanners(rows) {
         ${r.subtitle?`<div style="font-size:11px;color:var(--muted)">${r.subtitle}</div>`:''}
       </td>
       <td>${creatorBadge}</td>
+      <td>${_bnStore}</td>
       <td>${_bnCity}</td>
       <td>${durationHtml}</td>
       <td>${statusBadge}</td>
@@ -2705,7 +2713,7 @@ async function deleteBnBanner(id, source) {
   loadSliders();
 }
 
-function openSliderModal() {
+async function openSliderModal() {
   document.getElementById("sl_id").value = "";
   document.getElementById("sl_title").value = "";
   document.getElementById("sl_image_url").value = "";
@@ -2720,7 +2728,21 @@ function openSliderModal() {
   if (document.getElementById("sl_days"))      { document.getElementById("sl_days").value = "30"; }
   slUpdateEndDate();
   document.getElementById("sl_msg").innerText = "";
-  if (document.getElementById("sl_city")) document.getElementById("sl_city").value = "";
+  if (document.getElementById("sl_city"))      { document.getElementById("sl_city").value = ""; document.getElementById("sl_city").readOnly = false; }
+  if (document.getElementById("sl_merchant_phone")) document.getElementById("sl_merchant_phone").value = "";
+  // Populate merchant dropdown
+  if (window.merchantsList && merchantsList.length === 0) await loadMerchants();
+  const _slMerchSel = document.getElementById("sl_merchant_sel");
+  if (_slMerchSel) {
+    _slMerchSel.innerHTML = '<option value="">None (Admin banner)</option>' +
+      (window.merchantsList||[]).map(m => `<option value="${m.id||m._id}">${m.name||m.merchant_name||m.phone}</option>`).join('');
+    _slMerchSel.value = "";
+  }
+  // Reset store dropdown
+  const _slStoreSel = document.getElementById("sl_store_sel");
+  if (_slStoreSel) { _slStoreSel.innerHTML = '<option value="">Select merchant first</option>'; _slStoreSel.disabled = true; }
+  if (document.getElementById("sl_store_id"))          document.getElementById("sl_store_id").value = "";
+  if (document.getElementById("sl_store_name_hidden")) document.getElementById("sl_store_name_hidden").value = "";
   // Reset upload UI
   document.getElementById("sl_preview_wrap").style.display = "none";
   document.getElementById("sl_preview_img").src = "";
@@ -2773,6 +2795,71 @@ function slUpdateEndDate() {
 }
 
 let _merchantLookupTimer = null;
+
+async function slOnMerchantChange() {
+  const sel      = document.getElementById("sl_merchant_sel");
+  const storeSel = document.getElementById("sl_store_sel");
+  const cityInp  = document.getElementById("sl_city");
+  const phoneInp = document.getElementById("sl_merchant_phone");
+  const preview  = document.getElementById("sl_merchant_name_preview");
+  const storeIdInp   = document.getElementById("sl_store_id");
+  const storeNameInp = document.getElementById("sl_store_name_hidden");
+
+  const mid = (sel?.value || "").trim();
+  if (storeSel) { storeSel.innerHTML = '<option value="">Loading…</option>'; storeSel.disabled = true; }
+  if (cityInp)  { cityInp.value = ""; cityInp.readOnly = true; }
+  if (storeIdInp) storeIdInp.value = "";
+  if (storeNameInp) storeNameInp.value = "";
+
+  if (!mid) {
+    if (storeSel) { storeSel.innerHTML = '<option value="">Select merchant first</option>'; }
+    if (phoneInp) phoneInp.value = "";
+    if (preview)  preview.textContent = "";
+    if (cityInp)  cityInp.readOnly = false;
+    return;
+  }
+
+  // Set phone from merchantsList
+  const acct = (window.merchantsList || []).find(m => (m.id||m._id) === mid);
+  if (acct) {
+    if (phoneInp) phoneInp.value = acct.phone || "";
+    if (preview)  preview.textContent = "✅ " + (acct.name || acct.merchant_name || "");
+  }
+
+  try {
+    const r = await fetch("/admin/stores", {credentials:"include"});
+    if (!r.ok) { if (storeSel) storeSel.innerHTML = '<option value="">Error</option>'; return; }
+    const allStores = await r.json();
+    const mStores = allStores.filter(s => String(s.merchant_id) === String(mid));
+    if (storeSel) {
+      if (!mStores.length) {
+        storeSel.innerHTML = '<option value="">No stores for this merchant</option>';
+        storeSel.disabled = true;
+      } else {
+        storeSel.innerHTML = '<option value="">Select a store</option>' +
+          mStores.map(s => `<option value="${s._id}" data-city="${(s.city||'').toLowerCase()}" data-name="${s.store_name||''}">${s.store_name||s._id}</option>`).join('');
+        storeSel.disabled = false;
+        if (mStores.length === 1) { storeSel.value = mStores[0]._id; slOnStoreChange(); }
+      }
+    }
+  } catch(e) { console.warn("slOnMerchantChange:", e); }
+}
+
+function slOnStoreChange() {
+  const storeSel     = document.getElementById("sl_store_sel");
+  const cityInp      = document.getElementById("sl_city");
+  const storeIdInp   = document.getElementById("sl_store_id");
+  const storeNameInp = document.getElementById("sl_store_name_hidden");
+  if (!storeSel) return;
+  const sel  = storeSel.options[storeSel.selectedIndex];
+  const city = (sel && storeSel.value) ? (sel.getAttribute("data-city") || "") : "";
+  const name = (sel && storeSel.value) ? (sel.getAttribute("data-name") || "") : "";
+  if (cityInp)      { cityInp.value = city; cityInp.readOnly = !!city; }
+  if (storeIdInp)   storeIdInp.value = storeSel.value;
+  if (storeNameInp) storeNameInp.value = name;
+}
+
+
 async function lookupMerchantByPhone(val) {
   const preview = document.getElementById('sl_merchant_name_preview');
   if (!preview) return;
@@ -2806,8 +2893,12 @@ async function saveSlider() {
   if (!img) { document.getElementById("sl_msg").innerText = "Please upload a banner image first"; return; }
   // Extract merchant name from the preview element (set by lookupMerchantByPhone)
   const _slMerchPreview = document.getElementById('sl_merchant_name_preview')?.textContent || '';
-  const _slMerchName = _slMerchPreview.startsWith('✅ ') ? _slMerchPreview.slice(3).trim() : '';
-  const _slCity = (document.getElementById("sl_city")?.value || '').trim();
+  const _slMerchName = _slMerchPreview.startsWith('✅ ') ? _slMerchPreview.slice(3).trim() : (_slMerchPreview || '');
+  const _slCity      = (document.getElementById("sl_city")?.value || '').trim();
+  const _slMerchSel  = document.getElementById("sl_merchant_sel");
+  const _slMerchId   = (_slMerchSel?.value || '').trim();
+  const _slStoreId   = (document.getElementById("sl_store_id")?.value || '').trim();
+  const _slStoreName = (document.getElementById("sl_store_name_hidden")?.value || '').trim();
   const data = {
     title:           document.getElementById("sl_title").value.trim(),
     image_url:       img,
@@ -2819,6 +2910,9 @@ async function saveSlider() {
     end_date:        document.getElementById("sl_end_date")?.value || '',
     merchant_phone:  (document.getElementById("sl_merchant_phone")?.value || '').trim(),
     merchant_name:   _slMerchName,
+    merchant_id:     _slMerchId,
+    store_id:        _slStoreId,
+    store_name:      _slStoreName,
     city:            _slCity,
   };
   try {
@@ -3928,7 +4022,7 @@ async function openGiftCardModal() {
   gcModalInst.show();
 }
 
-async function editGiftCard(v) {
+async async function editGiftCard(v) {
   if (merchantsList.length === 0) await loadMerchants();
   _gcEditingId = v.id||v._id||"";
   document.getElementById("gc_id").value       = _gcEditingId;
@@ -4334,15 +4428,26 @@ async function saveStore() {
         </div>
         <div class="mb-3">
           <label class="form-label">Assign to Merchant <span style="color:var(--muted);font-size:11px">(optional)</span></label>
-          <input id="sl_merchant_phone" class="form-control" placeholder="e.g. 9535206137" oninput="lookupMerchantByPhone(this.value)">
+          <select id="sl_merchant_sel" class="form-select" onchange="slOnMerchantChange()">
+            <option value="">None (Admin banner)</option>
+          </select>
           <div id="sl_merchant_name_preview" style="font-size:12px;color:var(--primary);margin-top:4px;font-weight:600;min-height:18px"></div>
-          <small class="text-muted">If filled, this banner will appear in that merchant's banner screen.</small>
+          <input type="hidden" id="sl_merchant_phone">
+          <small class="text-muted">Selecting a merchant assigns this banner to their screen.</small>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Store <small class="text-muted">(auto-loaded from merchant)</small></label>
+          <select id="sl_store_sel" class="form-select" onchange="slOnStoreChange()" disabled>
+            <option value="">Select merchant first</option>
+          </select>
+          <input type="hidden" id="sl_store_id">
+          <input type="hidden" id="sl_store_name_hidden">
         </div>
         <input type="hidden" id="sl_order" value="0">
         <div class="mb-3">
           <label class="form-label">City <span style="color:var(--muted);font-size:11px">(optional)</span></label>
-          <input id="sl_city" class="form-control" placeholder="e.g. Ballari — leave empty for all cities">
-          <small class="text-muted">If filled, this banner only shows for users in that city.</small>
+          <input id="sl_city" class="form-control" placeholder="Auto-filled from store" readonly style="background:#f7faf8;cursor:default">
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">Auto-filled when a store is selected. Can also be typed manually.</div>
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="sl_active" checked>
