@@ -2308,6 +2308,10 @@ async function loadSliders() {
   const tbody = document.getElementById('bn_unified_body');
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
+  // Pre-load stores for enrichment
+  if (!window.allStoresList) {
+    try { const _sr = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = _sr.ok ? await _sr.json() : []; } catch(e) { window.allStoresList = []; }
+  }
   try {
     const [slidersR, merchantR] = await Promise.all([
       fetch('/admin/promo-sliders', {credentials:'include'}),
@@ -2388,8 +2392,19 @@ async function loadSliders() {
       !approvedMerchantIds.has(r._id)
     );
 
-    _allBannerRows = [...adminRows, ...filteredMerchantRows]
+    let _bnCombined = [...adminRows, ...filteredMerchantRows]
       .sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+    // Enrich store_name from allStoresList when banner doesn't have it
+    if (window.allStoresList && window.allStoresList.length > 0) {
+      _bnCombined = _bnCombined.map(r => {
+        if (!r.store_name && r.store_id) {
+          const _st = window.allStoresList.find(s => s._id === r.store_id);
+          if (_st) r.store_name = _st.store_name || '';
+        }
+        return r;
+      });
+    }
+    _allBannerRows = _bnCombined;
 
     // Stats — FIX 4: count merchant banners correctly
     const approved = _allBannerRows.filter(r=>r.status==='approved').length;
@@ -2651,6 +2666,16 @@ function openBnMerchantEditModal(row) {
       const img = document.getElementById('bn_edit_preview');
       img.src = this.value; img.style.display = this.value ? 'block' : 'none';
     });
+    // Enrich store_name from allStoresList when banner doesn't have it
+    if (window.allStoresList && window.allStoresList.length > 0) {
+      _allBannerRows = _allBannerRows.map(r => {
+        if (!r.store_name && r.store_id) {
+          const _st = window.allStoresList.find(s => s._id === r.store_id);
+          if (_st) r.store_name = _st.store_name || '';
+        }
+        return r;
+      });
+    }
   }
   // Populate fields
   const el2 = id => document.getElementById(id);
@@ -2753,7 +2778,7 @@ async function openSliderModal() {
   sliderModalInst.show();
 }
 
-function editSlider(s) {
+async function editSlider(s) {
   document.getElementById("sl_id").value = s.id||s._id||"";
   document.getElementById("sl_title").value = s.title||"";
   document.getElementById("sl_image_url").value = s.image_url||"";
@@ -2779,7 +2804,68 @@ function editSlider(s) {
     document.getElementById("sl_preview_img").src = "";
     document.getElementById("sl_upload_label").style.display = "";
   }
-  if (document.getElementById("sl_city")) document.getElementById("sl_city").value = s.city || '';
+  // Populate merchant dropdown
+  if (!window.merchantsList || merchantsList.length === 0) await loadMerchants();
+  const _slMerchSel = document.getElementById("sl_merchant_sel");
+  if (_slMerchSel) {
+    _slMerchSel.innerHTML = '<option value="">None (Admin banner)</option>' +
+      (window.merchantsList||[]).map(m => `<option value="${m._id||m.id}">${m.name||m.merchant_name||m.phone}</option>`).join('');
+    // Set selected merchant — match by merchant_id stored in banner, or by phone
+    const mid = s.merchant_id || '';
+    const mphone = (s.merchant_phone||'').replace(/\D/g,'').slice(-10);
+    if (mid) {
+      _slMerchSel.value = mid;
+    } else if (mphone) {
+      const found = (window.merchantsList||[]).find(m => (m.phone||'').replace(/\D/g,'').slice(-10) === mphone);
+      if (found) _slMerchSel.value = found._id || found.id || '';
+    }
+    // Update phone hidden field
+    if (document.getElementById("sl_merchant_phone")) {
+      document.getElementById("sl_merchant_phone").value = s.merchant_phone || '';
+    }
+    // Update preview
+    const _slPrev = document.getElementById("sl_merchant_name_preview");
+    if (_slPrev) {
+      const selOpt = _slMerchSel.options[_slMerchSel.selectedIndex];
+      if (_slMerchSel.value && selOpt) _slPrev.textContent = "✅ " + selOpt.textContent;
+      else _slPrev.textContent = '';
+    }
+  }
+  // Populate store dropdown from existing store_id / store_name
+  const _slStoreSel = document.getElementById("sl_store_sel");
+  const _slStoreId  = document.getElementById("sl_store_id");
+  const _slStoreNm  = document.getElementById("sl_store_name_hidden");
+  if (_slStoreSel) {
+    if (s.store_id) {
+      // Fetch stores for this merchant to populate dropdown
+      try {
+        const storeR = await fetch("/admin/stores", {credentials:"include"});
+        const allStores = storeR.ok ? await storeR.json() : [];
+        const mId = _slMerchSel?.value || '';
+        const mStores = mId ? allStores.filter(st => String(st.merchant_id)===String(mId)) : allStores;
+        if (mStores.length > 0) {
+          _slStoreSel.innerHTML = '<option value="">Select a store</option>' +
+            mStores.map(st => `<option value="${st._id}" data-city="${(st.city||'').toLowerCase()}" data-name="${st.store_name||''}">${st.store_name||st._id}</option>`).join('');
+          _slStoreSel.value = s.store_id;
+          _slStoreSel.disabled = false;
+        }
+      } catch(e) {
+        _slStoreSel.innerHTML = `<option value="${s.store_id}">${s.store_name||s.store_id}</option>`;
+        _slStoreSel.value = s.store_id;
+        _slStoreSel.disabled = false;
+      }
+    } else {
+      _slStoreSel.innerHTML = '<option value="">Select merchant first</option>';
+      _slStoreSel.disabled = true;
+    }
+  }
+  if (_slStoreId) _slStoreId.value = s.store_id || '';
+  if (_slStoreNm) _slStoreNm.value = s.store_name || '';
+  // Set city
+  if (document.getElementById("sl_city")) {
+    document.getElementById("sl_city").value = s.city || '';
+    document.getElementById("sl_city").readOnly = !!(s.store_id && s.city);
+  }
   sliderModalInst.show();
 }
 
@@ -3433,6 +3519,10 @@ async function loadGiftCards() {
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
   try {
+    // Load stores early so we can enrich store_name
+    if (!window.allStoresList) {
+      try { const _sr = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = _sr.ok ? await _sr.json() : []; } catch(e) { window.allStoresList = []; }
+    }
     // Fetch admin product cards + merchant product submissions in parallel
     const [adminR, merchantR] = await Promise.all([
       fetch("/admin/products", {credentials:"include"}),
@@ -3561,11 +3651,19 @@ async function loadGiftCards() {
       !approvedMerchantIds.has(r._id)       // not already copied to gift_vouchers
     );
 
-    _allProductRows = [...adminRows, ...dedupedMerchantRows]
+    let _combinedRows = [...adminRows, ...dedupedMerchantRows]
       .sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
-    // Build logo lookup map — strip heavy base64 from row objects so onclick JSON stays small
-    _pcLogoMap = {};
-    _allProductRows.forEach(r => { if (r.logo) { _pcLogoMap[r._id] = r.logo; r.logo = ''; } });
+    // Enrich store_name from allStoresList when backend didn't return it
+    if (window.allStoresList && window.allStoresList.length > 0) {
+      _combinedRows = _combinedRows.map(r => {
+        if (!r.store_name && r.store_id) {
+          const _st = window.allStoresList.find(s => s._id === r.store_id);
+          if (_st) r.store_name = _st.store_name || '';
+        }
+        return r;
+      });
+    }
+    _allProductRows = _combinedRows;
 
     // Update stats — expired is computed at normalize time (Issue 7)
     const approved = _allProductRows.filter(r=>r.status==='approved').length;
