@@ -20,7 +20,7 @@ def get_stores(city: str = None, category: str = None):
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
         "image":1,"image_url":1,"image_thumb":1,"_thumb":1,"store_image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
-        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1,
+        "lat":1,"lng":1,"latitude":1,"longitude":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1,
         "tags":1,"favorite_count":1,"favorites":1,"view_count":1,"views":1,
         "created_at":1,"late_night":1,"open_time":1,"close_time":1,"logo_url":1,"logo_thumb":1,"logo":1,"logo_image":1
     }))
@@ -106,8 +106,8 @@ def get_stores(city: str = None, category: str = None):
             "status": s.get("status", "active"),
             "visit_points": s.get("points_per_scan", 10),
             "points_per_scan": s.get("points_per_scan", 10),
-            "latitude": s.get("lat") or None,
-            "longitude": s.get("lng") or None,
+            "latitude": s.get("lat") or s.get("latitude") or None,
+            "longitude": s.get("lng") or s.get("longitude") or None,
             "rating": display_rating,
             "offer":      deal_summary,
             "deal_count":    deal_count,
@@ -539,19 +539,44 @@ def get_areas(city: str = ""):
 
 @router.get("/categories")
 def get_categories():
-    """Return all rich category objects with image_url, icon, subtitle for the Flutter app.
-    Returns ALL categories from DB regardless of store subscription status.
+    """Return rich category objects with image_url, icon, subtitle for the Flutter app.
+    Only categories that have at least 1 active subscribed store are returned.
     Handles two MongoDB schemas:
       1. Rich: multiple docs each with {name, image_url, icon, subtitle, sort_order}
       2. Legacy: single doc with {categories: ["Grocery","Restaurant",...]}
     """
+    from datetime import datetime as _dt
+    _now = _dt.utcnow()
+
+    # Build set of active subscription store IDs
+    _active_sub_ids = set()
+    for _sub in db.subscriptions.find({}, {"store_id": 1, "end_date": 1}):
+        _ed = _sub.get("end_date")
+        if _ed is None:
+            continue
+        try:
+            _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
+            if _ed_dt >= _now:
+                _active_sub_ids.add(str(_sub["store_id"]))
+        except Exception:
+            pass
+
+    # Build set of category names that have at least 1 active store with active subscription
+    _categories_with_stores = set()
+    for _store in db.stores.find({"status": "active"}, {"category": 1}):
+        if str(_store["_id"]) in _active_sub_ids:
+            _cat = (_store.get("category") or "").strip()
+            if _cat:
+                _categories_with_stores.add(_cat.lower())
+
     # Schema 1: try rich per-document format first
     rich_cats = list(db.categories.find({"name": {"$exists": True}, "status": {"$ne": "deleted"}}, {"_id":0}).sort("sort_order",1))
     if rich_cats:
         result = []
         for cat in rich_cats:
             cat_name = cat.get("name", "")
-            if not cat_name:
+            # Skip categories with no active stores
+            if _categories_with_stores and cat_name.lower() not in _categories_with_stores:
                 continue
             raw_img = cat.get("image_url", "") or ""
             # Pass http URLs AND base64 data URIs — Flutter decodes both
@@ -559,6 +584,8 @@ def get_categories():
                 safe_img = raw_img
             else:
                 safe_img = ""
+                if raw_img:
+                    print(f"[OFFRO /categories] WARN: unusable image_url for '{cat_name}' — stripped")
             result.append({
                 "name":       cat_name,
                 "subtitle":   cat.get("subtitle", ""),

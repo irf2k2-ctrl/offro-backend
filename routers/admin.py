@@ -871,6 +871,16 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
     store = db.stores.find_one({"_id": ObjectId(id)})
     if not store: raise HTTPException(404, "Not found")
     upd = {f: data[f] for f in ["store_name","category","city","state","area","address","phone","lat","lng","about"] if data.get(f) is not None}
+    # Normalise: if client sent latitude/longitude (long names), map to lat/lng
+    if data.get("latitude")  is not None and "lat" not in upd: upd["lat"] = data["latitude"]
+    if data.get("longitude") is not None and "lng" not in upd: upd["lng"] = data["longitude"]
+    # Convert to float if string (dashboard sends strings from input fields)
+    if "lat" in upd:
+        try: upd["lat"] = float(upd["lat"])
+        except (ValueError, TypeError): pass
+    if "lng" in upd:
+        try: upd["lng"] = float(upd["lng"])
+        except (ValueError, TypeError): pass
     if "points_per_scan" in data and data["points_per_scan"] is not None:
         upd["points_per_scan"] = int(data["points_per_scan"])
     if "visit_points" in data and data["visit_points"] is not None:
