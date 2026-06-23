@@ -2089,6 +2089,26 @@ async function openEditStore(id){
   else document.getElementById("store_image_preview").style.display="none";
   document.getElementById("store_msg").innerText="";
   populateCategoryDropdown(s.category||"");
+  // Populate subscription/payment fields from existing data
+  (function(){
+    var planEl = document.getElementById("sub_plan");
+    var amtEl  = document.getElementById("sub_amount");
+    var fromEl = document.getElementById("sub_from_date");
+    var endEl  = document.getElementById("sub_end_date");
+    var modeEl = document.getElementById("sub_pay_mode");
+    var refEl  = document.getElementById("sub_pay_ref");
+    if(planEl) planEl.value = s.sub_plan||"";
+    if(amtEl)  amtEl.value  = s.sub_amount||"";
+    if(modeEl) modeEl.value = s.sub_pay_mode||"cash";
+    if(refEl)  refEl.value  = s.sub_pay_ref||"";
+    // Parse end_date and from_date to date input format (YYYY-MM-DD)
+    function toDateInput(v){
+      if(!v) return "";
+      try{ return new Date(v).toISOString().split("T")[0]; }catch(e){ return ""; }
+    }
+    if(fromEl) fromEl.value = toDateInput(s.sub_from_date);
+    if(endEl)  endEl.value  = toDateInput(s.sub_end_date);
+  })();
   if (storeModal) storeModal.show();
 }
 function previewImage(){
@@ -2134,7 +2154,9 @@ async function submitStore(){
       return;
     }
     const _newSid=result.store_id||'';
-    if(!editingStore&&_newSid){
+    // Handle subscription for both new store and edit
+    const _targetSid = editingStore ? sid : _newSid;
+    if(_targetSid){
       const _plan=(document.getElementById("sub_plan")||{}).value||'';
       const _amount=(document.getElementById("sub_amount")||{}).value||'';
       const _fromDt=(document.getElementById("sub_from_date")||{}).value||'';
@@ -2143,16 +2165,16 @@ async function submitStore(){
       const _payRef=(document.getElementById("sub_pay_ref")||{}).value||'';
       if(_fromDt&&_endDt&&_amount){
         try{
-          document.getElementById("store_msg").innerText="Creating subscription…";
-          const _subR=await fetch(`/admin/stores/${_newSid}/subscription`,{
+          document.getElementById("store_msg").innerText=editingStore?"Updating subscription…":"Creating subscription…";
+          const _subR=await fetch(`/admin/stores/${_targetSid}/subscription`,{
             method:"POST",credentials:"include",
             headers:{"Content-Type":"application/json"},
             body:JSON.stringify({plan:_plan||"custom",amount:parseFloat(_amount)||0,gst_percent:0,
               from_date:_fromDt,end_date:_endDt,pay_mode:_payMode,payment_ref:_payRef})
           });
           const _subRes=await _subR.json();
-          if(!_subR.ok)document.getElementById("store_msg").innerText="Store created but subscription failed: "+(_subRes.detail||"error");
-        }catch(subErr){document.getElementById("store_msg").innerText="Store created (subscription err: "+subErr.message+")";}
+          if(!_subR.ok)document.getElementById("store_msg").innerText=(editingStore?"Store updated but":"Store created but")+" subscription failed: "+(_subRes.detail||"error");
+        }catch(subErr){document.getElementById("store_msg").innerText=(editingStore?"Store updated":"Store created")+" (subscription err: "+subErr.message+")";}
       }
     }
     if(storeModal)storeModal.hide();await loadStores();await loadStats();

@@ -595,6 +595,11 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "subscription":   sub_label,
         "sub_plan":       sub_plan,
         "sub_status":     sub_status,
+        "sub_end_date":   sub.get("end_date", ""),
+        "sub_from_date":  sub.get("from_date", ""),
+        "sub_amount":     sub.get("price", sub.get("total", "")),
+        "sub_pay_mode":   sub.get("pay_mode", ""),
+        "sub_pay_ref":    sub.get("payment_ref", ""),
         "deal_count":     len(deals),
         "best_deal":      best_deal,
         "lat":            s.get("lat", ""),
@@ -852,6 +857,8 @@ def admin_add_store_subscription(sid: str, data: dict, a=Depends(get_current_adm
     }
     sub_res = db.subscriptions.insert_one(sub_doc)
     sub_id  = str(sub_res.inserted_id)
+    # Invalidate store list cache so new subscription status shows immediately
+    global _store_cache; _store_cache["data"] = None
 
     # Update store status → active + subscription fields
     db.stores.update_one({"_id": ObjectId(sid)}, {"$set": {
