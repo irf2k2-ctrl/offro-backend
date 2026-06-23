@@ -4022,7 +4022,7 @@ async function openGiftCardModal() {
   gcModalInst.show();
 }
 
-async async function editGiftCard(v) {
+async function editGiftCard(v) {
   if (merchantsList.length === 0) await loadMerchants();
   _gcEditingId = v.id||v._id||"";
   document.getElementById("gc_id").value       = _gcEditingId;
