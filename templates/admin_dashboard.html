@@ -328,7 +328,7 @@ tr:hover td{background:#f7faf8;}
       <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-id-card me-2"></i>Products (App Display)</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage the product cards shown on the app home screen</div>
     </div>
-    <button class="btn-p" onclick="openGiftCardModal()"><i class="fas fa-plus me-1"></i> Add Card</button>
+    <button class="btn-p" onclick="openGiftCardModal()"><i class="fas fa-plus me-1"></i> Add Product</button>
   </div>
 
   <!-- Stats row -->
@@ -365,6 +365,7 @@ tr:hover td{background:#f7faf8;}
         <th style="width:60px">Preview</th>
         <th>Title</th>
         <th>Created By</th>
+        <th>Store</th>
         <th>City</th>
         <th>Validity</th>
         <th>Status</th>
@@ -3512,7 +3513,7 @@ function renderProductCards() {
   if (!tbody) return;
   const rows = _pcFilteredRows;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--muted)">No products found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:28px;color:var(--muted)">No products found.</td></tr>';
     if(showing) showing.textContent = '';
     if(pgBar)   pgBar.innerHTML = '';
     return;
@@ -3598,10 +3599,16 @@ function renderProductCards() {
         `</div>`
       : '';
     const _pcCity = r.city ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${r.city}</span>` : `<span style="color:var(--muted);font-size:11px">—</span>`;
+    const _pcStore = r.store_name
+      ? `<span style="font-size:12px;font-weight:600;color:var(--text)">${r.store_name}</span>`
+      : (r.store_id
+        ? `<span style="font-size:11px;color:var(--muted);font-family:monospace">${r.store_id.slice(-6)}</span>`
+        : `<span style="color:var(--muted);font-size:11px">—</span>`);
     return `<tr>
       <td>${logoHtml}</td>
       <td><strong style="font-size:13px">${r.title||'—'}</strong>${productSub}<div style="font-size:11px;color:var(--muted);margin-top:1px">${r.text||''}</div></td>
       <td>${creatorBadge}</td>
+      <td>${_pcStore}</td>
       <td>${_pcCity}</td>
       <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
       <td>${statusBadge}</td>
@@ -3908,7 +3915,9 @@ async function openGiftCardModal() {
   document.getElementById("gc_logo_img").src="";
   document.getElementById("gc_active").checked = true;
   document.getElementById("gc_msg").innerText = "";
-  if (document.getElementById("gc_city")) document.getElementById("gc_city").value = '';
+  if (document.getElementById("gc_city")) { document.getElementById("gc_city").value = ''; document.getElementById("gc_city").readOnly = false; }
+  const _gcStoreSelEl = document.getElementById("gc_store_sel");
+  if (_gcStoreSelEl) { _gcStoreSelEl.innerHTML = '<option value="">Select merchant first</option>'; _gcStoreSelEl.disabled = true; }
   _gcEditingId = '';
   _populateGcMerchants("");
   gcModalInst.show();
@@ -4004,13 +4013,19 @@ async function saveGiftCard() {
   const _gcDays = parseInt(document.getElementById("gc_duration_days")?.value) || 0;
   const _salePriceRaw = parseFloat(document.getElementById("gc_sale_price")?.value);
   const _origPriceRaw = parseFloat(document.getElementById("gc_original_price")?.value);
-  const _gcCity = (document.getElementById("gc_city")?.value || '').trim();
+  const _gcCity    = (document.getElementById("gc_city")?.value || '').trim();
+  const _gcStoreId = (document.getElementById("gc_store_sel")?.value || '').trim();
+  const _gcStoreSel  = document.getElementById("gc_store_sel");
+  const _gcStoreName = (_gcStoreSel && _gcStoreSel.selectedIndex > 0)
+    ? (_gcStoreSel.options[_gcStoreSel.selectedIndex]?.text || '') : '';
   const data = {
     title:          document.getElementById("gc_title").value.trim(),
     text,
     validity:       document.getElementById("gc_validity").value.trim(),
     logo:           document.getElementById("gc_logo").value.trim(),
     merchant_id:    document.getElementById("gc_merchant").value,
+    store_id:       _gcStoreId,
+    store_name:     _gcStoreName,
     city:           _gcCity,
     is_active:      document.getElementById("gc_active").checked,
     from_date:      _gcFrom,
@@ -4400,14 +4415,21 @@ async function saveStore() {
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Linked Merchant (optional)</label>
-          <select id="gc_merchant" class="form-select" onchange="gcAutoFillCity()">
+          <select id="gc_merchant" class="form-select" onchange="gcOnMerchantChange()">
             <option value="">None</option>
           </select>
         </div>
         <div class="mb-3">
+          <label class="form-label fw-semibold">Store <small class="text-muted">(auto-loaded from merchant)</small></label>
+          <select id="gc_store_sel" class="form-select" onchange="gcOnStoreChange()" disabled>
+            <option value="">Select merchant first</option>
+          </select>
+        </div>
+        <div class="mb-3">
           <label class="form-label fw-semibold">City</label>
-          <input type="text" id="gc_city" class="form-control" placeholder="e.g. Ballari (auto-filled from merchant's first store)">
-          <div style="font-size:11px;color:var(--muted);margin-top:3px">Auto-filled when a merchant is selected. Can be edited manually.</div>
+          <input type="text" id="gc_city" class="form-control" placeholder="Auto-filled from store" readonly
+            style="background:#f7faf8;cursor:default">
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">Auto-filled when a store is selected. Select merchant → store above.</div>
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="gc_active" checked>
@@ -5402,24 +5424,48 @@ function saveDiFile(type) { diUploadFile(type); }
 
 // ── City auto-fill from merchant's first store ──────────────────────
 async function gcAutoFillCity() {
-  const merchantId = document.getElementById("gc_merchant")?.value || '';
+  // Legacy shim — delegates to new merchant-change handler
+  gcOnMerchantChange();
+}
+
+async function gcOnMerchantChange() {
+  const merchantId = (document.getElementById("gc_merchant")?.value || '').trim();
+  const storeSel   = document.getElementById("gc_store_sel");
   const cityInput  = document.getElementById("gc_city");
-  if (!cityInput) return;
-  if (!merchantId) { cityInput.value = ''; return; }
+  if (storeSel) { storeSel.innerHTML = '<option value="">Loading stores…</option>'; storeSel.disabled = true; }
+  if (cityInput) { cityInput.value = ''; cityInput.readOnly = true; }
+  if (!merchantId) {
+    if (storeSel) { storeSel.innerHTML = '<option value="">Select merchant first</option>'; }
+    if (cityInput) cityInput.readOnly = false;
+    return;
+  }
   try {
-    const r = await fetch('/admin/stores/slim', {credentials:'include'});
-    if (!r.ok) return;
-    const stores = await r.json();
-    // Find the first store belonging to this merchant (by merchant_id field)
-    const match = stores.find(s => s.merchant_id && s.merchant_id === merchantId);
-    if (match && match.city) { cityInput.value = match.city; return; }
-    // Fallback: match by merchant phone from merchantsList
-    const acct = (window.merchantsList||[]).find(m => (m.id||m._id) === merchantId);
-    if (acct && acct.phone) {
-      const byPhone = stores.find(s => s.phone === acct.phone);
-      if (byPhone && byPhone.city) { cityInput.value = byPhone.city; }
+    const r = await fetch('/admin/stores', {credentials:'include'});
+    if (!r.ok) { if (storeSel) storeSel.innerHTML = '<option value="">Error loading stores</option>'; return; }
+    const allStores = await r.json();
+    const mStores = allStores.filter(s => String(s.merchant_id) === String(merchantId));
+    if (storeSel) {
+      if (!mStores.length) {
+        storeSel.innerHTML = '<option value="">No stores for this merchant</option>';
+        storeSel.disabled = true;
+      } else {
+        storeSel.innerHTML = '<option value="">Select a store</option>' +
+          mStores.map(s => `<option value="${s._id}" data-city="${(s.city||'').toLowerCase()}">${s.store_name||s._id}</option>`).join('');
+        storeSel.disabled = false;
+        if (mStores.length === 1) { storeSel.value = mStores[0]._id; gcOnStoreChange(); }
+      }
     }
-  } catch(e) { console.warn('gcAutoFillCity:', e); }
+  } catch(e) { console.warn('gcOnMerchantChange:', e); if (storeSel) storeSel.innerHTML = '<option value="">Error</option>'; }
+}
+
+function gcOnStoreChange() {
+  const storeSel  = document.getElementById("gc_store_sel");
+  const cityInput = document.getElementById("gc_city");
+  if (!storeSel || !cityInput) return;
+  const sel = storeSel.options[storeSel.selectedIndex];
+  const city = (sel && storeSel.value) ? (sel.getAttribute("data-city") || '') : '';
+  cityInput.value = city;
+  cityInput.readOnly = !!city;
 }
 </script>
 
