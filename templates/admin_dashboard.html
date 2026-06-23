@@ -2932,7 +2932,7 @@ async function slOnMerchantChange() {
   }
 
   // Set phone from merchantsList
-  const acct = (window.merchantsList || []).find(m => (m.id||m._id) === mid);
+  const acct = (merchantsList || []).find(m => (m.id||m._id) === mid);
   if (acct) {
     if (phoneInp) phoneInp.value = acct.phone || "";
     if (preview)  preview.textContent = "✅ " + (acct.name || acct.merchant_name || "");
@@ -3011,15 +3011,16 @@ async function saveSlider() {
   const _slMerchId   = (_slMerchSel?.value || '').trim();
   const _slStoreId   = (document.getElementById("sl_store_id")?.value || '').trim();
   const _slStoreName = (document.getElementById("sl_store_name_hidden")?.value || '').trim();
+  const _slFromDate = (document.getElementById("sl_from_date")?.value || '').trim();
+  const _slEndDate  = (document.getElementById("sl_end_date")?.value  || '').trim();
+  const _slDays     = parseInt(document.getElementById("sl_days")?.value)||30;
   const data = {
     title:           document.getElementById("sl_title").value.trim(),
     image_url:       img,
     link_url:        document.getElementById("sl_link_url").value.trim(),
     sort_order:      parseInt(document.getElementById("sl_order").value)||0,
     is_active:       document.getElementById("sl_active").checked,
-    from_date:       document.getElementById("sl_from_date")?.value || '',
-    days:            parseInt(document.getElementById("sl_days")?.value)||30,
-    end_date:        document.getElementById("sl_end_date")?.value || '',
+    days:            _slDays,
     merchant_phone:  (document.getElementById("sl_merchant_phone")?.value || '').trim(),
     merchant_name:   _slMerchName,
     merchant_id:     _slMerchId,
@@ -3027,6 +3028,17 @@ async function saveSlider() {
     store_name:      _slStoreName,
     city:            _slCity,
   };
+  // Only send dates if they have values — prevent overwriting valid DB dates with blanks
+  if (_slFromDate) data.from_date = _slFromDate;
+  if (_slEndDate)  data.end_date  = _slEndDate;
+  else if (_slFromDate && _slDays) {
+    // Calc end_date client-side if from_date is known
+    try {
+      const _fd = new Date(_slFromDate + 'T00:00:00');
+      _fd.setDate(_fd.getDate() + _slDays - 1);
+      data.end_date = _fd.toISOString().slice(0,10);
+    } catch(e) {}
+  }
   try {
     let url  = sid ? `/admin/promo-sliders/${sid}` : "/admin/promo-sliders";
     let meth = sid ? "PUT" : "POST";
