@@ -3391,12 +3391,15 @@ async function loadGiftCards() {
         merchant_phone: v.merchant_phone || '',
         created_at: v.created_at || '',
         _raw: v,
+        // store / city fields
+        store_id:    v.store_id   || '',
+        store_name:  v.store_name || '',
+        city:        v.city       || '',
         // product-specific fields
         price:       v.price || '',
         discount:    v.discount || '',
         category:    v.category || '',
         description: v.description || '',
-        city:        v.city || '',
       };
     });
 
@@ -3444,7 +3447,9 @@ async function loadGiftCards() {
         merchant_name: v.merchant_name || '',
         merchant_phone: v.merchant_phone || '',
         created_at: v.created_at || '',
-        city:       v.city || '',
+        city:        v.city       || '',
+        store_id:    v.store_id   || '',
+        store_name:  v.store_name || '',
         _raw: v,
       };
     });
