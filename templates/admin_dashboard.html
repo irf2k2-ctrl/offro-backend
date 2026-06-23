@@ -2308,10 +2308,11 @@ async function loadSliders() {
   const tbody = document.getElementById('bn_unified_body');
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
-  // Pre-load stores for enrichment
+  // Pre-load stores and merchants for enrichment
   if (!window.allStoresList) {
     try { const _sr = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = _sr.ok ? await _sr.json() : []; } catch(e) { window.allStoresList = []; }
   }
+  if (!merchantsList || merchantsList.length === 0) { try { await loadMerchants(); } catch(e) {} }
   try {
     const [slidersR, merchantR] = await Promise.all([
       fetch('/admin/promo-sliders', {credentials:'include'}),
@@ -2397,9 +2398,22 @@ async function loadSliders() {
     // Enrich store_name from allStoresList when banner doesn't have it
     if (window.allStoresList && window.allStoresList.length > 0) {
       _bnCombined = _bnCombined.map(r => {
-        if (!r.store_name && r.store_id) {
-          const _st = window.allStoresList.find(s => s._id === r.store_id);
-          if (_st) r.store_name = _st.store_name || '';
+        if (!r.store_name) {
+          if (r.store_id) {
+            // Direct lookup by store_id
+            const _st = window.allStoresList.find(s => s._id === r.store_id);
+            if (_st) r.store_name = _st.store_name || '';
+          } else if (r.merchant_phone) {
+            // Fallback: find merchant by phone → find their store
+            const _mphone = (r.merchant_phone||'').replace(/\D/g,'').slice(-10);
+            if (_mphone) {
+              const _merch = (merchantsList||[]).find(m => (m.phone||'').replace(/\D/g,'').slice(-10) === _mphone);
+              if (_merch) {
+                const _mst = window.allStoresList.find(s => String(s.merchant_id) === String(_merch._id));
+                if (_mst) { r.store_name = _mst.store_name || ''; r.store_id = _mst._id || ''; }
+              }
+            }
+          }
         }
         return r;
       });
@@ -2761,7 +2775,7 @@ async function openSliderModal() {
   const _slMerchSel = document.getElementById("sl_merchant_sel");
   if (_slMerchSel) {
     _slMerchSel.innerHTML = '<option value="">None (Admin banner)</option>' +
-      (window.merchantsList||[]).map(m => `<option value="${m.id||m._id}">${m.name||m.merchant_name||m.phone}</option>`).join('');
+      (merchantsList||[]).map(m => `<option value="${m.id||m._id}">${m.name||m.merchant_name||m.phone}</option>`).join('');
     _slMerchSel.value = "";
   }
   // Reset store dropdown
@@ -2785,9 +2799,20 @@ async function editSlider(s) {
   document.getElementById("sl_link_url").value = s.link_url||s.action||"";
   document.getElementById("sl_order").value = s.sort_order||0;
   document.getElementById("sl_active").checked = s.is_active!==false;
-  if (document.getElementById("sl_from_date"))      document.getElementById("sl_from_date").value      = s.from_date||'';
+  // Normalize dates to YYYY-MM-DD (backend may return "DD Mon YYYY" or ISO datetime)
+  function _toYMD(d) {
+    if (!d) return '';
+    const s2 = String(d).trim();
+    // Already YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}/.test(s2)) return s2.slice(0,10);
+    // Try parsing "DD Mon YYYY" → e.g. "22 Jun 2026"
+    const parsed = new Date(s2);
+    if (!isNaN(parsed)) return parsed.toISOString().slice(0,10);
+    return '';
+  }
+  if (document.getElementById("sl_from_date"))      document.getElementById("sl_from_date").value      = _toYMD(s.from_date);
   if (document.getElementById("sl_days"))           document.getElementById("sl_days").value           = s.duration_days||s.days||30;
-  if (document.getElementById("sl_end_date"))       document.getElementById("sl_end_date").value       = s.end_date||'';
+  if (document.getElementById("sl_end_date"))       document.getElementById("sl_end_date").value       = _toYMD(s.end_date);
   if (document.getElementById("sl_merchant_phone")) document.getElementById("sl_merchant_phone").value = s.merchant_phone||'';
   slUpdateEndDate();
   document.getElementById("sl_msg").innerText = "";
@@ -2805,18 +2830,18 @@ async function editSlider(s) {
     document.getElementById("sl_upload_label").style.display = "";
   }
   // Populate merchant dropdown
-  if (!window.merchantsList || merchantsList.length === 0) await loadMerchants();
+  if (!merchantsList || merchantsList.length === 0) await loadMerchants();
   const _slMerchSel = document.getElementById("sl_merchant_sel");
   if (_slMerchSel) {
     _slMerchSel.innerHTML = '<option value="">None (Admin banner)</option>' +
-      (window.merchantsList||[]).map(m => `<option value="${m._id||m.id}">${m.name||m.merchant_name||m.phone}</option>`).join('');
+      (merchantsList||[]).map(m => `<option value="${m._id||m.id}">${m.name||m.merchant_name||m.phone}</option>`).join('');
     // Set selected merchant — match by merchant_id stored in banner, or by phone
     const mid = s.merchant_id || '';
     const mphone = (s.merchant_phone||'').replace(/\D/g,'').slice(-10);
     if (mid) {
       _slMerchSel.value = mid;
     } else if (mphone) {
-      const found = (window.merchantsList||[]).find(m => (m.phone||'').replace(/\D/g,'').slice(-10) === mphone);
+      const found = (merchantsList||[]).find(m => (m.phone||'').replace(/\D/g,'').slice(-10) === mphone);
       if (found) _slMerchSel.value = found._id || found.id || '';
     }
     // Update phone hidden field
@@ -3519,10 +3544,11 @@ async function loadGiftCards() {
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
   try {
-    // Load stores early so we can enrich store_name
+    // Load stores and merchants early so we can enrich store_name
     if (!window.allStoresList) {
       try { const _sr = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = _sr.ok ? await _sr.json() : []; } catch(e) { window.allStoresList = []; }
     }
+    if (!merchantsList || merchantsList.length === 0) { try { await loadMerchants(); } catch(e) {} }
     // Fetch admin product cards + merchant product submissions in parallel
     const [adminR, merchantR] = await Promise.all([
       fetch("/admin/products", {credentials:"include"}),
@@ -3656,9 +3682,20 @@ async function loadGiftCards() {
     // Enrich store_name from allStoresList when backend didn't return it
     if (window.allStoresList && window.allStoresList.length > 0) {
       _combinedRows = _combinedRows.map(r => {
-        if (!r.store_name && r.store_id) {
-          const _st = window.allStoresList.find(s => s._id === r.store_id);
-          if (_st) r.store_name = _st.store_name || '';
+        if (!r.store_name) {
+          if (r.store_id) {
+            const _st = window.allStoresList.find(s => s._id === r.store_id);
+            if (_st) r.store_name = _st.store_name || '';
+          } else if (r.merchant_phone) {
+            const _mphone = (r.merchant_phone||'').replace(/\D/g,'').slice(-10);
+            if (_mphone) {
+              const _merch = (merchantsList||[]).find(m => (m.phone||'').replace(/\D/g,'').slice(-10) === _mphone);
+              if (_merch) {
+                const _mst = window.allStoresList.find(s => String(s.merchant_id) === String(_merch._id));
+                if (_mst) { r.store_name = _mst.store_name || ''; r.store_id = _mst._id || ''; }
+              }
+            }
+          }
         }
         return r;
       });
