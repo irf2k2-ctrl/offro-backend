@@ -1123,6 +1123,52 @@ tr:hover td{background:#f7faf8;}
           </div>
           <!-- New In Town checkbox removed -->
         </div>
+        <div id="store_payment_section" style="margin-top:14px;padding:14px 16px;background:#f2fbf6;border-radius:12px;border:1px solid var(--border)">
+          <div style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:10px">
+            <i class="fas fa-receipt"></i> Subscription / Payment
+            <span style="font-weight:400;color:var(--muted);font-size:11px"> (optional)</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;font-weight:600;color:var(--muted)">Plan</label>
+              <select id="sub_plan" class="form-select" style="margin-top:3px;font-size:13px" onchange="adminAutoCalcSubEnd()">
+                <option value="">Select Plan</option>
+                <option value="1month">1 Month</option>
+                <option value="3months">3 Months</option>
+                <option value="6months">6 Months</option>
+                <option value="12months">12 Months</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;color:var(--muted)">Amount (&#8377; excl. GST)</label>
+              <input id="sub_amount" type="number" min="0" class="form-control" style="margin-top:3px;font-size:13px" placeholder="e.g. 499">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;color:var(--muted)">Start Date</label>
+              <input id="sub_from_date" type="date" class="form-control" style="margin-top:3px;font-size:13px" oninput="adminAutoCalcSubEnd()">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;color:var(--muted)">End Date</label>
+              <input id="sub_end_date" type="date" class="form-control" style="margin-top:3px;font-size:13px">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;color:var(--muted)">Payment Mode</label>
+              <select id="sub_pay_mode" class="form-select" style="margin-top:3px;font-size:13px">
+                <option value="cash">Cash</option>
+                <option value="upi">UPI</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="cheque">Cheque</option>
+                <option value="free">Free / Waived</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;color:var(--muted)">Reference / Note</label>
+              <input id="sub_pay_ref" type="text" class="form-control" style="margin-top:3px;font-size:13px" placeholder="UPI ID / Cheque no.">
+            </div>
+          </div>
+          <div style="margin-top:6px;font-size:11px;color:var(--muted)" id="sub_auto_note"></div>
+        </div>
         <p id="store_msg" class="mt-3 mb-0" style="color:#c0392b;font-size:12px;"></p>
       </div>
       <div class="modal-footer">
@@ -1912,6 +1958,11 @@ async function openCreateStore(){
   document.getElementById("store_image_preview").style.display="none";
   // store_new_in_town removed
   document.getElementById("store_msg").innerText="";
+  // Reset payment/subscription fields
+  ["sub_plan","sub_amount","sub_from_date","sub_end_date","sub_pay_ref"].forEach(function(id){var el=document.getElementById(id);if(el)el.value="";});
+  var pm=document.getElementById("sub_pay_mode");if(pm)pm.value="cash";
+  var nt=document.getElementById("sub_auto_note");if(nt)nt.textContent="";
+  var fd=document.getElementById("sub_from_date");if(fd&&!fd.value)fd.value=new Date().toISOString().split("T")[0];
   populateCategoryDropdown("");
   if (storeModal) storeModal.show();
 }
@@ -1962,6 +2013,9 @@ async function submitStore(){
   let mid=document.getElementById("store_merchant").value;
   if(!name){document.getElementById("store_msg").innerText="Store name required";return;}
   if(!editingStore&&!mid){document.getElementById("store_msg").innerText="Select a merchant";return;}
+  const _sbtn=document.getElementById("storeSubmitBtn");
+  if(_sbtn&&_sbtn.disabled)return;
+  if(_sbtn){_sbtn.disabled=true;_sbtn.textContent="Saving…";}
   document.getElementById("store_msg").style.color="var(--muted)";
   document.getElementById("store_msg").innerText="Saving...";
   // When editing, only include merchant_id if a merchant was explicitly selected
@@ -1983,11 +2037,58 @@ async function submitStore(){
   try{
     let r=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),credentials:"include"});
     let result=await r.json();
-    if(!r.ok){document.getElementById("store_msg").style.color="#c0392b";document.getElementById("store_msg").innerText=result.detail||"Failed";return;}
-    if (storeModal) storeModal.hide(); await loadStores(); await loadStats();
+    if(!r.ok){
+      document.getElementById("store_msg").style.color="#c0392b";
+      document.getElementById("store_msg").innerText=result.detail||"Failed";
+      if(_sbtn){_sbtn.disabled=false;_sbtn.textContent=editingStore?"Save Changes":"Create Store";}
+      return;
+    }
+    const _newSid=result.store_id||'';
+    if(!editingStore&&_newSid){
+      const _plan=(document.getElementById("sub_plan")||{}).value||'';
+      const _amount=(document.getElementById("sub_amount")||{}).value||'';
+      const _fromDt=(document.getElementById("sub_from_date")||{}).value||'';
+      const _endDt=(document.getElementById("sub_end_date")||{}).value||'';
+      const _payMode=(document.getElementById("sub_pay_mode")||{}).value||'cash';
+      const _payRef=(document.getElementById("sub_pay_ref")||{}).value||'';
+      if(_fromDt&&_endDt&&_amount){
+        try{
+          document.getElementById("store_msg").innerText="Creating subscription…";
+          const _subR=await fetch(`/admin/stores/${_newSid}/subscription`,{
+            method:"POST",credentials:"include",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({plan:_plan||"custom",amount:parseFloat(_amount)||0,gst_percent:0,
+              from_date:_fromDt,end_date:_endDt,pay_mode:_payMode,payment_ref:_payRef})
+          });
+          const _subRes=await _subR.json();
+          if(!_subR.ok)document.getElementById("store_msg").innerText="Store created but subscription failed: "+(_subRes.detail||"error");
+        }catch(subErr){document.getElementById("store_msg").innerText="Store created (subscription err: "+subErr.message+")";}
+      }
+    }
+    if(storeModal)storeModal.hide();await loadStores();await loadStats();
     if(!editingStore&&result.qr_code)setTimeout(()=>showQR(result.store_id,name,result.qr_code),400);
-  }catch(e){document.getElementById("store_msg").style.color="#c0392b";document.getElementById("store_msg").innerText="Server error";}
+  }catch(e){
+    document.getElementById("store_msg").style.color="#c0392b";
+    document.getElementById("store_msg").innerText="Server error";
+  }finally{
+    if(_sbtn){_sbtn.disabled=false;_sbtn.textContent=editingStore?"Save Changes":"Create Store";}
+  }
 }
+function adminAutoCalcSubEnd(){
+  const from=document.getElementById("sub_from_date")?.value;
+  const plan=document.getElementById("sub_plan")?.value;
+  const endEl=document.getElementById("sub_end_date");
+  const note=document.getElementById("sub_auto_note");
+  if(!from||!endEl)return;
+  const planDays={"1month":30,"3months":90,"6months":180,"12months":365};
+  const days=planDays[plan]||0;
+  if(days>0){
+    const d=new Date(from);d.setDate(d.getDate()+days-1);
+    endEl.value=d.toISOString().split("T")[0];
+    if(note)note.textContent="Auto-set: "+days+" days from start";
+  }else{if(note)note.textContent="";}
+}
+
 async function approveStore(id){
   if(!confirm("Approve and set store to Active?"))return;
   await fetch(`/admin/stores/${id}/approve`,{method:"PUT",credentials:"include"});

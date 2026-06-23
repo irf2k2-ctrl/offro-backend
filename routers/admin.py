@@ -750,6 +750,10 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     name = data.get("store_name","").strip()
     if not mid: raise HTTPException(400, "merchant_id required")
     if not name: raise HTTPException(400, "store_name required")
+    # ── Idempotency: prevent duplicate stores (same merchant + same name) ──
+    existing = db.stores.find_one({"merchant_id": mid, "store_name": {"$regex": f"^{name}$", "$options": "i"}})
+    if existing:
+        raise HTTPException(409, f"A store named '{name}' already exists for this merchant.")
     try: merchant = db.accounts.find_one({"_id": ObjectId(mid)}) or db.merchants.find_one({"_id": ObjectId(mid)})
     except: raise HTTPException(400, "Invalid merchant_id")
     if not merchant: raise HTTPException(404, "Merchant not found")
@@ -792,6 +796,104 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     except Exception:
         pass
     return {"message": "Store created", "store_id": sid, "qr_code": qr}
+
+@router.post("/stores/{sid}/subscription")
+def admin_add_store_subscription(sid: str, data: dict, a=Depends(get_current_admin)):
+    """Admin manually adds a subscription for a store (no payment gateway — cash/offline)."""
+    store = db.stores.find_one({"_id": ObjectId(sid)})
+    if not store: raise HTTPException(404, "Store not found")
+
+    plan       = data.get("plan", "custom").strip()
+    from_date_str = str(data.get("from_date","")).strip()
+    end_date_str  = str(data.get("end_date","")).strip()
+    amount     = float(data.get("amount", 0) or 0)
+    gst_pct    = float(data.get("gst_percent", 0) or 0)
+    gst_amt    = round(amount * gst_pct / 100, 2)
+    total      = round(amount + gst_amt, 2)
+    pay_mode   = str(data.get("pay_mode", "cash") or "cash").strip()   # cash/upi/bank/cheque/free
+    pay_ref    = str(data.get("payment_ref", "") or "").strip()
+    note       = str(data.get("note", "") or "").strip()
+
+    if not from_date_str or not end_date_str:
+        raise HTTPException(400, "from_date and end_date are required")
+
+    # Parse dates
+    try:
+        from_date = datetime.fromisoformat(from_date_str)
+    except Exception:
+        raise HTTPException(400, f"Invalid from_date: {from_date_str}")
+    try:
+        end_date = datetime.fromisoformat(end_date_str)
+    except Exception:
+        raise HTTPException(400, f"Invalid end_date: {end_date_str}")
+
+    mid_str = str(store.get("merchant_id",""))
+    store_name = store.get("store_name","")
+
+    # Upsert subscription (prevent duplicate active plan)
+    sub_doc = {
+        "store_id":         sid,
+        "merchant_id":      mid_str,
+        "plan":             plan,
+        "from_date":        from_date,
+        "end_date":         end_date,
+        "price":            amount,
+        "gst":              gst_amt,
+        "gst_percent":      gst_pct,
+        "total":            total,
+        "status":           "paid",
+        "pay_mode":         pay_mode,
+        "payment_ref":      pay_ref,
+        "note":             note,
+        "added_by_admin":   True,
+        "created_at":       datetime.utcnow(),
+        "paid_at":          datetime.utcnow(),
+    }
+    sub_res = db.subscriptions.insert_one(sub_doc)
+    sub_id  = str(sub_res.inserted_id)
+
+    # Update store status → active + subscription fields
+    db.stores.update_one({"_id": ObjectId(sid)}, {"$set": {
+        "status":             "active",
+        "subscription_plan":  plan,
+        "subscription_start": from_date.isoformat(),
+        "subscription_end":   end_date.isoformat(),
+    }})
+
+    # Create invoice record
+    invoice_no = f"LS-ADMIN-{datetime.utcnow().strftime('%Y%m%d')}-{sub_id[-6:].upper()}"
+    try:
+        merchant = (db.accounts.find_one({"_id": ObjectId(mid_str)}) or
+                    db.merchants.find_one({"_id": ObjectId(mid_str)})) if mid_str else None
+    except Exception:
+        merchant = None
+    merchant_name  = (merchant or {}).get("name", "")
+    merchant_phone = (merchant or {}).get("phone", "")
+    db.invoices.insert_one({
+        "invoice_no":     invoice_no,
+        "merchant_id":    mid_str,
+        "merchant_name":  merchant_name,
+        "merchant_phone": merchant_phone,
+        "store_id":       sid,
+        "store_name":     store_name,
+        "plan":           plan,
+        "base_price":     amount,
+        "gst":            gst_amt,
+        "total":          total,
+        "pay_mode":       pay_mode,
+        "payment_ref":    pay_ref,
+        "from_date":      from_date,
+        "end_date":       end_date,
+        "added_by_admin": True,
+        "created_at":     datetime.utcnow(),
+    })
+
+    return {
+        "ok": True,
+        "subscription_id": sub_id,
+        "invoice_no":      invoice_no,
+        "message":         f"Subscription added. Store '{store_name}' is now active until {end_date_str}.",
+    }
 
 @router.get("/stores/slim")
 def get_stores_slim(a=Depends(get_current_admin)):

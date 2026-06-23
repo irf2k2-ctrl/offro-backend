@@ -911,8 +911,18 @@ def get_about_public():
 # =================== PROMO SLIDERS (public - for Flutter app) ===================
 @router.get("/promo-sliders")
 def get_promo_sliders_public(city: str = None):
-    """Returns active promo slider banners for the app home screen, optionally filtered by city."""
-    base_query = {"is_active": {"$ne": False}}
+    """Returns active, non-expired promo slider banners for the app home screen."""
+    from datetime import datetime as _dt
+    _now_iso = _dt.utcnow().strftime("%Y-%m-%d")
+    # Exclude banners where is_active=False OR where end_date/expires_at is in the past
+    base_query = {
+        "is_active": {"$ne": False},
+        "$or": [
+            {"end_date":    {"$exists": False}},
+            {"end_date":    {"$in": [None, ""]}},
+            {"end_date":    {"$gte": _now_iso}},
+        ]
+    }
     docs = []
     if city and city.strip():
         city = _normalize_city(city)  # FIX: map GPS alternate spellings (Bellary→Ballari etc.)
