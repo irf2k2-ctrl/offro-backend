@@ -160,7 +160,7 @@ tr:hover td{background:#f7faf8;}
   </div>
   <div class="table-wrap"><table>
     <thead><tr><th>User</th><th>Phone</th><th>Points</th><th>Value</th><th>Requested</th><th>Status</th><th>Action</th></tr></thead>
-    <tbody id="gift_product_requests_table"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+    <tbody id="gift_product_requests_table"><tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
   </table></div>
 </div>
 
@@ -372,7 +372,7 @@ tr:hover td{background:#f7faf8;}
         <th>Actions</th>
         <th>Created On</th>
       </tr></thead>
-      <tbody id="pc_unified_body"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+      <tbody id="pc_unified_body"><tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
     </table>
   </div>
   <!-- ISSUE 8: Pagination bar -->
@@ -445,13 +445,14 @@ tr:hover td{background:#f7faf8;}
         <th style="width:110px">Preview</th>
         <th>Title</th>
         <th>Merchant / Type</th>
+        <th>Store</th>
         <th>City</th>
         <th>Duration</th>
         <th>Status</th>
         <th>Created On</th>
         <th>Actions</th>
       </tr></thead>
-      <tbody id="bn_unified_body"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+      <tbody id="bn_unified_body"><tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
     </table>
   </div>
   <div style="margin-top:10px;font-size:12px;color:var(--muted)" id="bn_showing"></div>
@@ -2306,7 +2307,7 @@ let _allBannerRows = [];
 async function loadSliders() {
   const tbody = document.getElementById('bn_unified_body');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
   try {
     const [slidersR, merchantR] = await Promise.all([
       fetch('/admin/promo-sliders', {credentials:'include'}),
@@ -3430,7 +3431,7 @@ function _parseFlexDate(s) {
 async function loadGiftCards() {
   const tbody = document.getElementById('pc_unified_body');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
   try {
     // Fetch admin product cards + merchant product submissions in parallel
     const [adminR, merchantR] = await Promise.all([
@@ -3700,9 +3701,7 @@ function renderProductCards() {
     const _pcCity = r.city ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${r.city}</span>` : `<span style="color:var(--muted);font-size:11px">—</span>`;
     const _pcStore = r.store_name
       ? `<span style="font-size:12px;font-weight:600;color:var(--text)">${r.store_name}</span>`
-      : (r.store_id
-        ? `<span style="font-size:11px;color:var(--muted);font-family:monospace">${r.store_id.slice(-6)}</span>`
-        : `<span style="color:var(--muted);font-size:11px">—</span>`);
+      : `<span style="color:var(--muted);font-size:11px">—</span>`;
     return `<tr>
       <td>${logoHtml}</td>
       <td><strong style="font-size:13px">${r.title||'—'}</strong>${productSub}<div style="font-size:11px;color:var(--muted);margin-top:1px">${r.text||''}</div></td>
