@@ -1548,12 +1548,22 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
     if disc_code:
         db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
 
-    # Auto-assign city from merchant's first store
-    _af_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
-    _af_city  = (_af_store.get("city", "") if _af_store else "").strip().lower()
+    # Use city from selected store_id (passed by app), else fall back to first store
+    _req_store_id = data.get("store_id", "").strip()
+    _req_city     = data.get("city", "").strip().lower()
+    if _req_store_id:
+        try:
+            _af_store = db.stores.find_one({"_id": ObjectId(_req_store_id), "merchant_id": merchant_id}, {"city": 1, "store_name": 1})
+        except Exception:
+            _af_store = None
+        _af_city = (_af_store.get("city", "") if _af_store else _req_city).strip().lower() or _req_city
+    else:
+        _af_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
+        _af_city  = (_af_store.get("city", "") if _af_store else _req_city).strip().lower() or _req_city
 
     product_doc = {
         "merchant_id":    merchant_id,
+        "store_id":       _req_store_id,
         "merchant_name":  m.get("name", ""),
         "merchant_phone": str(m.get("phone", "")),
         "city":           _af_city,
@@ -1653,12 +1663,22 @@ def verify_product_payment(data: dict, m=Depends(get_merchant)):
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
 
-    # Auto-assign city from merchant's first store
-    _vf_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
-    _vf_city  = (_vf_store.get("city", "") if _vf_store else "").strip().lower()
+    # Use city from selected store_id (passed by app), else fall back to first store
+    _vf_store_id = data.get("store_id", "").strip()
+    _vf_req_city = data.get("city", "").strip().lower()
+    if _vf_store_id:
+        try:
+            _vf_store = db.stores.find_one({"_id": ObjectId(_vf_store_id), "merchant_id": merchant_id}, {"city": 1})
+        except Exception:
+            _vf_store = None
+        _vf_city = (_vf_store.get("city", "") if _vf_store else _vf_req_city).strip().lower() or _vf_req_city
+    else:
+        _vf_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
+        _vf_city  = (_vf_store.get("city", "") if _vf_store else _vf_req_city).strip().lower() or _vf_req_city
 
     product_doc = {
         "merchant_id":      merchant_id,
+        "store_id":         _vf_store_id,
         "merchant_name":    m.get("name", ""),
         "merchant_phone":   str(m.get("phone", "")),
         "city":             _vf_city,
