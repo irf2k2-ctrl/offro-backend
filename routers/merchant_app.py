@@ -1154,6 +1154,14 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     title       = data.get("title", "")
     image_url   = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
     image_thumb = _make_thumb_url(image_url)
+    city        = str(data.get("city", "") or "").strip()
+    store_id    = str(data.get("store_id", "") or "").strip()
+    store_name  = str(data.get("store_name", "") or "").strip()
+    if not city and store_id:
+        try:
+            _st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
+            if _st: city = str(_st.get("city", "") or "").strip()
+        except: pass
 
     order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
     if not order:
@@ -1181,6 +1189,9 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "gst_percent":      order.get("gst_percent", 18),
         "gst_amount":       order.get("gst_amount", 0),
         "total":            order.get("total", 0),
+        "city":             city,
+        "store_id":         store_id,
+        "store_name":       store_name,
         "payment_status":   "free",
         "status":           "pending",
         "approval_status":  "pending",
@@ -1228,6 +1239,14 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     title             = data.get("title", "")
     image_url         = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
     image_thumb       = _make_thumb_url(image_url)
+    city              = str(data.get("city", "") or "").strip()
+    store_id          = str(data.get("store_id", "") or "").strip()
+    store_name        = str(data.get("store_name", "") or "").strip()
+    if not city and store_id:
+        try:
+            _st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
+            if _st: city = str(_st.get("city", "") or "").strip()
+        except: pass
     razorpay_payment_id = data.get("razorpay_payment_id", "")
     razorpay_order_id   = data.get("razorpay_order_id", "")
     razorpay_signature  = data.get("razorpay_signature", "")
@@ -1267,6 +1286,9 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "discount_code":    order.get("discount_code", ""),
         "discount_amount":  order.get("discount_amount", order.get("discount", 0)),
         "final_amount":     order.get("final_amount", order.get("total", 0)),
+        "city":             city,
+        "store_id":         store_id,
+        "store_name":       store_name,
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":   "paid",
         "status":           "pending",
