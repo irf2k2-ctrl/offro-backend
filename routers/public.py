@@ -13,8 +13,11 @@ def get_stores(city: str = None, category: str = None):
         city = _normalize_city(city)  # FIX: map GPS alternate spellings (Bellary→Ballari etc.)
         query["city"] = {"$regex": city, "$options": "i"}
     if category and category.strip() and category.strip() != "All":
-        # Case-insensitive match so "Restaurant" matches "restaurant", "RESTAURANT" etc.
-        query["category"] = {"$regex": f"^{category.strip()}$", "$options": "i"}
+        # FIX ISSUE-4: Use flexible partial match (not ^exact$) so "Restaurant" also matches
+        # "Restaurants", "restaurant", "food & restaurant" etc. stored in DB
+        import re as _re
+        _cat_escaped = _re.escape(category.strip())
+        query["category"] = {"$regex": _cat_escaped, "$options": "i"}
 
 
     stores = list(db.stores.find(query, {
@@ -968,17 +971,19 @@ def get_public_products():
             if sid:
                 store["id"] = str(sid)
                 store.pop("_id", None)
-        # If store_id exists, try to pull store image for display
+        # FIX ISSUE-1: Always resolve store_name + logo from store_id (never trust stale stored value)
         store_id = d.get("store_id", "")
-        if store_id and not d.get("logo"):
+        if store_id:
             try:
                 from bson import ObjectId as OId
-                s = db.stores.find_one({"_id": OId(store_id)}, {"store_image2":1,"image":1,"store_name":1})
+                s = db.stores.find_one({"_id": OId(store_id)}, {"store_image2":1,"image":1,"store_name":1,"_id":1})
                 if s:
-                    d["logo"] = s.get("store_image2") or s.get("image") or ""
-                    if not d.get("title") and s.get("store_name"):
-                        d["title"] = s["store_name"]
-            except: pass
+                    # Always overwrite store_name from live store record — it's the source of truth
+                    d["store_name"] = s.get("store_name", d.get("store_name", ""))
+                    if not d.get("logo"):
+                        d["logo"] = s.get("store_image2") or s.get("image") or ""
+            except Exception:
+                pass
         result.append({"id": vid, **d})
     return result
 
