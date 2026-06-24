@@ -439,6 +439,12 @@ def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
 
 # ───────────── plans / pricing ─────────────
 
+@router.get("/categories")
+def get_categories_for_merchant(m=Depends(get_merchant)):
+    """Return all active categories — used for Add Store / Add Product dropdowns."""
+    cats = list(db.categories.find({"status": {"$ne": "deleted"}}, {"_id": 0, "name": 1, "image_url": 1, "subtitle": 1}).sort("sort_order", 1))
+    return cats
+
 @router.get("/plans")
 def get_plans():
     doc  = db.pricing.find_one({}) or {}
@@ -1073,7 +1079,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
         "discount_amount": discount_value,
         "final_amount":   total,
         "status":         "pending",
-        "approval_status": "pending",
+        "approval_status": "pending_approval",
         "created_at":     datetime.utcnow().isoformat(),
     }
     inserted = db.banner_orders.insert_one(order_doc)
@@ -1194,7 +1200,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "store_name":       store_name,
         "payment_status":   "free",
         "status":           "pending",
-        "approval_status":  "pending",
+        "approval_status":  "pending_approval",
         "created_at":       datetime.utcnow().isoformat(),
     }
     res = db.merchant_banners.insert_one(banner)
@@ -1292,7 +1298,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":   "paid",
         "status":           "pending",
-        "approval_status":  "pending",
+        "approval_status":  "pending_approval",
         "created_at":       datetime.utcnow().isoformat(),
     }
     res = db.merchant_banners.insert_one(banner)
@@ -1490,7 +1496,7 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
         "total":          total,
         "amount_paise":   amount_paise,
         "status":         "pending",
-        "approval_status": "pending",
+        "approval_status": "pending_approval",
         "created_at":     datetime.utcnow().isoformat(),
     }
     inserted = db.voucher_orders.insert_one(order_doc)
@@ -1608,7 +1614,7 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
         "total":          order.get("total", 0),
         "payment_status": "free",
         "status":         "pending",
-        "approval_status":"pending",
+        "approval_status":"pending_approval",
         "created_at":     datetime.utcnow().isoformat(),
     }
     res = db.merchant_vouchers.insert_one(product_doc)
@@ -1726,7 +1732,7 @@ def verify_product_payment(data: dict, m=Depends(get_merchant)):
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":   "paid",
         "status":           "pending",
-        "approval_status":  "pending",
+        "approval_status":  "pending_approval",
         "created_at":       datetime.utcnow().isoformat(),
     }
     res = db.merchant_vouchers.insert_one(product_doc)

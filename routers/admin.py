@@ -2404,6 +2404,8 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
             "source_banner_id": bid,
             "merchant_name":  b.get("merchant_name",""),
             "merchant_phone": str(b.get("merchant_phone", b.get("phone", ""))),
+            "city":           b.get("city",""),
+            "store_id":       b.get("store_id",""),
             "from_date":      b.get("from_date",""),
             "end_date":       b.get("end_date",""),
             "duration_days":  b.get("duration_days",""),
@@ -2426,6 +2428,8 @@ def resync_merchant_banner_sliders(a=Depends(get_current_admin)):
             {"source_banner_id": bid},
             {"$set": {
                 "merchant_phone": str(b.get("merchant_phone", b.get("phone", ""))),
+                "city":           b.get("city", ""),
+                "store_id":       b.get("store_id", ""),
                 "from_date":      b.get("from_date", ""),
                 "end_date":       b.get("end_date", ""),
                 "duration_days":  b.get("duration_days", ""),
