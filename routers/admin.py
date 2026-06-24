@@ -2090,6 +2090,20 @@ def delete_notification(notif_id: str, a=Depends(get_current_admin)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.delete("/notifications/cleanup/old")
+def cleanup_old_notifications(days: int = 30, a=Depends(get_current_admin)):
+    """Delete all notification records older than N days (default 30)."""
+    from datetime import datetime as _dt, timedelta as _td
+    cutoff = (_dt.utcnow() - _td(days=days)).isoformat()
+    # Match records with sent_at or created_at older than cutoff
+    result = db.notifications.delete_many({
+        "$or": [
+            {"sent_at":    {"$lt": cutoff}},
+            {"created_at": {"$lt": cutoff}},
+        ]
+    })
+    return {"message": f"Deleted {result.deleted_count} notification(s) older than {days} days"}
+
 @router.post("/notifications/process-queue")
 def process_notification_queue(a=Depends(get_current_admin)):
     """Retry all queued/failed notifications."""
@@ -3266,10 +3280,13 @@ def admin_get_default_images(a=Depends(get_current_admin)):
             return [val]
         return []
     return {
-        "store":   _to_list(doc.get("store",   doc.get("store_images",   []))),
-        "product": _to_list(doc.get("product", doc.get("product_images", []))),
-        "offer":   _to_list(doc.get("offer",   doc.get("offer_images",   []))),
-        "city":    _to_list(doc.get("city",    doc.get("city_images",    []))) or ["https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1200&q=80"],
+        "store":      _to_list(doc.get("store",      doc.get("store_images",   []))),
+        "product":    _to_list(doc.get("product",    doc.get("product_images", []))),
+        "offer":      _to_list(doc.get("offer",      doc.get("offer_images",   []))),
+        "city":       _to_list(doc.get("city",       doc.get("city_images",    []))) or ["https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1200&q=80"],
+        "no_service": _to_list(doc.get("no_service", [])),
+        "no_service_title":   str(doc.get("no_service_title",   "") or ""),
+        "no_service_message": str(doc.get("no_service_message", "") or ""),
     }
 
 
@@ -3321,6 +3338,32 @@ def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
     if update:
         db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
     return {"ok": True}
+
+@router.put("/default-images/no-service")
+def admin_set_no_service_config(body: dict, a=Depends(get_current_admin)):
+    """Set the no-service-available image URL, title, and message shown when a city has no stores."""
+    update = {}
+    if "url" in body and body["url"]:
+        url = str(body["url"]).strip()
+        if not url.startswith("http"):
+            raise HTTPException(400, "URL must start with http")
+        # Store as single-item list (consistent with other image types)
+        existing = db.settings.find_one({"_type": "default_images"}) or {}
+        cur = existing.get("no_service", [])
+        if not isinstance(cur, list):
+            cur = [cur] if cur else []
+        if url not in cur:
+            cur.append(url)
+        update["no_service"] = cur
+    if "title" in body:
+        update["no_service_title"] = str(body["title"] or "").strip()
+    if "message" in body:
+        update["no_service_message"] = str(body["message"] or "").strip()
+    if not update:
+        raise HTTPException(400, "No fields to update")
+    db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
+    return {"ok": True}
+
 
 @router.delete("/default-images/url")
 def admin_remove_default_image_url(body: dict, a=Depends(get_current_admin)):
