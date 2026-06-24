@@ -8,25 +8,29 @@ router = APIRouter(tags=["Public"])
 @router.get("/stores")
 def get_stores(city: str = None, category: str = None):
     """Public endpoint - Flutter app fetches this"""
+    import re as _re
     query = {"status": "active"}
+    _city_norm = None
     if city:
-        city = _normalize_city(city)  # FIX: map GPS alternate spellings (Bellary→Ballari etc.)
-        query["city"] = {"$regex": city, "$options": "i"}
+        _city_norm = _normalize_city(city)
+        query["city"] = {"$regex": _re.escape(_city_norm), "$options": "i"}
     if category and category.strip() and category.strip() != "All":
-        # FIX ISSUE-4: Use flexible partial match (not ^exact$) so "Restaurant" also matches
-        # "Restaurants", "restaurant", "food & restaurant" etc. stored in DB
-        import re as _re
         _cat_escaped = _re.escape(category.strip())
         query["category"] = {"$regex": _cat_escaped, "$options": "i"}
 
-
-    stores = list(db.stores.find(query, {
+    _STORE_PROJ = {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
         "image":1,"image_url":1,"image_thumb":1,"_thumb":1,"store_image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
         "lat":1,"lng":1,"latitude":1,"longitude":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1,
         "tags":1,"favorite_count":1,"favorites":1,"view_count":1,"views":1,
         "created_at":1,"late_night":1,"open_time":1,"close_time":1,"logo_url":1,"logo_thumb":1,"logo":1,"logo_image":1
-    }))
+    }
+    stores = list(db.stores.find(query, _STORE_PROJ))
+    # City+category fallback: if combined filter returns nothing, retry category-only
+    # This handles stores where city is missing or uses a different spelling than GPS
+    if not stores and _city_norm and category and category.strip() not in ("", "All"):
+        _fallback_q = {"status": "active", "category": {"$regex": _re.escape(category.strip()), "$options": "i"}}
+        stores = list(db.stores.find(_fallback_q, _STORE_PROJ))
     if not stores:
         return []
 

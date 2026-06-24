@@ -4613,8 +4613,10 @@ async function saveGiftCard() {
   const data = {
     title:          document.getElementById("gc_title").value.trim(),
     text,
+    offer_text:     text,  // alias for merchant-product backend
     validity:       document.getElementById("gc_validity").value.trim(),
     logo:           document.getElementById("gc_logo").value.trim(),
+    logo_url:       document.getElementById("gc_logo").value.trim(),  // alias
     merchant_id:    document.getElementById("gc_merchant").value,
     store_id:       _gcStoreId,
     store_name:     _gcStoreName,
@@ -4623,6 +4625,7 @@ async function saveGiftCard() {
     from_date:      _gcFrom,
     end_date:       _gcTo,
     duration_days:  _gcDays || undefined,
+    price:          isNaN(_salePriceRaw) ? undefined : _salePriceRaw,   // merchant-product field
     sale_price:     isNaN(_salePriceRaw) ? undefined : _salePriceRaw,
     original_price: isNaN(_origPriceRaw) ? undefined : _origPriceRaw,
     pay_from_date:  _gcPayFrom || undefined,
@@ -4633,12 +4636,19 @@ async function saveGiftCard() {
     pay_ref:        _gcPayRef  || undefined,
   };
   const _col = document.getElementById("gc_collection")?.value || "gift_vouchers";
+  const _isMerchantProduct = _col === "gift_vouchers" || _col === "merchant_vouchers";
   try {
     let url, meth;
     if (vid && _col === "products") {
+      // Admin-created product → /admin/products/{vid}
       url  = `/admin/products/${vid}`;
       meth = "PUT";
+    } else if (vid && _isMerchantProduct) {
+      // Merchant-created product → /admin/merchant-products/{vid}
+      url  = `/admin/merchant-products/${vid}`;
+      meth = "PUT";
     } else {
+      // New admin product
       url  = vid ? `/admin/products/${vid}` : "/admin/products";
       meth = vid ? "PUT" : "POST";
     }
@@ -4646,7 +4656,7 @@ async function saveGiftCard() {
     if (!res.ok) { const d = await res.json(); document.getElementById("gc_msg").innerText = d.detail||"Error"; return; }
     gcModalInst.hide();
     loadGiftCards();
-  } catch { document.getElementById("gc_msg").innerText = "Server error"; }
+  } catch (e) { document.getElementById("gc_msg").innerText = "Server error: " + (e.message||e); }
 }
 
 async function deleteGiftCard(id) {

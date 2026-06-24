@@ -836,31 +836,12 @@ def admin_add_store_subscription(sid: str, data: dict, a=Depends(get_current_adm
     mid_str = str(store.get("merchant_id",""))
     store_name = store.get("store_name","")
 
-    # Upsert subscription (prevent duplicate active plan)
-    sub_doc = {
-        "store_id":         sid,
-        "merchant_id":      mid_str,
-        "plan":             plan,
-        "from_date":        from_date,
-        "end_date":         end_date,
-        "price":            amount,
-        "gst":              gst_amt,
-        "gst_percent":      gst_pct,
-        "total":            total,
-        "status":           "paid",
-        "pay_mode":         pay_mode,
-        "payment_ref":      pay_ref,
-        "note":             note,
-        "added_by_admin":   True,
-        "created_at":       datetime.utcnow(),
-        "paid_at":          datetime.utcnow(),
-    }
-    sub_res = db.subscriptions.insert_one(sub_doc)
-    sub_id  = str(sub_res.inserted_id)
-    # Invalidate store list cache so new subscription status shows immediately
+    # ── Duplicate prevention: check if subscription already exists ──
+    existing_sub = db.subscriptions.find_one({"store_id": sid}, sort=[("created_at", -1)])
+
     global _store_cache; _store_cache["data"] = None
 
-    # Update store status → active + subscription fields
+    # Always update the store record with new dates/plan
     db.stores.update_one({"_id": ObjectId(sid)}, {"$set": {
         "status":             "active",
         "subscription_plan":  plan,
@@ -868,8 +849,6 @@ def admin_add_store_subscription(sid: str, data: dict, a=Depends(get_current_adm
         "subscription_end":   end_date.isoformat(),
     }})
 
-    # Create invoice record
-    invoice_no = f"LS-ADMIN-{datetime.utcnow().strftime('%Y%m%d')}-{sub_id[-6:].upper()}"
     try:
         merchant = (db.accounts.find_one({"_id": ObjectId(mid_str)}) or
                     db.merchants.find_one({"_id": ObjectId(mid_str)})) if mid_str else None
@@ -877,31 +856,58 @@ def admin_add_store_subscription(sid: str, data: dict, a=Depends(get_current_adm
         merchant = None
     merchant_name  = (merchant or {}).get("name", "")
     merchant_phone = (merchant or {}).get("phone", "")
-    db.invoices.insert_one({
-        "invoice_no":     invoice_no,
-        "merchant_id":    mid_str,
-        "merchant_name":  merchant_name,
-        "merchant_phone": merchant_phone,
-        "store_id":       sid,
-        "store_name":     store_name,
-        "plan":           plan,
-        "base_price":     amount,
-        "gst":            gst_amt,
-        "total":          total,
-        "pay_mode":       pay_mode,
-        "payment_ref":    pay_ref,
-        "from_date":      from_date,
-        "end_date":       end_date,
-        "added_by_admin": True,
-        "created_at":     datetime.utcnow(),
-    })
 
-    return {
-        "ok": True,
-        "subscription_id": sub_id,
-        "invoice_no":      invoice_no,
-        "message":         f"Subscription added. Store '{store_name}' is now active until {end_date_str}.",
-    }
+    if existing_sub:
+        # UPDATE existing subscription + invoice — no new duplicates
+        sub_id = str(existing_sub["_id"])
+        db.subscriptions.update_one({"_id": existing_sub["_id"]}, {"$set": {
+            "plan": plan, "from_date": from_date, "end_date": end_date,
+            "price": amount, "gst": gst_amt, "gst_percent": gst_pct, "total": total,
+            "status": "paid", "pay_mode": pay_mode, "payment_ref": pay_ref,
+            "note": note, "updated_at": datetime.utcnow(), "paid_at": datetime.utcnow(),
+        }})
+        db.invoices.update_one(
+            {"store_id": sid},
+            {"$set": {
+                "plan": plan, "base_price": amount, "gst": gst_amt, "total": total,
+                "pay_mode": pay_mode, "payment_ref": pay_ref, "note": note,
+                "from_date": from_date, "end_date": end_date,
+                "status": "paid_edited", "updated_at": datetime.utcnow(),
+            }},
+            upsert=False
+        )
+        existing_inv = db.invoices.find_one({"store_id": sid}, {"invoice_no": 1})
+        invoice_no = (existing_inv or {}).get("invoice_no", f"LS-EDIT-{sub_id[-6:].upper()}")
+        return {
+            "ok": True, "subscription_id": sub_id, "invoice_no": invoice_no,
+            "message": f"Subscription updated — existing invoice preserved. Active until {end_date_str}.",
+        }
+    else:
+        # CREATE new subscription + invoice (first time)
+        sub_doc = {
+            "store_id": sid, "merchant_id": mid_str, "plan": plan,
+            "from_date": from_date, "end_date": end_date,
+            "price": amount, "gst": gst_amt, "gst_percent": gst_pct, "total": total,
+            "status": "paid", "pay_mode": pay_mode, "payment_ref": pay_ref,
+            "note": note, "added_by_admin": True,
+            "created_at": datetime.utcnow(), "paid_at": datetime.utcnow(),
+        }
+        sub_res = db.subscriptions.insert_one(sub_doc)
+        sub_id  = str(sub_res.inserted_id)
+        invoice_no = f"LS-ADMIN-{datetime.utcnow().strftime('%Y%m%d')}-{sub_id[-6:].upper()}"
+        db.invoices.insert_one({
+            "invoice_no": invoice_no, "merchant_id": mid_str,
+            "merchant_name": merchant_name, "merchant_phone": merchant_phone,
+            "store_id": sid, "store_name": store_name, "plan": plan,
+            "base_price": amount, "gst": gst_amt, "total": total,
+            "pay_mode": pay_mode, "payment_ref": pay_ref,
+            "from_date": from_date, "end_date": end_date,
+            "added_by_admin": True, "created_at": datetime.utcnow(),
+        })
+        return {
+            "ok": True, "subscription_id": sub_id, "invoice_no": invoice_no,
+            "message": f"Subscription added. Store '{store_name}' is now active until {end_date_str}.",
+        }
 
 @router.patch("/stores/{sid}/subscription")
 def admin_update_store_subscription(sid: str, data: dict, a=Depends(get_current_admin)):
@@ -2865,8 +2871,8 @@ def reject_merchant_product(vid: str, body: dict = {}, a=Depends(get_current_adm
     return {"ok": True, "message": "Voucher rejected."}
 
 @router.put("/merchant-vouchers/{vid}")
-def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
-    """FIX 10: Admin edit merchant product fields + status."""
+def update_merchant_product(vid: str, data: dict, a=Depends(get_current_admin)):
+    """Admin edit merchant product fields + status."""
     # ISSUES 5+7: also allow from_date, end_date, logo_url updates
     allowed = {"title", "offer_text", "validity", "logo", "logo_url", "from_date", "end_date",
                "status", "approval_status", "store_id", "store_name", "city",
@@ -2880,7 +2886,7 @@ def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
         update_data["logo_url"] = update_data["logo"]
 
     result = db.merchant_vouchers.update_one(
-        {"_id": ObjectId(pid)},
+        {"_id": ObjectId(vid)},
         {"$set": update_data}
     )
     if result.matched_count == 0:
@@ -2907,13 +2913,13 @@ def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
         if "price"            in update_data: sync_fields["price"]     = update_data["price"]
         if "original_price"   in update_data: sync_fields["original_price"] = update_data["original_price"]
         if sync_fields:
-            db.gift_vouchers.update_many({"source_voucher_id": pid}, {"$set": sync_fields})
+            db.gift_vouchers.update_many({"source_voucher_id": vid}, {"$set": sync_fields})
 
     return {"ok": True, "updated": update_data}
 
 
 @router.delete("/merchant-vouchers/{vid}")
-def delete_merchant_product(pid: str, a=Depends(get_current_admin)):
+def delete_merchant_product(vid: str, a=Depends(get_current_admin)):
     db.merchant_vouchers.delete_one({"_id": ObjectId(vid)})
     db.gift_vouchers.delete_many({"source_voucher_id": vid})
     return {"ok": True}
