@@ -1111,13 +1111,25 @@ tr:hover td{background:#f7faf8;}
         </div>
         <div style="padding:16px">
           <div class="mb-3">
-            <label class="form-label fw-semibold">Image URL</label>
-            <div class="d-flex gap-2 align-items-center">
-              <input type="text" id="di_no_service_url" class="form-control" placeholder="Paste HTTPS image URL…">
-              <button class="btn" onclick="diSaveNoService()" style="white-space:nowrap"><i class="fas fa-save me-1"></i>Save</button>
+            <label class="form-label fw-semibold">Image</label>
+            <div class="mb-2">
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Upload Image File</label>
+              <div class="d-flex gap-2 align-items-center mt-1">
+                <input type="file" id="di_no_service_file" accept="image/*" class="form-control" style="font-size:13px" onchange="diNoServiceFileChange(this)">
+                <button class="btn btn-sm" onclick="diUploadNoServiceImage()" id="di_ns_upload_btn" style="white-space:nowrap;display:none">
+                  <i class="fas fa-cloud-upload-alt me-1"></i>Upload
+                </button>
+              </div>
             </div>
-            <div id="di_no_service_preview_wrap" style="margin-top:8px;display:none">
-              <img id="di_no_service_preview" src="" style="max-height:100px;max-width:100%;border-radius:8px;border:1px solid var(--border)">
+            <div>
+              <label style="font-size:12px;color:var(--muted);font-weight:600">&mdash; or paste an image URL &mdash;</label>
+              <div class="d-flex gap-2 align-items-center mt-1">
+                <input type="text" id="di_no_service_url" class="form-control" placeholder="https://example.com/image.jpg" oninput="diNsUrlPreview(this.value)">
+              </div>
+            </div>
+            <div id="di_no_service_preview_wrap" style="margin-top:10px;display:none">
+              <img id="di_no_service_preview" src="" style="max-height:120px;max-width:100%;border-radius:10px;border:1px solid var(--border)">
+              <button onclick="diClearNsImage()" style="display:block;margin-top:4px;background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer">&times; Remove image</button>
             </div>
           </div>
           <div class="mb-3">
@@ -5364,6 +5376,8 @@ function renderTxnRows(rows) {
     const st = inv._status || (inv.invoice_no==='PENDING'?'pending':(inv.invoice_no==='FREE'?'free':'paid'));
     const statusBadge = st==='paid'
       ? `<span class="badge-active">● Paid</span>`
+      : st==='paid_edited'
+      ? `<span style="background:#e8f0fe;color:#1a73e8;padding:3px 10px;border-radius:12px;font-size:11px;">✎ Paid (Edited)</span>`
       : st==='free'
       ? `<span style="background:#e8f4ef;color:#3E5F55;padding:3px 10px;border-radius:12px;font-size:11px;">● Free</span>`
       : `<span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:12px;font-size:11px;">○ Pending</span>`;
@@ -5995,6 +6009,56 @@ function updateAbmCount() {
 // ════════════════════════════════════════
 // DEFAULT IMAGES — multi-image table UI
 // ════════════════════════════════════════
+function diNoServiceFileChange(input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('di_ns_upload_btn').style.display = 'inline-flex';
+  const reader = new FileReader();
+  reader.onload = e => {
+    const prev = document.getElementById('di_no_service_preview');
+    const wrap = document.getElementById('di_no_service_preview_wrap');
+    if (prev) prev.src = e.target.result;
+    if (wrap) wrap.style.display = 'block';
+    document.getElementById('di_no_service_url').value = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+async function diUploadNoServiceImage() {
+  const fileInput = document.getElementById('di_no_service_file');
+  const file = fileInput.files[0];
+  if (!file) { showToast('Please select a file first', true); return; }
+  const btn = document.getElementById('di_ns_upload_btn');
+  btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Uploading…';
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const r = await fetch('/admin/upload-image', {method:'POST', credentials:'include', body: formData});
+    if (r.ok) {
+      const d = await r.json();
+      const uploadedUrl = d.url || d.image_url || d.secure_url || '';
+      if (uploadedUrl) {
+        document.getElementById('di_no_service_url').value = uploadedUrl;
+        const prev = document.getElementById('di_no_service_preview');
+        if (prev) prev.src = uploadedUrl;
+        showToast('Image uploaded ✓');
+      } else { showToast('Upload done — using base64 preview'); }
+    } else { showToast('Upload failed — base64 will be used', true); }
+  } catch(e) { showToast('Upload error: ' + e.message, true); }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-upload-alt me-1"></i>Upload'; }
+}
+function diNsUrlPreview(url) {
+  const prev = document.getElementById('di_no_service_preview');
+  const wrap = document.getElementById('di_no_service_preview_wrap');
+  if (url && url.startsWith('http') && prev && wrap) { prev.src = url; wrap.style.display = 'block'; }
+}
+function diClearNsImage() {
+  document.getElementById('di_no_service_url').value = '';
+  const prev = document.getElementById('di_no_service_preview');
+  const wrap = document.getElementById('di_no_service_preview_wrap');
+  if (prev) prev.src = ''; if (wrap) wrap.style.display = 'none';
+  document.getElementById('di_no_service_file').value = '';
+  document.getElementById('di_ns_upload_btn').style.display = 'none';
+}
 async function diSaveNoService() {
   const url   = (document.getElementById('di_no_service_url')?.value  || '').trim();
   const title = (document.getElementById('di_no_service_title')?.value || '').trim();

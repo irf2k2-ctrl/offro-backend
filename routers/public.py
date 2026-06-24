@@ -49,8 +49,13 @@ def get_stores(city: str = None, category: str = None):
                 _active_subs.add(str(_sub["store_id"]))
         except Exception:
             pass
-    # If a store has no subscription record at all it is NOT shown publicly
-    stores = [s for s in stores if str(s["_id"]) in _active_subs]
+    # If a store has no subscription record at all, hide it (unless category filtering is active)
+    # When browsing a category, show all active stores so category discovery works
+    if not category:
+        stores = [s for s in stores if str(s["_id"]) in _active_subs]
+    else:
+        # Category mode: show all active stores (subscription gating can hide legit category stores)
+        pass
     store_ids = [str(s["_id"]) for s in stores]
     if not stores:
         return []
@@ -422,7 +427,7 @@ def get_all_active_deals(city: str = ""):
     # Step 1: All active stores (no subscription gating — show all stores with deals)
     store_q = {"status": "active"}
     if city:
-        _norm = normalize_city(city)
+        _norm = _normalize_city(city)
         store_q["city"] = {"$regex": _norm, "$options": "i"}
 
     stores_raw = list(db.stores.find(store_q, {

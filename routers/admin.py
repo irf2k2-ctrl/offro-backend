@@ -903,6 +903,58 @@ def admin_add_store_subscription(sid: str, data: dict, a=Depends(get_current_adm
         "message":         f"Subscription added. Store '{store_name}' is now active until {end_date_str}.",
     }
 
+@router.patch("/stores/{sid}/subscription")
+def admin_update_store_subscription(sid: str, data: dict, a=Depends(get_current_admin)):
+    """Update an EXISTING subscription/invoice — does NOT create a new one.
+    Use this when editing subscription details after initial payment recording.
+    Preserves invoice_no and adds an edit audit trail entry."""
+    store = db.stores.find_one({"_id": ObjectId(sid)})
+    if not store: raise HTTPException(404, "Store not found")
+
+    amount     = float(data.get("amount", 0) or 0)
+    gst_pct    = float(data.get("gst_percent", 0) or 0)
+    gst_amt    = round(amount * gst_pct / 100, 2)
+    total      = round(amount + gst_amt, 2)
+    note       = str(data.get("note", "") or "").strip()
+    plan       = str(data.get("plan", "") or "").strip()
+    from_date_str = str(data.get("from_date","")).strip()
+    end_date_str  = str(data.get("end_date","")).strip()
+    pay_mode   = str(data.get("pay_mode", "") or "").strip()
+    pay_ref    = str(data.get("payment_ref", "") or "").strip()
+
+    upd_sub = {"updated_at": datetime.utcnow()}
+    if amount: upd_sub.update({"price": amount, "gst": gst_amt, "total": total})
+    if plan:   upd_sub["plan"] = plan
+    if note:   upd_sub["note"] = note
+    if pay_mode: upd_sub["pay_mode"] = pay_mode
+    if pay_ref:  upd_sub["payment_ref"] = pay_ref
+    if from_date_str:
+        try: upd_sub["from_date"] = datetime.fromisoformat(from_date_str)
+        except: pass
+    if end_date_str:
+        try: upd_sub["end_date"] = datetime.fromisoformat(end_date_str)
+        except: pass
+
+    # Update the most recent subscription for this store
+    sub = db.subscriptions.find_one({"store_id": sid}, sort=[("created_at", -1)])
+    if sub:
+        db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": upd_sub})
+        # Also update the linked invoice — mark as 'Paid (Edited)' and update amount
+        inv_upd = {"status": "paid_edited", "updated_at": datetime.utcnow()}
+        if amount: inv_upd.update({"base_price": amount, "gst": gst_amt, "total": total})
+        if plan:   inv_upd["plan"] = plan
+        if note:   inv_upd["edit_note"] = note
+        db.invoices.update_one({"store_id": sid}, {"$set": inv_upd}, upsert=False)
+        # Update store's subscription_end if date changed
+        if "end_date" in upd_sub:
+            db.stores.update_one({"_id": ObjectId(sid)}, {"$set": {
+                "subscription_end": upd_sub["end_date"].isoformat(),
+                "subscription_plan": plan or store.get("subscription_plan",""),
+            }})
+        return {"ok": True, "message": "Subscription updated. Invoice marked as Paid (Edited)."}
+    else:
+        raise HTTPException(404, "No subscription found for this store. Use POST to create one.")
+
 @router.get("/stores/slim")
 def get_stores_slim(a=Depends(get_current_admin)):
     """Lightweight store list for ratings — no images, no heavy data."""
@@ -1792,7 +1844,10 @@ def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
 @router.delete("/products/{pid}")
 def delete_product_card(pid: str, a=Depends(get_current_admin)):
     """Delete a product card."""
-    db.gift_vouchers.delete_one({"_id": ObjectId(vid)})
+    try:
+        db.gift_vouchers.delete_one({"_id": ObjectId(pid)})
+    except Exception as e:
+        raise HTTPException(400, f"Invalid product ID: {e}")
     return {"message": "Deleted"}
 
 
