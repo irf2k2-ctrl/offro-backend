@@ -1853,6 +1853,18 @@ def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
     if "logo_url" in upd and "logo" not in upd:
         upd["logo"] = upd["logo_url"]
     # NOTE: logo is only updated if explicitly sent — never auto-overwrite from store on edit
+    # Auto-resolve city + store_name from store_id if store_id updated but city not explicitly sent
+    if "store_id" in upd and upd["store_id"]:
+        try:
+            _s = db.stores.find_one({"_id": ObjectId(upd["store_id"])},
+                                    {"city": 1, "store_name": 1, "_id": 0})
+            if _s:
+                if "city" not in upd or not upd.get("city"):
+                    upd["city"] = (_s.get("city") or "").strip()
+                if "store_name" not in upd or not upd.get("store_name"):
+                    upd["store_name"] = (_s.get("store_name") or "").strip()
+        except Exception:
+            pass
     if "is_active" in data:
         upd["is_active"] = bool(data["is_active"])
     if not upd:
@@ -2917,6 +2929,18 @@ def update_merchant_product(vid: str, data: dict, a=Depends(get_current_admin)):
     # Map logo -> logo_url consistency
     if "logo" in update_data and "logo_url" not in update_data:
         update_data["logo_url"] = update_data["logo"]
+    # Auto-resolve city + store_name from store_id if not explicitly sent
+    if "store_id" in update_data and update_data["store_id"]:
+        try:
+            _sv = db.stores.find_one({"_id": ObjectId(update_data["store_id"])},
+                                     {"city": 1, "store_name": 1, "_id": 0})
+            if _sv:
+                if not update_data.get("city"):
+                    update_data["city"] = (_sv.get("city") or "").strip()
+                if not update_data.get("store_name"):
+                    update_data["store_name"] = (_sv.get("store_name") or "").strip()
+        except Exception:
+            pass
 
     result = db.merchant_vouchers.update_one(
         {"_id": ObjectId(vid)},
