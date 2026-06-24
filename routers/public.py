@@ -929,11 +929,21 @@ def get_promo_sliders_public(city: str = None):
     # Exclude banners where is_active=False OR where end_date/expires_at is in the past
     base_query = {
         "is_active": {"$ne": False},
-        "$or": [
-            {"end_date":    {"$exists": False}},
-            {"end_date":    {"$in": [None, ""]}},
-            {"end_date":    {"$gte": _now_iso}},
+        # Expiry: show banner if end_date is absent/empty OR end_date string >= today ISO string
+        "$and": [
+            {"$or": [
+                {"end_date": {"$exists": False}},
+                {"end_date": {"$in": [None, ""]}},
+                {"end_date": {"$gte": _now_iso}},
+            ]},
+            {"$or": [
+                {"expires_at": {"$exists": False}},
+                {"expires_at": {"$in": [None, ""]}},
+                {"expires_at": {"$gte": _now_iso}},
+            ]},
         ]
+        # NOTE: Banner visibility is independent of store subscription.
+        # A banner's own end_date determines its visibility, not the store's subscription.
     }
     docs = []
     if city and city.strip():
@@ -963,14 +973,49 @@ def get_promo_sliders_public(city: str = None):
         })
     return result
 
-# =================== GIFT VOUCHERS (public - for Flutter app home screen) ===================
+# =================== PRODUCTS (public - for Flutter app home screen gift/product zone) ===================
 @router.get("/products-public")
-def get_public_products():
-    """Returns active products shown on the app home screen."""
-    # Fetch all, then filter in Python to handle bool/string/missing is_active variants
-    docs = list(db.products.find({}).sort("_id", -1))
-    docs = [d for d in docs if d.get("is_active", True) not in (False, "false", "0", 0)
-             and d.get("status", "approved") not in ("expired", "deleted", "inactive")]
+def get_public_products(city: str = None):
+    """Returns active, non-expired products for the app home screen.
+    Filtered by city (if provided) and product-level expiry date.
+    Does NOT depend on store subscription status — products live independently."""
+    from datetime import datetime as _dt
+    import re as _re
+    _today = _dt.utcnow().strftime("%Y-%m-%d")
+
+    # Build query: status approved + not deleted/inactive/expired
+    query = {
+        "status": {"$nin": ["deleted", "inactive", "expired"]},
+        "is_active": {"$ne": False},
+        # Expiry filter: show if end_date is missing/empty OR end_date >= today
+        "$or": [
+            {"end_date": {"$exists": False}},
+            {"end_date": {"$in": [None, ""]}},
+            {"end_date": {"$gte": _today}},
+        ]
+    }
+
+    # City filter — products store city directly, independent of store subscription
+    _city_norm = None
+    if city and city.strip():
+        _city_norm = _normalize_city(city.strip())
+        query["city"] = {"$regex": _re.escape(_city_norm), "$options": "i"}
+
+    docs = list(db.products.find(query).sort("_id", -1))
+
+    # City fallback: if city filter returns nothing, show all (better UX than empty screen)
+    if not docs and _city_norm:
+        fallback_q = {
+            "status": {"$nin": ["deleted", "inactive", "expired"]},
+            "is_active": {"$ne": False},
+            "$or": [
+                {"end_date": {"$exists": False}},
+                {"end_date": {"$in": [None, ""]}},
+                {"end_date": {"$gte": _today}},
+            ]
+        }
+        docs = list(db.products.find(fallback_q).sort("_id", -1))
+
     result = []
     for d in docs:
         vid = str(d.pop("_id"))
@@ -981,17 +1026,20 @@ def get_public_products():
             if sid:
                 store["id"] = str(sid)
                 store.pop("_id", None)
-        # FIX ISSUE-1: Always resolve store_name + logo from store_id (never trust stale stored value)
+        # Resolve store_name + logo from store_id (source of truth)
         store_id = d.get("store_id", "")
         if store_id:
             try:
                 from bson import ObjectId as OId
-                s = db.stores.find_one({"_id": OId(store_id)}, {"store_image2":1,"image":1,"store_name":1,"_id":1})
+                s = db.stores.find_one({"_id": OId(store_id)},
+                    {"store_image2":1, "image":1, "store_name":1, "status":1, "_id":1})
                 if s:
-                    # Always overwrite store_name from live store record — it's the source of truth
                     d["store_name"] = s.get("store_name", d.get("store_name", ""))
                     if not d.get("logo"):
                         d["logo"] = s.get("store_image2") or s.get("image") or ""
+                    # Attach store_active flag — Flutter uses this for "Store Inactive" badge
+                    # Product remains visible regardless; only badge changes
+                    d["store_active"] = s.get("status", "active") == "active"
             except Exception:
                 pass
         result.append({"id": vid, **d})
@@ -1001,12 +1049,27 @@ def get_public_products():
 # =================== PRODUCTS (public — Discover Products on home screen) ===================
 @router.get("/products")
 def get_products_public(category: str = None, city: str = None, limit: int = 60, skip: int = 0):
-    """Returns active products for the Flutter app Discover Products section."""
-    query = {"status": {"$nin": ["deleted", "inactive", "expired"]}}
+    """Returns active, non-expired products for the Flutter app Discover Products section.
+    Products are independent of store subscription — they expire on their own end_date."""
+    from datetime import datetime as _dt
+    _today = _dt.utcnow().strftime("%Y-%m-%d")
+
+    query = {
+        "status": {"$nin": ["deleted", "inactive", "expired"]},
+        # Expiry: show if end_date missing/empty OR end_date >= today
+        "$or": [
+            {"end_date": {"$exists": False}},
+            {"end_date": {"$in": [None, ""]}},
+            {"end_date": {"$gte": _today}},
+        ]
+    }
     if category and category != "All":
         query["category"] = category
-    # SIMPLIFIED: show all active products regardless of city
-    # City filtering removed — products are global discovery content
+    # City filtering: products are discovery content, city is optional
+    if city and city.strip() and city.strip() not in ("", "All"):
+        import re as _re2
+        _cn = _normalize_city(city.strip())
+        query["city"] = {"$regex": _re2.escape(_cn), "$options": "i"}
     docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
     result = []
     for d in docs:

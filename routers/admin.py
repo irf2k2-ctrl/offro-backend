@@ -2440,6 +2440,15 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     if not b: raise HTTPException(404, "Banner not found")
     db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"approval_status":"approved","approved_at":datetime.utcnow()}})
     # TASK 9 FIX: upsert into promo_sliders — never create duplicates
+    # Resolve store_name from store_id if not already stored on banner record
+    _banner_store_name = b.get("store_name", "")
+    if not _banner_store_name and b.get("store_id"):
+        try:
+            _bs = db.stores.find_one({"_id": ObjectId(b["store_id"])}, {"store_name": 1})
+            if _bs:
+                _banner_store_name = _bs.get("store_name", "")
+        except Exception:
+            pass
     db.promo_sliders.update_one(
         {"source_banner_id": bid},
         {"$set": {
@@ -2453,6 +2462,7 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
             "merchant_phone": str(b.get("merchant_phone", b.get("phone", ""))),
             "city":           b.get("city",""),
             "store_id":       b.get("store_id",""),
+            "store_name":     _banner_store_name,
             "from_date":      b.get("from_date",""),
             "end_date":       b.get("end_date",""),
             "duration_days":  b.get("duration_days",""),
