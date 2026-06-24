@@ -917,6 +917,47 @@ tr:hover td{background:#f7faf8;}
           <div style="font-size:11px;color:var(--muted);margin-top:4px"><span id="abm_selected_count">0</span> store(s) selected</div>
         </div>
       </div>
+      <div class="modal-body" style="border-top:1px solid var(--border);padding-top:16px">
+        <div style="font-size:12px;font-weight:600;color:var(--primary);margin-bottom:10px">Payment Information</div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">From Date</label>
+            <input type="date" id="abm_pay_from" class="form-control">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">To Date</label>
+            <input type="date" id="abm_pay_to" class="form-control">
+          </div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Amount Paid (₹)</label>
+            <input type="number" id="abm_pay_amount" class="form-control" placeholder="0" min="0" step="0.01">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">GST (%)</label>
+            <input type="number" id="abm_pay_gst" class="form-control" placeholder="18" value="18" min="0" max="100">
+          </div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Payment Mode</label>
+            <select id="abm_pay_mode" class="form-select">
+              <option value="">Select...</option>
+              <option value="UPI">UPI</option>
+              <option value="Cash">Cash</option>
+              <option value="Bank Transfer">Bank Transfer</option>
+              <option value="Card">Card</option>
+              <option value="Razorpay">Razorpay</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">Payment Reference</label>
+            <input type="text" id="abm_pay_ref" class="form-control" placeholder="UTR / Transaction ID">
+          </div>
+        </div>
+      </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeAdminBannerModal()">Cancel</button>
         <button class="btn" onclick="saveAdminBanner()">Save Banner</button>
@@ -4354,7 +4395,7 @@ async function deleteProductCard(id, source) {
   loadGiftCards();
 }
 
-async function openGiftCardModal() {
+async async function openGiftCardModal() {
   if (merchantsList.length === 0) await loadMerchants();
   document.getElementById("gc_id").value = "";
   document.getElementById("gc_collection").value = "gift_vouchers";
@@ -4366,6 +4407,12 @@ async function openGiftCardModal() {
   document.getElementById("gc_from_date").value    = "";
   document.getElementById("gc_duration_days").value= "";
   if(document.getElementById("gc_to_date")) document.getElementById("gc_to_date").value = "";
+  if(document.getElementById("gc_pay_from"))   document.getElementById("gc_pay_from").value   = "";
+  if(document.getElementById("gc_pay_to"))     document.getElementById("gc_pay_to").value     = "";
+  if(document.getElementById("gc_pay_amount")) document.getElementById("gc_pay_amount").value = "";
+  if(document.getElementById("gc_pay_gst"))    document.getElementById("gc_pay_gst").value    = "18";
+  if(document.getElementById("gc_pay_mode"))   document.getElementById("gc_pay_mode").value   = "";
+  if(document.getElementById("gc_pay_ref"))    document.getElementById("gc_pay_ref").value    = "";
   if(document.getElementById("gc_validity_preview")) document.getElementById("gc_validity_preview").textContent = "";
   document.getElementById("gc_logo").value = "";
   document.getElementById("gc_logo_file").value="";
@@ -4408,6 +4455,13 @@ async function editGiftCard(v) {
   if (document.getElementById("gc_original_price")) document.getElementById("gc_original_price").value = v.original_price ?? v.mrp ?? "";
   _populateGcMerchants(v.merchant_id||"");
   if (document.getElementById("gc_city")) document.getElementById("gc_city").value = v.city || '';
+  // Populate payment fields if stored on the record
+  if (document.getElementById("gc_pay_from"))   document.getElementById("gc_pay_from").value   = v.pay_from_date || v.from_date || '';
+  if (document.getElementById("gc_pay_to"))     document.getElementById("gc_pay_to").value     = v.pay_to_date   || v.end_date  || '';
+  if (document.getElementById("gc_pay_amount")) document.getElementById("gc_pay_amount").value = v.pay_amount    || '';
+  if (document.getElementById("gc_pay_gst"))    document.getElementById("gc_pay_gst").value    = v.pay_gst       || '18';
+  if (document.getElementById("gc_pay_mode"))   document.getElementById("gc_pay_mode").value   = v.pay_mode      || '';
+  if (document.getElementById("gc_pay_ref"))    document.getElementById("gc_pay_ref").value    = v.pay_ref       || '';
   gcModalInst.show();
 }
 
@@ -4476,6 +4530,12 @@ async function saveGiftCard() {
   const _gcStoreSel  = document.getElementById("gc_store_sel");
   const _gcStoreName = (_gcStoreSel && _gcStoreSel.selectedIndex > 0)
     ? (_gcStoreSel.options[_gcStoreSel.selectedIndex]?.text || '') : '';
+  const _gcPayFrom   = document.getElementById("gc_pay_from")?.value  || '';
+  const _gcPayTo     = document.getElementById("gc_pay_to")?.value    || '';
+  const _gcPayAmt    = parseFloat(document.getElementById("gc_pay_amount")?.value) || 0;
+  const _gcPayGst    = parseFloat(document.getElementById("gc_pay_gst")?.value) || 18;
+  const _gcPayMode   = (document.getElementById("gc_pay_mode")?.value  || '').trim();
+  const _gcPayRef    = (document.getElementById("gc_pay_ref")?.value   || '').trim();
   const data = {
     title:          document.getElementById("gc_title").value.trim(),
     text,
@@ -4491,6 +4551,12 @@ async function saveGiftCard() {
     duration_days:  _gcDays || undefined,
     sale_price:     isNaN(_salePriceRaw) ? undefined : _salePriceRaw,
     original_price: isNaN(_origPriceRaw) ? undefined : _origPriceRaw,
+    pay_from_date:  _gcPayFrom || undefined,
+    pay_to_date:    _gcPayTo   || undefined,
+    pay_amount:     _gcPayAmt  || undefined,
+    pay_gst:        _gcPayGst  !== 18 ? _gcPayGst : undefined,
+    pay_mode:       _gcPayMode || undefined,
+    pay_ref:        _gcPayRef  || undefined,
   };
   const _col = document.getElementById("gc_collection")?.value || "gift_vouchers";
   try {
@@ -4900,6 +4966,46 @@ async function saveStore() {
             style="background:#f7faf8;cursor:default">
           <div style="font-size:11px;color:var(--muted);margin-top:3px">Auto-filled when a store is selected. Select merchant → store above.</div>
         </div>
+        <hr style="border-color:var(--border);margin:12px 0">
+        <div style="font-size:12px;font-weight:600;color:var(--primary);margin-bottom:10px">Payment Information</div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">From Date</label>
+            <input type="date" id="gc_pay_from" class="form-control">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">To Date</label>
+            <input type="date" id="gc_pay_to" class="form-control">
+          </div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Amount Paid (₹)</label>
+            <input type="number" id="gc_pay_amount" class="form-control" placeholder="0" min="0" step="0.01">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">GST (%)</label>
+            <input type="number" id="gc_pay_gst" class="form-control" placeholder="18" min="0" max="100" value="18">
+          </div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Payment Mode</label>
+            <select id="gc_pay_mode" class="form-select">
+              <option value="">Select...</option>
+              <option value="UPI">UPI</option>
+              <option value="Cash">Cash</option>
+              <option value="Bank Transfer">Bank Transfer</option>
+              <option value="Card">Card</option>
+              <option value="Razorpay">Razorpay</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">Payment Reference</label>
+            <input type="text" id="gc_pay_ref" class="form-control" placeholder="UTR / Transaction ID">
+          </div>
+        </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="gc_active" checked>
           <label class="form-check-label" for="gc_active">Active (show in app)</label>
@@ -5050,13 +5156,14 @@ async function loadMerchantProducts() {
         : `<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantProduct('${v._id}')">Del</button>`;
       return `<tr>
         <td>${logo}</td>
-        <td style="font-size:13px">${v.merchant_name||'—'}</td>
         <td style="font-size:13px;font-weight:600">${v.title||'—'}</td>
-        <td style="font-size:12px;color:var(--muted)">${v.offer_text||'—'}</td>
+        <td style="font-size:13px">${v.merchant_name||'—'}</td>
+        <td style="font-size:12px">${v.store_name||'—'}</td>
+        <td style="font-size:12px;color:var(--muted)">${v.city||'—'}</td>
         <td style="font-size:12px">${v.validity||'—'}</td>
-        <td style="font-size:13px">₹${v.amount||0}</td>
         <td>${badge}</td>
         <td>${actions}</td>
+        <td style="font-size:11px;color:var(--muted)">${(v.created_at||'').replace('T',' ').slice(0,16)}</td>
       </tr>`;
     }).join('');
   } catch(e) { if(el) el.innerHTML = `<tr><td colspan="8" style="color:red;text-align:center">${e.message}</td></tr>`; }
@@ -5646,6 +5753,13 @@ function openAdminBannerModal(data) {
   document.getElementById('abm_link_url').value = data?.link_url || '';
   document.getElementById('abm_sort').value = data?.sort_order ?? 0;
   document.getElementById('abm_active').value = (data?.is_active !== false).toString();
+  // Populate payment fields if stored
+  if (document.getElementById('abm_pay_from'))   document.getElementById('abm_pay_from').value   = data?.pay_from_date || '';
+  if (document.getElementById('abm_pay_to'))     document.getElementById('abm_pay_to').value     = data?.pay_to_date   || '';
+  if (document.getElementById('abm_pay_amount')) document.getElementById('abm_pay_amount').value = data?.pay_amount    || '';
+  if (document.getElementById('abm_pay_gst'))    document.getElementById('abm_pay_gst').value    = data?.pay_gst       || '18';
+  if (document.getElementById('abm_pay_mode'))   document.getElementById('abm_pay_mode').value   = data?.pay_mode      || '';
+  if (document.getElementById('abm_pay_ref'))    document.getElementById('abm_pay_ref').value    = data?.pay_ref       || '';
   // Preview
   const img = data?.image_url || '';
   const prev = document.getElementById('abm_img_preview');
@@ -5659,6 +5773,10 @@ function openAdminBannerModal(data) {
 }
 
 function closeAdminBannerModal() {
+  ['abm_pay_from','abm_pay_to','abm_pay_amount','abm_pay_mode','abm_pay_ref'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  const gstEl = document.getElementById('abm_pay_gst'); if (gstEl) gstEl.value = '18';
   document.getElementById('adminBannerModal').style.display = 'none';
   document.getElementById('abm_image_file').value = '';
 }
@@ -5700,7 +5818,26 @@ async function saveAdminBanner() {
   const floatingIds = Array.from(
     document.querySelectorAll('#abm_stores_list input[type=checkbox]:checked')
   ).map(cb => cb.value);
-  const payload = { title, subtitle, image_url: imageUrl, link_url: linkUrl, sort_order: sort, is_active: isActive, floating_store_ids: floatingIds };
+  const _abmPayFrom = (document.getElementById('abm_pay_from')?.value  || '').trim();
+  const _abmPayTo   = (document.getElementById('abm_pay_to')?.value    || '').trim();
+  const _abmPayAmt  = parseFloat(document.getElementById('abm_pay_amount')?.value) || 0;
+  const _abmPayGst  = parseFloat(document.getElementById('abm_pay_gst')?.value) || 18;
+  const _abmPayMode = (document.getElementById('abm_pay_mode')?.value  || '').trim();
+  const _abmPayRef  = (document.getElementById('abm_pay_ref')?.value   || '').trim();
+  const payload = {
+    title, subtitle,
+    image_url:         imageUrl,
+    link_url:          linkUrl,
+    sort_order:        sort,
+    is_active:         isActive,
+    floating_store_ids: floatingIds,
+    pay_from_date:     _abmPayFrom || undefined,
+    pay_to_date:       _abmPayTo   || undefined,
+    pay_amount:        _abmPayAmt  || undefined,
+    pay_gst:           _abmPayGst  !== 18 ? _abmPayGst : undefined,
+    pay_mode:          _abmPayMode || undefined,
+    pay_ref:           _abmPayRef  || undefined,
+  };
   try {
     if (id) {
       const r = await fetch(`/admin/banners/${id}`, {method:'PUT', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});

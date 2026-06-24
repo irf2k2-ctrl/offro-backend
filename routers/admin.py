@@ -1702,12 +1702,19 @@ def create_product_card(data: dict, a=Depends(get_current_admin)):
         "validity":      (data.get("validity") or "").strip(),
         "logo":          logo,
         "store_id":      store_id,
+        "store_name":    (data.get("store_name") or "").strip(),
         "merchant_id":   merchant_id,
         "city":          (data.get("city") or "").strip().lower(),
         "is_active":     bool(data.get("is_active", True)),
         "from_date":     (data.get("from_date") or "").strip(),
         "end_date":      (data.get("end_date") or "").strip(),
         "duration_days": int(data.get("duration_days") or 0),
+        "pay_from_date": (data.get("pay_from_date") or "").strip(),
+        "pay_to_date":   (data.get("pay_to_date") or "").strip(),
+        "pay_amount":    float(data.get("pay_amount") or 0),
+        "pay_gst":       float(data.get("pay_gst") or 18),
+        "pay_mode":      (data.get("pay_mode") or "").strip(),
+        "pay_ref":       (data.get("pay_ref") or "").strip(),
         "source":        "admin",
         "created_at":    datetime.utcnow(),
     }
@@ -1754,7 +1761,7 @@ def create_product_card(data: dict, a=Depends(get_current_admin)):
 def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
     """Update an existing product card."""
     upd = {}
-    _str_fields = ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date", "city"]
+    _str_fields = ["title", "text", "validity", "logo", "merchant_id", "store_id", "store_name", "from_date", "end_date", "city", "pay_from_date", "pay_to_date", "pay_mode", "pay_ref"]
     for field in _str_fields:
         if field in data:
             upd[field] = (data[field] or "").strip()
@@ -1763,6 +1770,12 @@ def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
             upd["duration_days"] = int(data["duration_days"]) if data["duration_days"] else 0
         except (TypeError, ValueError):
             upd["duration_days"] = 0
+    if "pay_amount" in data:
+        try: upd["pay_amount"] = float(data["pay_amount"]) if data["pay_amount"] not in (None, "") else 0.0
+        except (TypeError, ValueError): upd["pay_amount"] = 0.0
+    if "pay_gst" in data:
+        try: upd["pay_gst"] = float(data["pay_gst"]) if data["pay_gst"] not in (None, "") else 18.0
+        except (TypeError, ValueError): upd["pay_gst"] = 18.0
     if "store_id" in upd and upd["store_id"] and "logo" not in upd:
         try:
             s = db.stores.find_one({"_id": ObjectId(upd["store_id"])}, {"store_image2":1,"image2":1})
@@ -1804,6 +1817,12 @@ def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
             upd["duration_days"] = int(data["duration_days"]) if data["duration_days"] else 0
         except (TypeError, ValueError):
             upd["duration_days"] = 0
+    if "pay_amount" in data:
+        try: upd["pay_amount"] = float(data["pay_amount"]) if data["pay_amount"] not in (None, "") else 0.0
+        except (TypeError, ValueError): upd["pay_amount"] = 0.0
+    if "pay_gst" in data:
+        try: upd["pay_gst"] = float(data["pay_gst"]) if data["pay_gst"] not in (None, "") else 18.0
+        except (TypeError, ValueError): upd["pay_gst"] = 18.0
     if "is_active" in data:
         upd["is_active"] = bool(data["is_active"])
     # Resolve and store merchant_name + phone when merchant_id is updated
@@ -2827,7 +2846,9 @@ def reject_merchant_product(vid: str, body: dict = {}, a=Depends(get_current_adm
 def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
     """FIX 10: Admin edit merchant product fields + status."""
     # ISSUES 5+7: also allow from_date, end_date, logo_url updates
-    allowed = {"title", "offer_text", "validity", "logo", "logo_url", "from_date", "end_date", "status", "approval_status"}
+    allowed = {"title", "offer_text", "validity", "logo", "logo_url", "from_date", "end_date",
+               "status", "approval_status", "store_id", "store_name", "city",
+               "price", "original_price", "merchant_phone"}
     update_data = {k: v for k, v in data.items() if k in allowed}
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")
@@ -2858,6 +2879,11 @@ def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
         if "logo_url"         in update_data: sync_fields["logo"]      = update_data["logo_url"]
         if "title"            in update_data: sync_fields["title"]     = update_data["title"]
         if "offer_text"       in update_data: sync_fields["text"]      = update_data["offer_text"]
+        if "store_id"         in update_data: sync_fields["store_id"]  = update_data["store_id"]
+        if "store_name"       in update_data: sync_fields["store_name"]= update_data["store_name"]
+        if "city"             in update_data: sync_fields["city"]      = update_data["city"]
+        if "price"            in update_data: sync_fields["price"]     = update_data["price"]
+        if "original_price"   in update_data: sync_fields["original_price"] = update_data["original_price"]
         if sync_fields:
             db.gift_vouchers.update_many({"source_voucher_id": pid}, {"$set": sync_fields})
 
@@ -2869,6 +2895,31 @@ def delete_merchant_product(pid: str, a=Depends(get_current_admin)):
     db.merchant_vouchers.delete_one({"_id": ObjectId(vid)})
     db.gift_vouchers.delete_many({"source_voucher_id": vid})
     return {"ok": True}
+
+
+
+# ── Route aliases: /merchant-products/* mirrors /merchant-vouchers/* ──────────
+# Dashboard JS uses /merchant-products/ prefix; backend logic lives under /merchant-vouchers/
+
+@router.get("/merchant-products")
+def list_merchant_products_alias(a=Depends(get_current_admin)):
+    return list_merchant_products(a)
+
+@router.put("/merchant-products/{vid}/approve")
+def approve_merchant_product_alias(vid: str, a=Depends(get_current_admin)):
+    return approve_merchant_product(vid, a)
+
+@router.put("/merchant-products/{vid}/reject")
+def reject_merchant_product_alias(vid: str, data: dict = None, a=Depends(get_current_admin)):
+    return reject_merchant_product(vid, data or {}, a)
+
+@router.put("/merchant-products/{vid}")
+def update_merchant_product_alias(vid: str, data: dict, a=Depends(get_current_admin)):
+    return update_merchant_product(vid, data, a)
+
+@router.delete("/merchant-products/{vid}")
+def delete_merchant_product_alias(vid: str, a=Depends(get_current_admin)):
+    return delete_merchant_product(vid, a)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -3183,15 +3234,23 @@ def admin_list_banners(a=Depends(get_current_admin)):
 async def admin_create_banner(data: dict, a=Depends(get_current_admin)):
     """Create admin banner. Accepts JSON body with image_url (base64 or http URL)."""
     img = data.get("image_url") or data.get("image") or ""
+    floating_ids = data.get("floating_store_ids") or []
     doc = {
-        "title":      data.get("title", ""),
-        "subtitle":   data.get("subtitle", ""),
-        "image":      img,
-        "image_url":  img,
-        "link_url":   data.get("link_url", ""),
-        "sort_order": int(data.get("sort_order", 0)),
-        "is_active":  bool(data.get("is_active", True)),
-        "created_at": datetime.utcnow().isoformat(),
+        "title":               data.get("title", ""),
+        "subtitle":            data.get("subtitle", ""),
+        "image":               img,
+        "image_url":           img,
+        "link_url":            data.get("link_url", ""),
+        "sort_order":          int(data.get("sort_order", 0)),
+        "is_active":           bool(data.get("is_active", True)),
+        "floating_store_ids":  floating_ids,
+        "pay_from_date":       (data.get("pay_from_date") or "").strip(),
+        "pay_to_date":         (data.get("pay_to_date") or "").strip(),
+        "pay_amount":          float(data.get("pay_amount") or 0),
+        "pay_gst":             float(data.get("pay_gst") or 18),
+        "pay_mode":            (data.get("pay_mode") or "").strip(),
+        "pay_ref":             (data.get("pay_ref") or "").strip(),
+        "created_at":          datetime.utcnow().isoformat(),
     }
     r = db.banners.insert_one(doc)
     return {"ok": True, "id": str(r.inserted_id)}
@@ -3210,6 +3269,17 @@ async def admin_update_banner(bid: str, data: dict, a=Depends(get_current_admin)
     if img is not None:
         update["image"]     = img
         update["image_url"] = img
+    # Payment fields
+    for _pf in ["pay_from_date", "pay_to_date", "pay_mode", "pay_ref"]:
+        if _pf in data: update[_pf] = (data[_pf] or "").strip()
+    if "pay_amount" in data:
+        try: update["pay_amount"] = float(data["pay_amount"]) if data["pay_amount"] not in (None,"") else 0.0
+        except (TypeError, ValueError): update["pay_amount"] = 0.0
+    if "pay_gst" in data:
+        try: update["pay_gst"] = float(data["pay_gst"]) if data["pay_gst"] not in (None,"") else 18.0
+        except (TypeError, ValueError): update["pay_gst"] = 18.0
+    if "floating_store_ids" in data:
+        update["floating_store_ids"] = data["floating_store_ids"] or []
     if update:
         db.banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
     return {"ok": True}
