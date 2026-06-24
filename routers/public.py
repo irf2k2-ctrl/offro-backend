@@ -206,15 +206,20 @@ def get_store(store_id: str):
     } for d in deals]
 
     # Approved products (from merchant_vouchers collection) for this store
+    # FIX: filter by store_id first → prevents cross-store product leakage
+    # when a merchant has multiple stores.
     products_list = []
     if "merchant_vouchers" in cols:
         merchant_id = store.get("merchant_id", "")
-        merchant_phone = str(store.get("phone", ""))
-        q = {"status": "approved"}
-        if merchant_id:
-            q = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}],
-                 "status": "approved"}
-        prods = list(db.merchant_vouchers.find(q).sort("created_at", -1).limit(20))
+        # Primary: exact store match
+        prods = list(db.merchant_vouchers.find(
+            {"store_id": store_id, "status": "approved"}
+        ).sort("created_at", -1).limit(20))
+        # Fallback: merchant-level match only if no store-specific products found
+        if not prods and merchant_id:
+            prods = list(db.merchant_vouchers.find(
+                {"merchant_id": merchant_id, "status": "approved"}
+            ).sort("created_at", -1).limit(20))
         for p in prods:
             products_list.append({
                 "_id":            str(p["_id"]),
