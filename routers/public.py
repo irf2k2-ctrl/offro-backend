@@ -960,7 +960,8 @@ def get_public_products():
     """Returns active products shown on the app home screen."""
     # Fetch all, then filter in Python to handle bool/string/missing is_active variants
     docs = list(db.products.find({}).sort("_id", -1))
-    docs = [d for d in docs if d.get("is_active", True) not in (False, "false", "0", 0)]
+    docs = [d for d in docs if d.get("is_active", True) not in (False, "false", "0", 0)
+             and d.get("status", "approved") not in ("expired", "deleted", "inactive")]
     result = []
     for d in docs:
         vid = str(d.pop("_id"))
@@ -992,7 +993,7 @@ def get_public_products():
 @router.get("/products")
 def get_products_public(category: str = None, city: str = None, limit: int = 60, skip: int = 0):
     """Returns active products for the Flutter app Discover Products section."""
-    query = {"status": {"$nin": ["deleted", "inactive"]}}
+    query = {"status": {"$nin": ["deleted", "inactive", "expired"]}}
     if category and category != "All":
         query["category"] = category
     # SIMPLIFIED: show all active products regardless of city

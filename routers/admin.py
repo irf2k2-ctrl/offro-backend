@@ -2418,6 +2418,192 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     return {"ok": True, "message": "Banner approved and published to app."}
 
 
+
+
+@router.post("/merchant-vouchers/{pid}/payment")
+def admin_add_product_payment(pid: str, data: dict, a=Depends(get_current_admin)):
+    """Admin manually records a payment for a merchant product (offline/cash/UPI)."""
+    v = db.merchant_vouchers.find_one({"_id": ObjectId(pid)})
+    if not v:
+        raise HTTPException(404, "Product not found")
+
+    plan          = str(data.get("plan", "standard") or "standard").strip()
+    from_date_str = str(data.get("from_date", "") or "").strip()
+    end_date_str  = str(data.get("end_date", "") or "").strip()
+    amount        = float(data.get("amount", 0) or 0)
+    gst_pct       = float(data.get("gst_percent", 0) or 0)
+    gst_amt       = round(amount * gst_pct / 100, 2)
+    total         = round(amount + gst_amt, 2)
+    pay_mode      = str(data.get("pay_mode", "cash") or "cash").strip()
+    pay_ref       = str(data.get("payment_ref", "") or "").strip()
+    note          = str(data.get("note", "") or "").strip()
+    duration_days = int(data.get("duration_days", 30) or 30)
+
+    if not from_date_str or not end_date_str:
+        raise HTTPException(400, "from_date and end_date are required")
+    try:
+        from_dt = datetime.fromisoformat(from_date_str)
+    except Exception:
+        raise HTTPException(400, f"Invalid from_date: {from_date_str}")
+    try:
+        end_dt = datetime.fromisoformat(end_date_str)
+    except Exception:
+        raise HTTPException(400, f"Invalid end_date: {end_date_str}")
+
+    mid_str       = str(v.get("merchant_id", ""))
+    merchant_name = v.get("merchant_name", "")
+    merchant_phone= str(v.get("merchant_phone", ""))
+
+    # Mark product as approved + update dates
+    db.merchant_vouchers.update_one({"_id": ObjectId(pid)}, {"$set": {
+        "approval_status":  "approved",
+        "status":           "approved",
+        "payment_status":   "paid",
+        "pay_mode":         pay_mode,
+        "payment_ref":      pay_ref,
+        "from_date":        from_date_str,
+        "end_date":         end_date_str,
+        "duration_days":    duration_days,
+        "total":            total,
+        "amount":           amount,
+        "gst":              gst_amt,
+        "approved_at":      datetime.utcnow().isoformat(),
+    }})
+
+    # Sync to gift_vouchers
+    db.gift_vouchers.update_many({"source_voucher_id": pid}, {"$set": {
+        "status":    "approved",
+        "is_active": True,
+        "from_date": from_date_str,
+        "end_date":  end_date_str,
+        "validity":  f"{from_date_str} → {end_date_str}",
+    }})
+
+    # Create invoice
+    invoice_no = "LS-PROD-" + datetime.utcnow().strftime("%Y%m%d") + "-" + pid[-6:].upper()
+    store_name = v.get("store_name", "")
+    db.invoices.insert_one({
+        "invoice_no":     invoice_no,
+        "merchant_id":    mid_str,
+        "merchant_name":  merchant_name,
+        "merchant_phone": merchant_phone,
+        "store_name":     store_name,
+        "type":           "product",
+        "product_id":     pid,
+        "product_title":  v.get("title", ""),
+        "plan":           plan,
+        "base_price":     amount,
+        "gst":            gst_amt,
+        "gst_percent":    gst_pct,
+        "total":          total,
+        "pay_mode":       pay_mode,
+        "payment_ref":    pay_ref,
+        "note":           note,
+        "from_date":      from_dt,
+        "end_date":       end_dt,
+        "added_by_admin": True,
+        "created_at":     datetime.utcnow(),
+    })
+
+    return {
+        "ok":        True,
+        "invoice_no": invoice_no,
+        "message":   f"Payment recorded. Product '{v.get('title','')}' is now active until {end_date_str}.",
+    }
+
+
+@router.post("/merchant-banners/{bid}/payment")
+def admin_add_banner_payment(bid: str, data: dict, a=Depends(get_current_admin)):
+    """Admin manually records a payment for a merchant banner (offline/cash/UPI)."""
+    b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
+    if not b:
+        raise HTTPException(404, "Banner not found")
+
+    plan          = str(data.get("plan", "standard") or "standard").strip()
+    from_date_str = str(data.get("from_date", "") or "").strip()
+    end_date_str  = str(data.get("end_date", "") or "").strip()
+    amount        = float(data.get("amount", 0) or 0)
+    gst_pct       = float(data.get("gst_percent", 0) or 0)
+    gst_amt       = round(amount * gst_pct / 100, 2)
+    total         = round(amount + gst_amt, 2)
+    pay_mode      = str(data.get("pay_mode", "cash") or "cash").strip()
+    pay_ref       = str(data.get("payment_ref", "") or "").strip()
+    note          = str(data.get("note", "") or "").strip()
+    duration_days = int(data.get("duration_days", 30) or 30)
+
+    if not from_date_str or not end_date_str:
+        raise HTTPException(400, "from_date and end_date are required")
+    try:
+        from_dt = datetime.fromisoformat(from_date_str)
+    except Exception:
+        raise HTTPException(400, f"Invalid from_date: {from_date_str}")
+    try:
+        end_dt = datetime.fromisoformat(end_date_str)
+    except Exception:
+        raise HTTPException(400, f"Invalid end_date: {end_date_str}")
+
+    mid_str        = str(b.get("merchant_id", ""))
+    merchant_name  = b.get("merchant_name", "")
+    merchant_phone = str(b.get("merchant_phone", b.get("phone", "")))
+
+    # Mark banner as approved + update dates
+    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
+        "approval_status":  "approved",
+        "status":           "approved",
+        "payment_status":   "paid",
+        "pay_mode":         pay_mode,
+        "payment_ref":      pay_ref,
+        "from_date":        from_date_str,
+        "end_date":         end_date_str,
+        "duration_days":    duration_days,
+        "total":            total,
+        "amount":           amount,
+        "gst":              gst_amt,
+        "approved_at":      datetime.utcnow().isoformat(),
+    }})
+
+    # Sync to promo_sliders
+    db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {
+        "status":    "approved",
+        "is_active": True,
+        "from_date": from_date_str,
+        "end_date":  end_date_str,
+        "city":      b.get("city", ""),
+        "store_id":  b.get("store_id", ""),
+    }})
+
+    # Create invoice
+    invoice_no = "LS-BNR-" + datetime.utcnow().strftime("%Y%m%d") + "-" + bid[-6:].upper()
+    store_name = b.get("store_name", "")
+    db.invoices.insert_one({
+        "invoice_no":     invoice_no,
+        "merchant_id":    mid_str,
+        "merchant_name":  merchant_name,
+        "merchant_phone": merchant_phone,
+        "store_name":     store_name,
+        "type":           "banner",
+        "banner_id":      bid,
+        "banner_title":   b.get("title", ""),
+        "plan":           plan,
+        "base_price":     amount,
+        "gst":            gst_amt,
+        "gst_percent":    gst_pct,
+        "total":          total,
+        "pay_mode":       pay_mode,
+        "payment_ref":    pay_ref,
+        "note":           note,
+        "from_date":      from_dt,
+        "end_date":       end_dt,
+        "added_by_admin": True,
+        "created_at":     datetime.utcnow(),
+    })
+
+    return {
+        "ok":        True,
+        "invoice_no": invoice_no,
+        "message":   f"Payment recorded. Banner '{b.get('title','')}' is now active until {end_date_str}.",
+    }
+
 @router.post("/merchant-banners/resync-sliders")
 def resync_merchant_banner_sliders(a=Depends(get_current_admin)):
     """Re-sync all approved merchant banners into promo_sliders with latest fields (from_date, end_date, duration_days, merchant_phone)."""
@@ -2549,7 +2735,10 @@ def list_merchant_products(a=Depends(get_current_admin)):
             "duration_days": v.get("duration_days", v.get("duration",30)),
             "from_date":     v.get("from_date",""),
             "end_date":      v.get("end_date",""),
+            "approval_status": v.get("approval_status", "pending_approval"),
             "status":        _compute_product_status_mv(v),
+            "store_id":      v.get("store_id",""),
+            "store_name":    v.get("store_name",""),
             "invoice_no":    v.get("invoice_no",""),
             "amount":        v.get("total",0),
             "created_at":    v["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if isinstance(v.get("created_at"), datetime) else str(v.get("created_at",""))[:16],
@@ -2609,7 +2798,13 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
             "source_voucher_id": vid,
             "merchant_id":       str(v.get("merchant_id", "")),
             "merchant_name":     v.get("merchant_name", ""),
-            "amount":            v.get("amount", 0),
+            "merchant_phone":    str(v.get("merchant_phone", "")),
+            "store_id":          v.get("store_id", ""),
+            "store_name":        v.get("store_name", ""),
+            "city":              v.get("city", ""),
+            "price":             v.get("price", v.get("amount", 0)),
+            "original_price":    v.get("original_price", 0),
+            "amount":            v.get("total", v.get("amount", 0)),
             "updated_at":        datetime.utcnow().isoformat(),
         },
          "$setOnInsert": {
@@ -2642,26 +2837,29 @@ def update_merchant_product(pid: str, data: dict, a=Depends(get_current_admin)):
         update_data["logo_url"] = update_data["logo"]
 
     result = db.merchant_vouchers.update_one(
-        {"_id": ObjectId(vid)},
+        {"_id": ObjectId(pid)},
         {"$set": update_data}
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Voucher not found")
+        raise HTTPException(status_code=404, detail="Product not found")
 
-    # ISSUE 7: if status updated, sync to gift_vouchers record
-    if "status" in update_data or "validity" in update_data or "from_date" in update_data or "end_date" in update_data:
+    # Sync changes to gift_vouchers record
+    if "status" in update_data or "approval_status" in update_data or "validity" in update_data or "from_date" in update_data or "end_date" in update_data:
         sync_fields = {}
-        if "validity"   in update_data: sync_fields["validity"]  = update_data["validity"]
-        if "from_date"  in update_data: sync_fields["from_date"] = update_data["from_date"]
-        if "end_date"   in update_data: sync_fields["end_date"]  = update_data["end_date"]
-        if "status"     in update_data:
+        if "validity"         in update_data: sync_fields["validity"]  = update_data["validity"]
+        if "from_date"        in update_data: sync_fields["from_date"] = update_data["from_date"]
+        if "end_date"         in update_data: sync_fields["end_date"]  = update_data["end_date"]
+        if "status"           in update_data:
             new_st = update_data["status"]
+            sync_fields["status"]    = new_st
             sync_fields["is_active"] = (new_st == "approved")
-        if "logo"       in update_data: sync_fields["logo"]      = update_data["logo"]
-        if "title"      in update_data: sync_fields["title"]     = update_data["title"]
-        if "offer_text" in update_data: sync_fields["text"]      = update_data["offer_text"]
+        if "approval_status"  in update_data: sync_fields["approval_status"] = update_data["approval_status"]
+        if "logo"             in update_data: sync_fields["logo"]      = update_data["logo"]
+        if "logo_url"         in update_data: sync_fields["logo"]      = update_data["logo_url"]
+        if "title"            in update_data: sync_fields["title"]     = update_data["title"]
+        if "offer_text"       in update_data: sync_fields["text"]      = update_data["offer_text"]
         if sync_fields:
-            db.gift_vouchers.update_many({"source_voucher_id": vid}, {"$set": sync_fields})
+            db.gift_vouchers.update_many({"source_voucher_id": pid}, {"$set": sync_fields})
 
     return {"ok": True, "updated": update_data}
 
