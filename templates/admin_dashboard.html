@@ -4404,7 +4404,7 @@ async function deleteProductCard(id, source) {
   loadGiftCards();
 }
 
-async async function openGiftCardModal() {
+async function openGiftCardModal() {
   if (merchantsList.length === 0) await loadMerchants();
   document.getElementById("gc_id").value = "";
   document.getElementById("gc_collection").value = "gift_vouchers";
