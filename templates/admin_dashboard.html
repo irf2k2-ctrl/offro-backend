@@ -3775,8 +3775,17 @@ async function deleteReview(reviewId, storeName) {
 // ═══════════ PRODUCT CARDS (App Display) ═══════════
 let gcModalInst;
 window.addEventListener("DOMContentLoaded", function() {
-  if (document.getElementById("giftCardModal"))
-    gcModalInst = new bootstrap.Modal(document.getElementById("giftCardModal"));
+  // ── Initialize all Bootstrap modal instances ──
+  const _safeModal = (id) => {
+    const el = document.getElementById(id);
+    return el ? new bootstrap.Modal(el) : null;
+  };
+  gcModalInst      = _safeModal("giftCardModal");
+  storeModalInst   = _safeModal("storeModal");
+  vzViewModalInst  = _safeModal("vzViewModal");
+  bnViewModalInst  = _safeModal("bnViewModal");
+  productModalInst = _safeModal("giftCardModal"); // product edit reuses gcModal
+  accountDetailModalInst = _safeModal("accountDetailModal");
 });
 
 // ── All products data cache + pagination ──

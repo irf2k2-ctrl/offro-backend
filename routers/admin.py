@@ -1796,53 +1796,6 @@ def delete_product_card(pid: str, a=Depends(get_current_admin)):
     return {"message": "Deleted"}
 
 
-@router.put("/products/{pid}")
-def update_product(pid: str, data: dict, a=Depends(get_current_admin)):
-    """Update a product card (from the products collection) via admin dashboard."""
-    try:
-        p = db.products.find_one({"_id": ObjectId(pid)})
-    except Exception:
-        raise HTTPException(400, "Invalid product id")
-    if not p:
-        raise HTTPException(404, "Product not found")
-    upd = {}
-    for field in ["title", "name", "text", "offer_text", "validity", "logo",
-                  "merchant_id", "store_id", "from_date", "end_date",
-                  "category", "description", "price", "discount",
-                  "sale_price", "original_price"]:
-        if field in data:
-            upd[field] = (data[field] or "").strip() if isinstance(data[field], str) else data[field]
-    if "duration_days" in data:
-        try:
-            upd["duration_days"] = int(data["duration_days"]) if data["duration_days"] else 0
-        except (TypeError, ValueError):
-            upd["duration_days"] = 0
-    if "pay_amount" in data:
-        try: upd["pay_amount"] = float(data["pay_amount"]) if data["pay_amount"] not in (None, "") else 0.0
-        except (TypeError, ValueError): upd["pay_amount"] = 0.0
-    if "pay_gst" in data:
-        try: upd["pay_gst"] = float(data["pay_gst"]) if data["pay_gst"] not in (None, "") else 18.0
-        except (TypeError, ValueError): upd["pay_gst"] = 18.0
-    if "is_active" in data:
-        upd["is_active"] = bool(data["is_active"])
-    # Resolve and store merchant_name + phone when merchant_id is updated
-    if "merchant_id" in upd and upd["merchant_id"]:
-        try:
-            pm = (db.accounts.find_one({"_id": ObjectId(upd["merchant_id"])}, {"name":1,"phone":1}) or
-                  db.merchants.find_one({"_id": ObjectId(upd["merchant_id"])}, {"name":1,"phone":1}))
-            if pm:
-                upd["merchant_name"]  = pm.get("name", "")
-                upd["merchant_phone"] = str(pm.get("phone", ""))
-        except Exception:
-            pass
-    if not upd:
-        raise HTTPException(400, "Nothing to update")
-    db.products.update_one({"_id": ObjectId(pid)}, {"$set": upd})
-    return {"message": "Product updated"}
-
-
-# ===================== PRODUCT REVIEWS =====================
-
 @router.get("/product-reviews")
 def list_product_reviews(product_id: str = "", a=Depends(get_current_admin)):
     """List all product reviews. Optionally filter by product_id."""
