@@ -447,6 +447,9 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     phone      = acct.get("phone", "")
     mid        = acct.get("merchant_id", "")
     acct_id    = str(acct["_id"])
+    # If merchant_id field not set, fall back to _id (account IS the merchant record)
+    if not mid:
+        mid = acct_id
     roles      = acct.get("roles", ["user"])
     is_merchant = "merchant" in roles
 
@@ -456,13 +459,19 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     subscriptions = []
     invoices      = []
 
-    if is_merchant and mid:
-        store_count   = db.stores.count_documents({"merchant_id": mid})
-        banner_count  = db.merchant_banners.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
-        voucher_count = db.merchant_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
+    if is_merchant:
+        # Query by mid OR acct_id to cover both data patterns
+        mid_variants = list({mid, acct_id} - {""})
+        store_count   = db.stores.count_documents({"merchant_id": {"$in": mid_variants}})
+        banner_count  = db.merchant_banners.count_documents({
+            "$or": [{"merchant_id": {"$in": mid_variants}}, {"merchant_phone": phone}]
+        })
+        voucher_count = db.merchant_vouchers.count_documents({
+            "$or": [{"merchant_id": {"$in": mid_variants}}, {"merchant_phone": phone}]
+        })
 
         for s in db.subscriptions.find(
-            {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
+            {"$or": [{"merchant_id": {"$in": mid_variants}}, {"merchant_phone": phone}]}
         ).sort("created_at", -1).limit(5):
             subscriptions.append({
                 "plan":       s.get("plan",""),
@@ -472,7 +481,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
             })
 
         for inv in db.invoices.find(
-            {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
+            {"$or": [{"merchant_id": {"$in": mid_variants}}, {"merchant_phone": phone}]}
         ).sort("created_at", -1).limit(10):
             invoices.append({
                 "invoice_no":  inv.get("invoice_no",""),
@@ -503,6 +512,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
         "store_count":   store_count,
         "banner_count":  banner_count,
         "voucher_count": voucher_count,
+        "product_count": voucher_count,  # alias: HTML reads product_count
         "subscriptions": subscriptions,
         "invoices":      invoices,
     }
@@ -1819,7 +1829,7 @@ def create_product_card(data: dict, a=Depends(get_current_admin)):
 def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
     """Update an existing product card."""
     upd = {}
-    _str_fields = ["title", "text", "validity", "logo", "merchant_id", "store_id", "store_name", "from_date", "end_date", "city", "pay_from_date", "pay_to_date", "pay_mode", "pay_ref"]
+    _str_fields = ["title", "text", "offer_text", "validity", "logo", "logo_url", "merchant_id", "store_id", "store_name", "from_date", "end_date", "city", "pay_from_date", "pay_to_date", "pay_mode", "pay_ref", "pay_status"]
     for field in _str_fields:
         if field in data:
             upd[field] = (data[field] or "").strip()
@@ -1834,12 +1844,15 @@ def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
     if "pay_gst" in data:
         try: upd["pay_gst"] = float(data["pay_gst"]) if data["pay_gst"] not in (None, "") else 18.0
         except (TypeError, ValueError): upd["pay_gst"] = 18.0
-    if "store_id" in upd and upd["store_id"] and "logo" not in upd:
-        try:
-            s = db.stores.find_one({"_id": ObjectId(upd["store_id"])}, {"store_image2":1,"image2":1})
-            if s:
-                upd["logo"] = s.get("store_image2") or s.get("image2") or ""
-        except: pass
+    # Price fields
+    for _price_field in ["price", "sale_price", "original_price"]:
+        if _price_field in data and data[_price_field] not in (None, ""):
+            try: upd[_price_field] = float(data[_price_field])
+            except (TypeError, ValueError): pass
+    # logo_url → logo sync
+    if "logo_url" in upd and "logo" not in upd:
+        upd["logo"] = upd["logo_url"]
+    # NOTE: logo is only updated if explicitly sent — never auto-overwrite from store on edit
     if "is_active" in data:
         upd["is_active"] = bool(data["is_active"])
     if not upd:
@@ -2038,6 +2051,16 @@ def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     if "sort_order"    in data: upd["sort_order"]    = int(data["sort_order"])
     if "is_active"     in data: upd["is_active"]     = bool(data["is_active"])
     if "days"          in data: upd["duration_days"]  = int(data["days"])
+    # Payment fields
+    for _pf in ["pay_from_date", "pay_to_date", "pay_mode", "pay_ref", "invoice_no", "pay_status"]:
+        if data.get(_pf) not in (None, ""):
+            upd[_pf] = str(data[_pf]).strip()
+    if data.get("pay_amount") not in (None, ""):
+        try: upd["pay_amount"] = float(data["pay_amount"])
+        except (TypeError, ValueError): pass
+    if data.get("pay_gst") not in (None, ""):
+        try: upd["pay_gst"] = float(data["pay_gst"])
+        except (TypeError, ValueError): pass
     # Keep expires_at in sync with end_date (only when non-empty)
     if upd.get("end_date"): upd["expires_at"] = upd["end_date"]
     # Auto-calculate end_date from from_date + days

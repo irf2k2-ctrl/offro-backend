@@ -951,10 +951,7 @@ def get_promo_sliders_public(city: str = None):
         city_re = {"$regex": city.strip(), "$options": "i"}
         city_query = {"$and": [base_query, {"$or": [{"city": city_re}, {"store_city": city_re}]}]}
         docs = list(db.promo_sliders.find(city_query).sort("sort_order", 1))
-        # Fallback: no city-specific sliders — return ALL active sliders
-        # (better than a placeholder; user sees real content even if GPS city name mismatches)
-        if not docs:
-            docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
+        # NOTE: No city fallback — banners must match city. Cross-city leakage not allowed.
     else:
         docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
     result = []
@@ -1003,18 +1000,9 @@ def get_public_products(city: str = None):
 
     docs = list(db.products.find(query).sort("_id", -1))
 
-    # City fallback: if city filter returns nothing, show all (better UX than empty screen)
-    if not docs and _city_norm:
-        fallback_q = {
-            "status": {"$nin": ["deleted", "inactive", "expired"]},
-            "is_active": {"$ne": False},
-            "$or": [
-                {"end_date": {"$exists": False}},
-                {"end_date": {"$in": [None, ""]}},
-                {"end_date": {"$gte": _today}},
-            ]
-        }
-        docs = list(db.products.find(fallback_q).sort("_id", -1))
+    # NOTE: No city fallback here — city filtering is strict.
+    # Products must have the correct city field to appear in a city's home screen.
+    # Cross-city leakage is a critical UX issue.
 
     result = []
     for d in docs:

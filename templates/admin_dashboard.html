@@ -354,6 +354,8 @@ tr:hover td{background:#f7faf8;}
       <option value="pending">Pending</option>
       <option value="expired">Expired</option>
     </select>
+    <input id="pc_city_filter" class="form-control" style="max-width:160px;font-size:13px" placeholder="Filter by city..." oninput="filterProductCards()">
+    <input id="pc_store_filter" class="form-control" style="max-width:160px;font-size:13px" placeholder="Filter by store..." oninput="filterProductCards()">
     <input id="pc_date_from" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterProductCards()" placeholder="From">
     <input id="pc_date_to" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterProductCards()" placeholder="To">
   </div>
@@ -434,6 +436,8 @@ tr:hover td{background:#f7faf8;}
       <option value="admin">Admin Created</option>
       <option value="merchant">Merchant Created</option>
     </select>
+    <input id="bn_city_filter" class="form-control" style="max-width:160px;font-size:13px" placeholder="Filter by city..." oninput="filterBanners()">
+    <input id="bn_store_filter" class="form-control" style="max-width:160px;font-size:13px" placeholder="Filter by store..." oninput="filterBanners()">
     <input id="bn_date_from" type="date" class="form-control" style="max-width:155px;font-size:13px" onchange="filterBanners()">
     <input id="bn_date_to" type="date" class="form-control" style="max-width:155px;font-size:13px" onchange="filterBanners()">
   </div>
@@ -2745,14 +2749,18 @@ function filterBanners() {
   const byWho   = document.getElementById('bn_merchant_filter')?.value||'';
   const bySt    = document.getElementById('bn_status_filter')?.value||'';
   const byType  = document.getElementById('bn_type_filter')?.value||'';
+  const byCity  = (document.getElementById('bn_city_filter')?.value||'').toLowerCase();
+  const byStore = (document.getElementById('bn_store_filter')?.value||'').toLowerCase();
   const dateFrom= document.getElementById('bn_date_from')?.value||'';
   const dateTo  = document.getElementById('bn_date_to')?.value||'';
 
   let rows = _allBannerRows;
-  if (q)       rows = rows.filter(r=>(r.title||'').toLowerCase().includes(q)||(r.merchant_name||'').toLowerCase().includes(q));
+  if (q)       rows = rows.filter(r=>(r.title||'').toLowerCase().includes(q)||(r.merchant_name||'').toLowerCase().includes(q)||(r.store_name||'').toLowerCase().includes(q));
   if (byWho)   rows = rows.filter(r=>r._source===byWho);
   if (byType)  rows = rows.filter(r=>r._source===byType);
   if (bySt)    rows = rows.filter(r=>r.status===bySt);
+  if (byCity)  rows = rows.filter(r=>(r.city||'').toLowerCase().includes(byCity));
+  if (byStore) rows = rows.filter(r=>(r.store_name||'').toLowerCase().includes(byStore));
   if (dateFrom)rows = rows.filter(r=>(r.created_at||'')>=dateFrom);
   if (dateTo)  rows = rows.filter(r=>(r.created_at||'')<=dateTo+'z');
 
@@ -3156,6 +3164,15 @@ async function editSlider(s) {
       else _slPrev.textContent = '';
     }
   }
+  // Populate payment fields if stored on the banner record
+  if (document.getElementById("sl_pay_from"))   document.getElementById("sl_pay_from").value   = s.pay_from_date || s.from_date || '';
+  if (document.getElementById("sl_pay_to"))     document.getElementById("sl_pay_to").value     = s.pay_to_date   || s.end_date  || '';
+  if (document.getElementById("sl_pay_amount")) document.getElementById("sl_pay_amount").value = s.pay_amount    || '';
+  if (document.getElementById("sl_pay_gst"))    document.getElementById("sl_pay_gst").value    = s.pay_gst       || '18';
+  if (document.getElementById("sl_pay_mode"))   document.getElementById("sl_pay_mode").value   = s.pay_mode      || '';
+  if (document.getElementById("sl_pay_ref"))    document.getElementById("sl_pay_ref").value    = s.pay_ref       || s.payment_ref || '';
+  if (document.getElementById("sl_invoice_no")) document.getElementById("sl_invoice_no").value = s.invoice_no    || '';
+  if (document.getElementById("sl_pay_status")) document.getElementById("sl_pay_status").value = s.pay_status    || s.payment_status || '';
   // Populate store dropdown from existing store_id / store_name
   const _slStoreSel = document.getElementById("sl_store_sel");
   const _slStoreId  = document.getElementById("sl_store_id");
@@ -3314,6 +3331,14 @@ async function saveSlider() {
   const _slFromDate = (document.getElementById("sl_from_date")?.value || '').trim();
   const _slEndDate  = (document.getElementById("sl_end_date")?.value  || '').trim();
   const _slDays     = parseInt(document.getElementById("sl_days")?.value)||30;
+  const _slPayFrom   = (document.getElementById("sl_pay_from")?.value   || '').trim();
+  const _slPayTo     = (document.getElementById("sl_pay_to")?.value     || '').trim();
+  const _slPayAmt    = parseFloat(document.getElementById("sl_pay_amount")?.value) || 0;
+  const _slPayGst    = parseFloat(document.getElementById("sl_pay_gst")?.value) || 18;
+  const _slPayMode   = (document.getElementById("sl_pay_mode")?.value   || '').trim();
+  const _slPayRef    = (document.getElementById("sl_pay_ref")?.value    || '').trim();
+  const _slInvNo     = (document.getElementById("sl_invoice_no")?.value || '').trim();
+  const _slPayStatus = (document.getElementById("sl_pay_status")?.value || '').trim();
   const data = {
     title:           document.getElementById("sl_title").value.trim(),
     image_url:       img,
@@ -3327,6 +3352,14 @@ async function saveSlider() {
     ...((_slStoreId) ? {store_id: _slStoreId} : {}),
     ...((_slStoreName) ? {store_name: _slStoreName} : {}),
     city:            _slCity,
+    pay_from_date:   _slPayFrom  || undefined,
+    pay_to_date:     _slPayTo    || undefined,
+    pay_amount:      _slPayAmt   || undefined,
+    pay_gst:         _slPayGst !== 18 ? _slPayGst : undefined,
+    pay_mode:        _slPayMode  || undefined,
+    pay_ref:         _slPayRef   || undefined,
+    invoice_no:      _slInvNo    || undefined,
+    pay_status:      _slPayStatus|| undefined,
   };
   // Only send dates if they have values — prevent overwriting valid DB dates with blanks
   if (_slFromDate) data.from_date = _slFromDate;
@@ -4065,13 +4098,17 @@ function filterProductCards() {
   const q       = (document.getElementById('pc_search')?.value||'').toLowerCase();
   const byWho   = document.getElementById('pc_merchant_filter')?.value||'';
   const bySt    = document.getElementById('pc_status_filter')?.value||'';
+  const byCity  = (document.getElementById('pc_city_filter')?.value||'').toLowerCase();
+  const byStore = (document.getElementById('pc_store_filter')?.value||'').toLowerCase();
   const dateFrom= document.getElementById('pc_date_from')?.value||'';
   const dateTo  = document.getElementById('pc_date_to')?.value||'';
 
   let rows = _allProductRows;
-  if (q)       rows = rows.filter(r=>(r.title||'').toLowerCase().includes(q)||(r.offer_text||'').toLowerCase().includes(q));
+  if (q)       rows = rows.filter(r=>(r.title||'').toLowerCase().includes(q)||(r.offer_text||'').toLowerCase().includes(q)||(r.merchant_name||'').toLowerCase().includes(q));
   if (byWho)   rows = rows.filter(r=>r._source===byWho);
   if (bySt)    rows = rows.filter(r=>r.status===bySt);
+  if (byCity)  rows = rows.filter(r=>(r.city||'').toLowerCase().includes(byCity));
+  if (byStore) rows = rows.filter(r=>(r.store_name||'').toLowerCase().includes(byStore));
   if (dateFrom)rows = rows.filter(r=>(r.created_at||'')>=dateFrom);
   if (dateTo)  rows = rows.filter(r=>(r.created_at||'')<=dateTo+'z');
 
@@ -4326,6 +4363,20 @@ function openVZMerchantEditModal(row) {
         </div>
         <div class="row mb-3">
           <div class="col-6">
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">Selling Price (₹)</label>
+            <input id="pc_edit_sale_price" type="number" class="form-control" style="margin-top:4px" placeholder="e.g. 299" min="0" step="0.01">
+          </div>
+          <div class="col-6">
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">Original Price / MRP (₹)</label>
+            <input id="pc_edit_original_price" type="number" class="form-control" style="margin-top:4px" placeholder="e.g. 499" min="0" step="0.01">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">City</label>
+          <input id="pc_edit_city" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. Ballari">
+        </div>
+        <div class="row mb-3">
+          <div class="col-6">
             <label style="font-size:12px;font-weight:600;color:var(--muted)">From Date</label>
             <input id="pc_edit_from_date" type="date" class="form-control" style="margin-top:4px" onchange="_vzUpdateValidity()">
           </div>
@@ -4378,13 +4429,16 @@ function openVZMerchantEditModal(row) {
 // Logo listener now inside modal build block above
   }
   const el2 = id => document.getElementById(id);
-  if(el2('pc_edit_title'))     el2('pc_edit_title').value     = row.title||'';
-  if(el2('pc_edit_offer'))     el2('pc_edit_offer').value     = row.offer_text||'';
-  if(el2('pc_edit_from_date')) el2('pc_edit_from_date').value = row.from_date||'';
-  if(el2('pc_edit_end_date'))  el2('pc_edit_end_date').value  = row.end_date||'';
-  if(el2('pc_edit_validity'))  el2('pc_edit_validity').value  = row.validity||'';
-  if(el2('pc_edit_logo'))      el2('pc_edit_logo').value      = row.logo||'';
-  if(row.logo) _vzShowLogoPreview(row.logo); else _vzClearLogo();
+  if(el2('pc_edit_title'))           el2('pc_edit_title').value           = row.title||'';
+  if(el2('pc_edit_offer'))           el2('pc_edit_offer').value           = row.offer_text||row.text||'';
+  if(el2('pc_edit_from_date'))       el2('pc_edit_from_date').value       = row.from_date||'';
+  if(el2('pc_edit_end_date'))        el2('pc_edit_end_date').value        = row.end_date||'';
+  if(el2('pc_edit_validity'))        el2('pc_edit_validity').value        = row.validity||'';
+  if(el2('pc_edit_logo'))            el2('pc_edit_logo').value            = row.logo||row.logo_url||'';
+  if(el2('pc_edit_city'))            el2('pc_edit_city').value            = row.city||'';
+  if(el2('pc_edit_sale_price'))      el2('pc_edit_sale_price').value      = row.sale_price ?? row.price ?? '';
+  if(el2('pc_edit_original_price'))  el2('pc_edit_original_price').value  = row.original_price ?? row.mrp ?? '';
+  if(row.logo||row.logo_url) _vzShowLogoPreview(row.logo||row.logo_url); else _vzClearLogo();
   if(el2('pc_edit_logo_file')) el2('pc_edit_logo_file').value = '';
   if(el2('pc_edit_status'))    el2('pc_edit_status').value    = row.status||'pending';
   if(el2('pc_edit_msg'))       el2('pc_edit_msg').textContent = '';
@@ -4436,14 +4490,23 @@ async function saveVZMerchantEdit() {
   const logoVal = el('pc_edit_logo')?.value?.trim() || row.logo || '';
   const fromVal = el('pc_edit_from_date')?.value?.trim() || row.from_date || '';
   const toVal   = el('pc_edit_end_date')?.value?.trim()  || row.end_date  || '';
+  const _saleP  = parseFloat(el('pc_edit_sale_price')?.value);
+  const _origP  = parseFloat(el('pc_edit_original_price')?.value);
+  const _editCity = el('pc_edit_city')?.value?.trim() || row.city || '';
   const payload = {
-    title:      el('pc_edit_title')?.value?.trim()    || row.title,
-    offer_text: el('pc_edit_offer')?.value?.trim()    || row.offer_text,
-    validity:   el('pc_edit_validity')?.value?.trim() || row.validity,
-    logo:       logoVal,
-    from_date:  fromVal,
-    end_date:   toVal,
-    status:     el('pc_edit_status')?.value           || row.status,
+    title:          el('pc_edit_title')?.value?.trim()    || row.title,
+    offer_text:     el('pc_edit_offer')?.value?.trim()    || row.offer_text,
+    text:           el('pc_edit_offer')?.value?.trim()    || row.offer_text,
+    validity:       el('pc_edit_validity')?.value?.trim() || row.validity,
+    logo:           logoVal,
+    logo_url:       logoVal,
+    from_date:      fromVal,
+    end_date:       toVal,
+    status:         el('pc_edit_status')?.value           || row.status,
+    city:           _editCity,
+    price:          isNaN(_saleP)  ? undefined : _saleP,
+    sale_price:     isNaN(_saleP)  ? undefined : _saleP,
+    original_price: isNaN(_origP)  ? undefined : _origP,
   };
   try {
     const res = await fetch(`/admin/merchant-products/${row._id}`, {
@@ -4957,6 +5020,61 @@ async function saveStore() {
           <label class="form-label">City <span style="color:var(--muted);font-size:11px">(optional)</span></label>
           <input id="sl_city" class="form-control" placeholder="Auto-filled from store" readonly style="background:#f7faf8;cursor:default">
           <div style="font-size:11px;color:var(--muted);margin-top:3px">Auto-filled when a store is selected. Can also be typed manually.</div>
+        </div>
+        <hr style="border-color:var(--border);margin:14px 0">
+        <div style="font-size:12px;font-weight:600;color:var(--primary);margin-bottom:10px">💳 Payment Information</div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">From Date</label>
+            <input type="date" id="sl_pay_from" class="form-control">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">To Date</label>
+            <input type="date" id="sl_pay_to" class="form-control">
+          </div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Amount Paid (₹)</label>
+            <input type="number" id="sl_pay_amount" class="form-control" placeholder="0" min="0" step="0.01">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">GST (%)</label>
+            <input type="number" id="sl_pay_gst" class="form-control" placeholder="18" min="0" max="100" value="18">
+          </div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Payment Mode</label>
+            <select id="sl_pay_mode" class="form-select">
+              <option value="">Select...</option>
+              <option value="UPI">UPI</option>
+              <option value="Cash">Cash</option>
+              <option value="Bank Transfer">Bank Transfer</option>
+              <option value="Card">Card</option>
+              <option value="Razorpay">Razorpay</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">Payment Reference</label>
+            <input type="text" id="sl_pay_ref" class="form-control" placeholder="UTR / Transaction ID">
+          </div>
+        </div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Invoice Number</label>
+            <input type="text" id="sl_invoice_no" class="form-control" placeholder="Auto / Manual">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">Payment Status</label>
+            <select id="sl_pay_status" class="form-select">
+              <option value="">—</option>
+              <option value="paid">Paid</option>
+              <option value="pending">Pending</option>
+              <option value="free">Free / Complimentary</option>
+            </select>
+          </div>
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="sl_active" checked>
