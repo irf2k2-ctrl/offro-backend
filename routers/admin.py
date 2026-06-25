@@ -3625,12 +3625,13 @@ async def admin_update_default_images(
     product_file: UploadFile = File(None),
     offer_file: UploadFile = File(None),
     city_file: UploadFile = File(None),
+    merchant_banner_file: UploadFile = File(None),
     a=Depends(get_current_admin),
 ):
     """Upload default images. Saves Cloudinary URL if configured, else base64 fallback."""
     import base64 as _b64mod, os as _di_os
     update = {}
-    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file)]:
+    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file), ("merchant_banner", merchant_banner_file)]:
         if not f or not f.filename:
             continue
         raw  = await f.read()
