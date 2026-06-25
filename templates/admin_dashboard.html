@@ -1381,7 +1381,7 @@ async function loadDiscounts() {
     renderDiscounts();
   } catch(e) { console.error(e); }
 }
-function renderDiscounts() {
+async function renderDiscounts() {
   const q = (document.getElementById("disc_search")?.value||"").toLowerCase();
   const rows = allDiscounts.filter(d=>(d.code||"").toLowerCase().includes(q));
   document.getElementById("disc_body").innerHTML = rows.length ? rows.map(d => {
@@ -1466,7 +1466,7 @@ setInterval(() => {
 
 window.onload = () => {
   // Safe modal init — null-guarded so a missing element never crashes page load
-  function safeModal(id) {
+  async function safeModal(id) {
     const el = document.getElementById(id);
     return el ? new bootstrap.Modal(el) : null;
   }
@@ -1521,7 +1521,7 @@ async function loadGiftProductRequests() {
     }
 }
 
-function openFulfillModal(reqId, userName, points, value){
+async function openFulfillModal(reqId, userName, points, value){
   document.getElementById("fulfill_req_id").value=reqId;
   document.getElementById("fulfillUserName").innerText=userName;
   document.getElementById("fulfillPoints").innerText=points+" pts = ₹"+value;
@@ -1545,7 +1545,7 @@ async function submitFulfill(){
   else alert("❌ "+(d.detail||"Error"));
 }
 
-function showSection(name, el){
+async function showSection(name, el){
   if (name === 'cities') loadCities();
   if (name === 'default_images') loadDefaultImages();
   if (name === 'admin_banners') loadAdminBanners();
@@ -1705,12 +1705,12 @@ async function uploadCategoryImage(name,input){
     console.error("[OFFRO] Upload exception:",e);
   }
 }
-function showCatStatus(name,msg,color){
+async function showCatStatus(name,msg,color){
   // Find the status span within the card for this category
   const all=document.querySelectorAll("[data-cat-status]");
   all.forEach(el=>{if(el.dataset.catStatus===name){el.style.color=color;el.innerText=msg;}});
 }
-function populateCategoryDropdown(sel){
+async function populateCategoryDropdown(sel){
   let s=document.getElementById("store_category");
   s.innerHTML='<option value="">Select category</option>';
   let cats=categoriesList.length?categoriesList.map(c=>c.name||c):["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"];
@@ -1734,7 +1734,7 @@ async function loadPricing(){
   });
   renderPlans();
 }
-function renderPlans(){
+async function renderPlans(){
   let html=currentPlans.map((p,i)=>`
     <div class="plan-row">
       <label>${p.label}</label>
@@ -1831,7 +1831,7 @@ function filterMerchants(){
   _merchantsPage=1;
   renderMerchantsPage();
 }
-function renderMerchantsPage(){
+async function renderMerchantsPage(){
   let f=_filteredMerchants;
   let pageData=f.slice((_merchantsPage-1)*PAGE_SIZE, _merchantsPage*PAGE_SIZE);
   let html="";
@@ -1851,7 +1851,7 @@ function renderMerchantsPage(){
   renderPagination("merchants_pagination", f.length, _merchantsPage, "goMerchPage");
 }
 
-function openEditMerchant(id){
+async function openEditMerchant(id){
   let m=merchantsList.find(x=>x._id===id);if(!m)return;
   document.getElementById("edit_merchant_id").value=id;
   document.getElementById("edit_merchant_name").value=m.name||"";
@@ -2049,7 +2049,7 @@ const INDIA_STATES_CITIES = {
   "Lakshadweep":["Kavaratti"]
 };
 
-function populateStoreStateDropdown(selectedState) {
+async function populateStoreStateDropdown(selectedState) {
   const sel = document.getElementById("store_state");
   if (!sel) return;
   sel.innerHTML = '<option value="">— Select State —</option>' +
@@ -2058,7 +2058,7 @@ function populateStoreStateDropdown(selectedState) {
     ).join('');
 }
 
-function onStoreStateChange() {
+async function onStoreStateChange() {
   const state = document.getElementById("store_state")?.value || "";
   const citySel = document.getElementById("store_city");
   if (!citySel) return;
@@ -2073,7 +2073,7 @@ function onStoreStateChange() {
   loadAreasForCity(""); // reset areas when state changes
 }
 
-function setStoreCityDropdown(state, city, area) {
+async function setStoreCityDropdown(state, city, area) {
   populateStoreStateDropdown(state || "");
   const citySel = document.getElementById("store_city");
   if (!citySel) return;
@@ -2277,7 +2277,7 @@ async function submitStore(){
     if(_sbtn){_sbtn.disabled=false;_sbtn.textContent=editingStore?"Save Changes":"Create Store";}
   }
 }
-function adminAutoCalcSubEnd(){
+async function adminAutoCalcSubEnd(){
   const from=document.getElementById("sub_from_date")?.value;
   const plan=document.getElementById("sub_plan")?.value;
   const endEl=document.getElementById("sub_end_date");
@@ -2331,7 +2331,7 @@ function filterUsers(){
   _usersPage=1;
   renderUsersPage();
 }
-function renderUsersPage(){
+async function renderUsersPage(){
   let f=_filteredUsers;
   let pageData=f.slice((_usersPage-1)*PAGE_SIZE, _usersPage*PAGE_SIZE);
   let html="";
@@ -2369,7 +2369,7 @@ async function viewHistory(uid,uname){
   }).join(""):`<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted)">No transactions yet</td></tr>`;
   document.getElementById("hist_table").innerHTML=html;
 }
-function openAdjust(uid,uname){
+async function openAdjust(uid,uname){
   document.getElementById("adj_user_id").value=uid;
   document.getElementById("adjUserName").innerText=uname;
   document.getElementById("adj_points").value="";
@@ -2380,11 +2380,11 @@ function openAdjust(uid,uname){
 }
 
 // ─── TASK 1: Account Detail → Wallet/Points action helpers ───
-function openWalletFromAcct(uid, uname) {
+async function openWalletFromAcct(uid, uname) {
   if (_acctDetailModal) _acctDetailModal.hide();
   setTimeout(() => viewHistory(uid, uname), 350);
 }
-function openAddPointsFromAcct(uid, uname) {
+async function openAddPointsFromAcct(uid, uname) {
   if (_acctDetailModal) _acctDetailModal.hide();
   setTimeout(() => {
     openAdjust(uid, uname);
@@ -2393,7 +2393,7 @@ function openAddPointsFromAcct(uid, uname) {
     if (sel) sel.value = 'credit';
   }, 350);
 }
-function openDebitPointsFromAcct(uid, uname) {
+async function openDebitPointsFromAcct(uid, uname) {
   if (_acctDetailModal) _acctDetailModal.hide();
   setTimeout(() => {
     openAdjust(uid, uname);
@@ -2535,7 +2535,7 @@ function exportPaymentsPDF() {
 }
 
 // ===== EXPORT PAYMENTS CSV =====
-function exportPaymentsCSV() {
+async function exportPaymentsCSV() {
   const headers = ["Date","Invoice No","Merchant","Phone","Store","Plan","Base Price","GST","Total","Payment ID"];
   const rows = (_allTxnRows && _allTxnRows.length ? _allTxnRows : allTxns).map(t => [
     t.created_at||"",
@@ -3011,7 +3011,7 @@ function openBnMerchantEditModal(row) {
   el2('bn_merchant_edit_modal').style.display = 'flex';
 }
 
-function autoCalcBnEndDate() {
+async function autoCalcBnEndDate() {
   const fromVal = document.getElementById('bn_edit_from')?.value?.trim() || '';
   const daysVal = parseInt(document.getElementById('bn_edit_days')?.value || '0', 10);
   const endEl   = document.getElementById('bn_edit_end');
@@ -3108,7 +3108,7 @@ async function editSlider(s) {
   document.getElementById("sl_order").value = s.sort_order||0;
   document.getElementById("sl_active").checked = s.is_active!==false;
   // Normalize dates to YYYY-MM-DD (backend may return "DD Mon YYYY" or ISO datetime)
-  function _toYMD(d) {
+  async function _toYMD(d) {
     if (!d) return '';
     const s2 = String(d).trim();
     // Already YYYY-MM-DD
@@ -3211,7 +3211,7 @@ async function editSlider(s) {
   sliderModalInst.show();
 }
 
-function slUpdateEndDate() {
+async function slUpdateEndDate() {
   const from = document.getElementById("sl_from_date")?.value;
   const days = parseInt(document.getElementById("sl_days")?.value)||0;
   const endEl = document.getElementById("sl_end_date");
@@ -3274,7 +3274,7 @@ async function slOnMerchantChange() {
   } catch(e) { console.warn("slOnMerchantChange:", e); }
 }
 
-function slOnStoreChange() {
+async function slOnStoreChange() {
   const storeSel     = document.getElementById("sl_store_sel");
   const cityInp      = document.getElementById("sl_city");
   const storeIdInp   = document.getElementById("sl_store_id");
@@ -3396,7 +3396,7 @@ const _TOPIC_LABELS = {
   "specific":  "direct (token)",
 };
 
-function toggleNotifTarget() {
+async function toggleNotifTarget() {
   const target = document.getElementById("notif_target").value;
   document.getElementById("notif_phone_row").style.display  = target === "specific" ? ""     : "none";
   document.getElementById("notif_city_row").style.display   = target === "city"     ? ""     : "none";
@@ -3527,7 +3527,7 @@ async function processNotifQueue() {
 
 // ── Notification image helpers ────────────────────────────────
 let _niMode = 'url';
-function niMode(m) {
+async function niMode(m) {
   _niMode = m;
   document.getElementById('ni_url_box').style.display  = m === 'url'  ? '' : 'none';
   document.getElementById('ni_file_box').style.display = m === 'file' ? '' : 'none';
@@ -3538,7 +3538,7 @@ function niMode(m) {
   fb.style.background = m==='file' ? 'var(--primary)' : '#fff';
   fb.style.color      = m==='file' ? '#fff'           : 'var(--primary)';
 }
-function niPreview(input) {
+async function niPreview(input) {
   if (!input.files || !input.files[0]) return;
   const reader = new FileReader();
   reader.onload = e => {
@@ -3688,14 +3688,14 @@ function renderPagination(containerId, total, currentPage, onPage) {
   el.innerHTML = `<span style="font-size:12px;color:var(--muted)">${start}–${end} of ${total}</span><div style="display:flex;gap:4px;">${btns}</div>`;
 }
 
-function goStorePage(p) { _storesPage = p; // DEBUG — log first store image fields
+async function goStorePage(p) { _storesPage = p; // DEBUG — log first store image fields
 if (window._stores && window._stores.length) {
   const s0 = window._stores[0];
   console.log("🏪 First store image fields:", {image: s0.image, _thumb: s0._thumb, images: s0.images});
 }
 renderStoresPage(); }
-function goMerchPage(p) { _merchantsPage = p; renderMerchantsPage(); }
-function goUsersPage(p) { _usersPage = p; renderUsersPage(); }
+async function goMerchPage(p) { _merchantsPage = p; renderMerchantsPage(); }
+async function goUsersPage(p) { _usersPage = p; renderUsersPage(); }
 
 async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"include"});window.location.href="/admin";}
 
@@ -3734,7 +3734,7 @@ let _prodReviewsCache = [];
 let _prodReviewsFilter = "";
 let _activeReviewTab = "stores";
 
-function switchReviewTab(tab) {
+async function switchReviewTab(tab) {
   _activeReviewTab = tab;
   document.getElementById("rev_panel_stores").style.display   = tab === "stores"   ? "" : "none";
   document.getElementById("rev_panel_products").style.display = tab === "products" ? "" : "none";
@@ -3894,7 +3894,7 @@ let _pcPage = 1;
 const _VZ_PER_PAGE = 15;
 
 // ── Robust date parser: handles ISO, DD-MM-YYYY, "13 Jun 2026", "Jun 13 2026" ──
-function _parseFlexDate(s) {
+async function _parseFlexDate(s) {
   if (!s) return null;
   s = String(s).trim();
   // Already ISO — just parse
@@ -4463,14 +4463,14 @@ function _vzShowLogoPreview(src) {
   if (src) { img.src = src; wrap.style.display = 'flex'; }
   else     { img.src = ''; wrap.style.display = 'none'; }
 }
-function _vzClearLogo() {
+async function _vzClearLogo() {
   const urlInput  = document.getElementById('pc_edit_logo');
   const fileInput = document.getElementById('pc_edit_logo_file');
   if (urlInput)  urlInput.value  = '';
   if (fileInput) fileInput.value = '';
   _vzShowLogoPreview('');
 }
-function _vzPreviewUpload(input) {
+async function _vzPreviewUpload(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
@@ -4743,7 +4743,7 @@ async function deleteGiftCard(id) {
 }
 
 
-function _renderRatings(stores) {
+async function _renderRatings(stores) {
     const q = _ratingsSearch.toLowerCase();
     const filtered = q ? stores.filter(s=>(s.store_name||"").toLowerCase().includes(q)||(s.category||"").toLowerCase().includes(q)) : stores;
     let html = "";
@@ -4778,9 +4778,9 @@ async function clearRating(storeId) {
     } catch(e) { console.error(e); }
 }
 
-function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); }
+async function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); }
 
-function openSidebar()  { document.getElementById("sidebar").classList.add("open"); }
+async function openSidebar()  { document.getElementById("sidebar").classList.add("open"); }
 
 async function deleteProductCardAdmin(id) {
     if (!confirm("Delete product card?")) return;
@@ -4788,7 +4788,7 @@ async function deleteProductCardAdmin(id) {
     loadGiftProductRequests();
 }
 
-function editProductCard(v) {
+async function editProductCard(v) {
     document.getElementById("edit_product_id").value = v.id||v._id||"";
     document.getElementById("v_title").value    = v.title||"";
     document.getElementById("v_text").value     = v.text||"";
@@ -4802,7 +4802,7 @@ function editProductCard(v) {
     productModalInst.show();
 }
 
-function onProductStoreChange(storeId) {
+async function onProductStoreChange(storeId) {
     const preview = document.getElementById("v_store_img_preview");
     if (!storeId) { preview.innerHTML = ""; return; }
     // Find the store from allStoresList
@@ -5655,7 +5655,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 <div id="offro-toast-container" style="position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;"></div>
 <script>
-function showToast(msg, type='success') {
+async function showToast(msg, type='success') {
   const c = document.getElementById('offro-toast-container');
   const t = document.createElement('div');
   const bg = type==='success' ? '#1a6640' : type==='danger' ? '#c0392b' : '#856404';
@@ -5774,9 +5774,9 @@ function renderAccountsPage() {
   renderPagination('accounts_pagination', total, _acctPage, 'goAcctPage');
 }
 
-function goAcctPage(p) { _acctPage = p; renderAccountsPage(); }
+async function goAcctPage(p) { _acctPage = p; renderAccountsPage(); }
 
-function escHtml(s) {
+async function escHtml(s) {
   if (!s) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -6012,7 +6012,7 @@ function openAdminBannerModal(data) {
   renderAbmStoresList(pinnedIds);
 }
 
-function closeAdminBannerModal() {
+async function closeAdminBannerModal() {
   ['abm_pay_from','abm_pay_to','abm_pay_amount','abm_pay_mode','abm_pay_ref'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
@@ -6021,7 +6021,7 @@ function closeAdminBannerModal() {
   document.getElementById('abm_image_file').value = '';
 }
 
-function previewAdminBannerImage(input) {
+async function previewAdminBannerImage(input) {
   if (!input.files || !input.files[0]) return;
   const reader = new FileReader();
   reader.onload = e => {
@@ -6031,7 +6031,7 @@ function previewAdminBannerImage(input) {
   reader.readAsDataURL(input.files[0]);
 }
 
-function editAdminBanner(data) {
+async function editAdminBanner(data) {
   openAdminBannerModal(data);
 }
 
@@ -6153,7 +6153,7 @@ function _renderAbmStoreCheckboxes(stores, selectedIds, filter) {
   updateAbmCount();
 }
 
-function filterAbmStores(query) {
+async function filterAbmStores(query) {
   const allStores = window._storesList || [];
   const selectedIds = Array.from(
     document.querySelectorAll('#abm_stores_list input[type=checkbox]:checked')
@@ -6161,7 +6161,7 @@ function filterAbmStores(query) {
   _renderAbmStoreCheckboxes(allStores, selectedIds, query);
 }
 
-function updateAbmCount() {
+async function updateAbmCount() {
   const count = document.querySelectorAll('#abm_stores_list input[type=checkbox]:checked').length;
   const el = document.getElementById('abm_selected_count');
   if (el) el.textContent = count;
@@ -6173,7 +6173,7 @@ function updateAbmCount() {
 // ════════════════════════════════════════
 // DEFAULT IMAGES — multi-image table UI
 // ════════════════════════════════════════
-function diNoServiceFileChange(input) {
+async function diNoServiceFileChange(input) {
   const file = input.files[0];
   if (!file) return;
   document.getElementById('di_ns_upload_btn').style.display = 'inline-flex';
@@ -6210,12 +6210,12 @@ async function diUploadNoServiceImage() {
   } catch(e) { showToast('Upload error: ' + e.message, true); }
   finally { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-upload-alt me-1"></i>Upload'; }
 }
-function diNsUrlPreview(url) {
+async function diNsUrlPreview(url) {
   const prev = document.getElementById('di_no_service_preview');
   const wrap = document.getElementById('di_no_service_preview_wrap');
   if (url && url.startsWith('http') && prev && wrap) { prev.src = url; wrap.style.display = 'block'; }
 }
-function diClearNsImage() {
+async function diClearNsImage() {
   document.getElementById('di_no_service_url').value = '';
   const prev = document.getElementById('di_no_service_preview');
   const wrap = document.getElementById('di_no_service_preview_wrap');
@@ -6246,7 +6246,7 @@ async function diSaveNoService() {
   } catch(e) { showToast('Error: ' + e.message, true); }
 }
 
-async function loadDefaultImages() {
+async async function loadDefaultImages() {
   try {
     const r = await fetch('/admin/default-images', {credentials:'include'});
     if (!r.ok) throw new Error(await r.text());
@@ -6278,7 +6278,7 @@ async function loadDefaultImages() {
   } catch(e) { console.error('Default images load failed', e); }
 }
 
-function _renderDiTable(type, urls) {
+async function _renderDiTable(type, urls) {
   const tbody = document.getElementById(`di_${type}_body`);
   const count = document.getElementById(`di_${type}_count`);
   if (!tbody) return;
@@ -6358,8 +6358,8 @@ async function diUploadFile(type) {
 }
 
 // Legacy aliases (not used by new UI but kept for safety)
-function saveDiUrl(type) { diAddUrl(type); }
-function saveDiFile(type) { diUploadFile(type); }
+async function saveDiUrl(type) { diAddUrl(type); }
+async function saveDiFile(type) { diUploadFile(type); }
 
 // ── City auto-fill from merchant's first store ──────────────────────
 async function gcAutoFillCity() {
