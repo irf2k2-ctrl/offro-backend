@@ -3459,11 +3459,12 @@ def admin_get_default_images(a=Depends(get_current_admin)):
             return [val]
         return []
     return {
-        "store":      _to_list(doc.get("store",      doc.get("store_images",   []))),
-        "product":    _to_list(doc.get("product",    doc.get("product_images", []))),
-        "offer":      _to_list(doc.get("offer",      doc.get("offer_images",   []))),
-        "city":       _to_list(doc.get("city",       doc.get("city_images",    []))) or ["https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1200&q=80"],
-        "no_service": _to_list(doc.get("no_service", [])),
+        "store":           _to_list(doc.get("store",          doc.get("store_images",   []))),
+        "product":         _to_list(doc.get("product",        doc.get("product_images", []))),
+        "offer":           _to_list(doc.get("offer",          doc.get("offer_images",   []))),
+        "city":            _to_list(doc.get("city",           doc.get("city_images",    []))) or ["https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1200&q=80"],
+        "merchant_banner": _to_list(doc.get("merchant_banner", [])),
+        "no_service":      _to_list(doc.get("no_service", [])),
         "no_service_title":   str(doc.get("no_service_title",   "") or ""),
         "no_service_message": str(doc.get("no_service_message", "") or ""),
     }
@@ -3479,7 +3480,7 @@ def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
     img_type = body.get("type", "")
     url = (body.get("url") or "").strip()
 
-    if img_type and url and img_type in ["store", "product", "offer", "city"]:
+    if img_type and url and img_type in ["store", "product", "offer", "city", "merchant_banner"]:
         if action == "remove":
             db.settings.update_one(
                 {"_type": "default_images"},
