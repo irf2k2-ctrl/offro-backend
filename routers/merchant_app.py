@@ -1913,3 +1913,107 @@ def validate_discount_code(data: dict, m=Depends(get_merchant)):
         "message": f"Code valid — ₹{disc.get('value', 0):.0f} discount applied",
     }
 
+
+@router.post("/resolve-maps")
+async def resolve_maps_link(request: Request):
+    """
+    Server-side Google Maps short-link resolver.
+    Follows full redirect chain, extracts @lat,lng from final URL.
+    Falls back to Nominatim geocoding via /maps/place/ name.
+    """
+    import re, urllib.request
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    raw = (body.get("url") or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="url field required")
+
+    # ── Step 1: bare coordinate input "lat,lng" ──
+    bare = re.match(r'^\s*(-?\d{1,3}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})\s*$', raw)
+    if bare:
+        la, ln = float(bare.group(1)), float(bare.group(2))
+        if abs(la) <= 90 and abs(ln) <= 180 and la != 0.0 and ln != 0.0:
+            return {"lat": la, "lng": ln}
+
+    # ── Step 2: direct URL — try @lat,lng immediately ──
+    def _safe_coords(url):
+        for pat in [
+            r'@(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})',
+            r'[?&]q=(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})',
+        ]:
+            m = re.search(pat, url)
+            if m:
+                la, ln = float(m.group(1)), float(m.group(2))
+                if abs(la) <= 90 and abs(ln) <= 180 and la != 0.0 and ln != 0.0:
+                    return la, ln
+        return None
+
+    direct = _safe_coords(raw)
+    if direct:
+        return {"lat": direct[0], "lng": direct[1]}
+
+    is_google = any(k in raw for k in ["goo.gl", "maps.app", "google.com/maps", "maps.google"])
+    if not is_google:
+        raise HTTPException(status_code=422, detail="Not a recognised Google Maps URL")
+
+    # ── Step 3: Follow full redirect chain server-side ──
+    final_url = raw
+    try:
+        import urllib.request as urlreq
+        req = urlreq.Request(raw, headers={
+            "User-Agent": "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            "Accept": "text/html",
+            "Accept-Language": "en-IN,en;q=0.9",
+        })
+        # follow_redirects=True is default for urllib; max 10 hops
+        with urlreq.urlopen(req, timeout=10) as resp:
+            final_url = resp.url   # urllib gives us the final landed URL
+    except Exception:
+        pass  # use raw as fallback
+
+    # ── Step 4: Extract @lat,lng from FINAL URL ──
+    coords = _safe_coords(final_url)
+    if coords:
+        return {"lat": coords[0], "lng": coords[1]}
+
+    # ── Step 5: Extract place name from /maps/place/NAME/ ──
+    place_match = re.search(r'/maps/place/([^/?#]+)', final_url)
+    if not place_match:
+        raise HTTPException(status_code=422, detail="Could not extract coordinates or place name")
+
+    place_raw = place_match.group(1).replace('+', ' ')
+    try:
+        from urllib.parse import unquote
+        place_name = unquote(place_raw)
+    except Exception:
+        place_name = place_raw
+
+    # ── Step 6: Nominatim geocode with progressive simplification ──
+    import json
+    parts = [p.strip() for p in place_name.split(',') if p.strip()]
+    for start in range(len(parts)):
+        q = ', '.join(parts[start:])
+        try:
+            nom_url = (
+                "https://nominatim.openstreetmap.org/search"
+                "?q=" + urllib.request.quote(q, safe='') +
+                "&format=json&limit=1&countrycodes=in"
+            )
+            nom_req = urllib.request.Request(nom_url,
+                headers={"User-Agent": "OffroApp/1.0 (merchant-location-picker)"})
+            with urllib.request.urlopen(nom_req, timeout=8) as nr:
+                data = json.loads(nr.read().decode())
+            if data:
+                la = float(data[0]["lat"])
+                ln = float(data[0]["lon"])
+                if abs(la) <= 90 and abs(ln) <= 180 and la != 0.0 and ln != 0.0:
+                    return {"lat": la, "lng": ln}
+        except Exception:
+            continue
+
+    raise HTTPException(status_code=422, detail="Could not resolve location from Maps link")
+
