@@ -399,6 +399,29 @@ def list_accounts(a=Depends(get_current_admin)):
         total_pts = (acct.get("visit_pts", acct.get("visit_points", 0) or 0) +
                      acct.get("pool_pts", 0))
 
+        # Check stores owned by this account — match by merchant_id OR account _id
+        _store_ids = list(filter(None, [mid, acct_id, phone]))
+        _store_count = db.stores.count_documents(
+            {"merchant_id": {"$in": _store_ids}}
+        ) if _store_ids else 0
+        # Auto-grant merchant role if they have stores but role not yet set
+        if _store_count > 0 and "merchant" not in roles:
+            roles = list(roles) + ["merchant"]
+            try:
+                db.accounts.update_one({"_id": acct["_id"]}, {"$set": {"roles": roles}})
+            except Exception:
+                pass
+        # Product count: check both merchant_vouchers and gift_vouchers
+        _phone_clean = str(phone).replace(" ", "").strip()
+        _mv_count = db.merchant_vouchers.count_documents(
+            {"$or": [{"merchant_id": {"$in": list(filter(None, [mid, acct_id]))}},
+                     {"merchant_phone": {"$in": list(filter(None, [phone, _phone_clean]))}}]}
+        ) if (mid or acct_id or phone) else 0
+        _gv_count = db.gift_vouchers.count_documents(
+            {"$or": [{"merchant_id": {"$in": list(filter(None, [mid, acct_id]))}},
+                     {"merchant_phone": {"$in": list(filter(None, [phone, _phone_clean]))}}]}
+        ) if (mid or acct_id or phone) else 0
+        _prod_count = _mv_count + _gv_count
         result.append({
             "account_id":    acct_id,
             "merchant_id":   mid,
@@ -406,21 +429,19 @@ def list_accounts(a=Depends(get_current_admin)):
             "full_name":     acct.get("name", ""),
             "mobile_number": phone,
             "city":          acct.get("city", ""),
+            "area":          acct.get("area", ""),
             "roles":         roles,
             "status":        acct.get("status", "active"),
             "total_points":  total_pts,
             "visit_pts":     acct.get("visit_pts", acct.get("visit_points", 0) or 0),
             "pool_pts":      acct.get("pool_pts", 0),
             "scans":         acct.get("scans", 0),
-            "store_count":   db.stores.count_documents(
-                {"merchant_id": {"$in": list(filter(None, [mid, acct_id, phone]))}}
-            ) if (mid or acct_id or phone) else 0,
-            "product_count": db.merchant_vouchers.count_documents(
-                {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
-            ) if (mid or phone) else 0,
+            "store_count":   _store_count,
+            "product_count": _prod_count,
             "banner_count":  db.merchant_banners.count_documents(
-                {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
-            ) if (mid or phone) else 0,
+                {"$or": [{"merchant_id": {"$in": list(filter(None, [mid, acct_id]))}},
+                          {"merchant_phone": {"$in": list(filter(None, [phone, _phone_clean]))}}]}
+            ) if (mid or acct_id or phone) else 0,
             "created_at":    str(acct.get("created_at", ""))[:10],
         })
     return result
@@ -537,6 +558,29 @@ def toggle_account_status(account_id: str, data: dict, a=Depends(get_current_adm
         pass
     return {"ok": True, "status": new_status}
 
+
+@router.patch("/accounts/{account_id}/role")
+def set_account_role(account_id: str, data: dict, a=Depends(get_current_admin)):
+    """Manually set/add a role to an account (e.g. grant merchant role)."""
+    role = (data.get("role") or "").strip().lower()
+    if role not in ("merchant", "user", "admin"):
+        raise HTTPException(400, "Invalid role. Use: merchant, user, admin")
+    try:
+        acct = db.accounts.find_one({"_id": ObjectId(account_id)})
+        if not acct:
+            raise HTTPException(404, "Account not found")
+        roles = list(acct.get("roles", ["user"]))
+        if role not in roles:
+            roles.append(role)
+            db.accounts.update_one(
+                {"_id": ObjectId(account_id)},
+                {"$set": {"roles": roles}}
+            )
+        return {"ok": True, "roles": roles}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, str(e))
 
 
 def _fmt_store_fast(s, sub_map, deal_map, merchants):
@@ -1869,16 +1913,33 @@ def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
         upd["is_active"] = bool(data["is_active"])
     if not upd:
         raise HTTPException(400, "Nothing to update")
-    db.gift_vouchers.update_one({"_id": ObjectId(pid)}, {"$set": upd})
-    return {"message": "Voucher updated"}
+    try:
+        oid = ObjectId(pid)
+    except Exception as e:
+        raise HTTPException(400, f"Invalid product ID: {e}")
+    # Try gift_vouchers first, then products collection
+    r1 = db.gift_vouchers.update_one({"_id": oid}, {"$set": upd})
+    if r1.matched_count == 0:
+        # Fallback: products collection
+        r2 = db.products.update_one({"_id": oid}, {"$set": upd})
+        if r2.matched_count == 0:
+            raise HTTPException(404, "Product not found in any collection")
+    return {"message": "Product updated"}
 
 @router.delete("/products/{pid}")
 def delete_product_card(pid: str, a=Depends(get_current_admin)):
-    """Delete a product card."""
+    """Delete a product card — tries gift_vouchers then products collection."""
     try:
-        db.gift_vouchers.delete_one({"_id": ObjectId(pid)})
+        oid = ObjectId(pid)
     except Exception as e:
         raise HTTPException(400, f"Invalid product ID: {e}")
+    # Try gift_vouchers first (admin/merchant approved products)
+    r1 = db.gift_vouchers.delete_one({"_id": oid})
+    if r1.deleted_count == 0:
+        # Fallback: products collection (catalogue items)
+        r2 = db.products.delete_one({"_id": oid})
+        if r2.deleted_count == 0:
+            raise HTTPException(404, "Product not found in any collection")
     return {"message": "Deleted"}
 
 

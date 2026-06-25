@@ -4525,10 +4525,24 @@ async function saveVZMerchantEdit() {
 
 async function deleteProductCard(id, source) {
   if (!confirm('Delete this product?')) return;
-  const url = (source==='admin' || source==='products') 
-    ? `/admin/products/${id}` 
-    : `/admin/merchant-products/${id}`;
-  await fetch(url, {method:'DELETE', credentials:'include'});
+  try {
+    // For merchant-source (pending in merchant_vouchers), use merchant-products endpoint
+    // For all others (gift_vouchers or products collection), use products endpoint (tries both)
+    const url = (source === 'merchant')
+      ? `/admin/merchant-products/${id}`
+      : `/admin/products/${id}`;
+    const r = await fetch(url, {method:'DELETE', credentials:'include'});
+    if (!r.ok) {
+      // Fallback: if merchant-products fails, try products (handles approved merchant items in gift_vouchers)
+      if (source === 'merchant') {
+        const r2 = await fetch(`/admin/products/${id}`, {method:'DELETE', credentials:'include'});
+        if (!r2.ok) { const d = await r2.json(); throw new Error(d.detail||'Delete failed'); }
+      } else {
+        const d = await r.json(); throw new Error(d.detail||'Delete failed');
+      }
+    }
+    showToast('✅ Product deleted');
+  } catch(e) { showToast('Error: ' + e.message, true); }
   loadGiftCards();
 }
 
@@ -5655,6 +5669,21 @@ function showToast(msg, type='success') {
 // ════════════════════════════════════════════════════════════
 //  UNIFIED ACCOUNTS
 // ════════════════════════════════════════════════════════════
+async function grantMerchantRole(accountId, name) {
+  if (!confirm(`Grant Merchant role to ${name}?`)) return;
+  try {
+    const r = await fetch(`/admin/accounts/${accountId}/role`, {
+      method: 'PATCH', credentials: 'include',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({role:'merchant'})
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Error');
+    showToast(`✅ ${name} is now a Merchant`);
+    loadAccounts();
+  } catch(e) { showToast('Error: ' + e.message, true); }
+}
+
 async function loadAccounts() {
   try {
     const r = await fetch('/admin/accounts', {credentials:'include'});
@@ -5733,6 +5762,9 @@ function renderAccountsPage() {
       <td><span class="badge" style="background:${stBg};color:#fff;">${stLbl}</span></td>
       <td>
         <button class="btn-sm-p" onclick="openAccountDetail('${a.account_id}','${escHtml(a.full_name||'')}')">👁 View</button>
+        ${(!a.roles?.includes('merchant') && (a.store_count||0) > 0)
+          ? `<button class="btn-sm-p" style="background:var(--primary);font-size:10px;padding:3px 8px;margin-right:3px;" onclick="grantMerchantRole('${a.account_id}','${escHtml(a.full_name||'')}')">🏪 Merchant</button>`
+          : ''}
         <button class="btn-sm-p" style="background:#c0392b;" onclick="toggleAccountStatus('${a.account_id}','${a.status}')">
           ${a.status==='active'?'🚫 Block':'✅ Unblock'}</button>
       </td>
@@ -5809,6 +5841,10 @@ function renderAccountDetailHTML(d) {
       <button style="background:var(--danger);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="openDebitPointsFromAcct('${acctId}','${acctName}')">
         <i class="fas fa-minus-circle me-1"></i> Debit Points
       </button>
+      ${!(d.roles||[]).includes('merchant') ? `
+      <button style="background:#2e7d52;color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="grantMerchantRole('${acctId}','${escHtml(d.full_name||d.name||'')}')">
+        <i class="fas fa-store me-1"></i> Grant Merchant Role
+      </button>` : ''}
       <button style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="toggleAccountStatus('${acctId}','${d.status||"active"}')">
         <i class="fas fa-${d.status==='blocked'?'lock-open':'lock'} me-1"></i> ${d.status==='blocked'?'Unblock':'Block'}
       </button>
