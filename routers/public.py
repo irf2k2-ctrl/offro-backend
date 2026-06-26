@@ -932,8 +932,34 @@ def get_about_public():
 # =================== PROMO SLIDERS (public - for Flutter app) ===================
 @router.get("/promo-sliders")
 def get_promo_sliders_public():
-    """Returns active promo slider banners for the app home screen."""
+    """Returns active promo slider banners for the app home screen (merchant/all banners)."""
     docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
+    result = []
+    for d in docs:
+        img = d.get("image_url", "") or d.get("image", "")
+        result.append({
+            "id": str(d["_id"]),
+            "title": d.get("title", ""),
+            "subtitle": d.get("subtitle", "") or d.get("text", ""),
+            "image": img,
+            "image_url": img,
+            "link_url": d.get("link_url", ""),
+            "bg_color": d.get("bg_color", ""),
+            "sort_order": d.get("sort_order", 0),
+        })
+    return result
+
+@router.get("/admin-banners")
+def get_admin_banners_public():
+    """Returns active admin-created banners for the top banner section of the home screen.
+    Only returns banners with source='admin' (excludes merchant-submitted promo sliders)."""
+    docs = list(db.promo_sliders.find({
+        "is_active": True,
+        "$or": [
+            {"source": "admin"},
+            {"source_banner_id": {"$exists": False}},
+        ]
+    }).sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
