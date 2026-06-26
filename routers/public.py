@@ -8,29 +8,20 @@ router = APIRouter(tags=["Public"])
 @router.get("/stores")
 def get_stores(city: str = None, category: str = None):
     """Public endpoint - Flutter app fetches this"""
-    import re as _re
     query = {"status": "active"}
-    _city_norm = None
     if city:
-        _city_norm = _normalize_city(city)
-        query["city"] = {"$regex": _re.escape(_city_norm), "$options": "i"}
+        query["city"] = {"$regex": city, "$options": "i"}
     if category and category.strip() and category.strip() != "All":
-        _cat_escaped = _re.escape(category.strip())
-        query["category"] = {"$regex": _cat_escaped, "$options": "i"}
+        # Case-insensitive match so "Restaurant" matches "restaurant", "RESTAURANT" etc.
+        query["category"] = {"$regex": f"^{category.strip()}$", "$options": "i"}
 
-    _STORE_PROJ = {
+    stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
         "image":1,"image_url":1,"image_thumb":1,"_thumb":1,"store_image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
-        "lat":1,"lng":1,"latitude":1,"longitude":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1,
+        "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1,
         "tags":1,"favorite_count":1,"favorites":1,"view_count":1,"views":1,
-        "created_at":1,"late_night":1,"open_time":1,"close_time":1,"logo_url":1,"logo_thumb":1,"logo":1,"logo_image":1
-    }
-    stores = list(db.stores.find(query, _STORE_PROJ))
-    # City+category fallback: if combined filter returns nothing, retry category-only
-    # This handles stores where city is missing or uses a different spelling than GPS
-    if not stores and _city_norm and category and category.strip() not in ("", "All"):
-        _fallback_q = {"status": "active", "category": {"$regex": _re.escape(category.strip()), "$options": "i"}}
-        stores = list(db.stores.find(_fallback_q, _STORE_PROJ))
+        "created_at":1,"late_night":1
+    }))
     if not stores:
         return []
 
@@ -53,13 +44,8 @@ def get_stores(city: str = None, category: str = None):
                 _active_subs.add(str(_sub["store_id"]))
         except Exception:
             pass
-    # If a store has no subscription record at all, hide it (unless category filtering is active)
-    # When browsing a category, show all active stores so category discovery works
-    if not category:
-        stores = [s for s in stores if str(s["_id"]) in _active_subs]
-    else:
-        # Category mode: show all active stores (subscription gating can hide legit category stores)
-        pass
+    # If a store has no subscription record at all it is NOT shown publicly
+    stores = [s for s in stores if str(s["_id"]) in _active_subs]
     store_ids = [str(s["_id"]) for s in stores]
     if not stores:
         return []
@@ -118,8 +104,8 @@ def get_stores(city: str = None, category: str = None):
             "status": s.get("status", "active"),
             "visit_points": s.get("points_per_scan", 10),
             "points_per_scan": s.get("points_per_scan", 10),
-            "latitude": s.get("lat") or s.get("latitude") or None,
-            "longitude": s.get("lng") or s.get("longitude") or None,
+            "latitude": s.get("lat") or None,
+            "longitude": s.get("lng") or None,
             "rating": display_rating,
             "offer":      deal_summary,
             "deal_count":    deal_count,
@@ -133,54 +119,10 @@ def get_stores(city: str = None, category: str = None):
             "view_count":     int(s.get("view_count") or s.get("views") or 0),
             "created_at":     str(s.get("created_at", "") or ""),
             "late_night":     bool(s.get("late_night", False)),
-            "open_time":      s.get("open_time",  "") or "",
-            "close_time":     s.get("close_time", "") or "",
-            "logo_url":       s.get("logo_url", "") or s.get("logo_thumb", "") or s.get("logo", "") or s.get("logo_image", "") or "", # ITEM3
-            "lat":            s.get("lat") or None,
-            "lng":            s.get("lng") or None,
         })
     return result
 
 # =================== SINGLE STORE ===================
-
-
-# ── City name normalization (handles GPS alternate spellings) ──────────────────
-_CITY_ALIASES: dict = {
-    # Ballari variants (GPS returns multiple spellings)
-    "bellary":       "Ballari",
-    "ballary":       "Ballari",
-    "vijayanagara":  "Ballari",   # new district name (2021) that geocoders return
-    "vijayanagar":   "Ballari",
-    # Other Karnataka dual-name cities
-    "bijapur":       "Vijayapura",
-    "gulbarga":      "Kalaburagi",
-    "shimoga":       "Shivamogga",
-    "hospet":        "Hosapete",
-    "tumkur":        "Tumakuru",
-    "mysore":        "Mysuru",
-    "belgaum":       "Belagavi",
-    "mangalore":     "Mangaluru",
-    "hubli":         "Hubballi",
-    "dharwad":       "Hubballi",
-    "davangere":     "Davanagere",
-    "udupi":         "Udupi",
-}
-
-def _normalize_city(city: str) -> str:
-    """Map GPS/old city spellings to the canonical name used in the database."""
-    if not city:
-        return city
-    lower = city.strip().lower()
-    # Exact alias match first
-    if lower in _CITY_ALIASES:
-        return _CITY_ALIASES[lower]
-    # Substring match — e.g. "Ballari District" or "Bellary Urban" → "Ballari"
-    for alias, canonical in _CITY_ALIASES.items():
-        if alias in lower:
-            return canonical
-    return city.strip()
-
-
 @router.get("/stores/{store_id}")
 def get_store(store_id: str):
     from fastapi import HTTPException as _HTTPEx
@@ -205,21 +147,16 @@ def get_store(store_id: str):
         "end_date":    d.get("end_date"),
     } for d in deals]
 
-    # Approved products (from merchant_vouchers collection) for this store
-    # FIX: filter by store_id first → prevents cross-store product leakage
-    # when a merchant has multiple stores.
+    # Approved products (merchant_vouchers) for this store
     products_list = []
     if "merchant_vouchers" in cols:
         merchant_id = store.get("merchant_id", "")
-        # Primary: exact store match
-        prods = list(db.merchant_vouchers.find(
-            {"store_id": store_id, "status": "approved"}
-        ).sort("created_at", -1).limit(20))
-        # Fallback: merchant-level match only if no store-specific products found
-        if not prods and merchant_id:
-            prods = list(db.merchant_vouchers.find(
-                {"merchant_id": merchant_id, "status": "approved"}
-            ).sort("created_at", -1).limit(20))
+        merchant_phone = str(store.get("phone", ""))
+        q = {"status": "approved"}
+        if merchant_id:
+            q = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}],
+                 "status": "approved"}
+        prods = list(db.merchant_vouchers.find(q).sort("created_at", -1).limit(20))
         for p in prods:
             products_list.append({
                 "_id":            str(p["_id"]),
@@ -309,22 +246,6 @@ def get_store_reviews(store_id: str, limit: int = 10, skip: int = 0):
         })
     return {"reviews": result, "total": total}
 
-
-
-@router.get("/stores/{store_id}/user-review")
-def get_user_review(store_id: str, request: _Req):
-    """Get the current user's own review for a store."""
-    user = _get_user_optional(request)
-    if not user:
-        return {"review": None}
-    user_id = str(user["_id"])
-    r = db.reviews.find_one({"store_id": store_id, "user_id": user_id})
-    if not r:
-        return {"review": None}
-    r["_id"] = str(r["_id"])
-    r.setdefault("created_at", "")
-    r.setdefault("updated_at", "")
-    return {"review": r}
 
 @router.post("/stores/{store_id}/review")
 def submit_store_review(store_id: str, data: dict, request: _Req):
@@ -433,19 +354,34 @@ def get_all_active_deals(city: str = ""):
     from datetime import datetime as _dt
     _now = _dt.utcnow()
 
-    # Step 1: All active stores (no subscription gating — show all stores with deals)
+    # Step 1: Active subscription store IDs
+    _active_store_ids = set()
+    for _sub in db.subscriptions.find({}, {"store_id": 1, "end_date": 1}):
+        _ed = _sub.get("end_date")
+        if _ed is None:
+            continue
+        try:
+            _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
+            if _ed_dt >= _now:
+                _active_store_ids.add(str(_sub["store_id"]))
+        except Exception:
+            pass
+
+    # Step 2: Active stores in city
     store_q = {"status": "active"}
     if city:
-        _norm = _normalize_city(city)
-        store_q["city"] = {"$regex": _norm, "$options": "i"}
+        store_q["city"] = {"$regex": city, "$options": "i"}
 
     stores_raw = list(db.stores.find(store_q, {
         "store_name": 1, "category": 1, "city": 1, "area": 1, "address": 1, "phone": 1,
         "image_url": 1, "image_thumb": 1, "_thumb": 1, "image": 1, "images": 1,
     }))
-    stores_map = {str(s["_id"]): s for s in stores_raw}
+    stores_map = {
+        str(s["_id"]): s for s in stores_raw
+        if str(s["_id"]) in _active_store_ids
+    }
 
-    # Step 2: Active deals only (no products)
+    # Step 3: Active deals only (no products)
     result = []
     deal_q = {"status": "active"}
     if stores_map:
@@ -650,6 +586,74 @@ def get_terms_public(type: str):
 
 # =================== TERMS ===================
 # /terms/{type} handled above
+
+@router.get("/resolve-maps-link")
+def resolve_maps_link(url: str):
+    import re, urllib.request, urllib.parse, urllib.error
+    final_url = url.strip()
+    try:
+        req = urllib.request.Request(
+            final_url,
+            method="GET",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; OffrO/1.0)"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            final_url = resp.url
+    except Exception:
+        pass
+
+    lat, lng = None, None
+
+    m = re.search(r'[!;]3d(-?\d+\.\d+)[!;]4d(-?\d+\.\d+)', final_url)
+    if m:
+        try: lat, lng = float(m.group(1)), float(m.group(2))
+        except: pass
+
+    if lat is None:
+        m = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
+        if m:
+            try: lat, lng = float(m.group(1)), float(m.group(2))
+            except: pass
+
+    if lat is None:
+        m = re.search(r'[?&](?:q|query)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)', final_url)
+        if m:
+            try: lat, lng = float(m.group(1)), float(m.group(2))
+            except: pass
+
+    if lat is None:
+        m = re.search(r'[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
+        if m:
+            try: lat, lng = float(m.group(1)), float(m.group(2))
+            except: pass
+
+    if lat is None:
+        m = re.search(r'/maps/place/[^/]+/(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
+        if m:
+            try: lat, lng = float(m.group(1)), float(m.group(2))
+            except: pass
+
+    place_name = ""
+    m = re.search(r'/maps/place/([^/@?]+)', final_url)
+    if m:
+        raw = m.group(1).replace('+', ' ')
+        place_name = urllib.parse.unquote(raw).strip()
+
+    if lat is None or lng is None:
+        return {
+            "error": (
+                "Could not extract coordinates from this link. "
+                "In Google Maps, tap Share → Copy link, then paste the link here."
+            )
+        }
+
+    return {
+        "lat": round(lat, 6),
+        "lng": round(lng, 6),
+        "place_name": place_name,
+        "maps_url": final_url,
+    }
+
 
 @router.get("/policy/{policy_type}")
 def get_policy(policy_type: str):
@@ -927,38 +931,9 @@ def get_about_public():
 
 # =================== PROMO SLIDERS (public - for Flutter app) ===================
 @router.get("/promo-sliders")
-def get_promo_sliders_public(city: str = None):
-    """Returns active, non-expired promo slider banners for the app home screen."""
-    from datetime import datetime as _dt
-    _now_iso = _dt.utcnow().strftime("%Y-%m-%d")
-    # Exclude banners where is_active=False OR where end_date/expires_at is in the past
-    base_query = {
-        "is_active": {"$ne": False},
-        # Expiry: show banner if end_date is absent/empty OR end_date string >= today ISO string
-        "$and": [
-            {"$or": [
-                {"end_date": {"$exists": False}},
-                {"end_date": {"$in": [None, ""]}},
-                {"end_date": {"$gte": _now_iso}},
-            ]},
-            {"$or": [
-                {"expires_at": {"$exists": False}},
-                {"expires_at": {"$in": [None, ""]}},
-                {"expires_at": {"$gte": _now_iso}},
-            ]},
-        ]
-        # NOTE: Banner visibility is independent of store subscription.
-        # A banner's own end_date determines its visibility, not the store's subscription.
-    }
-    docs = []
-    if city and city.strip():
-        city = _normalize_city(city)  # FIX: map GPS alternate spellings (Bellary→Ballari etc.)
-        city_re = {"$regex": city.strip(), "$options": "i"}
-        city_query = {"$and": [base_query, {"$or": [{"city": city_re}, {"store_city": city_re}]}]}
-        docs = list(db.promo_sliders.find(city_query).sort("sort_order", 1))
-        # NOTE: No city fallback — banners must match city. Cross-city leakage not allowed.
-    else:
-        docs = list(db.promo_sliders.find(base_query).sort("sort_order", 1))
+def get_promo_sliders_public():
+    """Returns active promo slider banners for the app home screen."""
+    docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
@@ -971,44 +946,16 @@ def get_promo_sliders_public(city: str = None):
             "link_url": d.get("link_url", ""),
             "bg_color": d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
-            "city": d.get("city", ""),
         })
     return result
 
-# =================== PRODUCTS (public - for Flutter app home screen gift/product zone) ===================
-@router.get("/products-public")
-def get_public_products(city: str = None):
-    """Returns active, non-expired products for the app home screen.
-    Filtered by city (if provided) and product-level expiry date.
-    Does NOT depend on store subscription status — products live independently."""
-    from datetime import datetime as _dt
-    import re as _re
-    _today = _dt.utcnow().strftime("%Y-%m-%d")
-
-    # Build query: status approved + not deleted/inactive/expired
-    query = {
-        "status": {"$nin": ["deleted", "inactive", "expired"]},
-        "is_active": {"$ne": False},
-        # Expiry filter: show if end_date is missing/empty OR end_date >= today
-        "$or": [
-            {"end_date": {"$exists": False}},
-            {"end_date": {"$in": [None, ""]}},
-            {"end_date": {"$gte": _today}},
-        ]
-    }
-
-    # City filter — products store city directly, independent of store subscription
-    _city_norm = None
-    if city and city.strip():
-        _city_norm = _normalize_city(city.strip())
-        query["city"] = {"$regex": _re.escape(_city_norm), "$options": "i"}
-
-    docs = list(db.products.find(query).sort("_id", -1))
-
-    # NOTE: No city fallback here — city filtering is strict.
-    # Products must have the correct city field to appear in a city's home screen.
-    # Cross-city leakage is a critical UX issue.
-
+# =================== GIFT VOUCHERS (public - for Flutter app home screen) ===================
+@router.get("/gift-vouchers-public")
+def get_gift_vouchers_public():
+    """Returns active gift vouchers shown on the app home screen (Voucher Zone)."""
+    # Fetch all, then filter in Python to handle bool/string/missing is_active variants
+    docs = list(db.gift_vouchers.find({}).sort("_id", -1))
+    docs = [d for d in docs if d.get("is_active", True) not in (False, "false", "0", 0)]
     result = []
     for d in docs:
         vid = str(d.pop("_id"))
@@ -1019,254 +966,35 @@ def get_public_products(city: str = None):
             if sid:
                 store["id"] = str(sid)
                 store.pop("_id", None)
-        # Resolve store_name + logo from store_id (source of truth)
+        # If store_id exists, try to pull store image for display
         store_id = d.get("store_id", "")
-        if store_id:
+        if store_id and not d.get("logo"):
             try:
                 from bson import ObjectId as OId
-                s = db.stores.find_one({"_id": OId(store_id)},
-                    {"store_image2":1, "image":1, "store_name":1, "status":1, "_id":1})
+                s = db.stores.find_one({"_id": OId(store_id)}, {"store_image2":1,"image":1,"store_name":1})
                 if s:
-                    d["store_name"] = s.get("store_name", d.get("store_name", ""))
-                    if not d.get("logo"):
-                        d["logo"] = s.get("store_image2") or s.get("image") or ""
-                    # Attach store_active flag — Flutter uses this for "Store Inactive" badge
-                    # Product remains visible regardless; only badge changes
-                    d["store_active"] = s.get("status", "active") == "active"
-            except Exception:
-                pass
-        result.append({"id": vid, **d})
-    return result
-
-
-# =================== PRODUCTS (public — Discover Products on home screen) ===================
-@router.get("/products")
-def get_products_public(category: str = None, city: str = None, limit: int = 60, skip: int = 0):
-    """Returns active, non-expired products for the Flutter app Discover Products section.
-    Products are independent of store subscription — they expire on their own end_date."""
-    from datetime import datetime as _dt
-    _today = _dt.utcnow().strftime("%Y-%m-%d")
-
-    query = {
-        "status": {"$nin": ["deleted", "inactive", "expired"]},
-        # Expiry: show if end_date missing/empty OR end_date >= today
-        "$or": [
-            {"end_date": {"$exists": False}},
-            {"end_date": {"$in": [None, ""]}},
-            {"end_date": {"$gte": _today}},
-        ]
-    }
-    if category and category != "All":
-        query["category"] = category
-    # City filtering: products are discovery content, city is optional
-    if city and city.strip() and city.strip() not in ("", "All"):
-        import re as _re2
-        _cn = _normalize_city(city.strip())
-        query["city"] = {"$regex": _re2.escape(_cn), "$options": "i"}
-    docs = list(db.products.find(query).sort("_id", -1).skip(skip).limit(limit))
-    result = []
-    for d in docs:
-        pid = str(d.pop("_id", ""))
-        # Attach store name if missing
-        store_id = d.get("store_id", "")
-        merchant_id = d.get("merchant_id", "")
-        store_name = d.get("store_name", "")
-        # ITEM7: resolve store_name via store_id first, then merchant_id fallback
-        if not store_name:
-            try:
-                s = None
-                if store_id:
-                    s = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1, "_id": 1})
-                if not s and merchant_id:
-                    s = db.stores.find_one({"merchant_id": merchant_id}, {"store_name": 1, "_id": 1})
-                if s:
-                    d["store_name"] = s.get("store_name", "")
-                    if not store_id:
-                        d["store_id"] = str(s["_id"])
-            except Exception:
-                pass
-        # FIX3: normalise pricing fields so Flutter always finds them
-        if d.get("offer_price") and not d.get("sale_price"):
-            d["sale_price"] = d["offer_price"]
-        if not d.get("price") and d.get("sale_price"):
-            d["price"] = d["sale_price"]
-        # Ensure original_price is always set from mrp if missing
-        if not d.get("original_price") and d.get("mrp"):
-            d["original_price"] = d["mrp"]
-        # Ensure sale_price < original_price (otherwise hide strikethrough)
-        if d.get("original_price") and d.get("sale_price"):
-            try:
-                if float(d["original_price"]) <= float(d["sale_price"]):
-                    d["original_price"] = None
+                    d["logo"] = s.get("store_image2") or s.get("image") or ""
+                    if not d.get("title") and s.get("store_name"):
+                        d["title"] = s["store_name"]
             except: pass
-        result.append({"id": pid, **d})
+        result.append({"id": vid, **d})
     return result
 
 
 # ─── Default Images (fallback for stores/products/offers/cities) ──────────────
 @router.get("/default-images")
 def get_default_images():
-    """Return default/fallback images configured by admin.
-    Returns lists of HTTP/HTTPS URLs for each type — strips base64.
-    Flutter picks a random one client-side and rotates every 2 minutes.
-    """
-    doc = db.settings.find_one({"_type": "default_images"}) or {}
-
-    def _safe_list(val) -> list:
-        """Normalise legacy single-string or list → list of valid http(s) URLs."""
-        if isinstance(val, list):
-            return [v for v in val if isinstance(v, str) and v.startswith("http")]
-        if isinstance(val, str) and val.startswith("http"):
-            return [val]
-        return []
-
+    """Return default/fallback images configured by admin."""
+    doc = db.settings.find_one({"_type": "default_images"})
+    if not doc:
+        return {"store": "", "product": "", "offer": "", "city": "",
+                "no_service_url": "", "no_service_title": "", "no_service_message": ""}
     return {
-        "store":              _safe_list(doc.get("store",           doc.get("store_images",   []))),
-        "product":            _safe_list(doc.get("product",         doc.get("product_images", []))),
-        "offer":              _safe_list(doc.get("offer",           doc.get("offer_images",   []))),
-        "city":               _safe_list(doc.get("city",            doc.get("city_images",    []))) or ["https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1200&q=80"],
-        "merchant_banner":    _safe_list(doc.get("merchant_banner", [])),
-        "no_service":         _safe_list(doc.get("no_service",      [])),
-        "no_service_title":   str(doc.get("no_service_title",   "") or ""),
-        "no_service_message": str(doc.get("no_service_message", "") or ""),
+        "store":              doc.get("store", ""),
+        "product":            doc.get("product", ""),
+        "offer":              doc.get("offer", ""),
+        "city":               doc.get("city", ""),
+        "no_service_url":     doc.get("no_service_url", ""),
+        "no_service_title":   doc.get("no_service_title", ""),
+        "no_service_message": doc.get("no_service_message", ""),
     }
-
-# ─── Admin Banners (public - for Flutter app home screen) ─────────────────────
-@router.get("/admin-banners")
-def get_admin_banners_public(city: str = None):
-    """Return active admin banners for the app home screen — shown globally regardless of city."""
-    # FIX: return ALL banners where is_active is not explicitly False
-    # Also handles docs where is_active field doesn't exist
-    docs = list(db.banners.find(
-        {"$or": [{"is_active": True}, {"is_active": {"$exists": False}}]}
-    ).sort("sort_order", 1))
-    print(f"[OFFRO] /admin-banners — total docs in collection: {db.banners.count_documents({})}, active: {len(docs)}")
-    result = []
-    for d in docs:
-        img = d.get("image_url", "") or d.get("image", "") or ""
-        # Normalise base64 — ensure header is present
-        if img and not img.startswith("http") and not img.startswith("data:"):
-            img = "data:image/jpeg;base64," + img
-        result.append({
-            "id":         str(d["_id"]),
-            "title":      d.get("title", ""),
-            "subtitle":   d.get("subtitle", ""),
-            "image":      img,
-            "image_url":  img,
-            "link_url":   d.get("link_url", ""),
-            "sort_order": d.get("sort_order", 0),
-            "is_active":  d.get("is_active", True),
-        })
-    return result
-
-
-# ─── Product Reviews ──────────────────────────────────────────────────────────
-@router.get("/products/{product_id}/reviews")
-def get_product_reviews(product_id: str, limit: int = 20, skip: int = 0):
-    """Get reviews for a product."""
-    reviews = list(db.product_reviews.find(
-        {"product_id": product_id}
-    ).sort("created_at", -1).limit(limit).skip(skip))
-    result = []
-    for r in reviews:
-        result.append({
-            "id":         str(r["_id"]),
-            "product_id": r.get("product_id", ""),
-            "user_id":    r.get("user_id", ""),
-            "user_name":  r.get("user_name", "Anonymous"),
-            "rating":     r.get("rating", 0),
-            "text":       r.get("text", ""),
-            "created_at": r["created_at"].isoformat() if r.get("created_at") else "",
-        })
-    return result
-
-
-@router.post("/products/{product_id}/review")
-def submit_product_review(product_id: str, data: dict, request: _Req):
-    """Submit a product review."""
-    from datetime import datetime
-    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-    user_id   = ""
-    user_name = data.get("user_name", "Anonymous")
-    if token:
-        try:
-            user = db.users.find_one({"token": token})
-            if user:
-                user_id   = str(user["_id"])
-                user_name = user.get("name", user.get("full_name", user_name))
-        except Exception:
-            pass
-    rating = float(data.get("rating", 0))
-    text   = str(data.get("text", "")).strip()
-    if not rating or not text:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail="rating and text are required")
-    now = datetime.utcnow()
-    review_doc = {
-        "product_id": product_id,
-        "user_id":    user_id,
-        "user_name":  user_name,
-        "rating":     rating,
-        "text":       text,
-        "created_at": now,
-    }
-    result = db.product_reviews.insert_one(review_doc)
-    # Recalculate product avg rating
-    all_reviews = list(db.product_reviews.find({"product_id": product_id}, {"rating": 1}))
-    if all_reviews:
-        avg = sum(r["rating"] for r in all_reviews) / len(all_reviews)
-        db.products.update_one(
-            {"_id": ObjectId(product_id)},
-            {"$set": {"rating": round(avg, 2), "rating_count": len(all_reviews)}}
-        )
-    return {"success": True, "id": str(result.inserted_id)}
-
-
-# ─── Product Favorites ────────────────────────────────────────────────────────
-
-@router.get("/user/product-favorites")
-def get_user_favorites(request: _Req):
-    """Get all product IDs favorited by the current user."""
-    from fastapi import HTTPException as _HTTPEx
-    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-    if not token:
-        return {"product_ids": []}
-    acct = db.accounts.find_one({"token": token})
-    if not acct:
-        return {"product_ids": []}
-    user_id = str(acct["_id"])
-    favs = list(db.product_favorites.find({"user_id": user_id}, {"product_id": 1}))
-    return {"product_ids": [f["product_id"] for f in favs]}
-
-@router.post("/user/product-favorites/{product_id}")
-def toggle_product_favorite(product_id: str, request: _Req):
-    """Toggle product favorite for authenticated user."""
-    from fastapi import HTTPException
-    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    user = db.users.find_one({"token": token})
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    user_id  = str(user["_id"])
-    existing = db.product_favorites.find_one({"user_id": user_id, "product_id": product_id})
-    if existing:
-        db.product_favorites.delete_one({"_id": existing["_id"]})
-        return {"is_favorite": False}
-    else:
-        db.product_favorites.insert_one({"user_id": user_id, "product_id": product_id})
-        return {"is_favorite": True}
-
-
-@router.get("/user/product-favorites/{product_id}/check")
-def check_product_favorite(product_id: str, request: _Req):
-    """Check if a product is favorited by the current user."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
-    if not token:
-        return {"is_favorite": False}
-    user = db.users.find_one({"token": token})
-    if not user:
-        return {"is_favorite": False}
-    user_id = str(user["_id"])
-    exists  = db.product_favorites.find_one({"user_id": user_id, "product_id": product_id}) is not None
-    return {"is_favorite": exists}
