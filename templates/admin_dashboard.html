@@ -6224,10 +6224,33 @@ function diClearNsImage() {
   document.getElementById('di_ns_upload_btn').style.display = 'none';
 }
 async function diSaveNoService() {
-  const url   = (document.getElementById('di_no_service_url')?.value  || '').trim();
+  let url     = (document.getElementById('di_no_service_url')?.value  || '').trim();
   const title = (document.getElementById('di_no_service_title')?.value || '').trim();
   const msg   = (document.getElementById('di_no_service_msg')?.value   || '').trim();
   if (!url && !title && !msg) { showToast('Enter at least an image URL, title, or message', true); return; }
+  // Auto-upload base64 preview to server before saving (gets a real http URL)
+  if (url.startsWith('data:')) {
+    const fileInput = document.getElementById('di_no_service_file');
+    const file = fileInput?.files[0];
+    if (file) {
+      showToast('Uploading image…');
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const ur = await fetch('/admin/upload-image', { method:'POST', credentials:'include', body: fd });
+        if (ur.ok) {
+          const ud = await ur.json();
+          const cdnUrl = ud.url || ud.image_url || ud.secure_url || '';
+          if (cdnUrl) {
+            url = cdnUrl;
+            document.getElementById('di_no_service_url').value = cdnUrl;
+            const prev = document.getElementById('di_no_service_preview');
+            if (prev) prev.src = cdnUrl;
+          }
+        }
+      } catch(e) { /* upload failed — url stays as base64, backend will skip it */ }
+    }
+  }
   try {
     const r = await fetch('/admin/default-images/no-service', {
       method: 'PUT', credentials: 'include',
@@ -6237,8 +6260,7 @@ async function diSaveNoService() {
     const d = await r.json().catch(()=>({}));
     if (!r.ok) { showToast('Save failed: ' + (d.detail||r.status), true); return; }
     showToast('No Service config saved ✓');
-    // Show preview
-    if (url) {
+    if (url && url.startsWith('http')) {
       const prev = document.getElementById('di_no_service_preview');
       const wrap = document.getElementById('di_no_service_preview_wrap');
       if (prev) { prev.src = url; if (wrap) wrap.style.display = 'block'; }

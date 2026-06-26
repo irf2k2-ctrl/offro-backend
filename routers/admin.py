@@ -3525,16 +3525,16 @@ def admin_set_no_service_config(body: dict, a=Depends(get_current_admin)):
     update = {}
     if "url" in body and body["url"]:
         url = str(body["url"]).strip()
-        if not url.startswith("http"):
-            raise HTTPException(400, "URL must start with http")
-        # Store as single-item list (consistent with other image types)
-        existing = db.settings.find_one({"_type": "default_images"}) or {}
-        cur = existing.get("no_service", [])
-        if not isinstance(cur, list):
-            cur = [cur] if cur else []
-        if url not in cur:
-            cur.append(url)
-        update["no_service"] = cur
+        if url.startswith("http"):
+            # Valid HTTP URL — store in the no_service list
+            existing = db.settings.find_one({"_type": "default_images"}) or {}
+            cur = existing.get("no_service", [])
+            if not isinstance(cur, list):
+                cur = [cur] if cur else []
+            if url not in cur:
+                cur.append(url)
+            update["no_service"] = cur
+        # else: base64 or invalid URL — skip silently so title/message are still saved
     if "title" in body:
         update["no_service_title"] = str(body["title"] or "").strip()
     if "message" in body:
