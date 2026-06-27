@@ -30,20 +30,26 @@ def get_stores(city: str = None, category: str = None):
 
     # ── SUBSCRIPTION FILTER: remove stores with expired/no subscription ──
     from datetime import datetime as _dt
+    from bson import ObjectId as _OId
     _now = _dt.utcnow()
+    # FIX: subscription store_id may be stored as ObjectId OR string — query both
+    _oid_store_ids = []
+    for _sid in store_ids:
+        try: _oid_store_ids.append(_OId(_sid))
+        except Exception: pass
+    _sub_query = {"store_id": {"$in": store_ids + _oid_store_ids}}
     _active_subs = set()
-    for _sub in db.subscriptions.find(
-            {"store_id": {"$in": store_ids}},
-            {"store_id": 1, "end_date": 1, "status": 1}):
+    for _sub in db.subscriptions.find(_sub_query, {"store_id": 1, "end_date": 1, "status": 1}):
         _ed = _sub.get("end_date")
+        _sid_str = str(_sub["store_id"])  # str(ObjectId) gives hex; str(str) is a no-op
         if _ed is None:
             # No end_date = perpetual/lifetime subscription — always active
-            _active_subs.add(str(_sub["store_id"]))
+            _active_subs.add(_sid_str)
             continue
         try:
             _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
             if _ed_dt >= _now:
-                _active_subs.add(str(_sub["store_id"]))
+                _active_subs.add(_sid_str)
         except Exception:
             pass
     # If a store has no subscription record at all it is NOT shown publicly
@@ -174,12 +180,18 @@ def get_store(store_id: str):
 
     # 1. merchant_vouchers — approved, not expired
     if "merchant_vouchers" in cols:
+        from bson import ObjectId as _OId2
         merchant_id = store.get("merchant_id", "")
         merchant_phone = str(store.get("phone", ""))
         q = {"status": "approved"}
         if merchant_id:
-            q = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}],
-                 "status": "approved"}
+            # FIX: merchant_id may be ObjectId or string — match both
+            _mid_oid = None
+            try: _mid_oid = _OId2(merchant_id)
+            except Exception: pass
+            _or_clauses = [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}]
+            if _mid_oid: _or_clauses.append({"merchant_id": _mid_oid})
+            q = {"$or": _or_clauses, "status": "approved"}
         for p in db.merchant_vouchers.find(q).sort("created_at", -1).limit(30):
             if _prod_expired(p): continue
             pid = str(p["_id"])
@@ -199,7 +211,13 @@ def get_store(store_id: str):
 
     # 2. gift_vouchers — linked to this store_id, active
     if "gift_vouchers" in cols:
-        for p in db.gift_vouchers.find({"store_id": store_id, "is_active": True}).sort("_id", -1).limit(30):
+        from bson import ObjectId as _OId3
+        # FIX: gift_vouchers.store_id may be ObjectId or string — match both
+        _gv_clauses = [{"store_id": store_id}]
+        try: _gv_clauses.append({"store_id": _OId3(store_id)})
+        except Exception: pass
+        _gv_q = {"$or": _gv_clauses, "is_active": True}
+        for p in db.gift_vouchers.find(_gv_q).sort("_id", -1).limit(30):
             if _prod_expired(p): continue
             pid = str(p["_id"])
             if pid in seen_product_ids: continue
@@ -459,13 +477,24 @@ def get_all_active_deals(city: str = ""):
             imgs = s.get("images") or []
             return imgs[0] if imgs else ""
 
+        # Format end_date as ISO string and as human-readable validity
+        _end_iso = end_date.isoformat() if isinstance(end_date, _dt) else (str(end_date)[:19].replace(" ","T") if end_date else "")
+        _validity = ""
+        if end_date:
+            try:
+                _vdt = end_date if isinstance(end_date, _dt) else _dt.fromisoformat(str(end_date)[:19].replace(" ","T"))
+                _months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+                _validity = f"{_vdt.day} {_months[_vdt.month - 1]} {_vdt.year}"
+            except Exception:
+                pass
         result.append({
             "type":        "deal",
             "_id":         str(d["_id"]),
             "title":       d.get("title", d.get("deal_name", "")),
             "discount":    d.get("discount", d.get("offer_percent", "")),
             "description": d.get("description", ""),
-            "end_date":    end_date.isoformat() if isinstance(end_date, _dt) else (str(end_date)[:19].replace(" ","T") if end_date else ""),
+            "end_date":    _end_iso,
+            "validity":    _validity,
             "store_id":    sid,
             "store_name":  store.get("store_name",""),
             "store_area":  store.get("area",""),
@@ -988,8 +1017,9 @@ def get_promo_sliders_public():
     docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
-        # Expiry check — skip banners whose campaign end_date has passed
-        _end = d.get("end_date")
+        # Expiry check — approved merchant banners store expiry in "expires_at";
+        # admin-created promo sliders use "end_date". Check both.
+        _end = d.get("end_date") or d.get("expires_at")
         if _end:
             try:
                 _end_dt = _end if isinstance(_end, _dt) else _dt.fromisoformat(str(_end).replace("Z",""))
