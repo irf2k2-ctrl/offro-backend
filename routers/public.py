@@ -216,8 +216,9 @@ def get_store(store_id: str):
         _gv_clauses = [{"store_id": store_id}]
         try: _gv_clauses.append({"store_id": _OId3(store_id)})
         except Exception: pass
-        _gv_q = {"$or": _gv_clauses, "is_active": True}
+        _gv_q = {"$or": _gv_clauses}
         for p in db.gift_vouchers.find(_gv_q).sort("_id", -1).limit(30):
+            if p.get("is_active", True) in (False, "false", "0", 0): continue
             if _prod_expired(p): continue
             pid = str(p["_id"])
             if pid in seen_product_ids: continue
@@ -454,6 +455,10 @@ def get_all_active_deals(city: str = ""):
         deal_q["store_id"] = {"$in": list(stores_map.keys())}
 
     for d in db.deals.find(deal_q).sort("created_at", -1).limit(200):
+        # Skip ghost/empty deal records with no title
+        if not (d.get("title") or d.get("deal_name") or "").strip():
+            continue
+
         sid   = str(d.get("store_id", ""))
         store = stores_map.get(sid)
         if not store:
@@ -652,6 +657,17 @@ def get_categories():
     # Ultimate fallback
     fallback = ["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"]
     return [{"name":n,"subtitle":"","icon":"🏪","image_url":"","sort_order":i+1} for i,n in enumerate(fallback)]
+
+# =================== PUBLIC CATEGORIES ALIASES ===================
+# Flutter's fetchCategories() tries /public/categories then /public-categories
+# before falling back to hardcoded defaults. These aliases delegate to /categories.
+@router.get("/public/categories")
+def get_public_categories_alias():
+    return get_categories()
+
+@router.get("/public-categories")
+def get_public_categories_hyphen_alias():
+    return get_categories()
 
 # =================== PUBLIC TERMS ===================
 @router.get("/terms/{type}")
@@ -1022,8 +1038,27 @@ def get_promo_sliders_public():
         _end = d.get("end_date") or d.get("expires_at")
         if _end:
             try:
-                _end_dt = _end if isinstance(_end, _dt) else _dt.fromisoformat(str(_end).replace("Z",""))
-                if _end_dt < _now:
+                if isinstance(_end, _dt):
+                    _end_dt = _end
+                else:
+                    _end_str = str(_end).strip()
+                    try:
+                        _end_dt = _dt.fromisoformat(_end_str.replace("Z", ""))
+                    except Exception:
+                        # Merchant banners store end_date as "%d %b %Y" (e.g. "27 Jul 2026")
+                        import re as _re
+                        _mon_map = {"jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
+                                    "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12}
+                        _m = _re.match(r"(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})", _end_str)
+                        if _m:
+                            _mo = _mon_map.get(_m.group(2).lower()[:3])
+                            if _mo:
+                                _end_dt = _dt(int(_m.group(3)), _mo, int(_m.group(1)))
+                            else:
+                                _end_dt = None
+                        else:
+                            _end_dt = None
+                if _end_dt and _end_dt < _now:
                     continue
             except Exception:
                 pass
