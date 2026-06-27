@@ -205,7 +205,7 @@ def get_store(store_id: str):
                 "price":          str(p.get("price","") or ""),
                 "original_price": str(p.get("original_price","") or ""),
                 "discount":       str(p.get("discount_label","") or ""),
-                "validity":       p.get("validity",""),
+                "validity":       (str(p.get("end_date","") or "")[:10]) or (p.get("validity","") or ""),
                 "end_date":       str(p.get("end_date","") or ""),
             })
 
@@ -231,7 +231,7 @@ def get_store(store_id: str):
                 "price":          str(p.get("price","") or ""),
                 "original_price": str(p.get("original_price","") or ""),
                 "discount":       "",
-                "validity":       p.get("validity",""),
+                "validity":       (str(p.get("end_date","") or "")[:10]) or (p.get("validity","") or ""),
                 "end_date":       str(p.get("end_date","") or ""),
             })
 
@@ -455,8 +455,11 @@ def get_all_active_deals(city: str = ""):
         deal_q["store_id"] = {"$in": list(stores_map.keys())}
 
     for d in db.deals.find(deal_q).sort("created_at", -1).limit(200):
-        # Skip ghost/empty deal records with no title
-        if not (d.get("title") or d.get("deal_name") or "").strip():
+        # Skip truly empty deal records — must have NO title AND NO discount AND NO description
+        _t    = (d.get("title") or d.get("deal_name") or "").strip()
+        _disc = str(d.get("discount") or d.get("discount_percent") or d.get("offer_percent") or "").strip()
+        _desc = (d.get("description") or "").strip()
+        if not _t and not _disc and not _desc:
             continue
 
         sid   = str(d.get("store_id", ""))
@@ -1164,7 +1167,7 @@ def get_gift_vouchers_public(city: str = ""):
             "id":         vid,
             "title":      d.get("title", ""),
             "text":       d.get("text", "") or d.get("offer_text", ""),
-            "validity":   d.get("validity", ""),
+            "validity":   (str(d.get("end_date","") or "")[:10]) or (d.get("validity","") or ""),
             "logo":       _resolve_img(d),
             "logo_url":   _resolve_img(d),
             "store_id":   sid,
