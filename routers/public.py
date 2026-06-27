@@ -37,6 +37,8 @@ def get_stores(city: str = None, category: str = None):
             {"store_id": 1, "end_date": 1, "status": 1}):
         _ed = _sub.get("end_date")
         if _ed is None:
+            # No end_date = perpetual/lifetime subscription — always active
+            _active_subs.add(str(_sub["store_id"]))
             continue
         try:
             _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
@@ -147,8 +149,30 @@ def get_store(store_id: str):
         "end_date":    d.get("end_date"),
     } for d in deals]
 
-    # Approved products (merchant_vouchers) for this store
+    # Products for this store — from merchant_vouchers + gift_vouchers (active/non-expired only)
+    from datetime import datetime as _dt
+    _pnow = _dt.utcnow()
     products_list = []
+    seen_product_ids = set()
+
+    def _prod_expired(p):
+        """Return True if the product's end_date has passed."""
+        ed = p.get("end_date") or p.get("validity_end") or ""
+        if not ed:
+            return False
+        try:
+            ed_dt = ed if isinstance(ed, _dt) else _dt.fromisoformat(str(ed)[:19].replace(" ","T"))
+            return ed_dt < _pnow
+        except Exception:
+            return False
+
+    def _prod_img(p):
+        for k in ["logo_url","logo_thumb","image_url","logo","image"]:
+            v = str(p.get(k,"") or "")
+            if v.startswith("http"): return v
+        return ""
+
+    # 1. merchant_vouchers — approved, not expired
     if "merchant_vouchers" in cols:
         merchant_id = store.get("merchant_id", "")
         merchant_phone = str(store.get("phone", ""))
@@ -156,18 +180,40 @@ def get_store(store_id: str):
         if merchant_id:
             q = {"$or": [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}],
                  "status": "approved"}
-        prods = list(db.merchant_vouchers.find(q).sort("created_at", -1).limit(20))
-        for p in prods:
+        for p in db.merchant_vouchers.find(q).sort("created_at", -1).limit(30):
+            if _prod_expired(p): continue
+            pid = str(p["_id"])
+            if pid in seen_product_ids: continue
+            seen_product_ids.add(pid)
             products_list.append({
-                "_id":            str(p["_id"]),
+                "_id":            pid,
                 "title":          p.get("title", ""),
                 "offer_text":     p.get("offer_text", ""),
-                "logo_url":       p.get("logo_url", "") or p.get("logo_thumb", ""),
-                "price":          p.get("price", "") or "",
-                "original_price": p.get("original_price", "") or "",
-                "discount":       p.get("discount_label", "") or "",
-                "validity":       p.get("validity", ""),
-                "end_date":       p.get("end_date", ""),
+                "logo_url":       _prod_img(p),
+                "price":          str(p.get("price","") or ""),
+                "original_price": str(p.get("original_price","") or ""),
+                "discount":       str(p.get("discount_label","") or ""),
+                "validity":       p.get("validity",""),
+                "end_date":       str(p.get("end_date","") or ""),
+            })
+
+    # 2. gift_vouchers — linked to this store_id, active
+    if "gift_vouchers" in cols:
+        for p in db.gift_vouchers.find({"store_id": store_id, "is_active": True}).sort("_id", -1).limit(30):
+            if _prod_expired(p): continue
+            pid = str(p["_id"])
+            if pid in seen_product_ids: continue
+            seen_product_ids.add(pid)
+            products_list.append({
+                "_id":            pid,
+                "title":          p.get("title",""),
+                "offer_text":     p.get("text","") or p.get("offer_text",""),
+                "logo_url":       _prod_img(p),
+                "price":          str(p.get("price","") or ""),
+                "original_price": str(p.get("original_price","") or ""),
+                "discount":       "",
+                "validity":       p.get("validity",""),
+                "end_date":       str(p.get("end_date","") or ""),
             })
 
     # Rating count
@@ -359,6 +405,8 @@ def get_all_active_deals(city: str = ""):
     for _sub in db.subscriptions.find({}, {"store_id": 1, "end_date": 1}):
         _ed = _sub.get("end_date")
         if _ed is None:
+            # No end_date = perpetual/lifetime subscription — always active
+            _active_store_ids.add(str(_sub["store_id"]))
             continue
         try:
             _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
@@ -417,7 +465,7 @@ def get_all_active_deals(city: str = ""):
             "title":       d.get("title", d.get("deal_name", "")),
             "discount":    d.get("discount", d.get("offer_percent", "")),
             "description": d.get("description", ""),
-            "end_date":    str(end_date) if end_date else "",
+            "end_date":    end_date.isoformat() if isinstance(end_date, _dt) else (str(end_date)[:19].replace(" ","T") if end_date else ""),
             "store_id":    sid,
             "store_name":  store.get("store_name",""),
             "store_area":  store.get("area",""),
@@ -506,6 +554,8 @@ def get_categories():
     for _sub in db.subscriptions.find({}, {"store_id": 1, "end_date": 1}):
         _ed = _sub.get("end_date")
         if _ed is None:
+            # No end_date = perpetual/lifetime subscription — always active
+            _active_sub_ids.add(str(_sub["store_id"]))
             continue
         try:
             _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
@@ -932,20 +982,32 @@ def get_about_public():
 # =================== PROMO SLIDERS (public - for Flutter app) ===================
 @router.get("/promo-sliders")
 def get_promo_sliders_public():
-    """Returns active promo slider banners for the app home screen (merchant/all banners)."""
+    """Returns active, non-expired merchant banners (promo sliders) for the home screen."""
+    from datetime import datetime as _dt
+    _now = _dt.utcnow()
     docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
+        # Expiry check — skip banners whose campaign end_date has passed
+        _end = d.get("end_date")
+        if _end:
+            try:
+                _end_dt = _end if isinstance(_end, _dt) else _dt.fromisoformat(str(_end).replace("Z",""))
+                if _end_dt < _now:
+                    continue
+            except Exception:
+                pass
         img = d.get("image_url", "") or d.get("image", "")
         result.append({
-            "id": str(d["_id"]),
-            "title": d.get("title", ""),
-            "subtitle": d.get("subtitle", "") or d.get("text", ""),
-            "image": img,
-            "image_url": img,
-            "link_url": d.get("link_url", ""),
-            "bg_color": d.get("bg_color", ""),
+            "id":         str(d["_id"]),
+            "title":      d.get("title", ""),
+            "subtitle":   d.get("subtitle", "") or d.get("text", ""),
+            "image":      img,
+            "image_url":  img,
+            "link_url":   d.get("link_url", ""),
+            "bg_color":   d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
+            "city":       d.get("city", ""),
         })
     return result
 
@@ -995,25 +1057,37 @@ def get_gift_vouchers_public():
             except: pass
         return ""
 
+    def _get_store_name(sid: str) -> str:
+        if not sid: return ""
+        try:
+            s = db.stores.find_one({"_id": OId(sid)}, {"store_name": 1})
+            return s.get("store_name", "") if s else ""
+        except Exception:
+            return ""
+
     # ── 1. gift_vouchers collection ──────────────────────────────────────────
     for d in db.gift_vouchers.find({}).sort("_id", -1):
         if not _is_active(d): continue
         vid = str(d["_id"])
         if vid in seen_ids: continue
         seen_ids.add(vid)
+        sid = d.get("store_id", "")
+        # Resolve actual store name from store_id (not merchant_name which may differ)
+        resolved_store_name = _get_store_name(sid) or d.get("store_name", "") or d.get("merchant_name", "")
         result.append({
-            "id":       vid,
-            "title":    d.get("title", ""),
-            "text":     d.get("text", "") or d.get("offer_text", ""),
-            "validity": d.get("validity", ""),
-            "logo":     _resolve_img(d),
-            "logo_url": _resolve_img(d),
-            "store_id": d.get("store_id", ""),
-            "city":     d.get("city", ""),
-            "from_date": d.get("from_date", ""),
-            "end_date": d.get("end_date", ""),
-            "is_active": True,
-            "source":   "gift_vouchers",
+            "id":         vid,
+            "title":      d.get("title", ""),
+            "text":       d.get("text", "") or d.get("offer_text", ""),
+            "validity":   d.get("validity", ""),
+            "logo":       _resolve_img(d),
+            "logo_url":   _resolve_img(d),
+            "store_id":   sid,
+            "store_name": resolved_store_name,
+            "city":       d.get("city", ""),
+            "from_date":  d.get("from_date", ""),
+            "end_date":   d.get("end_date", ""),
+            "is_active":  True,
+            "source":     "gift_vouchers",
         })
 
     # ── 2. products collection ───────────────────────────────────────────────
@@ -1028,19 +1102,22 @@ def get_gift_vouchers_public():
         if discount: text_parts.append(f"{discount}% OFF")
         if price:    text_parts.append(f"₹{price}")
         offer_text = p.get("offer_text") or p.get("text") or (", ".join(text_parts) if text_parts else "")
+        psid = str(p.get("store_id", ""))
+        resolved_p_store = _get_store_name(psid) or p.get("store_name", "") or p.get("merchant_name", "")
         result.append({
-            "id":       pid,
-            "title":    p.get("name") or p.get("title") or "",
-            "text":     offer_text,
-            "validity": p.get("validity") or p.get("valid_till") or "",
-            "logo":     _resolve_img(p),
-            "logo_url": _resolve_img(p),
-            "store_id": str(p.get("store_id", "")),
-            "city":     p.get("city", ""),
-            "from_date": p.get("from_date") or p.get("start_date") or "",
-            "end_date": p.get("end_date") or p.get("expiry") or "",
-            "is_active": True,
-            "source":   "products",
+            "id":         pid,
+            "title":      p.get("name") or p.get("title") or "",
+            "text":       offer_text,
+            "validity":   p.get("validity") or p.get("valid_till") or "",
+            "logo":       _resolve_img(p),
+            "logo_url":   _resolve_img(p),
+            "store_id":   psid,
+            "store_name": resolved_p_store,
+            "city":       p.get("city", ""),
+            "from_date":  p.get("from_date") or p.get("start_date") or "",
+            "end_date":   p.get("end_date") or p.get("expiry") or "",
+            "is_active":  True,
+            "source":     "products",
         })
 
     return result
@@ -1049,17 +1126,29 @@ def get_gift_vouchers_public():
 # ─── Default Images (fallback for stores/products/offers/cities) ──────────────
 @router.get("/default-images")
 def get_default_images():
-    """Return default/fallback images configured by admin."""
+    """Return default/fallback images configured by admin.
+    Supports both legacy string and new array format per field."""
     doc = db.settings.find_one({"_type": "default_images"})
     if not doc:
         return {"store": "", "product": "", "offer": "", "city": "",
-                "no_service_url": "", "no_service_title": "", "no_service_message": ""}
+                "merchant_banner": "", "no_service_url": "",
+                "no_service_title": "", "no_service_message": ""}
+
+    def _first(val):
+        """Return first HTTP URL from string or list."""
+        if isinstance(val, list):
+            for v in val:
+                if isinstance(v, str) and v.startswith("http"): return v
+            return ""
+        return val if isinstance(val, str) else ""
+
     return {
-        "store":              doc.get("store", ""),
-        "product":            doc.get("product", ""),
-        "offer":              doc.get("offer", ""),
-        "city":               doc.get("city", ""),
-        "no_service_url":     doc.get("no_service_url", ""),
-        "no_service_title":   doc.get("no_service_title", ""),
-        "no_service_message": doc.get("no_service_message", ""),
+        "store":            _first(doc.get("store", "")),
+        "product":          _first(doc.get("product", "")),
+        "offer":            _first(doc.get("offer", "")),
+        "city":             _first(doc.get("city", "")),
+        "merchant_banner":  _first(doc.get("merchant_banner", "")),
+        "no_service_url":   _first(doc.get("no_service", doc.get("no_service_url", ""))),
+        "no_service_title": str(doc.get("no_service_title", "") or ""),
+        "no_service_message": str(doc.get("no_service_message", "") or ""),
     }
