@@ -951,59 +951,98 @@ def get_promo_sliders_public():
 
 @router.get("/admin-banners")
 def get_admin_banners_public():
-    """Returns active admin-created banners for the top banner section of the home screen.
-    Only returns banners with source='admin' (excludes merchant-submitted promo sliders)."""
-    docs = list(db.promo_sliders.find({
-        "is_active": True,
-        "$or": [
-            {"source": "admin"},
-            {"source_banner_id": {"$exists": False}},
-        ]
-    }).sort("sort_order", 1))
+    """Returns active admin banners from the banners collection (Admin Dashboard → Banners module).
+    This is the Home Screen banner section — completely separate from promo_sliders."""
+    docs = list(db.banners.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
         result.append({
-            "id": str(d["_id"]),
-            "title": d.get("title", ""),
-            "subtitle": d.get("subtitle", "") or d.get("text", ""),
-            "image": img,
-            "image_url": img,
-            "link_url": d.get("link_url", ""),
-            "bg_color": d.get("bg_color", ""),
+            "id":         str(d["_id"]),
+            "title":      d.get("title", ""),
+            "subtitle":   d.get("subtitle", ""),
+            "image":      img,
+            "image_url":  img,
+            "link_url":   d.get("link_url", ""),
             "sort_order": d.get("sort_order", 0),
+            "is_active":  d.get("is_active", True),
         })
     return result
 
 # =================== GIFT VOUCHERS (public - for Flutter app home screen) ===================
 @router.get("/gift-vouchers-public")
 def get_gift_vouchers_public():
-    """Returns active gift vouchers shown on the app home screen (Voucher Zone)."""
-    # Fetch all, then filter in Python to handle bool/string/missing is_active variants
-    docs = list(db.gift_vouchers.find({}).sort("_id", -1))
-    docs = [d for d in docs if d.get("is_active", True) not in (False, "false", "0", 0)]
+    """Returns active products for Discover Products section (Admin Dashboard → Products module).
+    Reads from gift_vouchers (primary) and products (secondary) — same as admin /admin/products."""
+    from bson import ObjectId as OId
     result = []
-    for d in docs:
-        vid = str(d.pop("_id"))
-        # Normalise store field
-        store = d.get("store", {})
-        if isinstance(store, dict):
-            sid = store.get("_id") or store.get("id")
-            if sid:
-                store["id"] = str(sid)
-                store.pop("_id", None)
-        # If store_id exists, try to pull store image for display
-        store_id = d.get("store_id", "")
-        if store_id and not d.get("logo"):
+    seen_ids = set()
+
+    def _is_active(doc):
+        return doc.get("is_active", True) not in (False, "false", "0", 0)
+
+    def _resolve_img(doc):
+        for k in ["logo", "logo_url", "image_url", "image", "thumbnail"]:
+            v = str(doc.get(k, "") or "")
+            if v.startswith("http"): return v
+        store_id = doc.get("store_id", "")
+        if store_id:
             try:
-                from bson import ObjectId as OId
-                s = db.stores.find_one({"_id": OId(store_id)}, {"store_image2":1,"image":1,"store_name":1})
+                s = db.stores.find_one({"_id": OId(store_id)},
+                                       {"store_image2": 1, "image": 1, "image2": 1})
                 if s:
-                    d["logo"] = s.get("store_image2") or s.get("image") or ""
-                    if not d.get("title") and s.get("store_name"):
-                        d["title"] = s["store_name"]
+                    return s.get("store_image2") or s.get("image2") or s.get("image") or ""
             except: pass
-        result.append({"id": vid, **d})
+        return ""
+
+    # ── 1. gift_vouchers collection ──────────────────────────────────────────
+    for d in db.gift_vouchers.find({}).sort("_id", -1):
+        if not _is_active(d): continue
+        vid = str(d["_id"])
+        if vid in seen_ids: continue
+        seen_ids.add(vid)
+        result.append({
+            "id":       vid,
+            "title":    d.get("title", ""),
+            "text":     d.get("text", "") or d.get("offer_text", ""),
+            "validity": d.get("validity", ""),
+            "logo":     _resolve_img(d),
+            "logo_url": _resolve_img(d),
+            "store_id": d.get("store_id", ""),
+            "city":     d.get("city", ""),
+            "from_date": d.get("from_date", ""),
+            "end_date": d.get("end_date", ""),
+            "is_active": True,
+            "source":   "gift_vouchers",
+        })
+
+    # ── 2. products collection ───────────────────────────────────────────────
+    for p in db.products.find({}).sort("_id", -1):
+        if not _is_active(p): continue
+        pid = str(p["_id"])
+        if pid in seen_ids: continue
+        seen_ids.add(pid)
+        price    = p.get("price", "")
+        discount = p.get("discount", "")
+        text_parts = []
+        if discount: text_parts.append(f"{discount}% OFF")
+        if price:    text_parts.append(f"₹{price}")
+        offer_text = p.get("offer_text") or p.get("text") or (", ".join(text_parts) if text_parts else "")
+        result.append({
+            "id":       pid,
+            "title":    p.get("name") or p.get("title") or "",
+            "text":     offer_text,
+            "validity": p.get("validity") or p.get("valid_till") or "",
+            "logo":     _resolve_img(p),
+            "logo_url": _resolve_img(p),
+            "store_id": str(p.get("store_id", "")),
+            "city":     p.get("city", ""),
+            "from_date": p.get("from_date") or p.get("start_date") or "",
+            "end_date": p.get("end_date") or p.get("expiry") or "",
+            "is_active": True,
+            "source":   "products",
+        })
+
     return result
 
 
