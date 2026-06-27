@@ -1033,12 +1033,23 @@ def get_admin_banners_public():
 
 # =================== GIFT VOUCHERS (public - for Flutter app home screen) ===================
 @router.get("/gift-vouchers-public")
-def get_gift_vouchers_public():
+def get_gift_vouchers_public(city: str = ""):
     """Returns active products for Discover Products section (Admin Dashboard → Products module).
-    Reads from gift_vouchers (primary) and products (secondary) — same as admin /admin/products."""
+    Reads from gift_vouchers (primary) and products (secondary) — same as admin /admin/products.
+    Filters by city when city param is provided (case-insensitive)."""
     from bson import ObjectId as OId
+    import re as _re
     result = []
     seen_ids = set()
+    city_filter = city.strip().lower() if city else ""
+
+    def _city_matches(doc_city: str) -> bool:
+        if not city_filter:
+            return True
+        dc = (doc_city or "").strip().lower()
+        if not dc:
+            return True  # no city on product — include it (global/all-city product)
+        return bool(_re.search(_re.escape(city_filter), dc) or _re.search(_re.escape(dc), city_filter))
 
     def _is_active(doc):
         return doc.get("is_active", True) not in (False, "false", "0", 0)
@@ -1065,14 +1076,24 @@ def get_gift_vouchers_public():
         except Exception:
             return ""
 
+    def _get_store_city(sid: str) -> str:
+        if not sid: return ""
+        try:
+            s = db.stores.find_one({"_id": OId(sid)}, {"city": 1})
+            return s.get("city", "") if s else ""
+        except Exception:
+            return ""
+
     # ── 1. gift_vouchers collection ──────────────────────────────────────────
     for d in db.gift_vouchers.find({}).sort("_id", -1):
         if not _is_active(d): continue
         vid = str(d["_id"])
         if vid in seen_ids: continue
+        # City filter: check product's own city OR its store's city
+        doc_city = d.get("city", "") or _get_store_city(str(d.get("store_id", "")))
+        if not _city_matches(doc_city): continue
         seen_ids.add(vid)
         sid = d.get("store_id", "")
-        # Resolve actual store name from store_id (not merchant_name which may differ)
         resolved_store_name = _get_store_name(sid) or d.get("store_name", "") or d.get("merchant_name", "")
         result.append({
             "id":         vid,
@@ -1083,7 +1104,7 @@ def get_gift_vouchers_public():
             "logo_url":   _resolve_img(d),
             "store_id":   sid,
             "store_name": resolved_store_name,
-            "city":       d.get("city", ""),
+            "city":       doc_city,
             "from_date":  d.get("from_date", ""),
             "end_date":   d.get("end_date", ""),
             "is_active":  True,
@@ -1095,6 +1116,9 @@ def get_gift_vouchers_public():
         if not _is_active(p): continue
         pid = str(p["_id"])
         if pid in seen_ids: continue
+        # City filter: check product's own city OR its store's city
+        pdoc_city = p.get("city", "") or _get_store_city(str(p.get("store_id", "")))
+        if not _city_matches(pdoc_city): continue
         seen_ids.add(pid)
         price    = p.get("price", "")
         discount = p.get("discount", "")
@@ -1113,7 +1137,7 @@ def get_gift_vouchers_public():
             "logo_url":   _resolve_img(p),
             "store_id":   psid,
             "store_name": resolved_p_store,
-            "city":       p.get("city", ""),
+            "city":       pdoc_city,
             "from_date":  p.get("from_date") or p.get("start_date") or "",
             "end_date":   p.get("end_date") or p.get("expiry") or "",
             "is_active":  True,
