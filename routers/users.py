@@ -282,7 +282,7 @@ def withdraw(data: dict, user=Depends(get_current_user)):
         "phone":        user.get("phone"),
         "email":        user.get("email", ""),
         "points":       amount,
-        "reward_cash_value": round(amount / 10, 2),
+        "voucher_value": round(amount / 10, 2),
         "status":       "pending",
         "created_at":   datetime.utcnow(),
     })
@@ -415,8 +415,34 @@ def list_favorites(user=Depends(get_current_user)):
             "city":       s.get("city", ""),
             "rating":     float(s.get("admin_rating") or s.get("rating") or 0),
             "image":      img,
+            "image_url":   s.get("image_url", "") or s.get("_thumb", "") or "",
+            "image_thumb": s.get("image_thumb", "") or s.get("_thumb", "") or "",
+            "deal_count":  0,
         })
     return result
+
+# ── Product Favourites ────────────────────────────────────────────────────────
+
+@router.get("/product-favorites")
+def list_product_favorites(user=Depends(get_current_user)):
+    """Return all product IDs favourited by the current user."""
+    return [str(pid) for pid in user.get("favorite_product_ids", [])]
+
+@router.post("/product-favorites/{product_id}")
+def toggle_product_favorite(product_id: str, user=Depends(get_current_user)):
+    user_id  = user["_id"]
+    fav_ids  = [str(f) for f in user.get("favorite_product_ids", [])]
+    if product_id in fav_ids:
+        db.accounts.update_one({"_id": user_id}, {"$pull":     {"favorite_product_ids": product_id}})
+        return {"is_favorite": False}
+    else:
+        db.accounts.update_one({"_id": user_id}, {"$addToSet": {"favorite_product_ids": product_id}})
+        return {"is_favorite": True}
+
+@router.get("/product-favorites/{product_id}/check")
+def check_product_favorite(product_id: str, user=Depends(get_current_user)):
+    fav_ids = [str(f) for f in user.get("favorite_product_ids", [])]
+    return {"is_favorite": product_id in fav_ids}
 
 @router.post("/favorites/{store_id}")
 def toggle_favorite(store_id: str, user=Depends(get_current_user)):
