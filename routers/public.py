@@ -1234,11 +1234,19 @@ def get_default_images():
             return ""
         return val if isinstance(val, str) else ""
 
+    def _all_urls(val):
+        """Return ALL HTTP URLs as a list (used for city hero rotation)."""
+        if isinstance(val, list):
+            return [v for v in val if isinstance(v, str) and v.startswith("http")]
+        if isinstance(val, str) and val.startswith("http"):
+            return [val]
+        return []
+
     return {
         "store":            _first(doc.get("store", "")),
         "product":          _first(doc.get("product", "")),
         "offer":            _first(doc.get("offer", "")),
-        "city":             _first(doc.get("city", "")),
+        "city":             _all_urls(doc.get("city", "")),
         "merchant_banner":  _first(doc.get("merchant_banner", "")),
         "no_service_url":   _first(doc.get("no_service", doc.get("no_service_url", ""))),
         "no_service_title": str(doc.get("no_service_title", "") or ""),
