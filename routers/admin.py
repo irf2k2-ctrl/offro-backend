@@ -2460,13 +2460,14 @@ async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=
 def admin_get_default_images(a=Depends(get_current_admin)):
     doc = db.settings.find_one({"_type": "default_images"})
     if not doc:
-        return {"store": "", "product": "", "offer": "", "city": "",
+        return {"store": "", "product": "", "offer": "", "city": "", "merchant_banner": "",
                 "no_service_url": "", "no_service_title": "", "no_service_message": ""}
     return {
         "store":              doc.get("store", ""),
         "product":            doc.get("product", ""),
         "offer":              doc.get("offer", ""),
         "city":               doc.get("city", ""),
+        "merchant_banner":    doc.get("merchant_banner", ""),
         "no_service_url":     doc.get("no_service_url", ""),
         "no_service_title":   doc.get("no_service_title", ""),
         "no_service_message": doc.get("no_service_message", ""),
@@ -2476,7 +2477,7 @@ def admin_get_default_images(a=Depends(get_current_admin)):
 @router.put("/default-images/urls")
 def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
     update = {}
-    for field in ["store", "product", "offer", "city"]:
+    for field in ["store", "product", "offer", "city", "merchant_banner"]:
         if field in body:
             update[field] = body[field]
     if update:
@@ -2507,16 +2508,38 @@ async def admin_save_no_service(
     return {"ok": True}
 
 
+@router.put("/default-images/no-service")
+def admin_update_no_service_json(body: dict, a=Depends(get_current_admin)):
+    """JSON body version: { url, title, message }"""
+    update = {}
+    if body.get("url"):
+        update["no_service_url"] = body["url"]
+    if "title" in body:
+        update["no_service_title"] = body.get("title", "")
+    if "message" in body:
+        update["no_service_message"] = body.get("message", "")
+    if update:
+        db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
+    return {"ok": True}
+
+
 @router.put("/default-images")
 async def admin_update_default_images(
     store_file: UploadFile = File(None),
     product_file: UploadFile = File(None),
     offer_file: UploadFile = File(None),
     city_file: UploadFile = File(None),
+    merchant_banner_file: UploadFile = File(None),
     a=Depends(get_current_admin),
 ):
     update = {}
-    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file)]:
+    for field, f in [
+        ("store", store_file),
+        ("product", product_file),
+        ("offer", offer_file),
+        ("city", city_file),
+        ("merchant_banner", merchant_banner_file),
+    ]:
         if f and f.filename:
             content = await f.read()
             mime = f.content_type or "image/jpeg"
@@ -2533,36 +2556,40 @@ async def admin_update_default_images(
 
 @router.get("/banners")
 def list_admin_banners(a=Depends(get_current_admin)):
+    """Admin banners — reads from promo_sliders (same backing store)."""
     banners = []
-    for b in db.admin_banners.find().sort("sort", 1):
+    for b in db.promo_sliders.find().sort("sort_order", 1):
+        created = b.get("created_at", "")
+        created_str = created.strftime("%d %b %Y %H:%M") if isinstance(created, datetime) else str(created)[:16]
         banners.append({
             "id":         str(b["_id"]),
             "image_url":  b.get("image_url", ""),
             "title":      b.get("title", ""),
-            "subtitle":   b.get("subtitle", ""),
+            "subtitle":   b.get("subtitle", b.get("merchant_name", "")),
             "link_url":   b.get("link_url", ""),
-            "sort":       b.get("sort", 0),
+            "sort":       b.get("sort_order", 0),
             "is_pinned":  b.get("is_pinned", False),
             "is_active":  b.get("is_active", True),
-            "created_at": str(b.get("created_at", ""))[:19],
+            "created_at": created_str,
         })
     return banners
 
 
 @router.post("/banners")
 def create_admin_banner(data: dict, a=Depends(get_current_admin)):
-    from datetime import datetime
+    """Creates an admin banner in promo_sliders collection."""
     doc = {
         "image_url":  data.get("image_url", ""),
         "title":      data.get("title", ""),
         "subtitle":   data.get("subtitle", ""),
         "link_url":   data.get("link_url", ""),
-        "sort":       int(data.get("sort", 0)),
+        "sort_order": int(data.get("sort_order", data.get("sort", 0))),
         "is_pinned":  bool(data.get("is_pinned", False)),
         "is_active":  bool(data.get("is_active", True)),
+        "source":     "admin",
         "created_at": datetime.utcnow(),
     }
-    res = db.admin_banners.insert_one(doc)
+    res = db.promo_sliders.insert_one(doc)
     return {"ok": True, "id": str(res.inserted_id)}
 
 
@@ -2570,11 +2597,15 @@ def create_admin_banner(data: dict, a=Depends(get_current_admin)):
 def update_admin_banner(bid: str, data: dict, a=Depends(get_current_admin)):
     from bson import ObjectId
     update = {}
-    for f in ["image_url", "title", "subtitle", "link_url", "sort", "is_pinned", "is_active"]:
+    for f in ["image_url", "title", "subtitle", "link_url", "is_pinned", "is_active"]:
         if f in data:
             update[f] = data[f]
+    if "sort_order" in data:
+        update["sort_order"] = int(data["sort_order"])
+    elif "sort" in data:
+        update["sort_order"] = int(data["sort"])
     try:
-        db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
+        db.promo_sliders.update_one({"_id": ObjectId(bid)}, {"$set": update})
     except Exception:
         raise HTTPException(400, "Invalid banner ID")
     return {"ok": True}
@@ -2584,7 +2615,7 @@ def update_admin_banner(bid: str, data: dict, a=Depends(get_current_admin)):
 def delete_admin_banner(bid: str, a=Depends(get_current_admin)):
     from bson import ObjectId
     try:
-        db.admin_banners.delete_one({"_id": ObjectId(bid)})
+        db.promo_sliders.delete_one({"_id": ObjectId(bid)})
     except Exception:
         raise HTTPException(400, "Invalid banner ID")
     return {"ok": True}
@@ -2599,29 +2630,33 @@ def delete_admin_banner(bid: str, a=Depends(get_current_admin)):
 def _fmt_admin_product_row(v, collection):
     mid   = v.get("merchant_id", "")
     phone = v.get("merchant_phone", "")
+    src   = v.get("source", "admin")
+    # Normalise source: merchant_standard / merchant_premium → merchant
+    is_merchant_src = src == "merchant" or src.startswith("merchant_")
     return {
-        "id":              str(v["_id"]),
-        "_id":             str(v["_id"]),
-        "_collection":     collection,
-        "logo":            v.get("logo", ""),
-        "title":           v.get("title", ""),
-        "text":            v.get("text", ""),
-        "offer_text":      v.get("text", ""),
-        "price":           v.get("price", 0),
-        "from_date":       str(v.get("from_date", ""))[:10],
-        "end_date":        str(v.get("end_date", ""))[:10],
-        "validity":        v.get("validity", ""),
-        "is_active":       v.get("is_active", True),
-        "status":          v.get("status", "approved"),
-        "source":          v.get("source", "admin"),
-        "product_type":    v.get("product_type", "premium"),
-        "merchant_id":     mid,
-        "merchant_name":   v.get("merchant_name", ""),
-        "merchant_phone":  phone,
-        "store_id":        v.get("store_id", ""),
-        "store_name":      v.get("store_name", ""),
-        "city":            v.get("city", ""),
-        "created_at":      str(v.get("created_at", ""))[:19],
+        "id":                str(v["_id"]),
+        "_id":               str(v["_id"]),
+        "_collection":       collection,
+        "logo":              v.get("logo", ""),
+        "title":             v.get("title", ""),
+        "text":              v.get("text", ""),
+        "offer_text":        v.get("text", ""),
+        "price":             v.get("price", 0),
+        "from_date":         str(v.get("from_date", ""))[:10],
+        "end_date":          str(v.get("end_date", ""))[:10],
+        "validity":          v.get("validity", ""),
+        "is_active":         v.get("is_active", True),
+        "status":            v.get("status", "approved"),
+        "source":            "merchant" if is_merchant_src else "admin",
+        "product_type":      v.get("product_type", "premium"),
+        "source_product_id": str(v.get("source_product_id", "")),
+        "merchant_id":       mid,
+        "merchant_name":     v.get("merchant_name", ""),
+        "merchant_phone":    phone,
+        "store_id":          v.get("store_id", ""),
+        "store_name":        v.get("store_name", ""),
+        "city":              v.get("city", ""),
+        "created_at":        str(v.get("created_at", ""))[:19],
     }
 
 
