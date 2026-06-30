@@ -439,12 +439,6 @@ def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
 
 # ───────────── plans / pricing ─────────────
 
-@router.get("/categories")
-def get_categories_for_merchant(m=Depends(get_merchant)):
-    """Return all active categories — used for Add Store / Add Product dropdowns."""
-    cats = list(db.categories.find({"status": {"$ne": "deleted"}}, {"_id": 0, "name": 1, "image_url": 1, "subtitle": 1}).sort("sort_order", 1))
-    return cats
-
 @router.get("/plans")
 def get_plans():
     doc  = db.pricing.find_one({}) or {}
@@ -1079,7 +1073,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
         "discount_amount": discount_value,
         "final_amount":   total,
         "status":         "pending",
-        "approval_status": "pending_approval",
+        "approval_status": "pending",
         "created_at":     datetime.utcnow().isoformat(),
     }
     inserted = db.banner_orders.insert_one(order_doc)
@@ -1130,29 +1124,6 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     }
 
 # ── POST /merchant/banners/activate-free  ──────────────────────────────────
-@router.put("/banners/{bid}")
-def update_merchant_banner(bid: str, data: dict, m=Depends(get_merchant)):
-    """Merchant updates their own banner title."""
-    merchant_id = _mid(m)
-    try:
-        obj_id = ObjectId(bid)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid banner ID")
-    existing = db.merchant_banners.find_one({"_id": obj_id, "merchant_id": merchant_id})
-    if not existing:
-        existing = db.merchant_banners.find_one({"_id": obj_id})
-        if not existing:
-            raise HTTPException(status_code=404, detail="Banner not found")
-        if str(existing.get("merchant_id", "")) != merchant_id:
-            raise HTTPException(status_code=403, detail="Not authorised to edit this banner")
-    allowed = {"title"}
-    update_data = {k: v for k, v in data.items() if k in allowed and v is not None}
-    if not update_data:
-        raise HTTPException(status_code=400, detail="No valid fields to update")
-    update_data["updated_at"] = datetime.utcnow().isoformat()
-    db.merchant_banners.update_one({"_id": obj_id}, {"$set": update_data})
-    return {"ok": True, "message": "Banner updated"}
-
 @router.post("/banners/activate-free")
 def activate_free_banner(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
@@ -1160,14 +1131,6 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     title       = data.get("title", "")
     image_url   = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
     image_thumb = _make_thumb_url(image_url)
-    city        = str(data.get("city", "") or "").strip()
-    store_id    = str(data.get("store_id", "") or "").strip()
-    store_name  = str(data.get("store_name", "") or "").strip()
-    if not city and store_id:
-        try:
-            _st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
-            if _st: city = str(_st.get("city", "") or "").strip()
-        except: pass
 
     order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
     if not order:
@@ -1195,12 +1158,9 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "gst_percent":      order.get("gst_percent", 18),
         "gst_amount":       order.get("gst_amount", 0),
         "total":            order.get("total", 0),
-        "city":             city,
-        "store_id":         store_id,
-        "store_name":       store_name,
         "payment_status":   "free",
         "status":           "pending",
-        "approval_status":  "pending_approval",
+        "approval_status":  "pending",
         "created_at":       datetime.utcnow().isoformat(),
     }
     res = db.merchant_banners.insert_one(banner)
@@ -1245,14 +1205,6 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     title             = data.get("title", "")
     image_url         = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
     image_thumb       = _make_thumb_url(image_url)
-    city              = str(data.get("city", "") or "").strip()
-    store_id          = str(data.get("store_id", "") or "").strip()
-    store_name        = str(data.get("store_name", "") or "").strip()
-    if not city and store_id:
-        try:
-            _st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
-            if _st: city = str(_st.get("city", "") or "").strip()
-        except: pass
     razorpay_payment_id = data.get("razorpay_payment_id", "")
     razorpay_order_id   = data.get("razorpay_order_id", "")
     razorpay_signature  = data.get("razorpay_signature", "")
@@ -1292,13 +1244,10 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "discount_code":    order.get("discount_code", ""),
         "discount_amount":  order.get("discount_amount", order.get("discount", 0)),
         "final_amount":     order.get("final_amount", order.get("total", 0)),
-        "city":             city,
-        "store_id":         store_id,
-        "store_name":       store_name,
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":   "paid",
         "status":           "pending",
-        "approval_status":  "pending_approval",
+        "approval_status":  "pending",
         "created_at":       datetime.utcnow().isoformat(),
     }
     res = db.merchant_banners.insert_one(banner)
@@ -1341,12 +1290,12 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MERCHANT PRODUCTS — self-service product listing ordering
+# MERCHANT VOUCHERS — self-service voucher ordering
 # Issue 3: now uses `days` + `from_date` instead of fixed 30/60/90 plans
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@router.get("/products")
-def get_my_products(m=Depends(get_merchant)):
+@router.get("/vouchers")
+def get_my_vouchers(m=Depends(get_merchant)):
     merchant_id = _mid(m)
     merchant_phone = str(m.get("phone", ""))
     # Unified auth: match by merchant_id OR merchant_phone
@@ -1369,56 +1318,11 @@ def get_my_products(m=Depends(get_merchant)):
             "status":          v.get("status", "pending"),
             "approval_status": v.get("approval_status", "pending"),
             "created_at":      v.get("created_at", ""),
-            "city":            v.get("city", ""),
         })
     return result
 
-# ── PUT /merchant/vouchers/{vid}  — Merchant edit own product ────────────────
-@router.put("/products/{pid}")
-def update_merchant_product(pid: str, data: dict, m=Depends(get_merchant)):
-    """Merchant updates their own product listing (title, offer text, prices)."""
-    mid = _mid(m)
-    try:
-        obj_id = ObjectId(pid)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid product ID")
-
-    # Verify this product belongs to this merchant
-    existing = db.merchant_vouchers.find_one({"_id": obj_id, "merchant_id": mid})
-    if not existing:
-        # Fallback: try matching by account_id in case of migration
-        existing = db.merchant_vouchers.find_one({"_id": obj_id})
-        if not existing:
-            raise HTTPException(status_code=404, detail="Product not found")
-        # Check ownership via store
-        store = db.stores.find_one({"_id": ObjectId(existing.get("store_id", "xx")), "merchant_id": mid}) if existing.get("store_id") else None
-        if not store:
-            raise HTTPException(status_code=403, detail="Not authorised to edit this product")
-
-    allowed = {"title", "offer_text", "original_price", "price", "sale_price",
-                "original_amount", "offer_price"}
-    update_data = {k: v for k, v in data.items() if k in allowed}
-    if not update_data:
-        raise HTTPException(status_code=400, detail="No valid fields to update")
-
-    # Normalise price field names
-    if "price" in update_data and "sale_price" not in update_data:
-        update_data["sale_price"] = update_data["price"]
-    if "original_price" in update_data and "original_amount" not in update_data:
-        update_data["original_amount"] = update_data["original_price"]
-
-    update_data["updated_at"] = datetime.utcnow().isoformat()
-    db.merchant_vouchers.update_one({"_id": obj_id}, {"$set": update_data})
-
-    # Sync title to gift_vouchers if applicable
-    if "title" in update_data:
-        db.gift_vouchers.update_many({"source_voucher_id": vid}, {"$set": {"title": update_data["title"]}})
-
-    return {"ok": True, "updated": list(update_data.keys())}
-
-
-@router.get("/products/pricing")
-def get_product_pricing_merchant(m=Depends(get_merchant)):
+@router.get("/vouchers/pricing")
+def get_voucher_pricing_merchant(m=Depends(get_merchant)):
     doc = _pricing_doc()
     gst_pct = float(doc.get("gst_percent", 18))
     return {
@@ -1426,8 +1330,8 @@ def get_product_pricing_merchant(m=Depends(get_merchant)):
         "gst_pct":       gst_pct,
     }
 
-@router.post("/products/order")
-def create_product_order(data: dict, m=Depends(get_merchant)):
+@router.post("/vouchers/order")
+def create_voucher_order(data: dict, m=Depends(get_merchant)):
     """
     Issue 3: accepts { "days": int, "from_date": "YYYY-MM-DD" }
     No fixed plan chips — merchant chooses exact number of days and start date.
@@ -1496,7 +1400,7 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
         "total":          total,
         "amount_paise":   amount_paise,
         "status":         "pending",
-        "approval_status": "pending_approval",
+        "approval_status": "pending",
         "created_at":     datetime.utcnow().isoformat(),
     }
     inserted = db.voucher_orders.insert_one(order_doc)
@@ -1546,8 +1450,8 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
         "razorpay_order_id": rp_order_id,
     }
 
-@router.post("/products/activate-free")
-def activate_free_product(data: dict, m=Depends(get_merchant)):
+@router.post("/vouchers/activate-free")
+def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id    = data.get("order_id", "")
     title       = data.get("title", "")
@@ -1576,25 +1480,10 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
     if disc_code:
         db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
 
-    # Use city from selected store_id (passed by app), else fall back to first store
-    _req_store_id = data.get("store_id", "").strip()
-    _req_city     = data.get("city", "").strip().lower()
-    if _req_store_id:
-        try:
-            _af_store = db.stores.find_one({"_id": ObjectId(_req_store_id), "merchant_id": merchant_id}, {"city": 1, "store_name": 1})
-        except Exception:
-            _af_store = None
-        _af_city = (_af_store.get("city", "") if _af_store else _req_city).strip().lower() or _req_city
-    else:
-        _af_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
-        _af_city  = (_af_store.get("city", "") if _af_store else _req_city).strip().lower() or _req_city
-
-    product_doc = {
+    voucher = {
         "merchant_id":    merchant_id,
-        "store_id":       _req_store_id,
         "merchant_name":  m.get("name", ""),
         "merchant_phone": str(m.get("phone", "")),
-        "city":           _af_city,
         "title":          title,
         "offer_text":     offer_text,
         "logo_url":       logo_url,
@@ -1614,10 +1503,10 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
         "total":          order.get("total", 0),
         "payment_status": "free",
         "status":         "pending",
-        "approval_status":"pending_approval",
+        "approval_status":"pending",
         "created_at":     datetime.utcnow().isoformat(),
     }
-    res = db.merchant_vouchers.insert_one(product_doc)
+    res = db.merchant_vouchers.insert_one(voucher)
     db.voucher_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "submitted", "voucher_id": str(res.inserted_id)}})
 
@@ -1651,8 +1540,8 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
             amount=0, meta={"voucher_id": str(res.inserted_id)})
     return {"message": "Product submitted for review", "voucher_id": str(res.inserted_id), "invoice_no": invoice_no}
 
-@router.post("/products/verify")
-def verify_product_payment(data: dict, m=Depends(get_merchant)):
+@router.post("/vouchers/verify")
+def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id            = data.get("order_id", "")
     title               = data.get("title", "")
@@ -1691,25 +1580,10 @@ def verify_product_payment(data: dict, m=Depends(get_merchant)):
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
 
-    # Use city from selected store_id (passed by app), else fall back to first store
-    _vf_store_id = data.get("store_id", "").strip()
-    _vf_req_city = data.get("city", "").strip().lower()
-    if _vf_store_id:
-        try:
-            _vf_store = db.stores.find_one({"_id": ObjectId(_vf_store_id), "merchant_id": merchant_id}, {"city": 1})
-        except Exception:
-            _vf_store = None
-        _vf_city = (_vf_store.get("city", "") if _vf_store else _vf_req_city).strip().lower() or _vf_req_city
-    else:
-        _vf_store = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1}, sort=[("created_at", 1)])
-        _vf_city  = (_vf_store.get("city", "") if _vf_store else _vf_req_city).strip().lower() or _vf_req_city
-
-    product_doc = {
+    voucher = {
         "merchant_id":      merchant_id,
-        "store_id":         _vf_store_id,
         "merchant_name":    m.get("name", ""),
         "merchant_phone":   str(m.get("phone", "")),
-        "city":             _vf_city,
         "title":            title,
         "offer_text":       offer_text,
         "logo_url":         logo_url,
@@ -1732,10 +1606,10 @@ def verify_product_payment(data: dict, m=Depends(get_merchant)):
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":   "paid",
         "status":           "pending",
-        "approval_status":  "pending_approval",
+        "approval_status":  "pending",
         "created_at":       datetime.utcnow().isoformat(),
     }
-    res = db.merchant_vouchers.insert_one(product_doc)
+    res = db.merchant_vouchers.insert_one(voucher)
     db.voucher_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "paid", "voucher_id": str(res.inserted_id)}})
 
@@ -1864,7 +1738,7 @@ def get_full_invoices(m=Depends(get_merchant)):
             "created_at":      _fmt_dt(b.get("created_at")),
         })
 
-    # 4. Fallback: product invoices not in central invoices
+    # 4. Fallback: voucher/product invoices not in central invoices
     for v in db.merchant_vouchers.find({"merchant_id": merchant_id, "payment_status": "paid"}).sort("created_at", -1):
         ino = v.get("invoice_no", str(v["_id"])[:8].upper())
         if ino in inv_ids: continue
@@ -1914,106 +1788,238 @@ def validate_discount_code(data: dict, m=Depends(get_merchant)):
     }
 
 
-@router.post("/resolve-maps")
-async def resolve_maps_link(request: Request):
-    """
-    Server-side Google Maps short-link resolver.
-    Follows full redirect chain, extracts @lat,lng from final URL.
-    Falls back to Nominatim geocoding via /maps/place/ name.
-    """
-    import re, urllib.request
+# ═══════════════════════════════════════════════════════════════════
+# PHASE 1: /merchant/products  —  Standard + Premium Products
+# ═══════════════════════════════════════════════════════════════════
+
+def _get_standard_product_limit() -> int:
+    """Return the configurable standard product limit from pricing collection."""
+    doc = _pricing_doc()
+    return int(doc.get("standard_product_limit", 10))
+
+def _is_store_subscription_active(store_id: str) -> bool:
+    """Return True if the given store has an active/paid subscription that has not expired."""
+    from datetime import datetime as _dt
+    now = _dt.utcnow()
+    sub = db.subscriptions.find_one(
+        {"store_id": store_id, "status": {"$in": ["active", "paid"]}},
+        sort=[("end_date", -1)],
+    )
+    if not sub:
+        return False
+    end = sub.get("end_date")
+    if end is None:
+        return True
+    if isinstance(end, _dt):
+        return end >= now
     try:
-        body = await request.json()
+        return _dt.fromisoformat(str(end).replace("Z", "")) >= now
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
+        return False
 
-    raw = (body.get("url") or "").strip()
-    if not raw:
-        raise HTTPException(status_code=400, detail="url field required")
+@router.get("/products")
+def list_merchant_products(m=Depends(get_merchant)):
+    """List all products for this merchant: Standard (gift_vouchers) + Premium (merchant_vouchers)."""
+    merchant_id    = _mid(m)
+    merchant_phone = str(m.get("phone", ""))
+    result = []
 
-    # ── Step 1: bare coordinate input "lat,lng" ──
-    bare = re.match(r'^\s*(-?\d{1,3}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})\s*$', raw)
-    if bare:
-        la, ln = float(bare.group(1)), float(bare.group(2))
-        if abs(la) <= 90 and abs(ln) <= 180 and la != 0.0 and ln != 0.0:
-            return {"lat": la, "lng": ln}
-
-    # ── Step 2: direct URL — try @lat,lng immediately ──
-    def _safe_coords(url):
-        for pat in [
-            r'@(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})',
-            r'[?&]q=(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})',
-        ]:
-            m = re.search(pat, url)
-            if m:
-                la, ln = float(m.group(1)), float(m.group(2))
-                if abs(la) <= 90 and abs(ln) <= 180 and la != 0.0 and ln != 0.0:
-                    return la, ln
-        return None
-
-    direct = _safe_coords(raw)
-    if direct:
-        return {"lat": direct[0], "lng": direct[1]}
-
-    is_google = any(k in raw for k in ["goo.gl", "maps.app", "google.com/maps", "maps.google"])
-    if not is_google:
-        raise HTTPException(status_code=422, detail="Not a recognised Google Maps URL")
-
-    # ── Step 3: Follow full redirect chain server-side ──
-    final_url = raw
-    try:
-        import urllib.request as urlreq
-        req = urlreq.Request(raw, headers={
-            "User-Agent": "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-            "Accept": "text/html",
-            "Accept-Language": "en-IN,en;q=0.9",
+    # ── 1. Standard products from gift_vouchers ──
+    for v in db.gift_vouchers.find({"product_type": "standard", "merchant_id": merchant_id}).sort("_id", -1):
+        store_id   = v.get("store_id", "")
+        sub_active = _is_store_subscription_active(store_id) if store_id else False
+        app_status = "approved" if sub_active else "subscription_expired"
+        result.append({
+            "_id":             str(v["_id"]),
+            "product_type":    "standard",
+            "title":           v.get("title", ""),
+            "offer_text":      v.get("text", "") or v.get("offer_text", ""),
+            "logo_url":        v.get("logo_url", "") or v.get("logo", ""),
+            "price":           str(v.get("price", "") or ""),
+            "original_price":  str(v.get("original_price", "") or ""),
+            "store_id":        store_id,
+            "store_name":      v.get("store_name", ""),
+            "city":            v.get("city", ""),
+            "is_active":       bool(v.get("is_active", True)) and sub_active,
+            "approval_status": app_status,
+            "status":          app_status,
+            "end_date":        "",
+            "duration_days":   0,
+            "amount":          0,
+            "created_at":      str(v.get("created_at", ""))[:19],
         })
-        # follow_redirects=True is default for urllib; max 10 hops
-        with urlreq.urlopen(req, timeout=10) as resp:
-            final_url = resp.url   # urllib gives us the final landed URL
-    except Exception:
-        pass  # use raw as fallback
 
-    # ── Step 4: Extract @lat,lng from FINAL URL ──
-    coords = _safe_coords(final_url)
-    if coords:
-        return {"lat": coords[0], "lng": coords[1]}
+    # ── 2. Premium products from merchant_vouchers ──
+    prem_query: dict = {"$or": [{"merchant_id": merchant_id}]}
+    if merchant_phone:
+        prem_query["$or"].append({"merchant_phone": merchant_phone})
+    for v in db.merchant_vouchers.find(prem_query).sort("created_at", -1):
+        result.append({
+            "_id":             str(v["_id"]),
+            "product_type":    "premium",
+            "title":           v.get("title", ""),
+            "offer_text":      v.get("offer_text", ""),
+            "logo_url":        v.get("logo_url", ""),
+            "price":           str(v.get("price", "") or ""),
+            "original_price":  str(v.get("original_price", "") or ""),
+            "store_id":        v.get("store_id", ""),
+            "store_name":      v.get("store_name", ""),
+            "city":            v.get("city", ""),
+            "is_active":       True,
+            "duration_days":   v.get("duration_days", 0),
+            "from_date":       v.get("from_date", ""),
+            "end_date":        v.get("end_date", ""),
+            "approval_status": v.get("approval_status", "pending_approval"),
+            "status":          v.get("status", "pending"),
+            "amount":          v.get("total", 0),
+            "created_at":      str(v.get("created_at", ""))[:19],
+        })
+    return result
 
-    # ── Step 5: Extract place name from /maps/place/NAME/ ──
-    place_match = re.search(r'/maps/place/([^/?#]+)', final_url)
-    if not place_match:
-        raise HTTPException(status_code=422, detail="Could not extract coordinates or place name")
+@router.get("/products/limit")
+def get_product_limit(m=Depends(get_merchant)):
+    """Return the standard product limit and current standard / premium counts."""
+    merchant_id    = _mid(m)
+    limit          = _get_standard_product_limit()
+    standard_count = db.gift_vouchers.count_documents({"product_type": "standard", "merchant_id": merchant_id})
+    premium_count  = db.merchant_vouchers.count_documents({"merchant_id": merchant_id})
+    return {
+        "standard_product_limit": limit,
+        "standard_count":         standard_count,
+        "premium_count":          premium_count,
+    }
 
-    place_raw = place_match.group(1).replace('+', ' ')
+@router.get("/products/pricing")
+def get_product_pricing(m=Depends(get_merchant)):
+    """Product pricing — returns per-day rate and GST for Premium products."""
+    doc     = _pricing_doc()
+    gst_pct = float(doc.get("gst_percent", 18))
+    return {
+        "price_per_day": float(doc.get("voucher_price_per_day", 10)),
+        "gst_pct":       gst_pct,
+    }
+
+@router.post("/products/standard")
+def create_standard_product(data: dict, m=Depends(get_merchant)):
+    """Create a Standard Product — free, auto-approved, linked to store subscription."""
+    merchant_id = _mid(m)
+    limit         = _get_standard_product_limit()
+    current_count = db.gift_vouchers.count_documents({"product_type": "standard", "merchant_id": merchant_id})
+    if current_count >= limit:
+        raise HTTPException(
+            400,
+            f"Standard product limit reached ({limit}). "
+            "Please delete an existing standard product or create a Premium Product instead.",
+        )
+    title = (data.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "Product title is required")
+    store_id = (data.get("store_id") or "").strip()
+    if not store_id:
+        raise HTTPException(400, "Please select a store for this product")
     try:
-        from urllib.parse import unquote
-        place_name = unquote(place_raw)
+        store = db.stores.find_one({"_id": ObjectId(store_id)})
     except Exception:
-        place_name = place_raw
+        raise HTTPException(400, "Invalid store ID")
+    if not store:
+        raise HTTPException(404, "Store not found")
 
-    # ── Step 6: Nominatim geocode with progressive simplification ──
-    import json
-    parts = [p.strip() for p in place_name.split(',') if p.strip()]
-    for start in range(len(parts)):
-        q = ', '.join(parts[start:])
-        try:
-            nom_url = (
-                "https://nominatim.openstreetmap.org/search"
-                "?q=" + urllib.request.quote(q, safe='') +
-                "&format=json&limit=1&countrycodes=in"
-            )
-            nom_req = urllib.request.Request(nom_url,
-                headers={"User-Agent": "OffroApp/1.0 (merchant-location-picker)"})
-            with urllib.request.urlopen(nom_req, timeout=8) as nr:
-                data = json.loads(nr.read().decode())
-            if data:
-                la = float(data[0]["lat"])
-                ln = float(data[0]["lon"])
-                if abs(la) <= 90 and abs(ln) <= 180 and la != 0.0 and ln != 0.0:
-                    return {"lat": la, "lng": ln}
-        except Exception:
-            continue
+    logo_raw = (data.get("logo_url") or "").strip()
+    logo_url = _cloudinary_upload(logo_raw, folder="offro/products") if logo_raw else ""
+    city     = (data.get("city") or store.get("city", "")).strip()
 
-    raise HTTPException(status_code=422, detail="Could not resolve location from Maps link")
+    product = {
+        "product_type":   "standard",
+        "merchant_id":    merchant_id,
+        "merchant_name":  m.get("name", ""),
+        "merchant_phone": str(m.get("phone", "")),
+        "title":          title,
+        "text":           (data.get("offer_text") or "").strip(),
+        "logo":           logo_url,
+        "logo_url":       logo_url,
+        "price":          str(data.get("price") or ""),
+        "original_price": str(data.get("original_price") or ""),
+        "store_id":       store_id,
+        "store_name":     store.get("store_name", data.get("store_name", "")),
+        "city":           city,
+        "is_active":      True,
+        "source":         "merchant_standard",
+        "created_at":     datetime.utcnow(),
+    }
+    res = db.gift_vouchers.insert_one(product)
+    _log_tx(merchant_id, "product_standard",
+            f"Standard Product created: '{title}'",
+            amount=0, meta={"product_id": str(res.inserted_id)})
+    return {
+        "ok":        True,
+        "product_id": str(res.inserted_id),
+        "message":   "Standard product created successfully!",
+    }
+
+@router.post("/products/order")
+def create_product_order(data: dict, m=Depends(get_merchant)):
+    """Create Premium product order — delegates to voucher order flow."""
+    return create_voucher_order(data, m)
+
+@router.post("/products/activate-free")
+def activate_free_product(data: dict, m=Depends(get_merchant)):
+    """Activate free-tier Premium product — delegates to voucher activate-free flow."""
+    return activate_free_voucher(data, m)
+
+@router.post("/products/verify")
+def verify_product_payment(data: dict, m=Depends(get_merchant)):
+    """Verify Premium product Razorpay payment — delegates to voucher verify flow."""
+    return verify_voucher_payment(data, m)
+
+@router.put("/products/{pid}")
+def update_product(pid: str, data: dict, m=Depends(get_merchant)):
+    """Update a product (Standard or Premium) — only title, offer text, and prices."""
+    merchant_id = _mid(m)
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+
+    # Try Premium (merchant_vouchers) first
+    prem = db.merchant_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
+    if prem:
+        allowed = {"title", "offer_text", "price", "original_price"}
+        upd = {k: v for k, v in data.items() if k in allowed}
+        if upd:
+            db.merchant_vouchers.update_one({"_id": oid}, {"$set": upd})
+        return {"ok": True, "updated": "premium"}
+
+    # Try Standard (gift_vouchers)
+    std = db.gift_vouchers.find_one({"_id": oid, "merchant_id": merchant_id, "product_type": "standard"})
+    if std:
+        upd = {}
+        for k, v in data.items():
+            if k == "offer_text":
+                upd["text"] = v
+            elif k in {"title", "price", "original_price"}:
+                upd[k] = v
+        if upd:
+            db.gift_vouchers.update_one({"_id": oid}, {"$set": upd})
+        return {"ok": True, "updated": "standard"}
+
+    raise HTTPException(404, "Product not found")
+
+@router.delete("/products/{pid}")
+def delete_product(pid: str, m=Depends(get_merchant)):
+    """Delete a product (Standard or Premium) owned by this merchant."""
+    merchant_id = _mid(m)
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+
+    res = db.merchant_vouchers.delete_one({"_id": oid, "merchant_id": merchant_id})
+    if res.deleted_count > 0:
+        return {"ok": True, "deleted": "premium"}
+
+    res = db.gift_vouchers.delete_one({"_id": oid, "merchant_id": merchant_id, "product_type": "standard"})
+    if res.deleted_count > 0:
+        return {"ok": True, "deleted": "standard"}
+
+    raise HTTPException(404, "Product not found")
 

@@ -154,18 +154,6 @@ def admin_logout():
 
 # ===================== CATEGORIES =====================
 
-@router.get("/public/categories")
-def get_public_categories():
-    """Public (no-auth) endpoint — returns active categories for the Flutter app."""
-    cats = list(db.categories.find({"status": {"$ne": "deleted"}}, {"_id": 0}).sort("sort_order", 1))
-    return cats
-
-@router.get("/public-categories")
-def get_public_categories_alt():
-    """Alternate public path for backwards compatibility."""
-    cats = list(db.categories.find({"status": {"$ne": "deleted"}}, {"_id": 0}).sort("sort_order", 1))
-    return cats
-
 @router.get("/categories")
 def get_categories(a=Depends(get_current_admin)):
     cats = list(db.categories.find({"status":{"$ne":"deleted"}}, {"_id":0}).sort("sort_order",1))
@@ -296,17 +284,19 @@ def get_pricing(a=Depends(get_current_admin)):
         "plans": doc.get("plans", []),
         "conversion_rate": doc.get("conversion_rate", 0.10),  # default ₹0.10 per point
         "min_withdraw_points": doc.get("min_withdraw_points", 200),
+        "standard_product_limit": int(doc.get("standard_product_limit", 10)),
     }
 
 @router.put("/pricing")
 def update_pricing(data: dict, a=Depends(get_current_admin)):
-    """Update GST %, plan prices, and withdrawal conversion rate."""
+    """Update GST %, plan prices, withdrawal conversion rate, and standard product limit."""
     doc = db.pricing.find_one({})
     update = {}
     if "gst_percent" in data: update["gst_percent"] = float(data["gst_percent"])
     if "plans" in data: update["plans"] = data["plans"]
     if "conversion_rate" in data: update["conversion_rate"] = float(data["conversion_rate"])
     if "min_withdraw_points" in data: update["min_withdraw_points"] = int(data["min_withdraw_points"])
+    if "standard_product_limit" in data: update["standard_product_limit"] = int(data["standard_product_limit"])
     if doc: db.pricing.update_one({"_id": doc["_id"]}, {"$set": update})
     else: db.pricing.insert_one(update)
     return {"message": "Pricing updated"}
@@ -332,30 +322,11 @@ def update_terms(type: str, data: dict, a=Depends(get_current_admin)):
 
 @router.get("/merchants")
 def list_merchants(a=Depends(get_current_admin)):
-    """Return all accounts — used for store/product merchant dropdowns.
-    Includes any account that has the merchant role OR has at least one store."""
-    # Gather IDs of all accounts that have stores (even without merchant role)
-    store_merchant_ids = set(
-        str(s["merchant_id"]) for s in db.stores.find({}, {"merchant_id": 1})
-        if s.get("merchant_id")
-    )
-    result = []
-    for m in db.accounts.find().sort("created_at", -1):
-        mid_str = str(m["_id"])
-        roles   = m.get("roles", [])
-        is_merchant = "merchant" in roles or mid_str in store_merchant_ids
-        if not is_merchant:
-            continue
-        result.append({
-            "_id":         mid_str,
-            "name":        m.get("name", m.get("full_name", "")),
-            "phone":       m.get("phone", m.get("mobile_number", "")),
-            "city":        m.get("city", ""),
-            "area":        m.get("area", ""),
-            "status":      m.get("status", "active"),
-            "store_count": db.stores.count_documents({"merchant_id": mid_str}),
-        })
-    return result
+    # DEPRECATED: Use /accounts?role=merchant instead. Kept for store creation dropdown.
+    return [{"_id": str(m["_id"]), "name": m.get("name"), "phone": m.get("phone"),
+             "city": m.get("city"), "area": m.get("area"), "status": m.get("status", "active"),
+             "store_count": db.stores.count_documents({"merchant_id": str(m["_id"])})}
+            for m in db.accounts.find({"roles": "merchant"})]
 
 @router.put("/merchants/{id}")
 def update_merchant(id: str, data: dict, a=Depends(get_current_admin)):
@@ -399,29 +370,6 @@ def list_accounts(a=Depends(get_current_admin)):
         total_pts = (acct.get("visit_pts", acct.get("visit_points", 0) or 0) +
                      acct.get("pool_pts", 0))
 
-        # Check stores owned by this account — match by merchant_id OR account _id
-        _store_ids = list(filter(None, [mid, acct_id, phone]))
-        _store_count = db.stores.count_documents(
-            {"merchant_id": {"$in": _store_ids}}
-        ) if _store_ids else 0
-        # Auto-grant merchant role if they have stores but role not yet set
-        if _store_count > 0 and "merchant" not in roles:
-            roles = list(roles) + ["merchant"]
-            try:
-                db.accounts.update_one({"_id": acct["_id"]}, {"$set": {"roles": roles}})
-            except Exception:
-                pass
-        # Product count: check both merchant_vouchers and gift_vouchers
-        _phone_clean = str(phone).replace(" ", "").strip()
-        _mv_count = db.merchant_vouchers.count_documents(
-            {"$or": [{"merchant_id": {"$in": list(filter(None, [mid, acct_id]))}},
-                     {"merchant_phone": {"$in": list(filter(None, [phone, _phone_clean]))}}]}
-        ) if (mid or acct_id or phone) else 0
-        _gv_count = db.gift_vouchers.count_documents(
-            {"$or": [{"merchant_id": {"$in": list(filter(None, [mid, acct_id]))}},
-                     {"merchant_phone": {"$in": list(filter(None, [phone, _phone_clean]))}}]}
-        ) if (mid or acct_id or phone) else 0
-        _prod_count = _mv_count + _gv_count
         result.append({
             "account_id":    acct_id,
             "merchant_id":   mid,
@@ -429,19 +377,13 @@ def list_accounts(a=Depends(get_current_admin)):
             "full_name":     acct.get("name", ""),
             "mobile_number": phone,
             "city":          acct.get("city", ""),
-            "area":          acct.get("area", ""),
             "roles":         roles,
             "status":        acct.get("status", "active"),
             "total_points":  total_pts,
             "visit_pts":     acct.get("visit_pts", acct.get("visit_points", 0) or 0),
             "pool_pts":      acct.get("pool_pts", 0),
             "scans":         acct.get("scans", 0),
-            "store_count":   _store_count,
-            "product_count": _prod_count,
-            "banner_count":  db.merchant_banners.count_documents(
-                {"$or": [{"merchant_id": {"$in": list(filter(None, [mid, acct_id]))}},
-                          {"merchant_phone": {"$in": list(filter(None, [phone, _phone_clean]))}}]}
-            ) if (mid or acct_id or phone) else 0,
+            "store_count":   db.stores.count_documents({"merchant_id": mid}) if mid else 0,
             "created_at":    str(acct.get("created_at", ""))[:10],
         })
     return result
@@ -468,9 +410,6 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     phone      = acct.get("phone", "")
     mid        = acct.get("merchant_id", "")
     acct_id    = str(acct["_id"])
-    # If merchant_id field not set, fall back to _id (account IS the merchant record)
-    if not mid:
-        mid = acct_id
     roles      = acct.get("roles", ["user"])
     is_merchant = "merchant" in roles
 
@@ -480,19 +419,13 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     subscriptions = []
     invoices      = []
 
-    if is_merchant:
-        # Query by mid OR acct_id to cover both data patterns
-        mid_variants = list({mid, acct_id} - {""})
-        store_count   = db.stores.count_documents({"merchant_id": {"$in": mid_variants}})
-        banner_count  = db.merchant_banners.count_documents({
-            "$or": [{"merchant_id": {"$in": mid_variants}}, {"merchant_phone": phone}]
-        })
-        voucher_count = db.merchant_vouchers.count_documents({
-            "$or": [{"merchant_id": {"$in": mid_variants}}, {"merchant_phone": phone}]
-        })
+    if is_merchant and mid:
+        store_count   = db.stores.count_documents({"merchant_id": mid})
+        banner_count  = db.merchant_banners.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
+        voucher_count = db.merchant_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
 
         for s in db.subscriptions.find(
-            {"$or": [{"merchant_id": {"$in": mid_variants}}, {"merchant_phone": phone}]}
+            {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
         ).sort("created_at", -1).limit(5):
             subscriptions.append({
                 "plan":       s.get("plan",""),
@@ -502,7 +435,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
             })
 
         for inv in db.invoices.find(
-            {"$or": [{"merchant_id": {"$in": mid_variants}}, {"merchant_phone": phone}]}
+            {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
         ).sort("created_at", -1).limit(10):
             invoices.append({
                 "invoice_no":  inv.get("invoice_no",""),
@@ -533,7 +466,6 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
         "store_count":   store_count,
         "banner_count":  banner_count,
         "voucher_count": voucher_count,
-        "product_count": voucher_count,  # alias: HTML reads product_count
         "subscriptions": subscriptions,
         "invoices":      invoices,
     }
@@ -558,29 +490,6 @@ def toggle_account_status(account_id: str, data: dict, a=Depends(get_current_adm
         pass
     return {"ok": True, "status": new_status}
 
-
-@router.patch("/accounts/{account_id}/role")
-def set_account_role(account_id: str, data: dict, a=Depends(get_current_admin)):
-    """Manually set/add a role to an account (e.g. grant merchant role)."""
-    role = (data.get("role") or "").strip().lower()
-    if role not in ("merchant", "user", "admin"):
-        raise HTTPException(400, "Invalid role. Use: merchant, user, admin")
-    try:
-        acct = db.accounts.find_one({"_id": ObjectId(account_id)})
-        if not acct:
-            raise HTTPException(404, "Account not found")
-        roles = list(acct.get("roles", ["user"]))
-        if role not in roles:
-            roles.append(role)
-            db.accounts.update_one(
-                {"_id": ObjectId(account_id)},
-                {"$set": {"roles": roles}}
-            )
-        return {"ok": True, "roles": roles}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(400, str(e))
 
 
 def _fmt_store_fast(s, sub_map, deal_map, merchants):
@@ -639,7 +548,6 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "is_popular":     s.get("is_popular", False),
         "badge":          s.get("badge", ""),
         "points_per_scan":s.get("points_per_scan", 0),
-        "visit_points":   s.get("visit_points", 0),
         "rating":         s.get("admin_rating") or s.get("rating") or 0,
         "image":          image,
         "image_url":      image,  # also expose as image_url for JS consistency
@@ -649,11 +557,6 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "subscription":   sub_label,
         "sub_plan":       sub_plan,
         "sub_status":     sub_status,
-        "sub_end_date":   sub.get("end_date", ""),
-        "sub_from_date":  sub.get("from_date", ""),
-        "sub_amount":     sub.get("price", sub.get("total", "")),
-        "sub_pay_mode":   sub.get("pay_mode", ""),
-        "sub_pay_ref":    sub.get("payment_ref", ""),
         "deal_count":     len(deals),
         "best_deal":      best_deal,
         "lat":            s.get("lat", ""),
@@ -809,10 +712,6 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     name = data.get("store_name","").strip()
     if not mid: raise HTTPException(400, "merchant_id required")
     if not name: raise HTTPException(400, "store_name required")
-    # ── Idempotency: prevent duplicate stores (same merchant + same name) ──
-    existing = db.stores.find_one({"merchant_id": mid, "store_name": {"$regex": f"^{name}$", "$options": "i"}})
-    if existing:
-        raise HTTPException(409, f"A store named '{name}' already exists for this merchant.")
     try: merchant = db.accounts.find_one({"_id": ObjectId(mid)}) or db.merchants.find_one({"_id": ObjectId(mid)})
     except: raise HTTPException(400, "Invalid merchant_id")
     if not merchant: raise HTTPException(404, "Merchant not found")
@@ -824,7 +723,6 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     store = {
         "merchant_id": mid, "store_name": name,
         "category": data.get("category",""),
-        "state": data.get("state","") or merchant.get("state",""),
         "city": data.get("city") or merchant.get("city",""),
         "area": data.get("area") or merchant.get("area",""),
         "address": data.get("address",""),
@@ -845,188 +743,17 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     sid = str(result.inserted_id)
     qr = generate_qr_base64(sid)
     db.stores.update_one({"_id": result.inserted_id}, {"$set": {"qr_code": qr}})
-    # Auto-grant merchant role to the account when a store is created under them
-    try:
-        acct = db.accounts.find_one({"_id": ObjectId(mid)})
-        if acct:
-            roles = acct.get("roles", [])
-            if "merchant" not in roles:
-                roles.append("merchant")
-                db.accounts.update_one({"_id": ObjectId(mid)}, {"$set": {"roles": roles}})
-    except Exception:
-        pass
     return {"message": "Store created", "store_id": sid, "qr_code": qr}
-
-@router.post("/stores/{sid}/subscription")
-def admin_add_store_subscription(sid: str, data: dict, a=Depends(get_current_admin)):
-    """Admin manually adds a subscription for a store (no payment gateway — cash/offline)."""
-    store = db.stores.find_one({"_id": ObjectId(sid)})
-    if not store: raise HTTPException(404, "Store not found")
-
-    plan       = data.get("plan", "custom").strip()
-    from_date_str = str(data.get("from_date","")).strip()
-    end_date_str  = str(data.get("end_date","")).strip()
-    amount     = float(data.get("amount", 0) or 0)
-    gst_pct    = float(data.get("gst_percent", 0) or 0)
-    gst_amt    = round(amount * gst_pct / 100, 2)
-    total      = round(amount + gst_amt, 2)
-    pay_mode   = str(data.get("pay_mode", "cash") or "cash").strip()   # cash/upi/bank/cheque/free
-    pay_ref    = str(data.get("payment_ref", "") or "").strip()
-    note       = str(data.get("note", "") or "").strip()
-
-    if not from_date_str or not end_date_str:
-        raise HTTPException(400, "from_date and end_date are required")
-
-    # Parse dates
-    try:
-        from_date = datetime.fromisoformat(from_date_str)
-    except Exception:
-        raise HTTPException(400, f"Invalid from_date: {from_date_str}")
-    try:
-        end_date = datetime.fromisoformat(end_date_str)
-    except Exception:
-        raise HTTPException(400, f"Invalid end_date: {end_date_str}")
-
-    mid_str = str(store.get("merchant_id",""))
-    store_name = store.get("store_name","")
-
-    # ── Duplicate prevention: check if subscription already exists ──
-    existing_sub = db.subscriptions.find_one({"store_id": sid}, sort=[("created_at", -1)])
-
-    global _store_cache; _store_cache["data"] = None
-
-    # Always update the store record with new dates/plan
-    db.stores.update_one({"_id": ObjectId(sid)}, {"$set": {
-        "status":             "active",
-        "subscription_plan":  plan,
-        "subscription_start": from_date.isoformat(),
-        "subscription_end":   end_date.isoformat(),
-    }})
-
-    try:
-        merchant = (db.accounts.find_one({"_id": ObjectId(mid_str)}) or
-                    db.merchants.find_one({"_id": ObjectId(mid_str)})) if mid_str else None
-    except Exception:
-        merchant = None
-    merchant_name  = (merchant or {}).get("name", "")
-    merchant_phone = (merchant or {}).get("phone", "")
-
-    if existing_sub:
-        # UPDATE existing subscription + invoice — no new duplicates
-        sub_id = str(existing_sub["_id"])
-        db.subscriptions.update_one({"_id": existing_sub["_id"]}, {"$set": {
-            "plan": plan, "from_date": from_date, "end_date": end_date,
-            "price": amount, "gst": gst_amt, "gst_percent": gst_pct, "total": total,
-            "status": "paid", "pay_mode": pay_mode, "payment_ref": pay_ref,
-            "note": note, "updated_at": datetime.utcnow(), "paid_at": datetime.utcnow(),
-        }})
-        db.invoices.update_one(
-            {"store_id": sid},
-            {"$set": {
-                "plan": plan, "base_price": amount, "gst": gst_amt, "total": total,
-                "pay_mode": pay_mode, "payment_ref": pay_ref, "note": note,
-                "from_date": from_date, "end_date": end_date,
-                "status": "paid_edited", "updated_at": datetime.utcnow(),
-            }},
-            upsert=False
-        )
-        existing_inv = db.invoices.find_one({"store_id": sid}, {"invoice_no": 1})
-        invoice_no = (existing_inv or {}).get("invoice_no", f"LS-EDIT-{sub_id[-6:].upper()}")
-        return {
-            "ok": True, "subscription_id": sub_id, "invoice_no": invoice_no,
-            "message": f"Subscription updated — existing invoice preserved. Active until {end_date_str}.",
-        }
-    else:
-        # CREATE new subscription + invoice (first time)
-        sub_doc = {
-            "store_id": sid, "merchant_id": mid_str, "plan": plan,
-            "from_date": from_date, "end_date": end_date,
-            "price": amount, "gst": gst_amt, "gst_percent": gst_pct, "total": total,
-            "status": "paid", "pay_mode": pay_mode, "payment_ref": pay_ref,
-            "note": note, "added_by_admin": True,
-            "created_at": datetime.utcnow(), "paid_at": datetime.utcnow(),
-        }
-        sub_res = db.subscriptions.insert_one(sub_doc)
-        sub_id  = str(sub_res.inserted_id)
-        invoice_no = f"LS-ADMIN-{datetime.utcnow().strftime('%Y%m%d')}-{sub_id[-6:].upper()}"
-        db.invoices.insert_one({
-            "invoice_no": invoice_no, "merchant_id": mid_str,
-            "merchant_name": merchant_name, "merchant_phone": merchant_phone,
-            "store_id": sid, "store_name": store_name, "plan": plan,
-            "base_price": amount, "gst": gst_amt, "total": total,
-            "pay_mode": pay_mode, "payment_ref": pay_ref,
-            "from_date": from_date, "end_date": end_date,
-            "added_by_admin": True, "created_at": datetime.utcnow(),
-        })
-        return {
-            "ok": True, "subscription_id": sub_id, "invoice_no": invoice_no,
-            "message": f"Subscription added. Store '{store_name}' is now active until {end_date_str}.",
-        }
-
-@router.patch("/stores/{sid}/subscription")
-def admin_update_store_subscription(sid: str, data: dict, a=Depends(get_current_admin)):
-    """Update an EXISTING subscription/invoice — does NOT create a new one.
-    Use this when editing subscription details after initial payment recording.
-    Preserves invoice_no and adds an edit audit trail entry."""
-    store = db.stores.find_one({"_id": ObjectId(sid)})
-    if not store: raise HTTPException(404, "Store not found")
-
-    amount     = float(data.get("amount", 0) or 0)
-    gst_pct    = float(data.get("gst_percent", 0) or 0)
-    gst_amt    = round(amount * gst_pct / 100, 2)
-    total      = round(amount + gst_amt, 2)
-    note       = str(data.get("note", "") or "").strip()
-    plan       = str(data.get("plan", "") or "").strip()
-    from_date_str = str(data.get("from_date","")).strip()
-    end_date_str  = str(data.get("end_date","")).strip()
-    pay_mode   = str(data.get("pay_mode", "") or "").strip()
-    pay_ref    = str(data.get("payment_ref", "") or "").strip()
-
-    upd_sub = {"updated_at": datetime.utcnow()}
-    if amount: upd_sub.update({"price": amount, "gst": gst_amt, "total": total})
-    if plan:   upd_sub["plan"] = plan
-    if note:   upd_sub["note"] = note
-    if pay_mode: upd_sub["pay_mode"] = pay_mode
-    if pay_ref:  upd_sub["payment_ref"] = pay_ref
-    if from_date_str:
-        try: upd_sub["from_date"] = datetime.fromisoformat(from_date_str)
-        except: pass
-    if end_date_str:
-        try: upd_sub["end_date"] = datetime.fromisoformat(end_date_str)
-        except: pass
-
-    # Update the most recent subscription for this store
-    sub = db.subscriptions.find_one({"store_id": sid}, sort=[("created_at", -1)])
-    if sub:
-        db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": upd_sub})
-        # Also update the linked invoice — mark as 'Paid (Edited)' and update amount
-        inv_upd = {"status": "paid_edited", "updated_at": datetime.utcnow()}
-        if amount: inv_upd.update({"base_price": amount, "gst": gst_amt, "total": total})
-        if plan:   inv_upd["plan"] = plan
-        if note:   inv_upd["edit_note"] = note
-        db.invoices.update_one({"store_id": sid}, {"$set": inv_upd}, upsert=False)
-        # Update store's subscription_end if date changed
-        if "end_date" in upd_sub:
-            db.stores.update_one({"_id": ObjectId(sid)}, {"$set": {
-                "subscription_end": upd_sub["end_date"].isoformat(),
-                "subscription_plan": plan or store.get("subscription_plan",""),
-            }})
-        return {"ok": True, "message": "Subscription updated. Invoice marked as Paid (Edited)."}
-    else:
-        raise HTTPException(404, "No subscription found for this store. Use POST to create one.")
 
 @router.get("/stores/slim")
 def get_stores_slim(a=Depends(get_current_admin)):
     """Lightweight store list for ratings — no images, no heavy data."""
     stores = list(db.stores.find({}, {
         "_id":1,"store_name":1,"category":1,"city":1,"area":1,
-        "merchant_id":1,"phone":1,"owner_phone":1,
         "rating":1,"admin_rating":1,"user_rating":1,"rating_count":1,"status":1
     }))
     return [{
         "_id": str(s["_id"]),
-        "merchant_id": str(s.get("merchant_id","") or ""),
-        "phone": s.get("phone","") or s.get("owner_phone",""),
         "store_name": s.get("store_name",""),
         "category": s.get("category",""),
         "city": s.get("city",""),
@@ -1563,239 +1290,53 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
 
 # ===================== GIFT VOUCHERS (app-facing cards) =====================
 
-def _compute_product_status(p):
-    """Compute real-time product status — stdlib-only date parsing, no third-party deps."""
-    stored = p.get("status", p.get("approval_status", ""))
-    if stored in ("rejected", "hidden", "inactive"):
-        return stored
-
-    # ── Collect end date from all possible fields ──────────────────────────────
-    end_raw = (p.get("end_date") or p.get("expiry") or
-               p.get("valid_till") or p.get("end") or "")
-
-    # Parse end from a validity string like "11 Jun 2026 → 13 Jun 2026"
-    if not end_raw:
-        validity_str = str(p.get("validity") or "")
-        if "→" in validity_str:                           # → arrow
-            end_raw = validity_str.split("→")[-1].strip()
-        elif " to " in validity_str.lower():
-            end_raw = validity_str.lower().split(" to ")[-1].strip()
-        elif " - " in validity_str and len(validity_str) > 8:
-            end_raw = validity_str.split(" - ")[-1].strip()
-
-    # ── Parse date using stdlib only (no dateutil / pytz needed) ──────────────
-    if end_raw:
-        end_dt = None
-        s = str(end_raw).strip()
-        # Strip ISO time portion (after T) — don't split on spaces (breaks '13 Jun 2026')
-        if "T" in s:
-            s = s.split("T")[0]
-        # Strip HH:MM:SS suffix for 'YYYY-MM-DD HH:MM:SS' format
-        import re as _re
-        s = _re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?$', '', s).strip()
-        # Try formats most common in this codebase
-        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"):
-            try:
-                end_dt = datetime.strptime(s, fmt)
-                break
-            except ValueError:
-                pass
-        # Handle "13 Jun 2026" / "Jun 13 2026"
-        if not end_dt:
-            import re as _re
-            m = _re.match(r"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$", s)
-            if m:
-                try:
-                    end_dt = datetime.strptime(s, "%d %b %Y")
-                except ValueError:
-                    pass
-            if not end_dt:
-                m2 = _re.match(r"^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})$", s)
-                if m2:
-                    try:
-                        end_dt = datetime.strptime(s, "%b %d %Y")
-                    except ValueError:
-                        pass
-
-        if end_dt:
-            # Set to end of day, compare against UTC now (both naive for simplicity)
-            end_of_day = end_dt.replace(hour=23, minute=59, second=59)
-            now = datetime.utcnow()
-            if end_of_day < now:
-                # Write expiry back to DB so it sticks
-                try:
-                    db.products.update_one(
-                        {"_id": p["_id"], "status": {"$ne": "expired"}},
-                        {"$set": {"status": "expired", "is_active": False}}
-                    )
-                except Exception:
-                    pass
-                return "expired"
-
-    # ── Only check is_active AFTER expiry (expired ≠ hidden) ──────────────────
-    is_active = p.get("is_active", True)
-    if not is_active:
-        return "hidden"
-
-    return "approved"
-
-@router.get("/products")
-def list_product_cards(a=Depends(get_current_admin)):
-    """List all gift vouchers + products shown in the app home screen."""
-    result = []
-
-    # ── 1. gift_vouchers collection (admin/merchant created cards) ──────────
+@router.get("/gift-vouchers")
+def list_gift_vouchers(a=Depends(get_current_admin)):
+    """List all gift vouchers shown in the app home screen."""
     docs = list(db.gift_vouchers.find().sort("_id", -1))
+    result = []
     for v in docs:
         mid = v.get("merchant_id", "")
         merchant_name  = ""
         merchant_phone = ""
+        # ISSUE 1: Resolve merchant_name from merchant_id for admin-created products
         if mid:
             try:
-                m = (db.accounts.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1}) or
-                     db.merchants.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1}))
+                m = (db.accounts.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1}) or db.merchants.find_one({"_id": ObjectId(mid)}, {"name":1,"phone":1}))
                 if m:
                     merchant_name  = m.get("name", "")
                     merchant_phone = str(m.get("phone", ""))
             except: pass
+        # ISSUE 3: Return full ISO datetime so frontend can convert to IST
         ca = v.get("created_at")
         if isinstance(ca, datetime):
             created_at_iso = ca.strftime("%Y-%m-%dT%H:%M:%S")
         else:
             created_at_iso = str(ca or "")[:19]
-        # Compute real-time expiry status for gift_voucher records (same logic as products)
-        _gv_end_raw = v.get("end_date", "")
-        if not _gv_end_raw:
-            _gv_validity = str(v.get("validity") or "")
-            if "\u2192" in _gv_validity or "->" in _gv_validity:
-                _sep = "\u2192" if "\u2192" in _gv_validity else "->"
-                _gv_end_raw = _gv_validity.split(_sep)[-1].strip()
-            elif " to " in _gv_validity.lower():
-                _gv_end_raw = _gv_validity.lower().split(" to ")[-1].strip()
-            elif " - " in _gv_validity and len(_gv_validity) > 8:
-                _gv_end_raw = _gv_validity.split(" - ")[-1].strip()
-        _gv_status = v.get("status", "approved")
-        if _gv_status not in ("rejected", "hidden", "inactive", "pending"):
-            if _gv_end_raw:
-                import re as _gv_re
-                _gv_s = str(_gv_end_raw).strip()
-                if "T" in _gv_s: _gv_s = _gv_s.split("T")[0]
-                _gv_s = _gv_re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?$', '', _gv_s).strip()
-                _gv_end_dt = None
-                for _gv_fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"):
-                    try: _gv_end_dt = datetime.strptime(_gv_s, _gv_fmt); break
-                    except ValueError: pass
-                if not _gv_end_dt:
-                    _gv_m = _gv_re.match(r"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$", _gv_s)
-                    if _gv_m:
-                        try: _gv_end_dt = datetime.strptime(_gv_s, "%d %b %Y")
-                        except ValueError: pass
-                if _gv_end_dt and _gv_end_dt.replace(hour=23, minute=59, second=59) < datetime.utcnow():
-                    _gv_status = "expired"
-                    # Write back to DB so it persists
-                    try:
-                        db.gift_vouchers.update_one(
-                            {"_id": v["_id"], "status": {"$ne": "expired"}},
-                            {"$set": {"status": "expired", "is_active": False}}
-                        )
-                    except: pass
         result.append({
             "id":                str(v["_id"]),
             "title":             v.get("title", ""),
             "text":              v.get("text", ""),
             "validity":          v.get("validity", ""),
-            "logo":              (v.get("logo","") if str(v.get("logo","")).startswith("http") else ""),  # strip base64 from list
+            "logo":              v.get("logo", ""),
             "store_id":          v.get("store_id", ""),
             "merchant_id":       mid,
             "merchant_name":     merchant_name,
             "merchant_phone":    merchant_phone,
-            "is_active":         _gv_status == "approved",
-            "status":            _gv_status,
+            "is_active":         v.get("is_active", True),
             "from_date":         v.get("from_date", ""),
-            "end_date":          v.get("end_date", _gv_end_raw),
+            "end_date":          v.get("end_date", ""),
             "created_at":        created_at_iso,
             "source":            v.get("source", "admin"),
             "source_voucher_id": v.get("source_voucher_id", ""),
             "duration_days":     v.get("duration_days", 0),
-            "city":              v.get("city", ""),
-            "_collection":       "gift_vouchers",
+            "product_type":      v.get("product_type", "premium"),
         })
-
-    # ── 2. products collection (seeded/imported product catalogue) ──────────
-    product_docs = list(db.products.find().sort("_id", -1))
-    for p in product_docs:
-        pid = str(p["_id"])
-        # Build offer text from price + discount if available
-        price    = p.get("price", "")
-        discount = p.get("discount", "")
-        text_parts = []
-        if discount: text_parts.append(f"{discount}% OFF")
-        if price:    text_parts.append(f"₹{price}")
-        offer_text = p.get("offer_text") or p.get("text") or (", ".join(text_parts) if text_parts else "")
-        # Resolve image
-        # Strip base64 — only return CDN/HTTP URLs to keep response lean
-        def _url_only(v): return v if v and str(v).startswith("http") else ""
-        logo = (_url_only(p.get("image_url")) or _url_only(p.get("logo_url")) or
-                _url_only(p.get("logo")) or _url_only(p.get("thumbnail")) or
-                _url_only(p.get("img")) or "")
-        ca = p.get("created_at")
-        if isinstance(ca, datetime):
-            created_at_iso = ca.strftime("%Y-%m-%dT%H:%M:%S")
-        else:
-            created_at_iso = str(ca or "")[:19]
-        # Resolve merchant_name from accounts if merchant_id exists but name not stored
-        p_mid = str(p.get("merchant_id", ""))
-        p_merchant_name  = p.get("merchant_name") or p.get("store_name") or ""
-        p_merchant_phone = str(p.get("phone") or p.get("merchant_phone") or "")
-        if p_mid and not p_merchant_name:
-            try:
-                pm = (db.accounts.find_one({"_id": ObjectId(p_mid)}, {"name":1,"phone":1}) or
-                      db.merchants.find_one({"_id": ObjectId(p_mid)}, {"name":1,"phone":1}))
-                if pm:
-                    p_merchant_name  = pm.get("name", "")
-                    p_merchant_phone = str(pm.get("phone", ""))
-            except Exception:
-                pass
-        _p_status = _compute_product_status(p)
-        result.append({
-            "id":                pid,
-            "title":             p.get("name") or p.get("title") or "",
-            "text":              offer_text,
-            "validity":          p.get("validity") or p.get("valid_till") or "",
-            "logo":              logo,
-            "store_id":          str(p.get("store_id", "")),
-            "merchant_id":       p_mid,
-            "merchant_name":     p_merchant_name,
-            "merchant_phone":    p_merchant_phone,
-            "is_active":         _p_status == "approved",
-            "status":            _p_status,
-            "from_date":         p.get("from_date") or p.get("start_date") or "",
-            "end_date":          (p.get("end_date") or p.get("expiry") or
-                                     p.get("valid_till") or
-                                     # Parse end from "DD Mon YYYY → DD Mon YYYY"
-                                     (lambda v: v.split("→")[-1].strip() if v and "→" in v else
-                                      (v.split(" to ")[-1].strip() if v and " to " in v.lower() else "")
-                                     )(str(p.get("validity") or "")) or ""),
-            "created_at":        created_at_iso,
-            "source":            "products",
-            "source_voucher_id": "",
-            "duration_days":     int(p.get("duration_days") or 0),
-            "city":              p.get("city", ""),
-            "_collection":       "products",
-            # Extra product-specific fields for display
-            "price":             str(price),
-            "discount":          str(discount),
-            "description":       p.get("description", ""),
-            "category":          p.get("category", ""),
-        })
-
-    # Sort all by created_at descending
-    result.sort(key=lambda x: x.get("created_at",""), reverse=True)
     return result
 
-@router.post("/products")
-def create_product_card(data: dict, a=Depends(get_current_admin)):
-    """Create a new product card visible in the app."""
+@router.post("/gift-vouchers")
+def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
+    """Create a new gift voucher card visible in the app."""
     text = (data.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "Offer text is required")
@@ -1814,19 +1355,11 @@ def create_product_card(data: dict, a=Depends(get_current_admin)):
         "validity":      (data.get("validity") or "").strip(),
         "logo":          logo,
         "store_id":      store_id,
-        "store_name":    (data.get("store_name") or "").strip(),
         "merchant_id":   merchant_id,
-        "city":          (data.get("city") or "").strip().lower(),
         "is_active":     bool(data.get("is_active", True)),
         "from_date":     (data.get("from_date") or "").strip(),
         "end_date":      (data.get("end_date") or "").strip(),
         "duration_days": int(data.get("duration_days") or 0),
-        "pay_from_date": (data.get("pay_from_date") or "").strip(),
-        "pay_to_date":   (data.get("pay_to_date") or "").strip(),
-        "pay_amount":    float(data.get("pay_amount") or 0),
-        "pay_gst":       float(data.get("pay_gst") or 18),
-        "pay_mode":      (data.get("pay_mode") or "").strip(),
-        "pay_ref":       (data.get("pay_ref") or "").strip(),
         "source":        "admin",
         "created_at":    datetime.utcnow(),
     }
@@ -1869,132 +1402,31 @@ def create_product_card(data: dict, a=Depends(get_current_admin)):
 
     return {"message": "Product created", "id": new_id}
 
-@router.put("/products/{pid}")
-def update_product_card(pid: str, data: dict, a=Depends(get_current_admin)):
-    """Update an existing product card."""
+@router.put("/gift-vouchers/{vid}")
+def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
+    """Update an existing gift voucher."""
     upd = {}
-    _str_fields = ["title", "text", "offer_text", "validity", "logo", "logo_url", "merchant_id", "store_id", "store_name", "from_date", "end_date", "city", "pay_from_date", "pay_to_date", "pay_mode", "pay_ref", "pay_status"]
-    for field in _str_fields:
+    for field in ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date", "duration_days"]:
         if field in data:
             upd[field] = (data[field] or "").strip()
-    if "duration_days" in data:
+    if "store_id" in upd and upd["store_id"] and "logo" not in upd:
         try:
-            upd["duration_days"] = int(data["duration_days"]) if data["duration_days"] else 0
-        except (TypeError, ValueError):
-            upd["duration_days"] = 0
-    if "pay_amount" in data:
-        try: upd["pay_amount"] = float(data["pay_amount"]) if data["pay_amount"] not in (None, "") else 0.0
-        except (TypeError, ValueError): upd["pay_amount"] = 0.0
-    if "pay_gst" in data:
-        try: upd["pay_gst"] = float(data["pay_gst"]) if data["pay_gst"] not in (None, "") else 18.0
-        except (TypeError, ValueError): upd["pay_gst"] = 18.0
-    # Price fields
-    for _price_field in ["price", "sale_price", "original_price"]:
-        if _price_field in data and data[_price_field] not in (None, ""):
-            try: upd[_price_field] = float(data[_price_field])
-            except (TypeError, ValueError): pass
-    # logo_url → logo sync
-    if "logo_url" in upd and "logo" not in upd:
-        upd["logo"] = upd["logo_url"]
-    # NOTE: logo is only updated if explicitly sent — never auto-overwrite from store on edit
-    # Auto-resolve city + store_name from store_id if store_id updated but city not explicitly sent
-    if "store_id" in upd and upd["store_id"]:
-        try:
-            _s = db.stores.find_one({"_id": ObjectId(upd["store_id"])},
-                                    {"city": 1, "store_name": 1, "_id": 0})
-            if _s:
-                if "city" not in upd or not upd.get("city"):
-                    upd["city"] = (_s.get("city") or "").strip()
-                if "store_name" not in upd or not upd.get("store_name"):
-                    upd["store_name"] = (_s.get("store_name") or "").strip()
-        except Exception:
-            pass
+            s = db.stores.find_one({"_id": ObjectId(upd["store_id"])}, {"store_image2":1,"image2":1})
+            if s:
+                upd["logo"] = s.get("store_image2") or s.get("image2") or ""
+        except: pass
     if "is_active" in data:
         upd["is_active"] = bool(data["is_active"])
     if not upd:
         raise HTTPException(400, "Nothing to update")
-    try:
-        oid = ObjectId(pid)
-    except Exception as e:
-        raise HTTPException(400, f"Invalid product ID: {e}")
-    # Try gift_vouchers first, then products collection
-    r1 = db.gift_vouchers.update_one({"_id": oid}, {"$set": upd})
-    if r1.matched_count == 0:
-        # Fallback: products collection
-        r2 = db.products.update_one({"_id": oid}, {"$set": upd})
-        if r2.matched_count == 0:
-            raise HTTPException(404, "Product not found in any collection")
-    return {"message": "Product updated"}
+    db.gift_vouchers.update_one({"_id": ObjectId(vid)}, {"$set": upd})
+    return {"message": "Voucher updated"}
 
-@router.delete("/products/{pid}")
-def delete_product_card(pid: str, a=Depends(get_current_admin)):
-    """Delete a product card — tries gift_vouchers then products collection."""
-    try:
-        oid = ObjectId(pid)
-    except Exception as e:
-        raise HTTPException(400, f"Invalid product ID: {e}")
-    # Try gift_vouchers first (admin/merchant approved products)
-    r1 = db.gift_vouchers.delete_one({"_id": oid})
-    if r1.deleted_count == 0:
-        # Fallback: products collection (catalogue items)
-        r2 = db.products.delete_one({"_id": oid})
-        if r2.deleted_count == 0:
-            raise HTTPException(404, "Product not found in any collection")
+@router.delete("/gift-vouchers/{vid}")
+def delete_gift_voucher(vid: str, a=Depends(get_current_admin)):
+    """Delete a gift voucher."""
+    db.gift_vouchers.delete_one({"_id": ObjectId(vid)})
     return {"message": "Deleted"}
-
-
-@router.get("/product-reviews")
-def list_product_reviews(product_id: str = "", a=Depends(get_current_admin)):
-    """List all product reviews. Optionally filter by product_id."""
-    from datetime import datetime as _dt
-    query = {}
-    if product_id:
-        query["product_id"] = product_id
-    result = []
-    for r in db.product_reviews.find(query).sort("created_at", -1).limit(500):
-        product_title = ""
-        try:
-            p = db.products.find_one({"_id": ObjectId(r["product_id"])}, {"title": 1, "name": 1})
-            if p:
-                product_title = p.get("title") or p.get("name") or ""
-        except Exception:
-            pass
-        result.append({
-            "_id":           str(r["_id"]),
-            "product_id":    r.get("product_id", ""),
-            "product_title": product_title,
-            "user_id":       r.get("user_id", ""),
-            "user_name":     r.get("user_name", "Anonymous"),
-            "rating":        r.get("rating", 0),
-            "text":          r.get("text", ""),
-            "created_at":    r.get("created_at", ""),
-        })
-    return result
-
-
-@router.delete("/product-reviews/{review_id}")
-def delete_product_review(review_id: str, a=Depends(get_current_admin)):
-    """Delete a product review and recalculate product avg rating."""
-    try:
-        r = db.product_reviews.find_one({"_id": ObjectId(review_id)})
-        if not r:
-            raise HTTPException(404, "Product review not found")
-        product_id = r.get("product_id", "")
-        db.product_reviews.delete_one({"_id": ObjectId(review_id)})
-        # Recalculate avg rating for the product
-        if product_id:
-            all_reviews = list(db.product_reviews.find({"product_id": product_id}, {"rating": 1}))
-            ratings = [x["rating"] for x in all_reviews if x.get("rating")]
-            avg = round(sum(ratings) / len(ratings), 1) if ratings else 0
-            db.products.update_one(
-                {"_id": ObjectId(product_id)},
-                {"$set": {"rating": avg, "rating_count": len(ratings)}}
-            )
-        return {"ok": True, "message": "Product review deleted"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 
 # ===================== PROMO SLIDERS =====================
@@ -2006,21 +1438,6 @@ def list_promo_sliders(a=Depends(get_current_admin)):
     for d in docs:
         created = d.get("created_at", "")
         created_str = created.strftime("%d %b %Y %H:%M") if isinstance(created, datetime) else str(created)[:16]
-        # Resolve merchant_name on-the-fly if not stored but phone exists
-        _sld_merch_name  = d.get("merchant_name", "")
-        _sld_merch_phone = d.get("merchant_phone", "")
-        if _sld_merch_phone and not _sld_merch_name:
-            try:
-                _sma = db.accounts.find_one(
-                    {"$or": [{"phone": _sld_merch_phone}, {"mobile_number": _sld_merch_phone},
-                             {"phone": {"$regex": _sld_merch_phone + "$"}},
-                             {"mobile_number": {"$regex": _sld_merch_phone + "$"}}]},
-                    {"name": 1, "full_name": 1}
-                )
-                if _sma:
-                    _sld_merch_name = _sma.get("name") or _sma.get("full_name") or ""
-            except Exception:
-                pass
         result.append({
             "id":            str(d["_id"]),
             "_id":           str(d["_id"]),
@@ -2035,16 +1452,10 @@ def list_promo_sliders(a=Depends(get_current_admin)):
             "expires_at":    d.get("end_date", d.get("expires_at", "")),
             "duration_days": d.get("duration_days", d.get("days", "")),
             # merchant attribution
-            "merchant_name":  _sld_merch_name,
-            "merchant_phone": _sld_merch_phone,
-            "city":           d.get("city", ""),
+            "merchant_name":  d.get("merchant_name", ""),
+            "merchant_phone": d.get("merchant_phone", ""),
             "source":         d.get("source", "admin"),
             "source_banner_id": d.get("source_banner_id", ""),
-            # store / location
-            "store_id":       d.get("store_id", ""),
-            "store_name":     d.get("store_name", ""),
-            "city":           d.get("city", d.get("store_city", "")),
-            "merchant_id":    d.get("merchant_id", ""),
             # audit
             "created_at":    created_str,
         })
@@ -2082,7 +1493,6 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
         "duration_days":  days,
         "merchant_name":  data.get("merchant_name", ""),
         "merchant_phone": merchant_phone_norm,
-        "city":           (data.get("city") or "").strip().lower(),
         "source":         "admin",
         "created_at":     datetime.utcnow(),
     }
@@ -2093,49 +1503,16 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
 def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     upd = {}
     import re as _re
-    for f in ["title", "image_url", "link_url", "merchant_name"]:
+    for f in ["title", "image_url", "link_url", "from_date", "end_date", "merchant_name"]:
         if f in data: upd[f] = data[f]
-    # Guard blank dates — only update if non-empty to prevent overwriting valid DB dates
-    if data.get("from_date"): upd["from_date"] = str(data["from_date"]).strip()
-    if data.get("end_date"):  upd["end_date"]  = str(data["end_date"]).strip()
-    if data.get("city"):      upd["city"]       = str(data["city"]).strip()
-    # Store / merchant fields
-    # Only update store_id/store_name when non-empty — prevents clearing existing link on edit
-    if data.get("store_id",  "").strip(): upd["store_id"]  = data["store_id"].strip()
-    if data.get("store_name","").strip(): upd["store_name"] = data["store_name"].strip()
-    if "merchant_id" in data: upd["merchant_id"] = str(data["merchant_id"] or "").strip()
     if "merchant_phone" in data:
         raw_p = str(data["merchant_phone"] or "").strip()
         upd["merchant_phone"] = _re.sub(r'\D', '', raw_p)[-10:] if raw_p else ""
-    # Resolve merchant_name from phone if not explicitly provided (or empty)
-    _upd_phone = upd.get("merchant_phone", "")
-    if _upd_phone and not upd.get("merchant_name", "").strip():
-        try:
-            _ma2 = db.accounts.find_one(
-                {"$or": [{"phone": _upd_phone}, {"mobile_number": _upd_phone},
-                         {"phone": {"$regex": _upd_phone + "$"}},
-                         {"mobile_number": {"$regex": _upd_phone + "$"}}]},
-                {"name": 1, "full_name": 1}
-            )
-            if _ma2:
-                upd["merchant_name"] = _ma2.get("name") or _ma2.get("full_name") or ""
-        except Exception:
-            pass
     if "sort_order"    in data: upd["sort_order"]    = int(data["sort_order"])
     if "is_active"     in data: upd["is_active"]     = bool(data["is_active"])
     if "days"          in data: upd["duration_days"]  = int(data["days"])
-    # Payment fields
-    for _pf in ["pay_from_date", "pay_to_date", "pay_mode", "pay_ref", "invoice_no", "pay_status"]:
-        if data.get(_pf) not in (None, ""):
-            upd[_pf] = str(data[_pf]).strip()
-    if data.get("pay_amount") not in (None, ""):
-        try: upd["pay_amount"] = float(data["pay_amount"])
-        except (TypeError, ValueError): pass
-    if data.get("pay_gst") not in (None, ""):
-        try: upd["pay_gst"] = float(data["pay_gst"])
-        except (TypeError, ValueError): pass
-    # Keep expires_at in sync with end_date (only when non-empty)
-    if upd.get("end_date"): upd["expires_at"] = upd["end_date"]
+    # Keep expires_at in sync with end_date
+    if "end_date" in upd: upd["expires_at"] = upd["end_date"]
     # Auto-calculate end_date from from_date + days
     if "from_date" in data and "days" in data and "end_date" not in data:
         from datetime import timedelta
@@ -2246,20 +1623,6 @@ def delete_notification(notif_id: str, a=Depends(get_current_admin)):
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-@router.delete("/notifications/cleanup/old")
-def cleanup_old_notifications(days: int = 30, a=Depends(get_current_admin)):
-    """Delete all notification records older than N days (default 30)."""
-    from datetime import datetime as _dt, timedelta as _td
-    cutoff = (_dt.utcnow() - _td(days=days)).isoformat()
-    # Match records with sent_at or created_at older than cutoff
-    result = db.notifications.delete_many({
-        "$or": [
-            {"sent_at":    {"$lt": cutoff}},
-            {"created_at": {"$lt": cutoff}},
-        ]
-    })
-    return {"message": f"Deleted {result.deleted_count} notification(s) older than {days} days"}
 
 @router.post("/notifications/process-queue")
 def process_notification_queue(a=Depends(get_current_admin)):
@@ -2525,7 +1888,6 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             "invoice_no":     b.get("invoice_no", ""),
             "amount":         b.get("total", 0),
             "created_at":     b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at",""))[:16],
-            "city":           b.get("city", ""),
         })
     return result
 
@@ -2536,247 +1898,23 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     if not b: raise HTTPException(404, "Banner not found")
     db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"approval_status":"approved","approved_at":datetime.utcnow()}})
     # TASK 9 FIX: upsert into promo_sliders — never create duplicates
-    # Resolve store_name from store_id if not already stored on banner record
-    _banner_store_name = b.get("store_name", "")
-    if not _banner_store_name and b.get("store_id"):
-        try:
-            _bs = db.stores.find_one({"_id": ObjectId(b["store_id"])}, {"store_name": 1})
-            if _bs:
-                _banner_store_name = _bs.get("store_name", "")
-        except Exception:
-            pass
     db.promo_sliders.update_one(
         {"source_banner_id": bid},
         {"$set": {
-            "title":          b.get("title",""),
-            "image_url":      b.get("image_url",""),
-            "is_active":      True,
-            "sort_order":     50,
-            "source":         "merchant",
+            "title":         b.get("title",""),
+            "image_url":     b.get("image_url",""),
+            "is_active":     True,
+            "sort_order":    50,
+            "source":        "merchant",
             "source_banner_id": bid,
-            "merchant_name":  b.get("merchant_name",""),
-            "merchant_phone": str(b.get("merchant_phone", b.get("phone", ""))),
-            "city":           b.get("city",""),
-            "store_id":       b.get("store_id",""),
-            "store_name":     _banner_store_name,
-            "from_date":      b.get("from_date",""),
-            "end_date":       b.get("end_date",""),
-            "duration_days":  b.get("duration_days",""),
-            "expires_at":     b.get("end_date",""),
-            "updated_at":     datetime.utcnow().isoformat(),
+            "merchant_name": b.get("merchant_name",""),
+            "expires_at":    b.get("end_date",""),
+            "updated_at":    datetime.utcnow().isoformat(),
         },
          "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}},
         upsert=True
     )
     return {"ok": True, "message": "Banner approved and published to app."}
-
-
-
-
-@router.post("/merchant-vouchers/{pid}/payment")
-def admin_add_product_payment(pid: str, data: dict, a=Depends(get_current_admin)):
-    """Admin manually records a payment for a merchant product (offline/cash/UPI)."""
-    v = db.merchant_vouchers.find_one({"_id": ObjectId(pid)})
-    if not v:
-        raise HTTPException(404, "Product not found")
-
-    plan          = str(data.get("plan", "standard") or "standard").strip()
-    from_date_str = str(data.get("from_date", "") or "").strip()
-    end_date_str  = str(data.get("end_date", "") or "").strip()
-    amount        = float(data.get("amount", 0) or 0)
-    gst_pct       = float(data.get("gst_percent", 0) or 0)
-    gst_amt       = round(amount * gst_pct / 100, 2)
-    total         = round(amount + gst_amt, 2)
-    pay_mode      = str(data.get("pay_mode", "cash") or "cash").strip()
-    pay_ref       = str(data.get("payment_ref", "") or "").strip()
-    note          = str(data.get("note", "") or "").strip()
-    duration_days = int(data.get("duration_days", 30) or 30)
-
-    if not from_date_str or not end_date_str:
-        raise HTTPException(400, "from_date and end_date are required")
-    try:
-        from_dt = datetime.fromisoformat(from_date_str)
-    except Exception:
-        raise HTTPException(400, f"Invalid from_date: {from_date_str}")
-    try:
-        end_dt = datetime.fromisoformat(end_date_str)
-    except Exception:
-        raise HTTPException(400, f"Invalid end_date: {end_date_str}")
-
-    mid_str       = str(v.get("merchant_id", ""))
-    merchant_name = v.get("merchant_name", "")
-    merchant_phone= str(v.get("merchant_phone", ""))
-
-    # Mark product as approved + update dates
-    db.merchant_vouchers.update_one({"_id": ObjectId(pid)}, {"$set": {
-        "approval_status":  "approved",
-        "status":           "approved",
-        "payment_status":   "paid",
-        "pay_mode":         pay_mode,
-        "payment_ref":      pay_ref,
-        "from_date":        from_date_str,
-        "end_date":         end_date_str,
-        "duration_days":    duration_days,
-        "total":            total,
-        "amount":           amount,
-        "gst":              gst_amt,
-        "approved_at":      datetime.utcnow().isoformat(),
-    }})
-
-    # Sync to gift_vouchers
-    db.gift_vouchers.update_many({"source_voucher_id": pid}, {"$set": {
-        "status":    "approved",
-        "is_active": True,
-        "from_date": from_date_str,
-        "end_date":  end_date_str,
-        "validity":  f"{from_date_str} → {end_date_str}",
-    }})
-
-    # Create invoice
-    invoice_no = "LS-PROD-" + datetime.utcnow().strftime("%Y%m%d") + "-" + pid[-6:].upper()
-    store_name = v.get("store_name", "")
-    db.invoices.insert_one({
-        "invoice_no":     invoice_no,
-        "merchant_id":    mid_str,
-        "merchant_name":  merchant_name,
-        "merchant_phone": merchant_phone,
-        "store_name":     store_name,
-        "type":           "product",
-        "product_id":     pid,
-        "product_title":  v.get("title", ""),
-        "plan":           plan,
-        "base_price":     amount,
-        "gst":            gst_amt,
-        "gst_percent":    gst_pct,
-        "total":          total,
-        "pay_mode":       pay_mode,
-        "payment_ref":    pay_ref,
-        "note":           note,
-        "from_date":      from_dt,
-        "end_date":       end_dt,
-        "added_by_admin": True,
-        "created_at":     datetime.utcnow(),
-    })
-
-    return {
-        "ok":        True,
-        "invoice_no": invoice_no,
-        "message":   f"Payment recorded. Product '{v.get('title','')}' is now active until {end_date_str}.",
-    }
-
-
-@router.post("/merchant-banners/{bid}/payment")
-def admin_add_banner_payment(bid: str, data: dict, a=Depends(get_current_admin)):
-    """Admin manually records a payment for a merchant banner (offline/cash/UPI)."""
-    b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
-    if not b:
-        raise HTTPException(404, "Banner not found")
-
-    plan          = str(data.get("plan", "standard") or "standard").strip()
-    from_date_str = str(data.get("from_date", "") or "").strip()
-    end_date_str  = str(data.get("end_date", "") or "").strip()
-    amount        = float(data.get("amount", 0) or 0)
-    gst_pct       = float(data.get("gst_percent", 0) or 0)
-    gst_amt       = round(amount * gst_pct / 100, 2)
-    total         = round(amount + gst_amt, 2)
-    pay_mode      = str(data.get("pay_mode", "cash") or "cash").strip()
-    pay_ref       = str(data.get("payment_ref", "") or "").strip()
-    note          = str(data.get("note", "") or "").strip()
-    duration_days = int(data.get("duration_days", 30) or 30)
-
-    if not from_date_str or not end_date_str:
-        raise HTTPException(400, "from_date and end_date are required")
-    try:
-        from_dt = datetime.fromisoformat(from_date_str)
-    except Exception:
-        raise HTTPException(400, f"Invalid from_date: {from_date_str}")
-    try:
-        end_dt = datetime.fromisoformat(end_date_str)
-    except Exception:
-        raise HTTPException(400, f"Invalid end_date: {end_date_str}")
-
-    mid_str        = str(b.get("merchant_id", ""))
-    merchant_name  = b.get("merchant_name", "")
-    merchant_phone = str(b.get("merchant_phone", b.get("phone", "")))
-
-    # Mark banner as approved + update dates
-    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
-        "approval_status":  "approved",
-        "status":           "approved",
-        "payment_status":   "paid",
-        "pay_mode":         pay_mode,
-        "payment_ref":      pay_ref,
-        "from_date":        from_date_str,
-        "end_date":         end_date_str,
-        "duration_days":    duration_days,
-        "total":            total,
-        "amount":           amount,
-        "gst":              gst_amt,
-        "approved_at":      datetime.utcnow().isoformat(),
-    }})
-
-    # Sync to promo_sliders
-    db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {
-        "status":    "approved",
-        "is_active": True,
-        "from_date": from_date_str,
-        "end_date":  end_date_str,
-        "city":      b.get("city", ""),
-        "store_id":  b.get("store_id", ""),
-    }})
-
-    # Create invoice
-    invoice_no = "LS-BNR-" + datetime.utcnow().strftime("%Y%m%d") + "-" + bid[-6:].upper()
-    store_name = b.get("store_name", "")
-    db.invoices.insert_one({
-        "invoice_no":     invoice_no,
-        "merchant_id":    mid_str,
-        "merchant_name":  merchant_name,
-        "merchant_phone": merchant_phone,
-        "store_name":     store_name,
-        "type":           "banner",
-        "banner_id":      bid,
-        "banner_title":   b.get("title", ""),
-        "plan":           plan,
-        "base_price":     amount,
-        "gst":            gst_amt,
-        "gst_percent":    gst_pct,
-        "total":          total,
-        "pay_mode":       pay_mode,
-        "payment_ref":    pay_ref,
-        "note":           note,
-        "from_date":      from_dt,
-        "end_date":       end_dt,
-        "added_by_admin": True,
-        "created_at":     datetime.utcnow(),
-    })
-
-    return {
-        "ok":        True,
-        "invoice_no": invoice_no,
-        "message":   f"Payment recorded. Banner '{b.get('title','')}' is now active until {end_date_str}.",
-    }
-
-@router.post("/merchant-banners/resync-sliders")
-def resync_merchant_banner_sliders(a=Depends(get_current_admin)):
-    """Re-sync all approved merchant banners into promo_sliders with latest fields (from_date, end_date, duration_days, merchant_phone)."""
-    updated = 0
-    for b in db.merchant_banners.find({"approval_status": "approved"}):
-        bid = str(b["_id"])
-        db.promo_sliders.update_one(
-            {"source_banner_id": bid},
-            {"$set": {
-                "merchant_phone": str(b.get("merchant_phone", b.get("phone", ""))),
-                "city":           b.get("city", ""),
-                "store_id":       b.get("store_id", ""),
-                "from_date":      b.get("from_date", ""),
-                "end_date":       b.get("end_date", ""),
-                "duration_days":  b.get("duration_days", ""),
-                "expires_at":     b.get("end_date", ""),
-            }}
-        )
-        updated += 1
-    return {"ok": True, "synced": updated}
 
 @router.put("/merchant-banners/{bid}/reject")
 def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admin)):
@@ -2815,54 +1953,25 @@ def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
 
 
 # ═══════════════════════════════════════════════════════════
-# ADMIN — MERCHANT PRODUCT APPROVAL
+# ADMIN — MERCHANT VOUCHER APPROVAL
 # ═══════════════════════════════════════════════════════════
 
 
-def _compute_product_status_mv(v):
-    """Return real-time status — stdlib-only date parsing, no third-party deps."""
+def _compute_voucher_status(v):
+    """Return real-time status — auto-expire if end_date has passed."""
     stored = v.get("approval_status", v.get("status", "pending_approval"))
     if stored in ("pending_approval", "rejected"):
         return stored
-
-    # ── Collect end date — also parse from validity string if end_date is empty ──
     end_raw = v.get("end_date", "")
-    if not end_raw:
-        validity_str = str(v.get("validity") or "")
-        if "\u2192" in validity_str or "->" in validity_str:
-            sep = "\u2192" if "\u2192" in validity_str else "->"
-            end_raw = validity_str.split(sep)[-1].strip()
-        elif " to " in validity_str.lower():
-            end_raw = validity_str.lower().split(" to ")[-1].strip()
-        elif " - " in validity_str and len(validity_str) > 8:
-            end_raw = validity_str.split(" - ")[-1].strip()
-
     if end_raw:
-        end_dt = None
-        import re as _re
-        s = str(end_raw).strip()
-        if "T" in s:
-            s = s.split("T")[0]
-        s = _re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?$', '', s).strip()
-        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"):
-            try:
-                end_dt = datetime.strptime(s, fmt)
-                break
-            except ValueError:
-                pass
-        if not end_dt:
-            m1 = _re.match(r"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$", s)
-            if m1:
-                try: end_dt = datetime.strptime(s, "%d %b %Y")
-                except ValueError: pass
-        if not end_dt:
-            m2 = _re.match(r"^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})$", s)
-            if m2:
-                try: end_dt = datetime.strptime(s, "%b %d %Y")
-                except ValueError: pass
-        if end_dt:
-            end_of_day = end_dt.replace(hour=23, minute=59, second=59)
-            if end_of_day < datetime.utcnow():
+        try:
+            from dateutil.parser import parse as _dp
+            import pytz
+            end_dt = _dp(str(end_raw))
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=pytz.UTC)
+            now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
+            if end_dt < now_utc:
                 try:
                     db.merchant_vouchers.update_one(
                         {"_id": v["_id"], "approval_status": {"$ne": "expired"}},
@@ -2870,36 +1979,35 @@ def _compute_product_status_mv(v):
                     )
                 except: pass
                 return "expired"
+        except:
+            pass
     return stored
 
 @router.get("/merchant-vouchers")
-def list_merchant_products(a=Depends(get_current_admin)):
+def list_merchant_vouchers(a=Depends(get_current_admin)):
     result = []
     for v in db.merchant_vouchers.find().sort("created_at", -1):
         result.append({
             "_id":           str(v["_id"]),
             "merchant_name": v.get("merchant_name",""),
             "merchant_phone": v.get("merchant_phone",""),
-            "city":          v.get("city",""),
             "title":         v.get("title",""),
             "offer_text":    v.get("offer_text",""),
-            "logo_url":      (v.get("logo_url","") if str(v.get("logo_url","")).startswith("http") else ""),  # strip base64
+            "logo_url":      v.get("logo_url",""),
             "validity":      v.get("validity", f"{v.get('from_date','')} → {v.get('end_date','')}" if v.get("from_date") else ""),
             "duration_days": v.get("duration_days", v.get("duration",30)),
             "from_date":     v.get("from_date",""),
             "end_date":      v.get("end_date",""),
-            "approval_status": v.get("approval_status", "pending_approval"),
-            "status":        _compute_product_status_mv(v),
-            "store_id":      v.get("store_id",""),
-            "store_name":    v.get("store_name",""),
+            "status":        _compute_voucher_status(v),
             "invoice_no":    v.get("invoice_no",""),
             "amount":        v.get("total",0),
             "created_at":    v["created_at"].strftime("%Y-%m-%dT%H:%M:%S") if isinstance(v.get("created_at"), datetime) else str(v.get("created_at",""))[:16],
+            "product_type":  v.get("product_type", "premium"),
         })
     return result
 
 @router.put("/merchant-vouchers/{vid}/approve")
-def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
+def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
     v = db.merchant_vouchers.find_one({"_id": ObjectId(vid)})
     if not v: raise HTTPException(404, "Voucher not found")
     # TASK 8: check if product has already expired before setting status
@@ -2907,20 +2015,9 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
     final_status = "approved"
     if end_date_raw:
         try:
-            import re as _re2
-            _s = str(end_date_raw).strip()
-            if "T" in _s: _s = _s.split("T")[0]
-            _s = _re2.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?$', '', _s).strip()
-            _end_dt = None
-            for _fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
-                try: _end_dt = datetime.strptime(_s, _fmt); break
-                except ValueError: pass
-            if not _end_dt:
-                _m = _re2.match(r"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$", _s)
-                if _m:
-                    try: _end_dt = datetime.strptime(_s, "%d %b %Y")
-                    except ValueError: pass
-            if _end_dt and _end_dt.replace(hour=23, minute=59, second=59) < datetime.utcnow():
+            from dateutil.parser import parse as _parse_dt
+            end_dt = _parse_dt(str(end_date_raw))
+            if end_dt < datetime.utcnow():
                 final_status = "expired"
         except:
             pass
@@ -2933,31 +2030,22 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
         }}
     )
     # TASK 1 FIX: upsert into gift_vouchers — update if exists, insert if not — NEVER duplicate
-    _v_from  = v.get("from_date", "")
-    _v_end   = v.get("end_date", "")
-    _v_valid = v.get("validity") or (f"{_v_from} \u2192 {_v_end}" if _v_from and _v_end else ("30 days" if not _v_from else ""))
     db.gift_vouchers.update_one(
         {"source_voucher_id": vid},
         {"$set": {
             "title":             v.get("title", ""),
             "text":              v.get("offer_text", ""),
             "logo":              v.get("logo_url", ""),
-            "validity":          _v_valid,
-            "from_date":         _v_from,
-            "end_date":          _v_end,
-            "is_active":         final_status == "approved",
-            "status":            final_status,
+            "validity":          v.get("validity") or (
+                                     f"{v.get('from_date', '')} → {v.get('end_date', '')}"
+                                     if v.get("from_date") else "30 days"
+                                 ),
+            "is_active":         True,
             "source":            "merchant",
             "source_voucher_id": vid,
             "merchant_id":       str(v.get("merchant_id", "")),
             "merchant_name":     v.get("merchant_name", ""),
-            "merchant_phone":    str(v.get("merchant_phone", "")),
-            "store_id":          v.get("store_id", ""),
-            "store_name":        v.get("store_name", ""),
-            "city":              v.get("city", ""),
-            "price":             v.get("price", v.get("amount", 0)),
-            "original_price":    v.get("original_price", 0),
-            "amount":            v.get("total", v.get("amount", 0)),
+            "amount":            v.get("amount", 0),
             "updated_at":        datetime.utcnow().isoformat(),
         },
          "$setOnInsert": {
@@ -2968,7 +2056,7 @@ def approve_merchant_product(vid: str, a=Depends(get_current_admin)):
     return {"ok": True, "message": "Voucher approved and published to Voucher Zone."}
 
 @router.put("/merchant-vouchers/{vid}/reject")
-def reject_merchant_product(vid: str, body: dict = {}, a=Depends(get_current_admin)):
+def reject_merchant_voucher(vid: str, body: dict = {}, a=Depends(get_current_admin)):
     reason = body.get("reason","")
     db.merchant_vouchers.update_one({"_id": ObjectId(vid)}, {"$set":{
         "approval_status":"rejected","rejection_reason":reason,"rejected_at":datetime.utcnow()
@@ -2977,12 +2065,10 @@ def reject_merchant_product(vid: str, body: dict = {}, a=Depends(get_current_adm
     return {"ok": True, "message": "Voucher rejected."}
 
 @router.put("/merchant-vouchers/{vid}")
-def update_merchant_product(vid: str, data: dict, a=Depends(get_current_admin)):
-    """Admin edit merchant product fields + status."""
+def update_merchant_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
+    """FIX 10: Admin edit merchant voucher fields + status."""
     # ISSUES 5+7: also allow from_date, end_date, logo_url updates
-    allowed = {"title", "offer_text", "validity", "logo", "logo_url", "from_date", "end_date",
-               "status", "approval_status", "store_id", "store_name", "city",
-               "price", "original_price", "merchant_phone"}
+    allowed = {"title", "offer_text", "validity", "logo", "logo_url", "from_date", "end_date", "status", "approval_status"}
     update_data = {k: v for k, v in data.items() if k in allowed}
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")
@@ -2990,46 +2076,26 @@ def update_merchant_product(vid: str, data: dict, a=Depends(get_current_admin)):
     # Map logo -> logo_url consistency
     if "logo" in update_data and "logo_url" not in update_data:
         update_data["logo_url"] = update_data["logo"]
-    # Auto-resolve city + store_name from store_id if not explicitly sent
-    if "store_id" in update_data and update_data["store_id"]:
-        try:
-            _sv = db.stores.find_one({"_id": ObjectId(update_data["store_id"])},
-                                     {"city": 1, "store_name": 1, "_id": 0})
-            if _sv:
-                if not update_data.get("city"):
-                    update_data["city"] = (_sv.get("city") or "").strip()
-                if not update_data.get("store_name"):
-                    update_data["store_name"] = (_sv.get("store_name") or "").strip()
-        except Exception:
-            pass
 
     result = db.merchant_vouchers.update_one(
         {"_id": ObjectId(vid)},
         {"$set": update_data}
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Voucher not found")
 
-    # Sync changes to gift_vouchers record
-    if "status" in update_data or "approval_status" in update_data or "validity" in update_data or "from_date" in update_data or "end_date" in update_data:
+    # ISSUE 7: if status updated, sync to gift_vouchers record
+    if "status" in update_data or "validity" in update_data or "from_date" in update_data or "end_date" in update_data:
         sync_fields = {}
-        if "validity"         in update_data: sync_fields["validity"]  = update_data["validity"]
-        if "from_date"        in update_data: sync_fields["from_date"] = update_data["from_date"]
-        if "end_date"         in update_data: sync_fields["end_date"]  = update_data["end_date"]
-        if "status"           in update_data:
+        if "validity"   in update_data: sync_fields["validity"]  = update_data["validity"]
+        if "from_date"  in update_data: sync_fields["from_date"] = update_data["from_date"]
+        if "end_date"   in update_data: sync_fields["end_date"]  = update_data["end_date"]
+        if "status"     in update_data:
             new_st = update_data["status"]
-            sync_fields["status"]    = new_st
             sync_fields["is_active"] = (new_st == "approved")
-        if "approval_status"  in update_data: sync_fields["approval_status"] = update_data["approval_status"]
-        if "logo"             in update_data: sync_fields["logo"]      = update_data["logo"]
-        if "logo_url"         in update_data: sync_fields["logo"]      = update_data["logo_url"]
-        if "title"            in update_data: sync_fields["title"]     = update_data["title"]
-        if "offer_text"       in update_data: sync_fields["text"]      = update_data["offer_text"]
-        if "store_id"         in update_data: sync_fields["store_id"]  = update_data["store_id"]
-        if "store_name"       in update_data: sync_fields["store_name"]= update_data["store_name"]
-        if "city"             in update_data: sync_fields["city"]      = update_data["city"]
-        if "price"            in update_data: sync_fields["price"]     = update_data["price"]
-        if "original_price"   in update_data: sync_fields["original_price"] = update_data["original_price"]
+        if "logo"       in update_data: sync_fields["logo"]      = update_data["logo"]
+        if "title"      in update_data: sync_fields["title"]     = update_data["title"]
+        if "offer_text" in update_data: sync_fields["text"]      = update_data["offer_text"]
         if sync_fields:
             db.gift_vouchers.update_many({"source_voucher_id": vid}, {"$set": sync_fields})
 
@@ -3037,35 +2103,10 @@ def update_merchant_product(vid: str, data: dict, a=Depends(get_current_admin)):
 
 
 @router.delete("/merchant-vouchers/{vid}")
-def delete_merchant_product(vid: str, a=Depends(get_current_admin)):
+def delete_merchant_voucher(vid: str, a=Depends(get_current_admin)):
     db.merchant_vouchers.delete_one({"_id": ObjectId(vid)})
     db.gift_vouchers.delete_many({"source_voucher_id": vid})
     return {"ok": True}
-
-
-
-# ── Route aliases: /merchant-products/* mirrors /merchant-vouchers/* ──────────
-# Dashboard JS uses /merchant-products/ prefix; backend logic lives under /merchant-vouchers/
-
-@router.get("/merchant-products")
-def list_merchant_products_alias(a=Depends(get_current_admin)):
-    return list_merchant_products(a)
-
-@router.put("/merchant-products/{vid}/approve")
-def approve_merchant_product_alias(vid: str, a=Depends(get_current_admin)):
-    return approve_merchant_product(vid, a)
-
-@router.put("/merchant-products/{vid}/reject")
-def reject_merchant_product_alias(vid: str, data: dict = None, a=Depends(get_current_admin)):
-    return reject_merchant_product(vid, data or {}, a)
-
-@router.put("/merchant-products/{vid}")
-def update_merchant_product_alias(vid: str, data: dict, a=Depends(get_current_admin)):
-    return update_merchant_product(vid, data, a)
-
-@router.delete("/merchant-products/{vid}")
-def delete_merchant_product_alias(vid: str, a=Depends(get_current_admin)):
-    return delete_merchant_product(vid, a)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -3215,6 +2256,59 @@ def update_banner_pricing(data: dict, a=Depends(get_current_admin)):
 # REVIEWS MANAGEMENT
 # ═══════════════════════════════════════════════════════════════
 
+@router.get("/reviews")
+def list_reviews(
+    store_id: str = None,
+    skip: int = 0,
+    limit: int = 50,
+    a=Depends(get_current_admin)
+):
+    """List all user reviews. Optionally filter by store_id."""
+    query = {}
+    if store_id:
+        query["store_id"] = store_id
+    reviews = list(
+        db.reviews.find(query)
+        .sort("created_at", -1)
+        .skip(skip)
+        .limit(limit)
+    )
+    total = db.reviews.count_documents(query)
+    result = []
+    for r in reviews:
+        # Enrich with store name
+        store_name = ""
+        try:
+            s = db.stores.find_one({"_id": ObjectId(r["store_id"])}, {"store_name": 1})
+            store_name = s.get("store_name", "") if s else ""
+        except Exception:
+            pass
+        result.append({
+            "_id":        str(r["_id"]),
+            "store_id":   r.get("store_id", ""),
+            "store_name": store_name,
+            "user_id":    r.get("user_id") or "",
+            "user_name":  r.get("user_name", "Anonymous"),
+            "rating":     float(r.get("rating", 0)),
+            "text":       r.get("text", ""),
+            "created_at": str(r.get("created_at", "")),
+            "updated_at": str(r.get("updated_at", "")),
+        })
+    return {"reviews": result, "total": total}
+
+
+@router.delete("/reviews/{review_id}")
+def delete_review(review_id: str, a=Depends(get_current_admin)):
+    """Admin deletes an inappropriate review."""
+    try:
+        res = db.reviews.delete_one({"_id": ObjectId(review_id)})
+    except Exception:
+        raise HTTPException(400, "Invalid review_id")
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Review not found")
+    return {"ok": True, "message": "Review deleted"}
+
+
 @router.get("/reviews/stats")
 def review_stats(a=Depends(get_current_admin)):
     """Return review counts grouped by store."""
@@ -3355,269 +2449,55 @@ async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=
 # DEFAULT IMAGES MANAGEMENT
 # ════════════════════════════════════════════════════════
 
-# ─── Admin Banners (home-screen banners managed by admin) ─────────────────────
-@router.get("/banners")
-def admin_list_banners(a=Depends(get_current_admin)):
-    docs = list(db.banners.find().sort("sort_order", 1))
-    result = []
-    for d in docs:
-        img = d.get("image_url", "") or d.get("image", "")
-        result.append({
-            "id":         str(d["_id"]),
-            "title":      d.get("title", ""),
-            "subtitle":   d.get("subtitle", ""),
-            "image":      img,
-            "image_url":  img,
-            "link_url":   d.get("link_url", ""),
-            "sort_order": d.get("sort_order", 0),
-            "is_active":  d.get("is_active", True),
-            "created_at": d.get("created_at", ""),
-        })
-    return result
-
-
-@router.post("/banners")
-async def admin_create_banner(data: dict, a=Depends(get_current_admin)):
-    """Create admin banner. Accepts JSON body with image_url (base64 or http URL)."""
-    img = data.get("image_url") or data.get("image") or ""
-    floating_ids = data.get("floating_store_ids") or []
-    doc = {
-        "title":               data.get("title", ""),
-        "subtitle":            data.get("subtitle", ""),
-        "image":               img,
-        "image_url":           img,
-        "link_url":            data.get("link_url", ""),
-        "sort_order":          int(data.get("sort_order", 0)),
-        "is_active":           bool(data.get("is_active", True)),
-        "floating_store_ids":  floating_ids,
-        "pay_from_date":       (data.get("pay_from_date") or "").strip(),
-        "pay_to_date":         (data.get("pay_to_date") or "").strip(),
-        "pay_amount":          float(data.get("pay_amount") or 0),
-        "pay_gst":             float(data.get("pay_gst") or 18),
-        "pay_mode":            (data.get("pay_mode") or "").strip(),
-        "pay_ref":             (data.get("pay_ref") or "").strip(),
-        "created_at":          datetime.utcnow().isoformat(),
-    }
-    r = db.banners.insert_one(doc)
-    return {"ok": True, "id": str(r.inserted_id)}
-
-
-@router.put("/banners/{bid}")
-async def admin_update_banner(bid: str, data: dict, a=Depends(get_current_admin)):
-    """Update admin banner. Accepts JSON body."""
-    update: dict = {}
-    if "title"      in data: update["title"]      = data["title"]
-    if "subtitle"   in data: update["subtitle"]   = data["subtitle"]
-    if "link_url"   in data: update["link_url"]   = data["link_url"]
-    if "sort_order" in data: update["sort_order"] = int(data["sort_order"])
-    if "is_active"  in data: update["is_active"]  = bool(data["is_active"])
-    img = data.get("image_url") or data.get("image")
-    if img is not None:
-        update["image"]     = img
-        update["image_url"] = img
-    # Payment fields
-    for _pf in ["pay_from_date", "pay_to_date", "pay_mode", "pay_ref"]:
-        if _pf in data: update[_pf] = (data[_pf] or "").strip()
-    if "pay_amount" in data:
-        try: update["pay_amount"] = float(data["pay_amount"]) if data["pay_amount"] not in (None,"") else 0.0
-        except (TypeError, ValueError): update["pay_amount"] = 0.0
-    if "pay_gst" in data:
-        try: update["pay_gst"] = float(data["pay_gst"]) if data["pay_gst"] not in (None,"") else 18.0
-        except (TypeError, ValueError): update["pay_gst"] = 18.0
-    if "floating_store_ids" in data:
-        update["floating_store_ids"] = data["floating_store_ids"] or []
-    if update:
-        db.banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
-    return {"ok": True}
-
-
-@router.delete("/banners/{bid}")
-def admin_delete_banner(bid: str, a=Depends(get_current_admin)):
-    db.banners.delete_one({"_id": ObjectId(bid)})
-    return {"ok": True}
-
-
-@router.patch("/banners/{bid}/toggle")
-def admin_toggle_banner(bid: str, a=Depends(get_current_admin)):
-    doc = db.banners.find_one({"_id": ObjectId(bid)})
-    if not doc:
-        raise HTTPException(404, "Banner not found")
-    new_state = not doc.get("is_active", True)
-    db.banners.update_one({"_id": ObjectId(bid)}, {"$set": {"is_active": new_state}})
-    return {"ok": True, "is_active": new_state}
-
-
-
 @router.get("/default-images")
 def admin_get_default_images(a=Depends(get_current_admin)):
-    doc = db.settings.find_one({"_type": "default_images"}) or {}
-    def _to_list(val):
-        """Normalise legacy single-string or list → list of non-empty http URLs."""
-        if isinstance(val, list):
-            return [v for v in val if isinstance(v, str) and v.startswith("http")]
-        if isinstance(val, str) and val.startswith("http"):
-            return [val]
-        return []
+    doc = db.settings.find_one({"_type": "default_images"})
+    if not doc:
+        return {"store": "", "product": "", "offer": "", "city": "",
+                "no_service_url": "", "no_service_title": "", "no_service_message": ""}
     return {
-        "store":           _to_list(doc.get("store",          doc.get("store_images",   []))),
-        "product":         _to_list(doc.get("product",        doc.get("product_images", []))),
-        "offer":           _to_list(doc.get("offer",          doc.get("offer_images",   []))),
-        "city":            _to_list(doc.get("city",           doc.get("city_images",    []))) or ["https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1200&q=80"],
-        "merchant_banner": _to_list(doc.get("merchant_banner", [])),
-        "no_service":      _to_list(doc.get("no_service", [])),
-        "no_service_title":   str(doc.get("no_service_title",   "") or ""),
-        "no_service_message": str(doc.get("no_service_message", "") or ""),
+        "store":              doc.get("store", ""),
+        "product":            doc.get("product", ""),
+        "offer":              doc.get("offer", ""),
+        "city":               doc.get("city", ""),
+        "no_service_url":     doc.get("no_service_url", ""),
+        "no_service_title":   doc.get("no_service_title", ""),
+        "no_service_message": doc.get("no_service_message", ""),
     }
 
 
 @router.put("/default-images/urls")
 def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
-    """Add a URL to the array for a given type.
-    Body: { "type": "store"|"product"|"offer"|"city", "url": "https://..." }
-    Also supports bulk legacy format: { "store": "url", ... }
-    """
-    action = body.get("action", "add")  # "add" or "remove"
-    img_type = body.get("type", "")
-    url = (body.get("url") or "").strip()
-
-    if img_type and url and img_type in ["store", "product", "offer", "city", "merchant_banner"]:
-        if action == "remove":
-            db.settings.update_one(
-                {"_type": "default_images"},
-                {"$pull": {img_type: url}},
-                upsert=True
-            )
-        else:
-            # Migrate string → array before $addToSet
-            doc = db.settings.find_one({"_type": "default_images"}) or {}
-            existing = doc.get(img_type)
-            if isinstance(existing, str):
-                db.settings.update_one(
-                    {"_type": "default_images"},
-                    {"$set": {img_type: [existing] if existing else []}},
-                    upsert=True
-                )
-            elif not isinstance(existing, list):
-                db.settings.update_one(
-                    {"_type": "default_images"},
-                    {"$set": {img_type: []}},
-                    upsert=True
-                )
-            db.settings.update_one(
-                {"_type": "default_images"},
-                {"$addToSet": {img_type: url}},
-                upsert=True
-            )
-        return {"ok": True}
-
-    # Legacy bulk format fallback
     update = {}
     for field in ["store", "product", "offer", "city"]:
-        if field in body and isinstance(body[field], str) and body[field].startswith("http"):
-            update[field] = [body[field]]
+        if field in body:
+            update[field] = body[field]
     if update:
         db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
     return {"ok": True}
 
-@router.put("/default-images/no-service")
-def admin_set_no_service_config(body: dict, a=Depends(get_current_admin)):
-    """Set the no-service-available image URL, title, and message shown when a city has no stores."""
-    update = {}
-    if "url" in body and body["url"]:
-        url = str(body["url"]).strip()
-        if url.startswith("http"):
-            # Valid HTTP URL — store in the no_service list
-            existing = db.settings.find_one({"_type": "default_images"}) or {}
-            cur = existing.get("no_service", [])
-            if not isinstance(cur, list):
-                cur = [cur] if cur else []
-            if url not in cur:
-                cur.append(url)
-            update["no_service"] = cur
-        # else: base64 or invalid URL — skip silently so title/message are still saved
-    if "title" in body:
-        update["no_service_title"] = str(body["title"] or "").strip()
-    if "message" in body:
-        update["no_service_message"] = str(body["message"] or "").strip()
-    if not update:
-        raise HTTPException(400, "No fields to update")
+
+@router.post("/default-images/no-service")
+async def admin_save_no_service(
+    no_service_file: UploadFile = File(None),
+    no_service_url: str = Form(""),
+    no_service_title: str = Form(""),
+    no_service_message: str = Form(""),
+    a=Depends(get_current_admin),
+):
+    update = {
+        "no_service_title":   no_service_title.strip(),
+        "no_service_message": no_service_message.strip(),
+    }
+    if no_service_file and no_service_file.filename:
+        content = await no_service_file.read()
+        url = _cloudinary_upload(content, no_service_file.content_type or "image/jpeg")
+        if url:
+            update["no_service_url"] = url
+    elif no_service_url.strip():
+        update["no_service_url"] = no_service_url.strip()
     db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
     return {"ok": True}
-
-
-@router.delete("/default-images/url")
-def admin_remove_default_image_url(body: dict, a=Depends(get_current_admin)):
-    """Remove a single URL from a type array."""
-    img_type = body.get("type", "")
-    url = (body.get("url") or "").strip()
-    if not img_type or not url:
-        raise HTTPException(status_code=400, detail="type and url required")
-    db.settings.update_one(
-        {"_type": "default_images"},
-        {"$pull": {img_type: url}},
-        upsert=True
-    )
-    return {"ok": True}
-
-
-@router.post("/seed-city-field")
-def seed_city_field(a=Depends(get_current_admin)):
-    """
-    One-time migration: backfill city field on all gift_vouchers, merchant_vouchers,
-    and promo_sliders from the merchant's first registered store.
-    """
-    from bson import ObjectId as ObjId
-    updated = {"gift_vouchers": 0, "merchant_vouchers": 0, "promo_sliders": 0}
-
-    def _get_merchant_city(merchant_id_str, merchant_phone_str=""):
-        """Look up city from the merchant's first store."""
-        query = {}
-        if merchant_id_str:
-            try:
-                query = {"merchant_id": merchant_id_str}
-            except Exception:
-                pass
-        store = None
-        if query:
-            store = db.stores.find_one(query, {"city": 1}, sort=[("created_at", 1)])
-        if not store and merchant_phone_str:
-            store = db.stores.find_one(
-                {"$or": [{"phone": merchant_phone_str[-10:]},
-                         {"owner_phone": merchant_phone_str[-10:]}]},
-                {"city": 1}, sort=[("created_at", 1)]
-            )
-        return (store.get("city", "") if store else "").strip().lower()
-
-    # ── gift_vouchers ──
-    for doc in db.gift_vouchers.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):
-        city = _get_merchant_city(str(doc.get("merchant_id", "") or ""), str(doc.get("merchant_phone", "") or ""))
-        if city:
-            db.gift_vouchers.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
-            updated["gift_vouchers"] += 1
-
-    # ── merchant_vouchers ──
-    for doc in db.merchant_vouchers.find({"city": {"$in": [None, "", []]}}, {"merchant_id": 1, "merchant_phone": 1}):
-        city = _get_merchant_city(str(doc.get("merchant_id", "") or ""), str(doc.get("merchant_phone", "") or ""))
-        if city:
-            db.merchant_vouchers.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
-            updated["merchant_vouchers"] += 1
-
-    # ── promo_sliders (merchant banners) ──
-    for doc in db.promo_sliders.find({"city": {"$in": [None, "", []]}}, {"merchant_phone": 1, "merchant_name": 1}):
-        phone = str(doc.get("merchant_phone", "") or "")
-        city = ""
-        if phone:
-            store = db.stores.find_one(
-                {"$or": [{"phone": phone[-10:]}, {"owner_phone": phone[-10:]}]},
-                {"city": 1}, sort=[("created_at", 1)]
-            )
-            if store:
-                city = store.get("city", "").strip().lower()
-        if city:
-            db.promo_sliders.update_one({"_id": doc["_id"]}, {"$set": {"city": city}})
-            updated["promo_sliders"] += 1
-
-    return {"message": "City seed complete", "updated": updated}
 
 
 @router.put("/default-images")
@@ -3626,55 +2506,15 @@ async def admin_update_default_images(
     product_file: UploadFile = File(None),
     offer_file: UploadFile = File(None),
     city_file: UploadFile = File(None),
-    merchant_banner_file: UploadFile = File(None),
     a=Depends(get_current_admin),
 ):
-    """Upload default images. Saves Cloudinary URL if configured, else base64 fallback."""
-    import base64 as _b64mod, os as _di_os
     update = {}
-    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file), ("merchant_banner", merchant_banner_file)]:
-        if not f or not f.filename:
-            continue
-        raw  = await f.read()
-        mime = f.content_type or "image/jpeg"
-        b64_str = _b64mod.b64encode(raw).decode()
-        b64_data = f"data:{mime};base64,{b64_str}"
-
-        # Try Cloudinary first (same as category image upload)
-        cloud  = _di_os.getenv("CLOUDINARY_CLOUD_NAME", "")
-        api_key= _di_os.getenv("CLOUDINARY_API_KEY", "")
-        secret = _di_os.getenv("CLOUDINARY_API_SECRET", "")
-        saved_value = b64_data  # fallback
-        if cloud and api_key and secret:
-            try:
-                cdn_url = _cloudinary_upload(b64_data, folder="offro/defaults")
-                if cdn_url and cdn_url.startswith("http"):
-                    saved_value = cdn_url
-                    print(f"[DEFAULT-IMG] {field} uploaded to Cloudinary: {cdn_url}")
-                else:
-                    print(f"[DEFAULT-IMG] Cloudinary returned no URL for {field}, falling back to base64")
-            except Exception as e:
-                print(f"[DEFAULT-IMG] Cloudinary upload failed for {field}: {e}, falling back to base64")
-        else:
-            print(f"[DEFAULT-IMG] Cloudinary not configured — saving {field} as base64 (size: {len(b64_data)} chars)")
-
-        update[field] = saved_value
-
+    for field, f in [("store", store_file), ("product", product_file), ("offer", offer_file), ("city", city_file)]:
+        if f and f.filename:
+            content = await f.read()
+            mime = f.content_type or "image/jpeg"
+            b64 = base64.b64encode(content).decode()
+            update[field] = f"data:{mime};base64,{b64}"
     if update:
-        # Migrate string → array, then append
-        push_ops = {"$addToSet": {}}
-        for field, val in update.items():
-            push_ops["$addToSet"][field] = val
-        if push_ops["$addToSet"]:
-            doc = db.settings.find_one({"_type": "default_images"}) or {}
-            set_fixes = {}
-            for img_type in push_ops["$addToSet"]:
-                existing = doc.get(img_type)
-                if isinstance(existing, str):
-                    set_fixes[img_type] = [existing] if existing else []
-                elif not isinstance(existing, list):
-                    set_fixes[img_type] = []
-            if set_fixes:
-                db.settings.update_one({"_type": "default_images"}, {"$set": set_fixes}, upsert=True)
-            db.settings.update_one({"_type": "default_images"}, push_ops, upsert=True)
-    return {"ok": True, "uploaded": list(update.keys())}
+        db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
+    return {"ok": True}

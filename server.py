@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from routers import admin, users, public, merchant_app
 from database import db
 import base64, io, re
@@ -27,17 +27,30 @@ app.include_router(users.router,        prefix="/user")
 app.include_router(public.router)       # /stores /categories /store-image — public
 
 
-# ── Public products endpoint ──
-@app.get("/products-public")
-def public_products():
-    docs = list(db.products.find({"is_active": True}).sort("_id", -1))
+# ── File download endpoints ──
+@app.get("/download/admin_dashboard")
+def download_admin_dashboard():
+    return FileResponse(
+        path="templates/admin_dashboard.html",
+        media_type="text/html",
+        filename="admin_dashboard.html",
+        headers={"Content-Disposition": "attachment; filename=admin_dashboard.html"}
+    )
+
+# ── Public gift-voucher endpoint ──
+@app.get("/gift-vouchers")
+def public_gift_vouchers():
+    # Phase 1: Only Premium products shown in Discover Products (exclude standard/subscription-linked)
+    docs = list(db.gift_vouchers.find(
+        {"is_active": True, "product_type": {"$ne": "standard"}}
+    ).sort("_id", -1))
     result = []
     for v in docs:
         # Voucher image: proxy if base64
         logo = v.get("logo","") or ""
         vid  = str(v["_id"])
         if logo.startswith("data:image"):
-            logo_out = f"/product-image/{vid}"
+            logo_out = f"/voucher-image/{vid}"
         elif logo.startswith("http"):
             logo_out = logo
         else:
@@ -53,14 +66,14 @@ def public_products():
     return result
 
 
-# ── Product image proxy ──
-@app.get("/product-image/{vid}")
-def get_product_image(vid: str):
+# ── Voucher image proxy ──
+@app.get("/voucher-image/{vid}")
+def get_voucher_image(vid: str):
     from fastapi.responses import Response
     from fastapi import HTTPException
     from bson import ObjectId
     try:
-        doc = db.products.find_one({"_id": ObjectId(vid)}, {"logo": 1})
+        doc = db.gift_vouchers.find_one({"_id": ObjectId(vid)}, {"logo": 1})
     except Exception:
         raise HTTPException(400, "Bad id")
     if not doc:
@@ -89,25 +102,25 @@ def get_home_data(
     limit:    int = 50,
     skip:     int = 0,
 ):
-    """Returns stores + categories + products + promo-sliders in one call."""
+    """Returns stores + categories + gift-vouchers + promo-sliders in one call."""
     from routers.public import get_stores, get_categories, get_promo_sliders_public
 
     stores_resp = get_stores(city=city, category=category, limit=limit, skip=skip)
     cats = get_categories()
 
-    # Products — lightweight (no base64, just proxy URLs)
-    prod_docs = list(db.products.find({"is_active": True}).sort("_id", -1))
-    products = []
-    for v in prod_docs:
+    # Gift vouchers — lightweight (no base64, just proxy URLs)
+    gv_docs = list(db.gift_vouchers.find({"is_active": True}).sort("_id", -1))
+    gift_vouchers = []
+    for v in gv_docs:
         logo = v.get("logo","") or ""
         vid  = str(v["_id"])
         if logo.startswith("data:image"):
-            logo_out = f"/product-image/{vid}"
+            logo_out = f"/voucher-image/{vid}"
         elif logo.startswith("http"):
             logo_out = logo
         else:
             logo_out = ""
-        products.append({
+        gift_vouchers.append({
             "id":       vid,
             "title":    v.get("title",""),
             "text":     v.get("text",""),
@@ -125,7 +138,7 @@ def get_home_data(
         "total":        stores_resp.get("total", 0),
         "has_more":     stores_resp.get("has_more", False),
         "categories":   cats,
-        "products": products,
+        "gift_vouchers": gift_vouchers,
         "promo_sliders": promo_sliders,
     }
 
@@ -195,8 +208,14 @@ async def register_fcm_token(request: Request):
 
 @app.on_event("startup")
 def startup():
-    admin.seed_admin()
-    _ensure_indexes()
+    try:
+        admin.seed_admin()
+    except Exception as e:
+        print(f"⚠️  seed_admin skipped (DB unreachable at startup): {e}")
+    try:
+        _ensure_indexes()
+    except Exception as e:
+        print(f"⚠️  index creation skipped (DB unreachable at startup): {e}")
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
         from routers.otp_service import _ensure_otp_indexes
@@ -288,66 +307,6 @@ def serve_merchant_dashboard(request: Request):
         import traceback
         return HTMLResponse(f"<pre>Template Error:\n{traceback.format_exc()}</pre>", status_code=500)
 
-
-# ─── Admin Banners CRUD ──────────────────────────────────────────────────────
-from bson import ObjectId as _ObjId
-import base64 as _b64, uuid as _uuid
-
-@app.get("/admin/banners")
-def admin_list_banners():
-    docs = list(db.admin_banners.find().sort("sort_order", 1))
-    result = []
-    for d in docs:
-        img = d.get("image_url","") or d.get("image","")
-        result.append({
-            "id":         str(d["_id"]),
-            "title":      d.get("title",""),
-            "subtitle":   d.get("subtitle",""),
-            "image_url":  img,
-            "link_url":   d.get("link_url",""),
-            "sort_order": d.get("sort_order",0),
-            "is_active":  d.get("is_active",True),
-            "created_at": str(d.get("created_at","")),
-        })
-    return result
-
-@app.post("/admin/banners")
-async def admin_create_banner(request: Request):
-    from datetime import datetime
-    data = await request.json()
-    # Handle base64 image upload → store as URL string in DB
-    img_url = data.get("image_url","") or data.get("image","")
-    doc = {
-        "title":      data.get("title",""),
-        "subtitle":   data.get("subtitle",""),
-        "image_url":  img_url,
-        "link_url":   data.get("link_url",""),
-        "sort_order": int(data.get("sort_order",0)),
-        "is_active":  data.get("is_active",True),
-        "created_at": datetime.utcnow(),
-    }
-    r = db.admin_banners.insert_one(doc)
-    return {"ok":True,"id":str(r.inserted_id)}
-
-@app.put("/admin/banners/{banner_id}")
-async def admin_update_banner(banner_id: str, request: Request):
-    data = await request.json()
-    img_url = data.get("image_url","") or data.get("image","")
-    update = {
-        "title":      data.get("title",""),
-        "subtitle":   data.get("subtitle",""),
-        "image_url":  img_url,
-        "link_url":   data.get("link_url",""),
-        "sort_order": int(data.get("sort_order",0)),
-        "is_active":  data.get("is_active",True),
-    }
-    db.admin_banners.update_one({"_id": _ObjId(banner_id)}, {"$set": update})
-    return {"ok":True}
-
-@app.delete("/admin/banners/{banner_id}")
-def admin_delete_banner(banner_id: str):
-    db.admin_banners.delete_one({"_id": _ObjId(banner_id)})
-    return {"ok":True}
 
 @app.get("/health")
 def health():

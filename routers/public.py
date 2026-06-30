@@ -1152,8 +1152,8 @@ def get_gift_vouchers_public(city: str = ""):
         except Exception:
             return ""
 
-    # ── 1. gift_vouchers collection ──────────────────────────────────────────
-    for d in db.gift_vouchers.find({}).sort("_id", -1):
+    # ── 1. gift_vouchers collection (Premium only — Standard are subscription-linked, shown in Store Detail) ──
+    for d in db.gift_vouchers.find({"product_type": {"$ne": "standard"}}).sort("_id", -1):
         if not _is_active(d): continue
         vid = str(d["_id"])
         if vid in seen_ids: continue
