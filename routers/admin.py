@@ -370,9 +370,31 @@ def list_accounts(a=Depends(get_current_admin)):
         total_pts = (acct.get("visit_pts", acct.get("visit_points", 0) or 0) +
                      acct.get("pool_pts", 0))
 
+        is_merchant = "merchant" in roles
+        # mid may be missing from account doc; fall back to acct_id for merchant accounts
+        eff_mid = mid or (acct_id if is_merchant else "")
+
+        def _or_query(mid_val, phone_val):
+            parts = []
+            if mid_val:  parts += [{"merchant_id": mid_val}]
+            if phone_val: parts += [{"merchant_phone": phone_val}]
+            return {"$or": parts} if len(parts) > 1 else (parts[0] if parts else {"_id": None})
+
+        store_count = 0
+        product_count = 0
+        banner_count = 0
+        if eff_mid or phone:
+            store_q = _or_query(eff_mid, phone)
+            store_count   = db.stores.count_documents(store_q)
+            product_count = (
+                db.merchant_vouchers.count_documents(_or_query(eff_mid, phone)) +
+                db.gift_vouchers.count_documents(_or_query(eff_mid, phone))
+            )
+            banner_count = db.merchant_banners.count_documents(_or_query(eff_mid, phone))
+
         result.append({
             "account_id":    acct_id,
-            "merchant_id":   mid,
+            "merchant_id":   eff_mid,
             "user_id":       acct.get("user_id", acct_id),
             "full_name":     acct.get("name", ""),
             "mobile_number": phone,
@@ -383,14 +405,9 @@ def list_accounts(a=Depends(get_current_admin)):
             "visit_pts":     acct.get("visit_pts", acct.get("visit_points", 0) or 0),
             "pool_pts":      acct.get("pool_pts", 0),
             "scans":         acct.get("scans", 0),
-            "store_count":   db.stores.count_documents({"merchant_id": mid}) if mid else 0,
-            "product_count": (
-                db.merchant_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}) +
-                db.gift_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
-            ) if mid else 0,
-            "banner_count":  db.merchant_banners.count_documents(
-                {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
-            ) if mid else 0,
+            "store_count":   store_count,
+            "product_count": product_count,
+            "banner_count":  banner_count,
             "created_at":    str(acct.get("created_at", ""))[:10],
         })
     return result
@@ -2556,16 +2573,16 @@ async def admin_update_default_images(
 
 @router.get("/banners")
 def list_admin_banners(a=Depends(get_current_admin)):
-    """Admin banners — reads from promo_sliders (same backing store)."""
+    """Admin-created banners — stored in admin_banners (separate from promo_sliders = merchant banners)."""
     banners = []
-    for b in db.promo_sliders.find().sort("sort_order", 1):
+    for b in db.admin_banners.find().sort("sort_order", 1):
         created = b.get("created_at", "")
         created_str = created.strftime("%d %b %Y %H:%M") if isinstance(created, datetime) else str(created)[:16]
         banners.append({
             "id":         str(b["_id"]),
             "image_url":  b.get("image_url", ""),
             "title":      b.get("title", ""),
-            "subtitle":   b.get("subtitle", b.get("merchant_name", "")),
+            "subtitle":   b.get("subtitle", ""),
             "link_url":   b.get("link_url", ""),
             "sort":       b.get("sort_order", 0),
             "is_pinned":  b.get("is_pinned", False),
@@ -2577,7 +2594,7 @@ def list_admin_banners(a=Depends(get_current_admin)):
 
 @router.post("/banners")
 def create_admin_banner(data: dict, a=Depends(get_current_admin)):
-    """Creates an admin banner in promo_sliders collection."""
+    """Creates an admin banner in the admin_banners collection."""
     doc = {
         "image_url":  data.get("image_url", ""),
         "title":      data.get("title", ""),
@@ -2589,7 +2606,7 @@ def create_admin_banner(data: dict, a=Depends(get_current_admin)):
         "source":     "admin",
         "created_at": datetime.utcnow(),
     }
-    res = db.promo_sliders.insert_one(doc)
+    res = db.admin_banners.insert_one(doc)
     return {"ok": True, "id": str(res.inserted_id)}
 
 
@@ -2605,7 +2622,7 @@ def update_admin_banner(bid: str, data: dict, a=Depends(get_current_admin)):
     elif "sort" in data:
         update["sort_order"] = int(data["sort"])
     try:
-        db.promo_sliders.update_one({"_id": ObjectId(bid)}, {"$set": update})
+        db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
     except Exception:
         raise HTTPException(400, "Invalid banner ID")
     return {"ok": True}
@@ -2615,7 +2632,7 @@ def update_admin_banner(bid: str, data: dict, a=Depends(get_current_admin)):
 def delete_admin_banner(bid: str, a=Depends(get_current_admin)):
     from bson import ObjectId
     try:
-        db.promo_sliders.delete_one({"_id": ObjectId(bid)})
+        db.admin_banners.delete_one({"_id": ObjectId(bid)})
     except Exception:
         raise HTTPException(400, "Invalid banner ID")
     return {"ok": True}
@@ -2633,6 +2650,21 @@ def _fmt_admin_product_row(v, collection):
     src   = v.get("source", "admin")
     # Normalise source: merchant_standard / merchant_premium → merchant
     is_merchant_src = src == "merchant" or src.startswith("merchant_")
+    ptype = v.get("product_type", "premium")
+    # Build validity: use stored validity field, or construct from dates, or "Ongoing" for standard
+    raw_validity = v.get("validity", "")
+    from_d = str(v.get("from_date", ""))[:10]
+    end_d  = str(v.get("end_date", ""))[:10]
+    if raw_validity:
+        computed_validity = raw_validity
+    elif from_d and end_d:
+        computed_validity = f"{from_d} → {end_d}"
+    elif end_d:
+        computed_validity = f"Until {end_d}"
+    elif ptype == "standard":
+        computed_validity = "Ongoing"
+    else:
+        computed_validity = ""
     return {
         "id":                str(v["_id"]),
         "_id":               str(v["_id"]),
@@ -2642,13 +2674,13 @@ def _fmt_admin_product_row(v, collection):
         "text":              v.get("text", ""),
         "offer_text":        v.get("text", ""),
         "price":             v.get("price", 0),
-        "from_date":         str(v.get("from_date", ""))[:10],
-        "end_date":          str(v.get("end_date", ""))[:10],
-        "validity":          v.get("validity", ""),
+        "from_date":         from_d,
+        "end_date":          end_d,
+        "validity":          computed_validity,
         "is_active":         v.get("is_active", True),
         "status":            v.get("status", "approved"),
         "source":            "merchant" if is_merchant_src else "admin",
-        "product_type":      v.get("product_type", "premium"),
+        "product_type":      ptype,
         "source_product_id": str(v.get("source_product_id", "")),
         "merchant_id":       mid,
         "merchant_name":     v.get("merchant_name", ""),
