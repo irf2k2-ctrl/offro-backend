@@ -384,6 +384,13 @@ def list_accounts(a=Depends(get_current_admin)):
             "pool_pts":      acct.get("pool_pts", 0),
             "scans":         acct.get("scans", 0),
             "store_count":   db.stores.count_documents({"merchant_id": mid}) if mid else 0,
+            "product_count": (
+                db.merchant_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}) +
+                db.gift_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
+            ) if mid else 0,
+            "banner_count":  db.merchant_banners.count_documents(
+                {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
+            ) if mid else 0,
             "created_at":    str(acct.get("created_at", ""))[:10],
         })
     return result
@@ -2518,3 +2525,203 @@ async def admin_update_default_images(
     if update:
         db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
     return {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════════════
+# ADMIN BANNERS  (admin-created, shown on app home screen)
+# ══════════════════════════════════════════════════════════════════
+
+@router.get("/banners")
+def list_admin_banners(a=Depends(get_current_admin)):
+    banners = []
+    for b in db.admin_banners.find().sort("sort", 1):
+        banners.append({
+            "id":         str(b["_id"]),
+            "image_url":  b.get("image_url", ""),
+            "title":      b.get("title", ""),
+            "subtitle":   b.get("subtitle", ""),
+            "link_url":   b.get("link_url", ""),
+            "sort":       b.get("sort", 0),
+            "is_pinned":  b.get("is_pinned", False),
+            "is_active":  b.get("is_active", True),
+            "created_at": str(b.get("created_at", ""))[:19],
+        })
+    return banners
+
+
+@router.post("/banners")
+def create_admin_banner(data: dict, a=Depends(get_current_admin)):
+    from datetime import datetime
+    doc = {
+        "image_url":  data.get("image_url", ""),
+        "title":      data.get("title", ""),
+        "subtitle":   data.get("subtitle", ""),
+        "link_url":   data.get("link_url", ""),
+        "sort":       int(data.get("sort", 0)),
+        "is_pinned":  bool(data.get("is_pinned", False)),
+        "is_active":  bool(data.get("is_active", True)),
+        "created_at": datetime.utcnow(),
+    }
+    res = db.admin_banners.insert_one(doc)
+    return {"ok": True, "id": str(res.inserted_id)}
+
+
+@router.put("/banners/{bid}")
+def update_admin_banner(bid: str, data: dict, a=Depends(get_current_admin)):
+    from bson import ObjectId
+    update = {}
+    for f in ["image_url", "title", "subtitle", "link_url", "sort", "is_pinned", "is_active"]:
+        if f in data:
+            update[f] = data[f]
+    try:
+        db.admin_banners.update_one({"_id": ObjectId(bid)}, {"$set": update})
+    except Exception:
+        raise HTTPException(400, "Invalid banner ID")
+    return {"ok": True}
+
+
+@router.delete("/banners/{bid}")
+def delete_admin_banner(bid: str, a=Depends(get_current_admin)):
+    from bson import ObjectId
+    try:
+        db.admin_banners.delete_one({"_id": ObjectId(bid)})
+    except Exception:
+        raise HTTPException(400, "Invalid banner ID")
+    return {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════════════
+# ADMIN PRODUCTS  (unified product-card management)
+# Read from gift_vouchers + products collections; merchant submissions
+# come from merchant_vouchers via /admin/merchant-products.
+# ══════════════════════════════════════════════════════════════════
+
+def _fmt_admin_product_row(v, collection):
+    mid   = v.get("merchant_id", "")
+    phone = v.get("merchant_phone", "")
+    return {
+        "id":              str(v["_id"]),
+        "_id":             str(v["_id"]),
+        "_collection":     collection,
+        "logo":            v.get("logo", ""),
+        "title":           v.get("title", ""),
+        "text":            v.get("text", ""),
+        "offer_text":      v.get("text", ""),
+        "price":           v.get("price", 0),
+        "from_date":       str(v.get("from_date", ""))[:10],
+        "end_date":        str(v.get("end_date", ""))[:10],
+        "validity":        v.get("validity", ""),
+        "is_active":       v.get("is_active", True),
+        "status":          v.get("status", "approved"),
+        "source":          v.get("source", "admin"),
+        "product_type":    v.get("product_type", "premium"),
+        "merchant_id":     mid,
+        "merchant_name":   v.get("merchant_name", ""),
+        "merchant_phone":  phone,
+        "store_id":        v.get("store_id", ""),
+        "store_name":      v.get("store_name", ""),
+        "city":            v.get("city", ""),
+        "created_at":      str(v.get("created_at", ""))[:19],
+    }
+
+
+@router.get("/products")
+def list_admin_products(a=Depends(get_current_admin)):
+    """All admin product cards (gift_vouchers + products collections)."""
+    result = []
+    for v in db.gift_vouchers.find().sort("_id", -1):
+        result.append(_fmt_admin_product_row(v, "gift_vouchers"))
+    for v in db.products.find().sort("_id", -1):
+        result.append(_fmt_admin_product_row(v, "products"))
+    return result
+
+
+@router.post("/products")
+def create_admin_product(data: dict, a=Depends(get_current_admin)):
+    from datetime import datetime
+    doc = {
+        "title":          data.get("title", ""),
+        "text":           data.get("text", ""),
+        "logo":           data.get("logo", ""),
+        "price":          float(data.get("price", 0)),
+        "from_date":      data.get("from_date", ""),
+        "end_date":       data.get("end_date", ""),
+        "validity":       data.get("validity", ""),
+        "is_active":      bool(data.get("is_active", True)),
+        "status":         "approved",
+        "source":         "admin",
+        "product_type":   data.get("product_type", "premium"),
+        "merchant_id":    data.get("merchant_id", ""),
+        "merchant_name":  data.get("merchant_name", ""),
+        "merchant_phone": data.get("merchant_phone", ""),
+        "store_id":       data.get("store_id", ""),
+        "store_name":     data.get("store_name", ""),
+        "city":           data.get("city", ""),
+        "created_at":     datetime.utcnow(),
+    }
+    col = data.get("_collection", "gift_vouchers")
+    collection = db.products if col == "products" else db.gift_vouchers
+    res = collection.insert_one(doc)
+    return {"ok": True, "id": str(res.inserted_id)}
+
+
+@router.put("/products/{vid}")
+def update_admin_product(vid: str, data: dict, a=Depends(get_current_admin)):
+    from bson import ObjectId
+    col = data.pop("_collection", "gift_vouchers")
+    update = {k: v for k, v in data.items() if k not in ["_id", "id"]}
+    collection = db.products if col == "products" else db.gift_vouchers
+    try:
+        oid = ObjectId(vid)
+        res = collection.update_one({"_id": oid}, {"$set": update})
+        if res.matched_count == 0:
+            other = db.gift_vouchers if col == "products" else db.products
+            other.update_one({"_id": oid}, {"$set": update})
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    return {"ok": True}
+
+
+@router.delete("/products/{vid}")
+def delete_admin_product(vid: str, a=Depends(get_current_admin)):
+    from bson import ObjectId
+    try:
+        oid = ObjectId(vid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    r1 = db.gift_vouchers.delete_one({"_id": oid})
+    if r1.deleted_count == 0:
+        db.products.delete_one({"_id": oid})
+    return {"ok": True}
+
+
+@router.get("/merchant-products")
+def list_merchant_products(a=Depends(get_current_admin)):
+    """Merchant-submitted product cards (merchant_vouchers collection)."""
+    result = []
+    for v in db.merchant_vouchers.find().sort("_id", -1):
+        result.append({
+            "id":              str(v["_id"]),
+            "_id":             str(v["_id"]),
+            "_collection":     "merchant_vouchers",
+            "logo":            v.get("logo", ""),
+            "title":           v.get("title", ""),
+            "text":            v.get("text", ""),
+            "offer_text":      v.get("text", ""),
+            "price":           v.get("price", 0),
+            "from_date":       str(v.get("from_date", ""))[:10],
+            "end_date":        str(v.get("end_date", ""))[:10],
+            "validity":        v.get("validity", ""),
+            "is_active":       v.get("is_active", True),
+            "status":          v.get("status", "pending"),
+            "approval_status": v.get("approval_status", v.get("status", "pending")),
+            "product_type":    v.get("product_type", "premium"),
+            "merchant_id":     v.get("merchant_id", ""),
+            "merchant_name":   v.get("merchant_name", ""),
+            "merchant_phone":  v.get("merchant_phone", ""),
+            "store_id":        v.get("store_id", ""),
+            "store_name":      v.get("store_name", ""),
+            "city":            v.get("city", ""),
+            "created_at":      str(v.get("created_at", ""))[:19],
+        })
+    return result

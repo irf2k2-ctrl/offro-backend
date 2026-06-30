@@ -603,6 +603,11 @@ tr:hover td{background:#f7faf8;}
         <label class="form-label fw-bold">GST Percentage (%)</label>
         <input id="gst_input" class="form-control" type="number" style="max-width:160px;" placeholder="18">
       </div>
+      <div class="mb-4">
+        <label class="form-label fw-bold">Standard Product Limit <small style="color:#6b8c7e;font-weight:normal;">(free products per merchant)</small></label>
+        <input id="std_product_limit_input" class="form-control" type="number" min="0" style="max-width:160px;" placeholder="10">
+        <small class="text-muted">Max Standard (free) products a merchant can create. Set 0 for unlimited.</small>
+      </div>
       <div id="plans_editor"></div>
       <hr style="margin:24px 0;">
       <div style="background:#f0f9f4;border-radius:12px;padding:20px;border:1px solid #c3dfc6;">
@@ -1724,6 +1729,8 @@ async function loadPricing(){
   let r=await fetch("/admin/pricing",{credentials:"include"});
   let d=await r.json();
   document.getElementById("gst_input").value=(d.gst_percent!=null?d.gst_percent:18);
+  const stdLimitEl = document.getElementById("std_product_limit_input");
+  if (stdLimitEl) stdLimitEl.value = (d.standard_product_limit != null ? d.standard_product_limit : 10);
   currentPlans=d.plans||[];
   let rate=d.conversion_rate||0.10;
   document.getElementById("conversion_rate_input").value=rate;
@@ -1749,8 +1756,10 @@ async function savePricing(){
   let rate=parseFloat(document.getElementById("conversion_rate_input").value)||0.10;
   let minW=parseInt(document.getElementById("min_withdraw_input").value)||200;
   let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
+  const stdLimitRaw = document.getElementById("std_product_limit_input")?.value;
+  const stdLimit = (stdLimitRaw === '' || stdLimitRaw == null) ? 10 : parseInt(stdLimitRaw);
   let r=await fetch("/admin/pricing",{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({gst_percent:gst,plans,conversion_rate:rate,min_withdraw_points:minW}),credentials:"include"});
+    body:JSON.stringify({gst_percent:gst,plans,conversion_rate:rate,min_withdraw_points:minW,standard_product_limit:stdLimit}),credentials:"include"});
   document.getElementById("pricing_msg").innerText=r.ok?"✅ All settings saved!":"❌ Error saving";
   setTimeout(()=>document.getElementById("pricing_msg").innerText="",2500);
 }
@@ -6310,22 +6319,26 @@ function _renderDiTable(type, urls) {
     tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr>';
     return;
   }
-  tbody.innerHTML = urls.map((url, i) => `
-    <tr>
+  tbody.innerHTML = urls.map((url, i) => {
+    const isBase64 = url && url.startsWith('data:');
+    const displayUrl = isBase64 ? '[Uploaded file — replace with a public HTTPS URL using the URL field below]' : url;
+    const safeUrl = (url || '').replace(/'/g, "\\'");
+    return `<tr>
       <td style="padding:6px 10px;vertical-align:middle">
         <img src="${url}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd"
           onerror="this.style.display='none'">
       </td>
       <td style="padding:6px 10px;vertical-align:middle;word-break:break-all;font-size:12px;color:var(--muted)">
-        ${url}
+        ${isBase64 ? `<span style="color:#856404;font-style:italic;">${displayUrl}</span>` : displayUrl}
       </td>
       <td style="padding:6px 10px;vertical-align:middle">
         <button class="btn btn-sm" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px"
-          onclick="diRemoveUrl('${type}','${url.replace(/'/g,"\'")}')">
+          onclick="diRemoveUrl('${type}','${safeUrl}')">
           <i class="fas fa-trash-alt"></i>
         </button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 async function diAddUrl(type) {
