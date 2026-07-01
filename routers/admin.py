@@ -443,13 +443,25 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     subscriptions = []
     invoices      = []
 
-    if is_merchant and mid:
-        store_count   = db.stores.count_documents({"merchant_id": mid})
-        banner_count  = db.merchant_banners.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
-        voucher_count = db.merchant_vouchers.count_documents({"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]})
+    # Same fallback as list_accounts: mid may be absent; use acct_id for merchants
+    eff_mid = mid or (acct_id if is_merchant else "")
+
+    def _or_q(mid_v, ph_v):
+        parts = []
+        if mid_v: parts.append({"merchant_id": mid_v})
+        if ph_v:  parts.append({"merchant_phone": ph_v})
+        return {"$or": parts} if len(parts) > 1 else (parts[0] if parts else {"_id": None})
+
+    if is_merchant and (eff_mid or phone):
+        store_count   = db.stores.count_documents(_or_q(eff_mid, phone))
+        banner_count  = db.merchant_banners.count_documents(_or_q(eff_mid, phone))
+        voucher_count = (
+            db.merchant_vouchers.count_documents(_or_q(eff_mid, phone)) +
+            db.gift_vouchers.count_documents(_or_q(eff_mid, phone))
+        )
 
         for s in db.subscriptions.find(
-            {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
+            _or_q(eff_mid, phone)
         ).sort("created_at", -1).limit(5):
             subscriptions.append({
                 "plan":       s.get("plan",""),
@@ -459,7 +471,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
             })
 
         for inv in db.invoices.find(
-            {"$or": [{"merchant_id": mid}, {"merchant_phone": phone}]}
+            _or_q(eff_mid, phone)
         ).sort("created_at", -1).limit(10):
             invoices.append({
                 "invoice_no":  inv.get("invoice_no",""),

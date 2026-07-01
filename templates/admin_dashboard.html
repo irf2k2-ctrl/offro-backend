@@ -6294,17 +6294,14 @@ async function loadDefaultImages() {
       const urls = Array.isArray(d[type]) ? d[type] : (d[type] ? [d[type]] : []);
       _renderDiTable(type, urls);
     }
-    // Load no-service config
-    const nsUrls = Array.isArray(d.no_service) ? d.no_service : [];
-    if (nsUrls.length) {
+    // Load no-service config — API returns no_service_url (string)
+    const nsUrl = d.no_service_url || '';
+    if (nsUrl) {
       const el = document.getElementById('di_no_service_url');
-      if (el) el.value = nsUrls[nsUrls.length-1] || '';
+      if (el) el.value = nsUrl;
       const prev = document.getElementById('di_no_service_preview');
       const wrap = document.getElementById('di_no_service_preview_wrap');
-      if (prev && nsUrls[nsUrls.length-1]) {
-        prev.src = nsUrls[nsUrls.length-1];
-        if (wrap) wrap.style.display = 'block';
-      }
+      if (prev) { prev.src = nsUrl; if (wrap) wrap.style.display = 'block'; }
     }
     if (d.no_service_title !== undefined) {
       const el = document.getElementById('di_no_service_title');
