@@ -5643,7 +5643,8 @@ function loadP2All() { loadP2Summary(); loadP2Revenue(); loadP2TopMerchants(); l
 
 async function loadP2Summary() {
   try {
-    const d = await apiFetch('/products/summary');
+    const r = await fetch('/admin/products/summary', {credentials:'include'});
+    const d = await r.json();
     document.getElementById('p2_total_premium').textContent   = d.total_premium   ?? '--';
     document.getElementById('p2_live_premium').textContent    = d.live_premium     ?? '--';
     document.getElementById('p2_pending_premium').textContent = d.pending_premium  ?? '--';
@@ -5654,7 +5655,8 @@ async function loadP2Summary() {
 
 async function loadP2Revenue() {
   try {
-    const d = await apiFetch('/products/revenue');
+    const r = await fetch('/admin/products/revenue', {credentials:'include'});
+    const d = await r.json();
     document.getElementById('p2_rev_today').textContent = '₹' + (d.today      ?? 0);
     document.getElementById('p2_rev_month').textContent = '₹' + (d.this_month ?? 0);
     document.getElementById('p2_rev_life').textContent  = '₹' + (d.lifetime   ?? 0);
@@ -5664,8 +5666,9 @@ async function loadP2Revenue() {
 async function loadP2TopMerchants() {
   const tbody = document.getElementById('p2_top_merchants_table');
   try {
-    const rows = await apiFetch('/products/top-merchants');
-    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--muted)">No data yet</td></tr>'; return; }
+    const r = await fetch('/admin/products/top-merchants', {credentials:'include'});
+    const rows = await r.json();
+    if (!Array.isArray(rows) || !rows.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--muted)">No data yet</td></tr>'; return; }
     tbody.innerHTML = rows.map((r,i) => `<tr>
       <td>${i+1}</td>
       <td><strong>${r.merchant_name||'-'}</strong></td>
@@ -5678,16 +5681,17 @@ async function loadP2TopMerchants() {
 async function loadP2Expiry() {
   const tbody = document.getElementById('p2_expiry_table');
   try {
-    const rows = await apiFetch('/products/expiring?days=7');
-    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:14px;color:var(--muted)">No products expiring soon ✅</td></tr>'; return; }
-    tbody.innerHTML = rows.map(r => `<tr>
-      <td><strong>${r.title||'-'}</strong></td>
-      <td>${r.merchant_name||'-'}</td>
-      <td>${r.merchant_phone||'-'}</td>
-      <td>${r.store_name||'-'}</td>
-      <td>${(r.end_date||'').slice(0,10)}</td>
-      <td><span class="${r.days_left<=2?'badge-inactive':'badge-waiting'}">${r.days_left}d</span></td>
-      <td><button class="btn-o" onclick="adminExtendProduct('${r.id}')">+7 days</button></td>
+    const r = await fetch('/admin/products/expiring?days=7', {credentials:'include'});
+    const rows = await r.json();
+    if (!Array.isArray(rows) || !rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:14px;color:var(--muted)">No products expiring soon ✅</td></tr>'; return; }
+    tbody.innerHTML = rows.map(row => `<tr>
+      <td><strong>${row.title||'-'}</strong></td>
+      <td>${row.merchant_name||'-'}</td>
+      <td>${row.merchant_phone||'-'}</td>
+      <td>${row.store_name||'-'}</td>
+      <td>${(row.end_date||'').slice(0,10)}</td>
+      <td><span class="${row.days_left<=2?'badge-inactive':'badge-waiting'}">${row.days_left}d</span></td>
+      <td><button class="btn-o" onclick="adminExtendProduct('${row.id}')">+7 days</button></td>
     </tr>`).join('');
   } catch(e) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:14px;color:red">Error loading</td></tr>'; }
 }
