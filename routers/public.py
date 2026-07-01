@@ -1252,3 +1252,102 @@ def get_default_images():
         "no_service_title": str(doc.get("no_service_title", "") or ""),
         "no_service_message": str(doc.get("no_service_message", "") or ""),
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# PHASE 2 — PUBLIC PRODUCT ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+@router.post("/products/{pid}/track")
+def track_product_event(pid: str, data: dict):
+    """Track a product event (view, share, open) from the Flutter app."""
+    from bson import ObjectId as _OId4
+    from datetime import datetime as _dtt
+    event = data.get("event", "view")
+    if event not in ("view", "share", "open"):
+        event = "view"
+    merchant_id = data.get("merchant_id", "")
+    db.product_events.insert_one({
+        "product_id": pid, "merchant_id": merchant_id,
+        "event": event, "created_at": _dtt.utcnow(),
+    })
+    for col in [db.merchant_vouchers, db.gift_vouchers]:
+        try:
+            col.update_one({"_id": _OId4(pid)}, {"$inc": {f"{event}_count": 1}})
+        except Exception:
+            pass
+    return {"ok": True}
+
+
+@router.get("/products/{pid}/similar")
+def get_similar_products(pid: str, limit: int = 6):
+    """Return similar products (same category/city) for the detail page."""
+    from bson import ObjectId as _OId5
+    from datetime import datetime as _dt2
+    _now2 = _dt2.utcnow()
+    src = None
+    try:
+        _oid = _OId5(pid)
+        src = db.merchant_vouchers.find_one({"_id": _oid}) or db.gift_vouchers.find_one({"_id": _oid})
+    except Exception:
+        pass
+    if not src:
+        return []
+    category = src.get("category", "")
+    city     = src.get("city", "")
+    results  = []
+    seen     = {pid}
+    cat_q    = {"$regex": category, "$options": "i"} if category else {"$exists": True}
+    city_q   = {"$regex": city,     "$options": "i"} if city     else {"$exists": True}
+    for p in db.merchant_vouchers.find(
+        {"status": "approved", "approval_status": "approved", "category": cat_q, "city": city_q}
+    ).limit(limit + 5):
+        sid = str(p["_id"])
+        if sid in seen: continue
+        ed = p.get("end_date")
+        if ed and isinstance(ed, _dt2) and ed < _now2: continue
+        seen.add(sid)
+        results.append({
+            "_id": sid, "title": p.get("title",""),
+            "offer_text": p.get("offer_text",""),
+            "logo_url": (p.get("logo_url") or p.get("image_url") or ""),
+            "price": str(p.get("price","") or ""),
+        })
+        if len(results) >= limit: break
+    return results
+
+
+@router.get("/products/by-store/{store_id}")
+def get_products_by_store(store_id: str, limit: int = 20):
+    """Return all visible products for a given store (MoreFromStore widget)."""
+    from datetime import datetime as _dt3
+    from bson import ObjectId as _OId6
+    _now3 = _dt3.utcnow()
+    results = []
+    seen    = set()
+    _oid_clauses = [{"store_id": store_id}]
+    try: _oid_clauses.append({"store_id": _OId6(store_id)})
+    except Exception: pass
+    q_oid = {"$or": _oid_clauses}
+    for p in db.merchant_vouchers.find(
+        {**q_oid, "status": "approved", "approval_status": "approved"}
+    ).sort("created_at", -1).limit(limit):
+        ed = p.get("end_date")
+        if ed and isinstance(ed, _dt3) and ed < _now3: continue
+        pid = str(p["_id"])
+        if pid in seen: continue
+        seen.add(pid)
+        results.append({"_id": pid, "title": p.get("title",""),
+                        "offer_text": p.get("offer_text",""),
+                        "logo_url": (p.get("logo_url") or p.get("image_url") or ""),
+                        "price": str(p.get("price","") or ""), "product_type": "premium"})
+    for p in db.gift_vouchers.find(q_oid).sort("_id", -1).limit(limit):
+        if p.get("is_active", True) in (False, "false", "0", 0): continue
+        pid = str(p["_id"])
+        if pid in seen: continue
+        seen.add(pid)
+        results.append({"_id": pid, "title": p.get("title",""),
+                        "offer_text": p.get("offer_text","") or p.get("text",""),
+                        "logo_url": (p.get("logo_url") or p.get("image_url") or ""),
+                        "price": str(p.get("price","") or ""), "product_type": "standard"})
+    return results[:limit]

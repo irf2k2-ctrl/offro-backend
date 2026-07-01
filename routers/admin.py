@@ -2804,3 +2804,143 @@ def list_merchant_products(a=Depends(get_current_admin)):
             "created_at":      str(v.get("created_at", ""))[:19],
         })
     return result
+
+
+# ═══════════════════════════════════════════════════════════
+# PHASE 2 — ADMIN PRODUCT MANAGEMENT
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/products/summary")
+def admin_product_summary(a=Depends(get_current_admin)):
+    """High-level product counts for the admin Phase 2 dashboard panel."""
+    from datetime import datetime as _dt4
+    _now4 = _dt4.utcnow()
+    return {
+        "total_premium":   db.merchant_vouchers.count_documents({}),
+        "live_premium":    db.merchant_vouchers.count_documents(
+            {"approval_status": "approved", "end_date": {"$gt": _now4}}),
+        "expired_premium": db.merchant_vouchers.count_documents({"end_date": {"$lt": _now4}}),
+        "pending_premium": db.merchant_vouchers.count_documents(
+            {"approval_status": {"$in": ["pending", "pending_approval"]}}),
+        "total_standard":  db.gift_vouchers.count_documents({}),
+    }
+
+
+@router.get("/products/revenue")
+def admin_product_revenue(a=Depends(get_current_admin)):
+    """Revenue from product upgrade + renewal orders (today / month / lifetime)."""
+    from datetime import datetime as _dt5
+    _now5 = _dt5.utcnow()
+    _today = _dt5(_now5.year, _now5.month, _now5.day)
+    _month = _dt5(_now5.year, _now5.month, 1)
+    _epoch = _dt5(2020, 1, 1)
+
+    def _sum(col_name, since):
+        res = list(db[col_name].aggregate([
+            {"$match": {"status": "paid", "created_at": {"$gte": since}}},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+        ]))
+        return res[0]["total"] if res else 0
+
+    return {
+        "today":      _sum("product_upgrade_orders", _today)  + _sum("product_renewal_orders", _today),
+        "this_month": _sum("product_upgrade_orders", _month)  + _sum("product_renewal_orders", _month),
+        "lifetime":   _sum("product_upgrade_orders", _epoch)  + _sum("product_renewal_orders", _epoch),
+    }
+
+
+@router.get("/products/expiring")
+def admin_expiring_products(days: int = 7, a=Depends(get_current_admin)):
+    """Products expiring within `days` days — for admin expiry monitor."""
+    from datetime import datetime as _dt6, timedelta as _td6
+    _now6 = _dt6.utcnow()
+    _soon = _now6 + _td6(days=days)
+    docs = list(db.merchant_vouchers.find(
+        {"approval_status": "approved", "end_date": {"$gte": _now6, "$lte": _soon}},
+        {"title":1,"merchant_id":1,"merchant_name":1,"merchant_phone":1,"store_name":1,"end_date":1}
+    ).sort("end_date", 1).limit(100))
+    return [{
+        "id":             str(d["_id"]),
+        "title":          d.get("title",""),
+        "merchant_name":  d.get("merchant_name",""),
+        "merchant_phone": d.get("merchant_phone",""),
+        "store_name":     d.get("store_name",""),
+        "end_date":       str(d.get("end_date",""))[:19],
+        "days_left":      max(0,(d["end_date"]-_now6).days) if isinstance(d.get("end_date"),_dt6) else 0,
+    } for d in docs]
+
+
+@router.get("/products/top-merchants")
+def admin_top_merchants(limit: int = 10, a=Depends(get_current_admin)):
+    """Merchants ranked by number of approved premium products."""
+    rows = list(db.merchant_vouchers.aggregate([
+        {"$match": {"approval_status": "approved"}},
+        {"$group": {"_id": "$merchant_id",
+                    "merchant_name":  {"$first": "$merchant_name"},
+                    "merchant_phone": {"$first": "$merchant_phone"},
+                    "count":          {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": limit},
+    ]))
+    return [{"merchant_id": str(r["_id"]), "merchant_name": r.get("merchant_name",""),
+             "merchant_phone": r.get("merchant_phone",""), "premium_count": r["count"]}
+            for r in rows]
+
+
+@router.put("/merchant-vouchers/{vid}/extend")
+def admin_extend_premium(vid: str, data: dict, a=Depends(get_current_admin)):
+    """Admin manually extends a premium product's end_date by N days."""
+    from datetime import datetime as _dt7, timedelta as _td7
+    try:
+        oid = ObjectId(vid)
+    except Exception:
+        raise HTTPException(400, "Invalid ID")
+    days = int(data.get("days", 7))
+    prod = db.merchant_vouchers.find_one({"_id": oid}, {"end_date": 1})
+    if not prod:
+        raise HTTPException(404, "Product not found")
+    existing = prod.get("end_date")
+    base = (existing if isinstance(existing, _dt7) and existing > _dt7.utcnow() else _dt7.utcnow())
+    new_end = base + _td7(days=days)
+    db.merchant_vouchers.update_one(
+        {"_id": oid},
+        {"$set": {"end_date": new_end, "status": "approved", "approval_status": "approved",
+                  "admin_extended": True, "extended_at": _dt7.utcnow()}},
+    )
+    return {"ok": True, "new_end_date": new_end.isoformat(), "extended_days": days}
+
+
+@router.put("/products/{pid}/activate")
+def admin_activate_product(pid: str, a=Depends(get_current_admin)):
+    """Admin activates a product."""
+    from datetime import datetime as _dt8
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    upd = {"$set": {"approval_status": "approved", "status": "approved",
+                    "is_active": True, "updated_at": _dt8.utcnow()}}
+    res = db.gift_vouchers.update_one({"_id": oid}, upd)
+    if res.matched_count == 0:
+        res = db.merchant_vouchers.update_one({"_id": oid}, upd)
+    if res.matched_count == 0:
+        raise HTTPException(404, "Product not found")
+    return {"ok": True}
+
+
+@router.put("/products/{pid}/deactivate")
+def admin_deactivate_product(pid: str, a=Depends(get_current_admin)):
+    """Admin deactivates/suspends a product."""
+    from datetime import datetime as _dt9
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    upd = {"$set": {"approval_status": "suspended", "status": "inactive",
+                    "is_active": False, "updated_at": _dt9.utcnow()}}
+    res = db.gift_vouchers.update_one({"_id": oid}, upd)
+    if res.matched_count == 0:
+        res = db.merchant_vouchers.update_one({"_id": oid}, upd)
+    if res.matched_count == 0:
+        raise HTTPException(404, "Product not found")
+    return {"ok": True}

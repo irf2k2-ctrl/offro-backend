@@ -2025,3 +2025,282 @@ def delete_product(pid: str, m=Depends(get_merchant)):
 
     raise HTTPException(404, "Product not found")
 
+
+
+# ═══════════════════════════════════════════════════════════
+# PHASE 2 — PRODUCT MANAGEMENT ENHANCEMENTS
+# ═══════════════════════════════════════════════════════════
+
+@router.put("/products/{pid}/availability")
+def toggle_product_availability(pid: str, data: dict, m=Depends(get_merchant)):
+    """Toggle a product's is_available flag on/off."""
+    merchant_id = _mid(m)
+    available = bool(data.get("available", True))
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    upd = {"$set": {"is_available": available, "updated_at": datetime.utcnow()}}
+    res = db.gift_vouchers.update_one({"_id": oid, "merchant_id": merchant_id}, upd)
+    if res.matched_count == 0:
+        res = db.merchant_vouchers.update_one({"_id": oid, "merchant_id": merchant_id}, upd)
+    if res.matched_count == 0:
+        raise HTTPException(404, "Product not found")
+    return {"ok": True, "available": available}
+
+
+@router.get("/products/search")
+def search_merchant_products(
+    q: str = "", product_type: str = "", status: str = "", store_id: str = "",
+    m=Depends(get_merchant)
+):
+    """Search/filter merchant's own products."""
+    merchant_id = _mid(m)
+    results = []
+
+    def _match(p):
+        title = (p.get("title") or "").lower()
+        offer  = (p.get("offer_text") or "").lower()
+        if q and q.lower() not in title and q.lower() not in offer:
+            return False
+        ptype = (p.get("product_type") or "premium")
+        if product_type and ptype != product_type:
+            return False
+        st = (p.get("approval_status") or p.get("status") or "")
+        if status and st != status:
+            return False
+        if store_id and str(p.get("store_id", "")) != store_id:
+            return False
+        return True
+
+    for p in db.gift_vouchers.find({"merchant_id": merchant_id}).limit(200):
+        if _match(p):
+            p["_id"] = str(p["_id"])
+            results.append(p)
+    for p in db.merchant_vouchers.find({"merchant_id": merchant_id}).limit(200):
+        if _match(p):
+            p["_id"] = str(p["_id"])
+            results.append(p)
+    return results
+
+
+@router.post("/products/{pid}/upgrade")
+def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
+    """Create a Razorpay order to upgrade a Standard product to Premium."""
+    merchant_id = _mid(m)
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    prod = db.gift_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
+    if not prod:
+        raise HTTPException(404, "Standard product not found")
+    plan = data.get("plan", "1month")
+    pricing = _pricing_doc()
+    premium_plans = {p["id"]: p["price"] for p in (pricing.get("premium_plans") or [
+        {"id": "1month", "price": 299}, {"id": "3months", "price": 799},
+        {"id": "6months", "price": 1499}, {"id": "12months", "price": 2799},
+    ])}
+    base_price = premium_plans.get(plan, 299)
+    gst_pct    = pricing.get("gst_percent", 18)
+    gst_amt    = round(base_price * gst_pct / 100)
+    total      = base_price + gst_amt
+    order_data = {"amount": total * 100, "currency": "INR",
+                  "receipt": f"upg_{pid[:8]}_{plan}",
+                  "notes": {"product_id": pid, "plan": plan, "merchant_id": merchant_id, "type": "upgrade"}}
+    resp = _razorpay_request("POST", "/v1/orders", (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), order_data)
+    rz = resp.json()
+    db.product_upgrade_orders.insert_one({
+        "razorpay_order_id": rz["id"], "product_id": pid, "merchant_id": merchant_id,
+        "plan": plan, "amount": total, "status": "created", "created_at": datetime.utcnow(),
+    })
+    return {"order_id": rz["id"], "amount": total, "currency": "INR",
+            "key": RAZORPAY_KEY_ID, "plan": plan, "gst": gst_amt}
+
+
+@router.post("/products/{pid}/upgrade/verify")
+def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
+    """Verify Razorpay payment and convert Standard product to Premium."""
+    merchant_id = _mid(m)
+    order_id   = data.get("razorpay_order_id", "")
+    payment_id = data.get("razorpay_payment_id", "")
+    signature  = data.get("razorpay_signature", "")
+    plan       = data.get("plan", "1month")
+    body   = f"{order_id}|{payment_id}"
+    digest = hmac.new(RAZORPAY_KEY_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+    if digest != signature:
+        raise HTTPException(400, "Payment verification failed")
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    prod = db.gift_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
+    if not prod:
+        raise HTTPException(404, "Product not found")
+    days     = {"1month": 30, "3months": 90, "6months": 180, "12months": 365}.get(plan, 30)
+    end_date = datetime.utcnow() + timedelta(days=days)
+    new_doc  = {**prod, "_id": ObjectId(), "product_type": "premium",
+                "status": "pending_approval", "approval_status": "pending_approval",
+                "duration_days": days, "end_date": end_date,
+                "razorpay_order_id": order_id, "razorpay_payment_id": payment_id,
+                "upgraded_from": pid, "created_at": datetime.utcnow()}
+    new_doc.pop("is_active", None)
+    db.merchant_vouchers.insert_one(new_doc)
+    db.gift_vouchers.update_one({"_id": oid}, {"$set": {"upgraded": True, "upgraded_at": datetime.utcnow()}})
+    db.product_upgrade_orders.update_one(
+        {"razorpay_order_id": order_id},
+        {"$set": {"status": "paid", "payment_id": payment_id, "paid_at": datetime.utcnow()}},
+    )
+    _log_tx(merchant_id, "product_upgrade", f"Product upgraded to premium ({plan})",
+            amount=data.get("amount", 0), meta={"product_id": pid, "plan": plan})
+    return {"ok": True, "message": "Product upgraded to premium. Awaiting admin approval."}
+
+
+@router.post("/products/{pid}/renew")
+def renew_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
+    """Create a Razorpay order to renew an expiring/expired Premium product."""
+    merchant_id = _mid(m)
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    prod = db.merchant_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
+    if not prod:
+        raise HTTPException(404, "Premium product not found")
+    plan = data.get("plan", "1month")
+    pricing = _pricing_doc()
+    premium_plans = {p["id"]: p["price"] for p in (pricing.get("premium_plans") or [
+        {"id": "1month", "price": 299}, {"id": "3months", "price": 799},
+        {"id": "6months", "price": 1499}, {"id": "12months", "price": 2799},
+    ])}
+    base_price = premium_plans.get(plan, 299)
+    gst_pct    = pricing.get("gst_percent", 18)
+    gst_amt    = round(base_price * gst_pct / 100)
+    total      = base_price + gst_amt
+    order_data = {"amount": total * 100, "currency": "INR",
+                  "receipt": f"ren_{pid[:8]}_{plan}",
+                  "notes": {"product_id": pid, "plan": plan, "merchant_id": merchant_id, "type": "renew"}}
+    resp = _razorpay_request("POST", "/v1/orders", (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), order_data)
+    rz = resp.json()
+    db.product_renewal_orders.insert_one({
+        "razorpay_order_id": rz["id"], "product_id": pid, "merchant_id": merchant_id,
+        "plan": plan, "amount": total, "status": "created", "created_at": datetime.utcnow(),
+    })
+    return {"order_id": rz["id"], "amount": total, "currency": "INR",
+            "key": RAZORPAY_KEY_ID, "plan": plan, "gst": gst_amt}
+
+
+@router.post("/products/{pid}/renew/verify")
+def verify_renewal_payment(pid: str, data: dict, m=Depends(get_merchant)):
+    """Verify Razorpay payment and extend Premium product end_date."""
+    merchant_id = _mid(m)
+    order_id   = data.get("razorpay_order_id", "")
+    payment_id = data.get("razorpay_payment_id", "")
+    signature  = data.get("razorpay_signature", "")
+    plan       = data.get("plan", "1month")
+    body   = f"{order_id}|{payment_id}"
+    digest = hmac.new(RAZORPAY_KEY_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+    if digest != signature:
+        raise HTTPException(400, "Payment verification failed")
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    days = {"1month": 30, "3months": 90, "6months": 180, "12months": 365}.get(plan, 30)
+    prod = db.merchant_vouchers.find_one({"_id": oid, "merchant_id": merchant_id}, {"end_date": 1})
+    existing_end = prod.get("end_date") if prod else None
+    base = (existing_end if isinstance(existing_end, datetime) and existing_end > datetime.utcnow()
+            else datetime.utcnow())
+    new_end = base + timedelta(days=days)
+    db.merchant_vouchers.update_one(
+        {"_id": oid},
+        {"$set": {"end_date": new_end, "status": "approved", "approval_status": "approved",
+                  "renewed_at": datetime.utcnow(), "last_renewal_plan": plan,
+                  "razorpay_renewal_order_id": order_id}},
+    )
+    db.product_renewal_orders.update_one(
+        {"razorpay_order_id": order_id},
+        {"$set": {"status": "paid", "payment_id": payment_id, "paid_at": datetime.utcnow()}},
+    )
+    _log_tx(merchant_id, "product_renew", f"Premium product renewed ({plan})",
+            amount=data.get("amount", 0), meta={"product_id": pid, "plan": plan})
+    return {"ok": True, "new_end_date": new_end.isoformat(),
+            "message": f"Product renewed for {days} days."}
+
+
+@router.post("/products/bulk-action")
+def bulk_product_action(data: dict, m=Depends(get_merchant)):
+    """Bulk activate / deactivate / delete products."""
+    merchant_id = _mid(m)
+    ids    = [i for i in data.get("ids", []) if i]
+    action = data.get("action", "")
+    if not ids or action not in ("activate", "deactivate", "delete"):
+        raise HTTPException(400, "ids and valid action required")
+    try:
+        oids = [ObjectId(i) for i in ids]
+    except Exception:
+        raise HTTPException(400, "One or more invalid product IDs")
+    filter_ = {"_id": {"$in": oids}, "merchant_id": merchant_id}
+    count = 0
+    if action == "delete":
+        count += db.gift_vouchers.delete_many(filter_).deleted_count
+        count += db.merchant_vouchers.delete_many(filter_).deleted_count
+    elif action == "activate":
+        upd = {"$set": {"is_available": True, "updated_at": datetime.utcnow()}}
+        count += db.gift_vouchers.update_many(filter_, upd).modified_count
+        count += db.merchant_vouchers.update_many(filter_, upd).modified_count
+    else:
+        upd = {"$set": {"is_available": False, "updated_at": datetime.utcnow()}}
+        count += db.gift_vouchers.update_many(filter_, upd).modified_count
+        count += db.merchant_vouchers.update_many(filter_, upd).modified_count
+    return {"ok": True, "affected": count, "action": action}
+
+
+@router.get("/products/expiry-check")
+def check_product_expiry(m=Depends(get_merchant)):
+    """Return premium products expiring within the next 7 days."""
+    merchant_id = _mid(m)
+    now  = datetime.utcnow()
+    soon = now + timedelta(days=7)
+    docs = list(db.merchant_vouchers.find(
+        {"merchant_id": merchant_id, "end_date": {"$gte": now, "$lte": soon}},
+        {"_id": 1, "title": 1, "end_date": 1, "status": 1}
+    ).limit(50))
+    return [{"id": str(d["_id"]), "title": d.get("title",""),
+             "end_date": str(d.get("end_date",""))[:19],
+             "days_left": max(0,(d["end_date"]-now).days) if isinstance(d.get("end_date"), datetime) else 0}
+            for d in docs]
+
+
+@router.get("/products/{pid}/analytics")
+def get_product_analytics(pid: str, m=Depends(get_merchant)):
+    """Return view/share/open event counts for a product."""
+    merchant_id = _mid(m)
+    try:
+        ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    events = list(db.product_events.find({"product_id": pid, "merchant_id": merchant_id}, {"event": 1}))
+    counts = {"view": 0, "share": 0, "open": 0}
+    for e in events:
+        ev = e.get("event", "")
+        if ev in counts:
+            counts[ev] += 1
+    return {"product_id": pid, **counts, "total": sum(counts.values())}
+
+
+@router.get("/products/{pid}/history")
+def get_product_history(pid: str, m=Depends(get_merchant)):
+    """Return the activity history log for a product."""
+    merchant_id = _mid(m)
+    try:
+        ObjectId(pid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    logs = list(db.product_history.find(
+        {"product_id": pid, "merchant_id": merchant_id}, {"_id": 0}
+    ).sort("created_at", -1).limit(50))
+    for log in logs:
+        if "created_at" in log:
+            log["created_at"] = str(log["created_at"])[:19]
+    return logs

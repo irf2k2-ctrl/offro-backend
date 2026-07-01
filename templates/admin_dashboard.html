@@ -131,6 +131,8 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('default_images',this)"><i class="fas fa-image fa-fw"></i> Default Images</a>
   <div class="sep"></div>
   <!-- PHASE 1: Users + Merchants hidden — collections intact, sidebar entries removed -->
+  <a href="#" onclick="showSection('p2_products',this)"><i class="fas fa-rocket fa-fw"></i> P2 Products</a>
+  <div class="sep"></div>
   <a href="#" class="logout" onclick="logout()"><i class="fas fa-sign-out-alt fa-fw"></i> Logout</a>
 </div>
 
@@ -187,6 +189,49 @@ tr:hover td{background:#f7faf8;}
       </tbody>
     </table>
   </div>
+
+  <!-- ══ PHASE 2 PRODUCTS PANEL ══ -->
+  <div id="section-p2_products" class="section">
+    <div class="page-title">🚀 Phase 2 — Product Management
+      <button class="btn-o" style="font-size:12px;padding:3px 10px;margin-left:10px;" onclick="loadP2All()">↻ Refresh</button>
+    </div>
+    <!-- Summary stats -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-2"><div class="card-stat"><h3 id="p2_total_premium">--</h3><p>Total Premium</p></div></div>
+      <div class="col-6 col-md-2"><div class="card-stat"><h3 id="p2_live_premium" style="color:#1a6640">--</h3><p>Live Premium</p></div></div>
+      <div class="col-6 col-md-2"><div class="card-stat warn"><h3 id="p2_pending_premium">--</h3><p>Pending Approval</p></div></div>
+      <div class="col-6 col-md-2"><div class="card-stat"><h3 id="p2_expired_premium" style="color:#c0392b">--</h3><p>Expired</p></div></div>
+      <div class="col-6 col-md-2"><div class="card-stat"><h3 id="p2_total_standard">--</h3><p>Total Standard</p></div></div>
+    </div>
+    <!-- Revenue -->
+    <div class="row g-3 mb-4">
+      <div class="col-12"><h6 style="color:var(--primary);font-weight:700;margin-bottom:8px">💰 Premium Revenue</h6></div>
+      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_today">₹--</h3><p>Today</p></div></div>
+      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_month">₹--</h3><p>This Month</p></div></div>
+      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_life">₹--</h3><p>Lifetime</p></div></div>
+    </div>
+    <!-- Top Merchants -->
+    <div class="mb-4">
+      <div class="section-header">
+        <h6 style="color:var(--primary);font-weight:700;margin:0">🏆 Top Merchants by Premium Products</h6>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>Merchant</th><th>Phone</th><th>Premium Count</th></tr></thead>
+        <tbody id="p2_top_merchants_table"><tr><td colspan="4" style="text-align:center;padding:18px;color:var(--muted)">Loading...</td></tr></tbody>
+      </table></div>
+    </div>
+    <!-- Expiry Monitor -->
+    <div>
+      <div class="section-header">
+        <h6 style="color:var(--warning);font-weight:700;margin:0">⏰ Expiry Monitor (next 7 days)</h6>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Product</th><th>Merchant</th><th>Phone</th><th>Store</th><th>Expires</th><th>Days Left</th><th>Action</th></tr></thead>
+        <tbody id="p2_expiry_table"><tr><td colspan="7" style="text-align:center;padding:18px;color:var(--muted)">Loading...</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ═══ REVIEWS ═══ -->
@@ -5590,7 +5635,74 @@ window.showSection = function(name, el) {
   if (name === 'product_cards')    { loadMerchantProducts(); }
   if (name === 'pricing')         { loadPricingConfig(); }
   if (name === 'merchant_txns')   { loadMerchantTxnsFull(); }
+  if (name === 'p2_products')     { loadP2All(); }
 };
+
+// ── Phase 2 JS functions ─────────────────────────────────────────────
+function loadP2All() { loadP2Summary(); loadP2Revenue(); loadP2TopMerchants(); loadP2Expiry(); }
+
+async function loadP2Summary() {
+  try {
+    const d = await apiFetch('/products/summary');
+    document.getElementById('p2_total_premium').textContent   = d.total_premium   ?? '--';
+    document.getElementById('p2_live_premium').textContent    = d.live_premium     ?? '--';
+    document.getElementById('p2_pending_premium').textContent = d.pending_premium  ?? '--';
+    document.getElementById('p2_expired_premium').textContent = d.expired_premium  ?? '--';
+    document.getElementById('p2_total_standard').textContent  = d.total_standard   ?? '--';
+  } catch(e) { console.error('p2summary', e); }
+}
+
+async function loadP2Revenue() {
+  try {
+    const d = await apiFetch('/products/revenue');
+    document.getElementById('p2_rev_today').textContent = '₹' + (d.today      ?? 0);
+    document.getElementById('p2_rev_month').textContent = '₹' + (d.this_month ?? 0);
+    document.getElementById('p2_rev_life').textContent  = '₹' + (d.lifetime   ?? 0);
+  } catch(e) { console.error('p2revenue', e); }
+}
+
+async function loadP2TopMerchants() {
+  const tbody = document.getElementById('p2_top_merchants_table');
+  try {
+    const rows = await apiFetch('/products/top-merchants');
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--muted)">No data yet</td></tr>'; return; }
+    tbody.innerHTML = rows.map((r,i) => `<tr>
+      <td>${i+1}</td>
+      <td><strong>${r.merchant_name||'-'}</strong></td>
+      <td>${r.merchant_phone||'-'}</td>
+      <td><span class="badge-active">${r.premium_count} premium</span></td>
+    </tr>`).join('');
+  } catch(e) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:red">Error loading</td></tr>'; }
+}
+
+async function loadP2Expiry() {
+  const tbody = document.getElementById('p2_expiry_table');
+  try {
+    const rows = await apiFetch('/products/expiring?days=7');
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:14px;color:var(--muted)">No products expiring soon ✅</td></tr>'; return; }
+    tbody.innerHTML = rows.map(r => `<tr>
+      <td><strong>${r.title||'-'}</strong></td>
+      <td>${r.merchant_name||'-'}</td>
+      <td>${r.merchant_phone||'-'}</td>
+      <td>${r.store_name||'-'}</td>
+      <td>${(r.end_date||'').slice(0,10)}</td>
+      <td><span class="${r.days_left<=2?'badge-inactive':'badge-waiting'}">${r.days_left}d</span></td>
+      <td><button class="btn-o" onclick="adminExtendProduct('${r.id}')">+7 days</button></td>
+    </tr>`).join('');
+  } catch(e) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:14px;color:red">Error loading</td></tr>'; }
+}
+
+async function adminExtendProduct(vid) {
+  try {
+    const res = await fetch('/merchant-vouchers/' + vid + '/extend', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({days:7})
+    });
+    const d = await res.json();
+    if (d.ok) { alert('Extended to ' + (d.new_end_date||'').slice(0,10)); loadP2Expiry(); }
+    else alert('Error: ' + JSON.stringify(d));
+  } catch(e) { alert('Network error: '+e); }
+}
 
 // Override loadMerchantTxns to use the full version
 window.loadMerchantTxns = loadMerchantTxnsFull;
