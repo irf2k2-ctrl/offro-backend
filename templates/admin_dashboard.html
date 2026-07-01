@@ -130,9 +130,6 @@ tr:hover td{background:#f7faf8;}
 
   <a href="#" onclick="showSection('default_images',this)"><i class="fas fa-image fa-fw"></i> Default Images</a>
   <div class="sep"></div>
-  <!-- PHASE 1: Users + Merchants hidden — collections intact, sidebar entries removed -->
-  <a href="#" onclick="showSection('p2_products',this)"><i class="fas fa-rocket fa-fw"></i> P2 Products</a>
-  <div class="sep"></div>
   <a href="#" class="logout" onclick="logout()"><i class="fas fa-sign-out-alt fa-fw"></i> Logout</a>
 </div>
 
@@ -191,47 +188,6 @@ tr:hover td{background:#f7faf8;}
   </div>
 </div>
 
-<!-- ══ PHASE 2 PRODUCTS PANEL ══ -->
-<div id="section-p2_products" class="section">
-    <div class="page-title">🚀 Phase 2 — Product Management
-      <button class="btn-o" style="font-size:12px;padding:3px 10px;margin-left:10px;" onclick="loadP2All()">↻ Refresh</button>
-    </div>
-    <!-- Summary stats -->
-    <div class="row g-3 mb-4">
-      <div class="col-6 col-md-2"><div class="card-stat"><h3 id="p2_total_premium">--</h3><p>Total Premium</p></div></div>
-      <div class="col-6 col-md-2"><div class="card-stat"><h3 id="p2_live_premium" style="color:#1a6640">--</h3><p>Live Premium</p></div></div>
-      <div class="col-6 col-md-2"><div class="card-stat warn"><h3 id="p2_pending_premium">--</h3><p>Pending Approval</p></div></div>
-      <div class="col-6 col-md-2"><div class="card-stat"><h3 id="p2_expired_premium" style="color:#c0392b">--</h3><p>Expired</p></div></div>
-      <div class="col-6 col-md-2"><div class="card-stat"><h3 id="p2_total_standard">--</h3><p>Total Standard</p></div></div>
-    </div>
-    <!-- Revenue -->
-    <div class="row g-3 mb-4">
-      <div class="col-12"><h6 style="color:var(--primary);font-weight:700;margin-bottom:8px">💰 Premium Revenue</h6></div>
-      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_today">₹--</h3><p>Today</p></div></div>
-      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_month">₹--</h3><p>This Month</p></div></div>
-      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_life">₹--</h3><p>Lifetime</p></div></div>
-    </div>
-    <!-- Top Merchants -->
-    <div class="mb-4">
-      <div class="section-header">
-        <h6 style="color:var(--primary);font-weight:700;margin:0">🏆 Top Merchants by Premium Products</h6>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>Merchant</th><th>Phone</th><th>Premium Count</th></tr></thead>
-        <tbody id="p2_top_merchants_table"><tr><td colspan="4" style="text-align:center;padding:18px;color:var(--muted)">Loading...</td></tr></tbody>
-      </table></div>
-    </div>
-    <!-- Expiry Monitor -->
-    <div>
-      <div class="section-header">
-        <h6 style="color:var(--warning);font-weight:700;margin:0">⏰ Expiry Monitor (next 7 days)</h6>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Product</th><th>Merchant</th><th>Phone</th><th>Store</th><th>Expires</th><th>Days Left</th><th>Action</th></tr></thead>
-        <tbody id="p2_expiry_table"><tr><td colspan="7" style="text-align:center;padding:18px;color:var(--muted)">Loading...</td></tr></tbody>
-      </table></div>
-    </div>
-  </div>
 
 <!-- ═══ REVIEWS ═══ -->
 <div id="section-reviews" class="section">
@@ -439,6 +395,54 @@ tr:hover td{background:#f7faf8;}
   <!-- hidden spans kept for JS back-compat -->
   <span id="mproduct_count" style="display:none"></span>
   <tbody id="merchant_products_body" style="display:none"></tbody>
+
+  <!-- ── PHASE 2: Standard & Premium breakdown ── -->
+  <hr style="margin:28px 0 20px;border-color:var(--border)">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+    <h6 style="margin:0;font-size:15px;font-weight:700;color:var(--primary)">📊 Standard &amp; Premium Breakdown</h6>
+    <button class="btn-o" style="font-size:12px;padding:4px 12px" onclick="loadP2All()">↻ Refresh</button>
+  </div>
+
+  <!-- Summary stats -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="p2_total_standard">--</h3><p>Total Standard</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="p2_total_premium">--</h3><p>Total Premium</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="p2_live_premium" style="color:#1a6640">--</h3><p>Live Premium</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat warn"><h3 id="p2_pending_premium">--</h3><p>Pending Premium</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="p2_expired_premium" style="color:#c0392b">--</h3><p>Expired Premium</p></div></div>
+  </div>
+
+  <!-- Premium Revenue -->
+  <div style="margin-bottom:20px">
+    <h6 style="color:var(--primary);font-weight:700;margin-bottom:10px">💰 Premium Revenue</h6>
+    <div class="row g-3">
+      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_today">₹--</h3><p>Today</p></div></div>
+      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_month">₹--</h3><p>This Month</p></div></div>
+      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_life">₹--</h3><p>Lifetime</p></div></div>
+    </div>
+  </div>
+
+  <!-- Top Merchants by Premium -->
+  <div class="mb-4">
+    <div class="section-header">
+      <h6 style="color:var(--primary);font-weight:700;margin:0">🏆 Top Merchants by Premium Products</h6>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>Merchant</th><th>Phone</th><th>Premium Count</th></tr></thead>
+      <tbody id="p2_top_merchants_table"><tr><td colspan="4" style="text-align:center;padding:14px;color:var(--muted)">Click Refresh to load</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <!-- Expiry Monitor -->
+  <div>
+    <div class="section-header">
+      <h6 style="color:var(--warning,#b7830a);font-weight:700;margin:0">⏰ Expiry Monitor — next 7 days</h6>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Product</th><th>Merchant</th><th>Phone</th><th>Store</th><th>Expires</th><th>Days Left</th><th>Action</th></tr></thead>
+      <tbody id="p2_expiry_table"><tr><td colspan="7" style="text-align:center;padding:14px;color:var(--muted)">Click Refresh to load</td></tr></tbody>
+    </table></div>
+  </div>
 </div>
 
 <!-- PROMO SLIDERS -->
@@ -5631,10 +5635,9 @@ const _origShowSec = window.showSection;
 window.showSection = function(name, el) {
   if (_origShowSec) _origShowSec(name, el);
   if (name === 'promo_sliders')   { loadMerchantBanners(); }
-  if (name === 'product_cards')    { loadMerchantProducts(); }
+  if (name === 'product_cards')    { loadMerchantProducts(); loadP2All(); }
   if (name === 'pricing')         { loadPricingConfig(); }
   if (name === 'merchant_txns')   { loadMerchantTxnsFull(); }
-  if (name === 'p2_products')     { loadP2All(); }
 };
 
 // ── Phase 2 JS functions ─────────────────────────────────────────────
