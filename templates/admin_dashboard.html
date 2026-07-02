@@ -5603,7 +5603,7 @@ const _origShowSec = window.showSection;
 window.showSection = function(name, el) {
   if (_origShowSec) _origShowSec(name, el);
   if (name === 'promo_sliders')   { loadMerchantBanners(); }
-  if (name === 'product_cards')    { loadMerchantProducts(); loadP2All(); }
+  if (name === 'product_cards')    { loadMerchantProducts(); }
   if (name === 'pricing')         { loadPricingConfig(); }
   if (name === 'merchant_txns')   { loadMerchantTxnsFull(); }
 };
@@ -5612,29 +5612,34 @@ window.showSection = function(name, el) {
 function loadP2All() { loadP2Summary(); loadP2Revenue(); loadP2TopMerchants(); loadP2Expiry(); }
 
 async function loadP2Summary() {
+  if (!document.getElementById('p2_total_premium')) return;
   try {
     const r = await fetch('/admin/products/summary', {credentials:'include'});
     const d = await r.json();
-    document.getElementById('p2_total_premium').textContent   = d.total_premium   ?? '--';
-    document.getElementById('p2_live_premium').textContent    = d.live_premium     ?? '--';
-    document.getElementById('p2_pending_premium').textContent = d.pending_premium  ?? '--';
-    document.getElementById('p2_expired_premium').textContent = d.expired_premium  ?? '--';
-    document.getElementById('p2_total_standard').textContent  = d.total_standard   ?? '--';
+    const _sp = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+    _sp('p2_total_premium',   d.total_premium   ?? '--');
+    _sp('p2_live_premium',    d.live_premium     ?? '--');
+    _sp('p2_pending_premium', d.pending_premium  ?? '--');
+    _sp('p2_expired_premium', d.expired_premium  ?? '--');
+    _sp('p2_total_standard',  d.total_standard   ?? '--');
   } catch(e) { console.error('p2summary', e); }
 }
 
 async function loadP2Revenue() {
+  if (!document.getElementById('p2_rev_today')) return;
   try {
     const r = await fetch('/admin/products/revenue', {credentials:'include'});
     const d = await r.json();
-    document.getElementById('p2_rev_today').textContent = '₹' + (d.today      ?? 0);
-    document.getElementById('p2_rev_month').textContent = '₹' + (d.this_month ?? 0);
-    document.getElementById('p2_rev_life').textContent  = '₹' + (d.lifetime   ?? 0);
+    const _sr = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+    _sr('p2_rev_today', '₹' + (d.today      ?? 0));
+    _sr('p2_rev_month', '₹' + (d.this_month ?? 0));
+    _sr('p2_rev_life',  '₹' + (d.lifetime   ?? 0));
   } catch(e) { console.error('p2revenue', e); }
 }
 
 async function loadP2TopMerchants() {
   const tbody = document.getElementById('p2_top_merchants_table');
+  if (!tbody) return;
   try {
     const r = await fetch('/admin/products/top-merchants', {credentials:'include'});
     const rows = await r.json();
@@ -5650,6 +5655,7 @@ async function loadP2TopMerchants() {
 
 async function loadP2Expiry() {
   const tbody = document.getElementById('p2_expiry_table');
+  if (!tbody) return;
   try {
     const r = await fetch('/admin/products/expiring?days=7', {credentials:'include'});
     const rows = await r.json();
