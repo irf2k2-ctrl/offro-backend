@@ -2527,10 +2527,13 @@ async def admin_save_no_service(
         "no_service_message": no_service_message.strip(),
     }
     if no_service_file and no_service_file.filename:
+        import base64 as _b64mod
         content = await no_service_file.read()
-        url = _cloudinary_upload(content, no_service_file.content_type or "image/jpeg")
-        if url:
-            update["no_service_url"] = url
+        ct = no_service_file.content_type or "image/jpeg"
+        b64_str = f"data:{ct};base64," + _b64mod.b64encode(content).decode()
+        cdn_url = _cloudinary_upload(b64_str, folder="offro/settings")
+        # Prefer CDN URL; fall back to base64 (works even without Cloudinary)
+        update["no_service_url"] = cdn_url if cdn_url.startswith("http") else b64_str
     elif no_service_url.strip():
         update["no_service_url"] = no_service_url.strip()
     db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)

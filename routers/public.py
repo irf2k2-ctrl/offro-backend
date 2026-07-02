@@ -1083,7 +1083,7 @@ def get_promo_sliders_public():
 def get_admin_banners_public():
     """Returns active admin banners from the banners collection (Admin Dashboard → Banners module).
     This is the Home Screen banner section — completely separate from promo_sliders."""
-    docs = list(db.banners.find({"is_active": True}).sort("sort_order", 1))
+    docs = list(db.admin_banners.find({"is_active": True}).sort("sort_order", 1))
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
@@ -1242,13 +1242,17 @@ def get_default_images():
             return [val]
         return []
 
+    # no_service_url may be an HTTP URL or base64 — return raw so app can render both
+    _ns_raw = doc.get("no_service_url", doc.get("no_service", ""))
+    _ns_val = _ns_raw if isinstance(_ns_raw, str) else ""
+
     return {
         "store":            _first(doc.get("store", "")),
         "product":          _first(doc.get("product", "")),
         "offer":            _first(doc.get("offer", "")),
         "city":             _all_urls(doc.get("city", "")),
         "merchant_banner":  _first(doc.get("merchant_banner", "")),
-        "no_service_url":   _first(doc.get("no_service", doc.get("no_service_url", ""))),
+        "no_service_url":   _ns_val,
         "no_service_title": str(doc.get("no_service_title", "") or ""),
         "no_service_message": str(doc.get("no_service_message", "") or ""),
     }
