@@ -1826,9 +1826,17 @@ def list_merchant_products(m=Depends(get_merchant)):
 
     # ── 1. Standard products from gift_vouchers ──
     for v in db.gift_vouchers.find({"product_type": "standard", "merchant_id": merchant_id}).sort("_id", -1):
-        store_id   = v.get("store_id", "")
-        sub_active = _is_store_subscription_active(store_id) if store_id else False
-        app_status = "approved" if sub_active else "subscription_expired"
+        store_id      = v.get("store_id", "")
+        sub_active    = _is_store_subscription_active(store_id) if store_id else False
+        prod_approval = (v.get("approval_status") or v.get("status") or "waiting_approval")
+        # Only show as Live if BOTH: store subscription active AND admin has approved the product
+        if prod_approval == "approved" and sub_active:
+            app_status = "approved"
+        elif not sub_active and prod_approval == "approved":
+            app_status = "subscription_expired"
+        else:
+            # Still pending admin approval (waiting_approval, pending_approval, etc.)
+            app_status = prod_approval
         result.append({
             "_id":             str(v["_id"]),
             "product_type":    "standard",
@@ -1840,7 +1848,7 @@ def list_merchant_products(m=Depends(get_merchant)):
             "store_id":        store_id,
             "store_name":      v.get("store_name", ""),
             "city":            v.get("city", ""),
-            "is_active":       bool(v.get("is_active", True)) and sub_active,
+            "is_active":       bool(v.get("is_active", True)) and sub_active and prod_approval == "approved",
             "approval_status": app_status,
             "status":          app_status,
             "end_date":        "",
@@ -2086,7 +2094,7 @@ def search_merchant_products(
 
 @router.post("/products/{pid}/upgrade")
 def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
-    """Create a Razorpay order to upgrade a Standard product to Premium."""
+    """Create a Razorpay order to upgrade a Standard product to Premium (per-day pricing)."""
     merchant_id = _mid(m)
     try:
         oid = ObjectId(pid)
@@ -2095,27 +2103,42 @@ def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     prod = db.gift_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
     if not prod:
         raise HTTPException(404, "Standard product not found")
-    plan = data.get("plan", "1month")
-    pricing = _pricing_doc()
-    premium_plans = {p["id"]: p["price"] for p in (pricing.get("premium_plans") or [
-        {"id": "1month", "price": 299}, {"id": "3months", "price": 799},
-        {"id": "6months", "price": 1499}, {"id": "12months", "price": 2799},
-    ])}
-    base_price = premium_plans.get(plan, 299)
-    gst_pct    = pricing.get("gst_percent", 18)
-    gst_amt    = round(base_price * gst_pct / 100)
-    total      = base_price + gst_amt
-    order_data = {"amount": total * 100, "currency": "INR",
-                  "receipt": f"upg_{pid[:8]}_{plan}",
-                  "notes": {"product_id": pid, "plan": plan, "merchant_id": merchant_id, "type": "upgrade"}}
+    days          = max(1, int(data.get("days", 30)))
+    from_date_str = data.get("from_date", datetime.utcnow().strftime("%Y-%m-%d"))
+    pricing       = _pricing_doc()
+    price_per_day = float(pricing.get("voucher_price_per_day", 10))
+    gst_pct       = float(pricing.get("gst_percent", 0))
+    base_price    = round(price_per_day * days, 2)
+    discount_code  = (data.get("discount_code") or "").strip().upper()
+    discount_value = 0.0
+    if discount_code:
+        dc = db.discount_codes.find_one({"code": discount_code, "active": True})
+        if dc:
+            discount_value = float(dc.get("value", 0))
+    gst_amount = round(max(0, base_price - discount_value) * gst_pct / 100, 2)
+    total      = round(max(0, base_price - discount_value) + gst_amount, 2)
+    try:
+        from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
+    except Exception:
+        from_date = datetime.utcnow()
+    end_date = from_date + timedelta(days=days)
+    _months  = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    def _df(dt): return f"{dt.day:02d} {_months[dt.month-1]} {dt.year}"
+    order_data = {"amount": int(total * 100), "currency": "INR",
+                  "receipt": f"upg_{pid[:8]}_{days}d",
+                  "notes": {"product_id": pid, "days": str(days), "merchant_id": merchant_id, "type": "upgrade"}}
     resp = _razorpay_request("POST", "/v1/orders", (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), order_data)
     rz = resp.json()
     db.product_upgrade_orders.insert_one({
         "razorpay_order_id": rz["id"], "product_id": pid, "merchant_id": merchant_id,
-        "plan": plan, "amount": total, "status": "created", "created_at": datetime.utcnow(),
+        "days": days, "amount": total, "status": "created", "created_at": datetime.utcnow(),
     })
     return {"order_id": rz["id"], "amount": total, "currency": "INR",
-            "key": RAZORPAY_KEY_ID, "plan": plan, "gst": gst_amt}
+            "key": RAZORPAY_KEY_ID, "gst": gst_amount, "days": days,
+            "from_date": _df(from_date), "end_date": _df(end_date),
+            "price_per_day": price_per_day, "base_price": base_price,
+            "gst_percent": gst_pct, "gst_amount": gst_amount,
+            "discount_amount": discount_value, "amount_display": total}
 
 
 @router.post("/products/{pid}/upgrade/verify")
@@ -2137,7 +2160,9 @@ def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
     prod = db.gift_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
     if not prod:
         raise HTTPException(404, "Product not found")
-    days     = {"1month": 30, "3months": 90, "6months": 180, "12months": 365}.get(plan, 30)
+    # Retrieve days from the stored upgrade order (per-day pricing)
+    upg_order = db.product_upgrade_orders.find_one({"razorpay_order_id": order_id})
+    days     = int(upg_order.get("days", 30)) if upg_order else 30
     end_date = datetime.utcnow() + timedelta(days=days)
     new_doc  = {**prod, "_id": ObjectId(), "product_type": "premium",
                 "status": "pending_approval", "approval_status": "pending_approval",
@@ -2158,7 +2183,7 @@ def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
 
 @router.post("/products/{pid}/renew")
 def renew_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
-    """Create a Razorpay order to renew an expiring/expired Premium product."""
+    """Create a Razorpay order to renew an expiring/expired Premium product (per-day pricing)."""
     merchant_id = _mid(m)
     try:
         oid = ObjectId(pid)
@@ -2167,27 +2192,43 @@ def renew_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     prod = db.merchant_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
     if not prod:
         raise HTTPException(404, "Premium product not found")
-    plan = data.get("plan", "1month")
-    pricing = _pricing_doc()
-    premium_plans = {p["id"]: p["price"] for p in (pricing.get("premium_plans") or [
-        {"id": "1month", "price": 299}, {"id": "3months", "price": 799},
-        {"id": "6months", "price": 1499}, {"id": "12months", "price": 2799},
-    ])}
-    base_price = premium_plans.get(plan, 299)
-    gst_pct    = pricing.get("gst_percent", 18)
-    gst_amt    = round(base_price * gst_pct / 100)
-    total      = base_price + gst_amt
-    order_data = {"amount": total * 100, "currency": "INR",
-                  "receipt": f"ren_{pid[:8]}_{plan}",
-                  "notes": {"product_id": pid, "plan": plan, "merchant_id": merchant_id, "type": "renew"}}
+    days          = max(1, int(data.get("days", 30)))
+    pricing       = _pricing_doc()
+    price_per_day = float(pricing.get("voucher_price_per_day", 10))
+    gst_pct       = float(pricing.get("gst_percent", 0))
+    base_price    = round(price_per_day * days, 2)
+    discount_code  = (data.get("discount_code") or "").strip().upper()
+    discount_value = 0.0
+    if discount_code:
+        dc = db.discount_codes.find_one({"code": discount_code, "active": True})
+        if dc:
+            discount_value = float(dc.get("value", 0))
+    gst_amount = round(max(0, base_price - discount_value) * gst_pct / 100, 2)
+    total      = round(max(0, base_price - discount_value) + gst_amount, 2)
+    # Compute renewal period from current end_date
+    existing_end = prod.get("end_date")
+    if isinstance(existing_end, datetime) and existing_end > datetime.utcnow():
+        renew_from = existing_end
+    else:
+        renew_from = datetime.utcnow()
+    new_end  = renew_from + timedelta(days=days)
+    _months  = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    def _df(dt): return f"{dt.day:02d} {_months[dt.month-1]} {dt.year}"
+    order_data = {"amount": int(total * 100), "currency": "INR",
+                  "receipt": f"ren_{pid[:8]}_{days}d",
+                  "notes": {"product_id": pid, "days": str(days), "merchant_id": merchant_id, "type": "renew"}}
     resp = _razorpay_request("POST", "/v1/orders", (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), order_data)
     rz = resp.json()
     db.product_renewal_orders.insert_one({
         "razorpay_order_id": rz["id"], "product_id": pid, "merchant_id": merchant_id,
-        "plan": plan, "amount": total, "status": "created", "created_at": datetime.utcnow(),
+        "days": days, "amount": total, "status": "created", "created_at": datetime.utcnow(),
     })
     return {"order_id": rz["id"], "amount": total, "currency": "INR",
-            "key": RAZORPAY_KEY_ID, "plan": plan, "gst": gst_amt}
+            "key": RAZORPAY_KEY_ID, "gst": gst_amount, "days": days,
+            "from_date": _df(renew_from), "end_date": _df(new_end),
+            "price_per_day": price_per_day, "base_price": base_price,
+            "gst_percent": gst_pct, "gst_amount": gst_amount,
+            "discount_amount": discount_value, "amount_display": total}
 
 
 @router.post("/products/{pid}/renew/verify")
@@ -2206,7 +2247,9 @@ def verify_renewal_payment(pid: str, data: dict, m=Depends(get_merchant)):
         oid = ObjectId(pid)
     except Exception:
         raise HTTPException(400, "Invalid product ID")
-    days = {"1month": 30, "3months": 90, "6months": 180, "12months": 365}.get(plan, 30)
+    # Retrieve days from the stored renewal order (per-day pricing)
+    ren_order = db.product_renewal_orders.find_one({"razorpay_order_id": order_id})
+    days = int(ren_order.get("days", 30)) if ren_order else 30
     prod = db.merchant_vouchers.find_one({"_id": oid, "merchant_id": merchant_id}, {"end_date": 1})
     existing_end = prod.get("end_date") if prod else None
     base = (existing_end if isinstance(existing_end, datetime) and existing_end > datetime.utcnow()
