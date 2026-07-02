@@ -12,8 +12,12 @@ def get_stores(city: str = None, category: str = None):
     if city:
         query["city"] = {"$regex": city, "$options": "i"}
     if category and category.strip() and category.strip() != "All":
-        # Case-insensitive match so "Restaurant" matches "restaurant", "RESTAURANT" etc.
-        query["category"] = {"$regex": f"^{category.strip()}$", "$options": "i"}
+        # Flexible case-insensitive contains match:
+        # "Restaurant" matches "Restaurant", "Restaurants", "Indian Restaurant", "Restaurant / Bar"
+        # Use re.escape so special chars in category names don't break the regex
+        import re as _re
+        _cat_pat = _re.escape(category.strip())
+        query["category"] = {"$regex": _cat_pat, "$options": "i"}
 
     stores = list(db.stores.find(query, {
         "store_name":1,"category":1,"city":1,"area":1,"address":1,"phone":1,
