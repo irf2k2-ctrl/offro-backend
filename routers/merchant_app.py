@@ -2131,7 +2131,8 @@ def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     rz = resp.json()
     db.product_upgrade_orders.insert_one({
         "razorpay_order_id": rz["id"], "product_id": pid, "merchant_id": merchant_id,
-        "days": days, "amount": total, "status": "created", "created_at": datetime.utcnow(),
+        "days": days, "from_date": from_date.isoformat(), "amount": total,
+        "status": "created", "created_at": datetime.utcnow(),
     })
     return {"order_id": rz["id"], "amount": total, "currency": "INR",
             "key": RAZORPAY_KEY_ID, "gst": gst_amount, "days": days,
@@ -2160,18 +2161,43 @@ def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
     prod = db.gift_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
     if not prod:
         raise HTTPException(404, "Product not found")
-    # Retrieve days from the stored upgrade order (per-day pricing)
-    upg_order = db.product_upgrade_orders.find_one({"razorpay_order_id": order_id})
-    days     = int(upg_order.get("days", 30)) if upg_order else 30
-    end_date = datetime.utcnow() + timedelta(days=days)
-    new_doc  = {**prod, "_id": ObjectId(), "product_type": "premium",
-                "status": "pending_approval", "approval_status": "pending_approval",
-                "duration_days": days, "end_date": end_date,
-                "razorpay_order_id": order_id, "razorpay_payment_id": payment_id,
-                "upgraded_from": pid, "created_at": datetime.utcnow()}
-    new_doc.pop("is_active", None)
-    db.merchant_vouchers.insert_one(new_doc)
-    db.gift_vouchers.update_one({"_id": oid}, {"$set": {"upgraded": True, "upgraded_at": datetime.utcnow()}})
+    # Retrieve days + from_date from the stored upgrade order
+    upg_order   = db.product_upgrade_orders.find_one({"razorpay_order_id": order_id})
+    days        = int(upg_order.get("days", 30)) if upg_order else 30
+    from_date_s = (upg_order or {}).get("from_date")
+    try:
+        from_date = datetime.fromisoformat(from_date_s) if from_date_s else datetime.utcnow()
+    except Exception:
+        from_date = datetime.utcnow()
+    end_date = from_date + timedelta(days=days)
+
+    # ── Move the product IN-PLACE: same _id, gift_vouchers → merchant_vouchers ──
+    # This avoids creating a duplicate — the product list shows it as the same item,
+    # now as premium/pending_approval.
+    updated_doc = {
+        **prod,
+        "product_type":       "premium",
+        "status":             "pending_approval",
+        "approval_status":    "pending_approval",
+        "duration_days":      days,
+        "start_date":         from_date,
+        "end_date":           end_date,
+        "razorpay_order_id":  order_id,
+        "razorpay_payment_id": payment_id,
+        "is_active":          True,
+        "updated_at":         datetime.utcnow(),
+    }
+    updated_doc.pop("upgraded",    None)
+    updated_doc.pop("upgraded_at", None)
+    try:
+        db.merchant_vouchers.insert_one(updated_doc)
+    except Exception:
+        # Already moved on a prior retry — just refresh the payment fields
+        db.merchant_vouchers.update_one(
+            {"_id": oid},
+            {"$set": {k: v for k, v in updated_doc.items() if k != "_id"}},
+        )
+    db.gift_vouchers.delete_one({"_id": oid})
     db.product_upgrade_orders.update_one(
         {"razorpay_order_id": order_id},
         {"$set": {"status": "paid", "payment_id": payment_id, "paid_at": datetime.utcnow()}},
