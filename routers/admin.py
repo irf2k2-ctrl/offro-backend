@@ -2774,6 +2774,123 @@ def delete_admin_product(vid: str, a=Depends(get_current_admin)):
     return {"ok": True}
 
 
+@router.put("/merchant-products/{vid}/approve")
+def approve_merchant_product_card(vid: str, a=Depends(get_current_admin)):
+    """Approve a merchant-submitted product card (standard or premium)."""
+    try:
+        oid = ObjectId(vid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+
+    # Check merchant_vouchers first (premium products)
+    v = db.merchant_vouchers.find_one({"_id": oid})
+    if v:
+        end_date_raw = v.get("end_date", "")
+        final_status = "approved"
+        if end_date_raw:
+            try:
+                from dateutil.parser import parse as _parse_dt
+                end_dt = _parse_dt(str(end_date_raw))
+                if end_dt < datetime.utcnow():
+                    final_status = "expired"
+            except Exception:
+                pass
+        db.merchant_vouchers.update_one(
+            {"_id": oid},
+            {"$set": {"approval_status": final_status, "status": final_status,
+                      "approved_at": datetime.utcnow().isoformat()}}
+        )
+        # Mirror into gift_vouchers
+        db.gift_vouchers.update_one(
+            {"source_voucher_id": vid},
+            {"$set": {
+                "title":             v.get("title", ""),
+                "text":              v.get("offer_text", v.get("text", "")),
+                "logo":              v.get("logo_url", v.get("logo", "")),
+                "validity":          v.get("validity") or (
+                                         f"{v.get('from_date', '')} → {v.get('end_date', '')}"
+                                         if v.get("from_date") else "30 days"),
+                "is_active":         final_status == "approved",
+                "source":            "merchant",
+                "source_voucher_id": vid,
+                "merchant_id":       str(v.get("merchant_id", "")),
+                "merchant_name":     v.get("merchant_name", ""),
+                "product_type":      v.get("product_type", "premium"),
+                "amount":            v.get("amount", v.get("total", 0)),
+                "duration_days":     v.get("duration_days", 0),
+                "updated_at":        datetime.utcnow().isoformat(),
+            },
+             "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}},
+            upsert=True
+        )
+        return {"ok": True, "message": "Product approved."}
+
+    # Fall back to gift_vouchers (standard products pending admin approval)
+    gv = db.gift_vouchers.find_one({"_id": oid})
+    if gv:
+        db.gift_vouchers.update_one(
+            {"_id": oid},
+            {"$set": {"status": "approved", "approval_status": "approved",
+                      "is_active": True, "approved_at": datetime.utcnow().isoformat()}}
+        )
+        return {"ok": True, "message": "Standard product approved."}
+
+    raise HTTPException(404, "Product not found")
+
+
+@router.put("/merchant-products/{vid}/reject")
+def reject_merchant_product_card(vid: str, body: dict = {}, a=Depends(get_current_admin)):
+    try:
+        oid = ObjectId(vid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    reason = body.get("reason", "")
+    v = db.merchant_vouchers.find_one({"_id": oid})
+    if v:
+        db.merchant_vouchers.update_one(
+            {"_id": oid},
+            {"$set": {"approval_status": "rejected", "status": "rejected",
+                      "rejection_reason": reason, "rejected_at": datetime.utcnow()}}
+        )
+        db.gift_vouchers.delete_many({"source_voucher_id": vid})
+        return {"ok": True}
+    gv = db.gift_vouchers.find_one({"_id": oid})
+    if gv:
+        db.gift_vouchers.update_one(
+            {"_id": oid},
+            {"$set": {"status": "rejected", "approval_status": "rejected",
+                      "rejection_reason": reason}}
+        )
+        return {"ok": True}
+    raise HTTPException(404, "Product not found")
+
+
+@router.delete("/merchant-products/{vid}")
+def delete_merchant_product_card(vid: str, a=Depends(get_current_admin)):
+    try:
+        oid = ObjectId(vid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    r1 = db.merchant_vouchers.delete_one({"_id": oid})
+    if r1.deleted_count == 0:
+        db.gift_vouchers.delete_one({"_id": oid})
+    db.gift_vouchers.delete_many({"source_voucher_id": vid})
+    return {"ok": True}
+
+
+@router.put("/merchant-products/{vid}")
+def update_merchant_product_card(vid: str, data: dict, a=Depends(get_current_admin)):
+    try:
+        oid = ObjectId(vid)
+    except Exception:
+        raise HTTPException(400, "Invalid product ID")
+    update = {k: v for k, v in data.items() if k not in ["_id", "id"]}
+    r = db.merchant_vouchers.update_one({"_id": oid}, {"$set": update})
+    if r.matched_count == 0:
+        db.gift_vouchers.update_one({"_id": oid}, {"$set": update})
+    return {"ok": True}
+
+
 @router.get("/merchant-products")
 def list_merchant_products(a=Depends(get_current_admin)):
     """Merchant-submitted product cards (merchant_vouchers collection)."""

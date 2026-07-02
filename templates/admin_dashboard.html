@@ -335,10 +335,10 @@ tr:hover td{background:#f7faf8;}
   <!-- Stats row -->
   <div class="row g-3 mb-4">
     <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_total">—</h3><p>Total Cards</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_approved" style="color:#1a6640">—</h3><p>Approved</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_active_premium" style="color:#6b21a8">—</h3><p>Active Premium</p></div></div>
     <div class="col-6 col-md"><div class="card-stat warn"><h3 id="pc_pending">—</h3><p>Pending</p></div></div>
     <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_expired" style="color:var(--danger)">—</h3><p>Expired</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_active" style="color:var(--primary)">—</h3><p>Active</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_standard_active" style="color:var(--primary)">—</h3><p>Standard Active</p></div></div>
   </div>
 
   <!-- Filters -->
@@ -359,6 +359,11 @@ tr:hover td{background:#f7faf8;}
     <input id="pc_store_filter" class="form-control" style="max-width:160px;font-size:13px" placeholder="Filter by store..." oninput="filterProductCards()">
     <input id="pc_date_from" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterProductCards()" placeholder="From">
     <input id="pc_date_to" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterProductCards()" placeholder="To">
+    <select id="pc_type_filter" class="form-select" style="max-width:140px;font-size:13px" onchange="filterProductCards()">
+      <option value="">All Types</option>
+      <option value="standard">Standard</option>
+      <option value="premium">Premium</option>
+    </select>
   </div>
 
   <!-- Unified table -->
@@ -373,10 +378,12 @@ tr:hover td{background:#f7faf8;}
         <th>City</th>
         <th>Validity</th>
         <th>Status</th>
+        <th>Duration</th>
+        <th>Paid</th>
         <th>Actions</th>
         <th>Created On</th>
       </tr></thead>
-      <tbody id="pc_unified_body"><tr><td colspan="10" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+      <tbody id="pc_unified_body"><tr><td colspan="12" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
     </table>
   </div>
   <!-- ISSUE 8: Pagination bar -->
@@ -396,52 +403,7 @@ tr:hover td{background:#f7faf8;}
   <span id="mproduct_count" style="display:none"></span>
   <tbody id="merchant_products_body" style="display:none"></tbody>
 
-  <!-- ── PHASE 2: Standard & Premium breakdown ── -->
-  <hr style="margin:28px 0 20px;border-color:var(--border)">
-  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
-    <h6 style="margin:0;font-size:15px;font-weight:700;color:var(--primary)">📊 Standard &amp; Premium Breakdown</h6>
-    <button class="btn-o" style="font-size:12px;padding:4px 12px" onclick="loadP2All()">↻ Refresh</button>
-  </div>
-
-  <!-- Summary stats -->
-  <div class="row g-3 mb-4">
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="p2_total_standard">--</h3><p>Total Standard</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="p2_total_premium">--</h3><p>Total Premium</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="p2_live_premium" style="color:#1a6640">--</h3><p>Live Premium</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat warn"><h3 id="p2_pending_premium">--</h3><p>Pending Premium</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="p2_expired_premium" style="color:#c0392b">--</h3><p>Expired Premium</p></div></div>
-  </div>
-
-  <!-- Premium Revenue -->
-  <div style="margin-bottom:20px">
-    <h6 style="color:var(--primary);font-weight:700;margin-bottom:10px">💰 Premium Revenue</h6>
-    <div class="row g-3">
-      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_today">₹--</h3><p>Today</p></div></div>
-      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_month">₹--</h3><p>This Month</p></div></div>
-      <div class="col-4"><div class="card-stat"><h3 id="p2_rev_life">₹--</h3><p>Lifetime</p></div></div>
-    </div>
-  </div>
-
-  <!-- Top Merchants by Premium -->
-  <div class="mb-4">
-    <div class="section-header">
-      <h6 style="color:var(--primary);font-weight:700;margin:0">🏆 Top Merchants by Premium Products</h6>
-    </div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>#</th><th>Merchant</th><th>Phone</th><th>Premium Count</th></tr></thead>
-      <tbody id="p2_top_merchants_table"><tr><td colspan="4" style="text-align:center;padding:14px;color:var(--muted)">Click Refresh to load</td></tr></tbody>
-    </table></div>
-  </div>
-
-  <!-- Expiry Monitor -->
-  <div>
-    <div class="section-header">
-      <h6 style="color:var(--warning,#b7830a);font-weight:700;margin:0">⏰ Expiry Monitor — next 7 days</h6>
-    </div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Product</th><th>Merchant</th><th>Phone</th><th>Store</th><th>Expires</th><th>Days Left</th><th>Action</th></tr></thead>
-      <tbody id="p2_expiry_table"><tr><td colspan="7" style="text-align:center;padding:14px;color:var(--muted)">Click Refresh to load</td></tr></tbody>
-    </table></div>
+  <!-- P2 development section removed -->
   </div>
 </div>
 
@@ -4076,23 +4038,26 @@ async function loadGiftCards() {
         }
       }
       return {
-        _id:        v._id,
-        _source:    'merchant',
-        logo:       v.logo_url || '',
-        title:      v.title || '',
-        offer_text: v.offer_text || '',
-        validity:   validityDisplay,
-        from_date:  fromD,
-        end_date:   toD,
-        is_active:  computedStatus === 'approved',
-        status:     computedStatus,
+        _id:          v._id,
+        _source:      'merchant',
+        logo:         v.logo_url || v.logo || '',
+        title:        v.title || '',
+        offer_text:   v.offer_text || '',
+        validity:     validityDisplay,
+        from_date:    fromD,
+        end_date:     toD,
+        is_active:    computedStatus === 'approved',
+        status:       computedStatus,
         approval_status: st,
-        merchant_name: v.merchant_name || '',
+        merchant_name:  v.merchant_name || '',
         merchant_phone: v.merchant_phone || '',
-        created_at: v.created_at || '',
-        city:        v.city       || '',
-        store_id:    v.store_id   || '',
-        store_name:  v.store_name || '',
+        created_at:   v.created_at || '',
+        city:         v.city       || '',
+        store_id:     v.store_id   || '',
+        store_name:   v.store_name || '',
+        product_type: v.product_type || 'premium',
+        duration_days:v.duration_days || '',
+        amount:       v.amount || 0,
         _raw: v,
       };
     });
@@ -4134,18 +4099,17 @@ async function loadGiftCards() {
     }
     _allProductRows = _combinedRows;
 
-    // Update stats — expired is computed at normalize time (Issue 7)
-    const approved = _allProductRows.filter(r=>r.status==='approved').length;
-    const pending  = _allProductRows.filter(r=>r.status==='pending').length;
-    const expired  = _allProductRows.filter(r=>r.status==='expired').length;
-    const active   = _allProductRows.filter(r=>r.is_active && r.status!=='expired').length;
-    const _s = id => { const el=document.getElementById(id); if(el) el.textContent=0; };
+    // Update stats
+    const pending        = _allProductRows.filter(r=>r.status==='pending').length;
+    const expired        = _allProductRows.filter(r=>r.status==='expired').length;
+    const active_premium = _allProductRows.filter(r=>r.status==='approved' && (r.product_type||'premium')==='premium').length;
+    const std_active     = _allProductRows.filter(r=>r.status==='approved' && (r.product_type||'premium')==='standard').length;
     const _set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-    _set('pc_total',    _allProductRows.length);
-    _set('pc_approved', approved);
-    _set('pc_pending',  pending);
-    _set('pc_expired',  expired);
-    _set('pc_active',   active);
+    _set('pc_total',          _allProductRows.length);
+    _set('pc_active_premium', active_premium);
+    _set('pc_pending',        pending);
+    _set('pc_expired',        expired);
+    _set('pc_standard_active',std_active);
 
     _pcFilteredRows = _allProductRows;
     _pcPage = 1;
@@ -4161,6 +4125,7 @@ function filterProductCards() {
   const byStore = (document.getElementById('pc_store_filter')?.value||'').toLowerCase();
   const dateFrom= document.getElementById('pc_date_from')?.value||'';
   const dateTo  = document.getElementById('pc_date_to')?.value||'';
+  const byType  = document.getElementById('pc_type_filter')?.value||'';
 
   let rows = _allProductRows;
   if (q)       rows = rows.filter(r=>(r.title||'').toLowerCase().includes(q)||(r.offer_text||'').toLowerCase().includes(q)||(r.merchant_name||'').toLowerCase().includes(q));
@@ -4170,6 +4135,7 @@ function filterProductCards() {
   if (byStore) rows = rows.filter(r=>(r.store_name||'').toLowerCase().includes(byStore));
   if (dateFrom)rows = rows.filter(r=>(r.created_at||'')>=dateFrom);
   if (dateTo)  rows = rows.filter(r=>(r.created_at||'')<=dateTo+'z');
+  if (byType)  rows = rows.filter(r=>(r.product_type||'premium')===byType);
 
   _pcFilteredRows = rows;
   _pcPage = 1; // reset to page 1 on filter change
@@ -4184,7 +4150,7 @@ function renderProductCards() {
   if (!tbody) return;
   const rows = _pcFilteredRows;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:28px;color:var(--muted)">No products found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:28px;color:var(--muted)">No products found.</td></tr>';
     if(showing) showing.textContent = '';
     if(pgBar)   pgBar.innerHTML = '';
     return;
@@ -4287,6 +4253,8 @@ function renderProductCards() {
       <td>${_pcCity}</td>
       <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
       <td>${statusBadge}</td>
+      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${_prodType==='premium' && r.duration_days ? r.duration_days+' days' : '—'}</td>
+      <td style="font-size:12px;color:var(--text);white-space:nowrap">${_prodType==='premium' && r.amount ? '₹'+Number(r.amount).toLocaleString('en-IN') : '—'}</td>
       <td>
         <button class="btn-o me-1" onclick='openVZViewModal(${viewJson})'>View</button>
         ${approveBtn}
