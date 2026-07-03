@@ -568,6 +568,20 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
             sub_status = raw_status or "unpaid"
     sub_label  = f"{sub_plan} ({sub_status})" if sub_plan else ""
 
+    # Format subscription end date for display
+    _sub_ed = sub.get("end_date")
+    if isinstance(_sub_ed, datetime):
+        sub_end_date = _sub_ed.strftime("%d %b %Y")
+    elif isinstance(_sub_ed, str) and _sub_ed:
+        try:
+            from datetime import datetime as _dt2
+            _ep = _dt2.fromisoformat(_sub_ed.replace("Z", ""))
+            sub_end_date = _ep.strftime("%d %b %Y")
+        except Exception:
+            sub_end_date = str(_sub_ed)[:10]
+    else:
+        sub_end_date = ""
+
     best_deal = max((d.get("discount", 0) for d in deals), default=0)
 
     return {
@@ -593,6 +607,7 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         "subscription":   sub_label,
         "sub_plan":       sub_plan,
         "sub_status":     sub_status,
+        "sub_end_date":   sub_end_date,
         "deal_count":     len(deals),
         "best_deal":      best_deal,
         "lat":            s.get("lat", ""),
@@ -1959,6 +1974,9 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             "invoice_no":     b.get("invoice_no", ""),
             "amount":         b.get("total", 0),
             "created_at":     b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at",""))[:16],
+            "store_id":       str(b.get("store_id", "")),
+            "city":           b.get("city", "") or b.get("store_city", ""),
+            "store_name":     b.get("store_name", ""),
         })
     return result
 
@@ -2523,15 +2541,21 @@ async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=
 @router.get("/default-images")
 def admin_get_default_images(a=Depends(get_current_admin)):
     doc = db.settings.find_one({"_type": "default_images"})
+
+    def _as_list(v):
+        if isinstance(v, list): return v
+        if v: return [v]
+        return []
+
     if not doc:
-        return {"store": "", "product": "", "offer": "", "city": "", "merchant_banner": "",
+        return {"store": [], "product": [], "offer": [], "city": [], "merchant_banner": [],
                 "no_service_url": "", "no_service_title": "", "no_service_message": ""}
     return {
-        "store":              doc.get("store", ""),
-        "product":            doc.get("product", ""),
-        "offer":              doc.get("offer", ""),
-        "city":               doc.get("city", ""),
-        "merchant_banner":    doc.get("merchant_banner", ""),
+        "store":              _as_list(doc.get("store", "")),
+        "product":            _as_list(doc.get("product", "")),
+        "offer":              _as_list(doc.get("offer", "")),
+        "city":               _as_list(doc.get("city", "")),
+        "merchant_banner":    _as_list(doc.get("merchant_banner", "")),
         "no_service_url":     doc.get("no_service_url", ""),
         "no_service_title":   doc.get("no_service_title", ""),
         "no_service_message": doc.get("no_service_message", ""),
@@ -2540,12 +2564,22 @@ def admin_get_default_images(a=Depends(get_current_admin)):
 
 @router.put("/default-images/urls")
 def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
-    update = {}
-    for field in ["store", "product", "offer", "city", "merchant_banner"]:
-        if field in body:
-            update[field] = body[field]
-    if update:
-        db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
+    field  = body.get("type", "")
+    url    = body.get("url", "")
+    action = body.get("action", "add")
+    if field not in ["store", "product", "offer", "city", "merchant_banner"]:
+        raise HTTPException(400, "Invalid image type")
+    if action == "add" and url:
+        db.settings.update_one(
+            {"_type": "default_images"},
+            {"$addToSet": {field: url}},
+            upsert=True
+        )
+    elif action == "remove" and url:
+        db.settings.update_one(
+            {"_type": "default_images"},
+            {"$pull": {field: url}}
+        )
     return {"ok": True}
 
 

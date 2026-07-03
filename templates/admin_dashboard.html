@@ -2002,10 +2002,11 @@ function renderStoresPage(){
         ${(()=>{
           const _ss = (s.sub_status||"").toLowerCase();
           const _sp = s.sub_plan||"";
-          if(_ss==='active') return `<span class="badge-active" style="font-size:10px;">✓ ${_sp||'Paid'}</span>`;
-          if(_ss==='expired') return `<span class="badge-inactive" style="font-size:10px;">Expired</span>`;
-          if(_ss==='free') return `<span class="badge-warn" style="font-size:10px;">Free</span>`;
-          return `<span class="badge-warn" style="font-size:10px;">Unpaid</span>`;
+          const _ed = s.sub_end_date ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${s.sub_end_date}</div>` : '';
+          if(_ss==='active') return `<span class="badge-active" style="font-size:10px;">✓ ${_sp||'Paid'}</span>${_ed}`;
+          if(_ss==='expired') return `<span class="badge-inactive" style="font-size:10px;">Expired</span>${_ed}`;
+          if(_ss==='free') return `<span class="badge-warn" style="font-size:10px;">Free</span>${_ed}`;
+          return `<span class="badge-warn" style="font-size:10px;">Unpaid</span>${_ed}`;
         })()}
       </td>
       <td>
@@ -2874,7 +2875,13 @@ function renderBanners(rows) {
       : '';
 
     const viewJson = JSON.stringify({...r, _raw:undefined}).replace(/"/g,'&quot;');
-    const _bnCity = r.city ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${r.city}</span>` : `<span style="color:var(--muted);font-size:11px">All Cities</span>`;
+    // Resolve city: use stored city, or look up from store list if store_id is present
+    let _bnCityText = r.city || '';
+    if (!_bnCityText && r.store_id && window.allStoresList) {
+      const _bnSt = window.allStoresList.find(s => s._id === r.store_id);
+      if (_bnSt) _bnCityText = _bnSt.city || '';
+    }
+    const _bnCity = _bnCityText ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${_bnCityText}</span>` : `<span style="color:var(--muted);font-size:11px">All Cities</span>`;
     const _bnStore = r.store_name
       ? `<span style="font-size:12px;font-weight:600;color:var(--text)">${r.store_name}</span>`
       : `<span style="color:var(--muted);font-size:11px">—</span>`;
@@ -4004,6 +4011,8 @@ async function loadGiftCards() {
         discount:    v.discount || '',
         category:    v.category || '',
         description: v.description || '',
+        // product type — must be propagated so type badge renders correctly
+        product_type: v.product_type || 'standard',
       };
     });
 
