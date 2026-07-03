@@ -1848,7 +1848,7 @@ def list_merchant_products(m=Depends(get_merchant)):
             "store_id":        store_id,
             "store_name":      v.get("store_name", ""),
             "city":            v.get("city", ""),
-            "is_active":       bool(v.get("is_active", True)) and sub_active and prod_approval == "approved",
+            "is_active":       bool(v.get("is_active", True)),
             "approval_status": app_status,
             "status":          app_status,
             "end_date":        "",
@@ -1995,7 +1995,7 @@ def update_product(pid: str, data: dict, m=Depends(get_merchant)):
     # Try Premium (merchant_vouchers) first
     prem = db.merchant_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
     if prem:
-        allowed = {"title", "offer_text", "price", "original_price"}
+        allowed = {"title", "offer_text", "price", "original_price", "is_active"}
         upd = {k: v for k, v in data.items() if k in allowed}
         if upd:
             db.merchant_vouchers.update_one({"_id": oid}, {"$set": upd})
@@ -2008,7 +2008,7 @@ def update_product(pid: str, data: dict, m=Depends(get_merchant)):
         for k, v in data.items():
             if k == "offer_text":
                 upd["text"] = v
-            elif k in {"title", "price", "original_price"}:
+            elif k in {"title", "price", "original_price", "is_active"}:
                 upd[k] = v
         if upd:
             db.gift_vouchers.update_one({"_id": oid}, {"$set": upd})
