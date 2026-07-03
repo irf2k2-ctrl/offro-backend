@@ -1909,7 +1909,7 @@ def get_product_pricing(m=Depends(get_merchant)):
 
 @router.post("/products/standard")
 def create_standard_product(data: dict, m=Depends(get_merchant)):
-    """Create a Standard Product — free, auto-approved, linked to store subscription."""
+    """Create a Standard Product — free, requires admin approval, linked to store subscription."""
     merchant_id = _mid(m)
     limit         = _get_standard_product_limit()
     current_count = db.gift_vouchers.count_documents({"product_type": "standard", "merchant_id": merchant_id})
@@ -1933,6 +1933,8 @@ def create_standard_product(data: dict, m=Depends(get_merchant)):
         raise HTTPException(404, "Store not found")
 
     logo_raw = (data.get("logo_url") or "").strip()
+    if not logo_raw:
+        raise HTTPException(400, "Product image is required")
     logo_url = _cloudinary_upload(logo_raw, folder="offro/products") if logo_raw else ""
     city     = (data.get("city") or store.get("city", "")).strip()
 

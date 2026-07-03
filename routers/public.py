@@ -1092,7 +1092,7 @@ def get_gift_vouchers_public(city: str = ""):
             return True
         dc = (doc_city or "").strip().lower()
         if not dc:
-            return True  # no city on product — include it (global/all-city product)
+            return False  # FIX: city filter active — exclude products with no city assigned
         return bool(_re.search(_re.escape(city_filter), dc) or _re.search(_re.escape(dc), city_filter))
 
     def _is_active(doc):

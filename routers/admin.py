@@ -1442,7 +1442,7 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
 def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
     """Update an existing gift voucher."""
     upd = {}
-    for field in ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date", "duration_days"]:
+    for field in ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date", "duration_days", "approval_status", "status"]:
         if field in data:
             upd[field] = (data[field] or "").strip()
     if "store_id" in upd and upd["store_id"] and "logo" not in upd:
@@ -1453,10 +1453,45 @@ def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
         except: pass
     if "is_active" in data:
         upd["is_active"] = bool(data["is_active"])
+    # Auto-sync is_active when approval_status changes
+    if "approval_status" in upd and "is_active" not in upd:
+        upd["is_active"] = (upd["approval_status"] == "approved")
     if not upd:
         raise HTTPException(400, "Nothing to update")
     db.gift_vouchers.update_one({"_id": ObjectId(vid)}, {"$set": upd})
     return {"message": "Voucher updated"}
+
+@router.put("/gift-vouchers/{vid}/approve")
+def approve_standard_product(vid: str, a=Depends(get_current_admin)):
+    """Approve a standard product (gift_vouchers) — sets approval_status to approved and activates it."""
+    v = db.gift_vouchers.find_one({"_id": ObjectId(vid)})
+    if not v: raise HTTPException(404, "Product not found")
+    db.gift_vouchers.update_one(
+        {"_id": ObjectId(vid)},
+        {"$set": {
+            "approval_status": "approved",
+            "status":          "approved",
+            "is_active":       True,
+            "approved_at":     datetime.utcnow().isoformat(),
+        }}
+    )
+    return {"ok": True, "message": "Standard product approved and activated."}
+
+@router.put("/gift-vouchers/{vid}/reject")
+def reject_standard_product(vid: str, body: dict = {}, a=Depends(get_current_admin)):
+    """Reject a standard product."""
+    reason = body.get("reason", "")
+    db.gift_vouchers.update_one(
+        {"_id": ObjectId(vid)},
+        {"$set": {
+            "approval_status":  "rejected",
+            "status":           "rejected",
+            "is_active":        False,
+            "rejection_reason": reason,
+            "rejected_at":      datetime.utcnow().isoformat(),
+        }}
+    )
+    return {"ok": True, "message": "Product rejected."}
 
 @router.delete("/gift-vouchers/{vid}")
 def delete_gift_voucher(vid: str, a=Depends(get_current_admin)):
