@@ -406,7 +406,11 @@ def submit_product_review(pid: str, data: dict, request: _Req):
         oid = ObjectId(pid)
     except Exception:
         raise _HTTPEx(400, "Invalid product_id")
-    product = db.products.find_one({"_id": oid})
+    product = (
+        db.products.find_one({"_id": oid}) or
+        db.gift_vouchers.find_one({"_id": oid}) or
+        db.merchant_vouchers.find_one({"_id": oid})
+    )
     if not product:
         raise _HTTPEx(404, "Product not found")
 
@@ -454,6 +458,24 @@ def submit_product_review(pid: str, data: dict, request: _Req):
         {"$set": {"rating": avg, "rating_count": len(all_revs)}}
     )
     return {"ok": True, "message": "Review submitted!", "avg_rating": avg}
+
+
+@router.get("/products/{pid}/my-review")
+def get_my_product_review(pid: str, request: _Req):
+    """Authenticated: return the current user's review for a product (if any)."""
+    user = _get_user_optional(request)
+    if not user:
+        return {}
+    user_id = str(user["_id"])
+    try:
+        ObjectId(pid)
+    except Exception:
+        return {}
+    rev = db.product_reviews.find_one({"product_id": pid, "user_id": user_id})
+    if not rev:
+        return {}
+    rev["_id"] = str(rev["_id"])
+    return rev
 
 
 # =================== PUBLIC CATEGORIES ===================

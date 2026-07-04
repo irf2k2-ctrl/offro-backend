@@ -2772,6 +2772,16 @@ def _fmt_admin_product_row(v, collection):
         "store_id":          v.get("store_id", ""),
         "store_name":        v.get("store_name", ""),
         "city":              v.get("city", ""),
+        "sale_price":        v.get("sale_price", v.get("price", 0)),
+        "original_price":    v.get("original_price", v.get("mrp", 0)),
+        "logo_url":          v.get("logo_url", v.get("logo", "")),
+        "duration_days":     v.get("duration_days", 0),
+        "pay_from_date":     str(v.get("pay_from_date", ""))[:10],
+        "pay_to_date":       str(v.get("pay_to_date", ""))[:10],
+        "pay_amount":        v.get("pay_amount", 0),
+        "pay_gst":           v.get("pay_gst", 18),
+        "pay_mode":          v.get("pay_mode", ""),
+        "pay_ref":           v.get("pay_ref", ""),
         "created_at":        str(v.get("created_at", ""))[:19],
     }
 
@@ -3132,4 +3142,28 @@ def admin_deactivate_product(pid: str, a=Depends(get_current_admin)):
         res = db.merchant_vouchers.update_one({"_id": oid}, upd)
     if res.matched_count == 0:
         raise HTTPException(404, "Product not found")
+    return {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════════════
+# ADMIN PRODUCT REVIEWS
+# ══════════════════════════════════════════════════════════════════
+
+@router.get("/product-reviews")
+def list_product_reviews(a=Depends(get_current_admin)):
+    """Admin: list all product reviews across all products."""
+    reviews = []
+    for r in db.product_reviews.find().sort("created_at", -1):
+        r["_id"] = str(r["_id"])
+        reviews.append(r)
+    return reviews
+
+
+@router.delete("/product-reviews/{review_id}")
+def delete_product_review(review_id: str, a=Depends(get_current_admin)):
+    """Admin: delete a product review by ID."""
+    try:
+        db.product_reviews.delete_one({"_id": ObjectId(review_id)})
+    except Exception:
+        raise HTTPException(400, "Invalid review ID")
     return {"ok": True}
