@@ -453,10 +453,10 @@ def submit_product_review(pid: str, data: dict, request: _Req):
 
     all_revs = list(db.product_reviews.find({"product_id": pid}, {"rating": 1}))
     avg      = round(sum(r["rating"] for r in all_revs) / len(all_revs), 1) if all_revs else rating
-    db.products.update_one(
-        {"_id": oid},
-        {"$set": {"rating": avg, "rating_count": len(all_revs)}}
-    )
+    _rating_upd = {"$set": {"rating": avg, "rating_count": len(all_revs)}}
+    db.products.update_one({"_id": oid}, _rating_upd)
+    db.gift_vouchers.update_one({"_id": oid}, _rating_upd)
+    db.merchant_vouchers.update_one({"_id": oid}, _rating_upd)
     return {"ok": True, "message": "Review submitted!", "avg_rating": avg}
 
 
@@ -1320,19 +1320,21 @@ def get_gift_vouchers_public(city: str = ""):
             or d.get("merchant_name", "")
         )
         result.append({
-            "id":         vid,
-            "title":      d.get("title", ""),
-            "text":       d.get("text", "") or d.get("offer_text", ""),
-            "validity":   (str(d.get("end_date","") or "")[:10]) or (d.get("validity","") or ""),
-            "logo":       _resolve_img(d),
-            "logo_url":   _resolve_img(d),
-            "store_id":   sid,
-            "store_name": resolved_store_name,
-            "city":       doc_city,
-            "from_date":  d.get("from_date", ""),
-            "end_date":   d.get("end_date", ""),
-            "is_active":  True,
-            "source":     "gift_vouchers",
+            "id":           vid,
+            "title":        d.get("title", ""),
+            "text":         d.get("text", "") or d.get("offer_text", ""),
+            "validity":     (str(d.get("end_date","") or "")[:10]) or (d.get("validity","") or ""),
+            "logo":         _resolve_img(d),
+            "logo_url":     _resolve_img(d),
+            "store_id":     sid,
+            "store_name":   resolved_store_name,
+            "city":         doc_city,
+            "from_date":    d.get("from_date", ""),
+            "end_date":     d.get("end_date", ""),
+            "is_active":    True,
+            "source":       "gift_vouchers",
+            "rating":       float(d.get("rating") or d.get("avg_rating") or 0),
+            "rating_count": int(d.get("rating_count") or d.get("review_count") or 0),
         })
 
     # ── 2. products collection ───────────────────────────────────────────────
@@ -1361,19 +1363,21 @@ def get_gift_vouchers_public(city: str = ""):
             or p.get("merchant_name", "")
         )
         result.append({
-            "id":         pid,
-            "title":      p.get("name") or p.get("title") or "",
-            "text":       offer_text,
-            "validity":   p.get("validity") or p.get("valid_till") or "",
-            "logo":       _resolve_img(p),
-            "logo_url":   _resolve_img(p),
-            "store_id":   psid,
-            "store_name": resolved_p_store,
-            "city":       pdoc_city,
-            "from_date":  p.get("from_date") or p.get("start_date") or "",
-            "end_date":   p.get("end_date") or p.get("expiry") or "",
-            "is_active":  True,
-            "source":     "products",
+            "id":           pid,
+            "title":        p.get("name") or p.get("title") or "",
+            "text":         offer_text,
+            "validity":     p.get("validity") or p.get("valid_till") or "",
+            "logo":         _resolve_img(p),
+            "logo_url":     _resolve_img(p),
+            "store_id":     psid,
+            "store_name":   resolved_p_store,
+            "city":         pdoc_city,
+            "from_date":    p.get("from_date") or p.get("start_date") or "",
+            "end_date":     p.get("end_date") or p.get("expiry") or "",
+            "is_active":    True,
+            "source":       "products",
+            "rating":       float(p.get("rating") or p.get("avg_rating") or 0),
+            "rating_count": int(p.get("rating_count") or p.get("review_count") or 0),
         })
 
     return result

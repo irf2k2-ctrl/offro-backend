@@ -2134,6 +2134,10 @@ def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
             "source_voucher_id": vid,
             "merchant_id":       str(v.get("merchant_id", "")),
             "merchant_name":     v.get("merchant_name", ""),
+            "store_id":          v.get("store_id", ""),
+            "store_name":        v.get("store_name", "") or v.get("merchant_name", ""),
+            "city":              v.get("city", ""),
+            "product_type":      "premium",
             "amount":            v.get("amount", 0),
             "updated_at":        datetime.utcnow().isoformat(),
         },
@@ -2790,7 +2794,11 @@ def _fmt_admin_product_row(v, collection):
 def list_admin_products(a=Depends(get_current_admin)):
     """All admin product cards (gift_vouchers + products collections)."""
     result = []
-    for v in db.gift_vouchers.find().sort("_id", -1):
+    # Exclude gift_vouchers that were auto-created from merchant_voucher approval (source_voucher_id set)
+    # — those are already shown in the Merchant Products tab; showing them here causes duplicates.
+    for v in db.gift_vouchers.find(
+        {"$or": [{"source_voucher_id": {"$exists": False}}, {"source_voucher_id": ""}]}
+    ).sort("_id", -1):
         result.append(_fmt_admin_product_row(v, "gift_vouchers"))
     for v in db.products.find().sort("_id", -1):
         result.append(_fmt_admin_product_row(v, "products"))
@@ -2897,6 +2905,9 @@ def approve_merchant_product_card(vid: str, a=Depends(get_current_admin)):
                 "source_voucher_id": vid,
                 "merchant_id":       str(v.get("merchant_id", "")),
                 "merchant_name":     v.get("merchant_name", ""),
+                "store_id":          v.get("store_id", ""),
+                "store_name":        v.get("store_name", "") or v.get("merchant_name", ""),
+                "city":              v.get("city", ""),
                 "product_type":      v.get("product_type", "premium"),
                 "amount":            v.get("amount", v.get("total", 0)),
                 "duration_days":     v.get("duration_days", 0),

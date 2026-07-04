@@ -1848,7 +1848,7 @@ def list_merchant_products(m=Depends(get_merchant)):
             "store_id":        store_id,
             "store_name":      v.get("store_name", ""),
             "city":            v.get("city", ""),
-            "is_active":       bool(v.get("is_active", True)),
+            "is_active":       bool(v.get("is_active", True)) and sub_active and prod_approval == "approved",
             "approval_status": app_status,
             "status":          app_status,
             "end_date":        "",
@@ -1877,8 +1877,8 @@ def list_merchant_products(m=Depends(get_merchant)):
             "duration_days":   v.get("duration_days", 0),
             "from_date":       v.get("from_date", ""),
             "end_date":        v.get("end_date", ""),
-            "approval_status": v.get("approval_status", "pending_approval"),
-            "status":          v.get("status", "pending"),
+            "approval_status": v.get("approval_status") or v.get("status") or "pending_approval",
+            "status":          v.get("status") or v.get("approval_status") or "pending",
             "amount":          v.get("total", 0),
             "created_at":      str(v.get("created_at", ""))[:19],
         })
@@ -1995,7 +1995,7 @@ def update_product(pid: str, data: dict, m=Depends(get_merchant)):
     # Try Premium (merchant_vouchers) first
     prem = db.merchant_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
     if prem:
-        allowed = {"title", "offer_text", "price", "original_price", "is_active"}
+        allowed = {"title", "offer_text", "price", "original_price"}
         upd = {k: v for k, v in data.items() if k in allowed}
         if upd:
             db.merchant_vouchers.update_one({"_id": oid}, {"$set": upd})
@@ -2008,7 +2008,7 @@ def update_product(pid: str, data: dict, m=Depends(get_merchant)):
         for k, v in data.items():
             if k == "offer_text":
                 upd["text"] = v
-            elif k in {"title", "price", "original_price", "is_active"}:
+            elif k in {"title", "price", "original_price"}:
                 upd[k] = v
         if upd:
             db.gift_vouchers.update_one({"_id": oid}, {"$set": upd})
