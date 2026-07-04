@@ -378,6 +378,84 @@ def submit_store_review(store_id: str, data: dict, request: _Req):
         )
     return {"ok": True, "message": "Review submitted!", "avg_rating": avg}
 
+
+# ─── PRODUCT REVIEWS ─────────────────────────────────────────────────────────
+
+@router.get("/products/{pid}/reviews")
+def get_product_reviews(pid: str, limit: int = 10, skip: int = 0):
+    """Public: fetch paginated reviews for a product."""
+    try:
+        ObjectId(pid)
+    except Exception:
+        return {"reviews": [], "total": 0}
+    total   = db.product_reviews.count_documents({"product_id": pid})
+    reviews = list(
+        db.product_reviews.find({"product_id": pid})
+        .sort("created_at", -1).skip(skip).limit(limit)
+    )
+    for r in reviews:
+        r["_id"] = str(r["_id"])
+    return {"reviews": reviews, "total": total}
+
+
+@router.post("/products/{pid}/review")
+def submit_product_review(pid: str, data: dict, request: _Req):
+    """Authenticated: submit or update a product review (one per user)."""
+    from fastapi import HTTPException as _HTTPEx
+    try:
+        oid = ObjectId(pid)
+    except Exception:
+        raise _HTTPEx(400, "Invalid product_id")
+    product = db.products.find_one({"_id": oid})
+    if not product:
+        raise _HTTPEx(404, "Product not found")
+
+    rating = float(data.get("rating", 0))
+    text   = (data.get("text", "") or "").strip()
+    if not (1 <= rating <= 5):
+        raise _HTTPEx(400, "Rating must be 1–5")
+    if len(text) < 3:
+        raise _HTTPEx(400, "Review text too short (min 3 chars)")
+
+    user      = _get_user_optional(request)
+    user_id   = str(user["_id"]) if user else None
+    user_name = (user.get("name") or user.get("full_name") or "").strip() if user else ""
+    if not user_name:
+        user_name = (data.get("user_name", "") or "").strip() or "Anonymous"
+
+    from datetime import datetime as _dt
+    if user_id:
+        db.product_reviews.update_one(
+            {"product_id": pid, "user_id": user_id},
+            {"$set": {
+                "product_id": pid,
+                "user_id":    user_id,
+                "user_name":  user_name,
+                "rating":     rating,
+                "text":       text,
+                "updated_at": _dt.utcnow().isoformat(),
+            }, "$setOnInsert": {"created_at": _dt.utcnow().isoformat()}},
+            upsert=True,
+        )
+    else:
+        db.product_reviews.insert_one({
+            "product_id": pid,
+            "user_id":    None,
+            "user_name":  user_name,
+            "rating":     rating,
+            "text":       text,
+            "created_at": _dt.utcnow().isoformat(),
+        })
+
+    all_revs = list(db.product_reviews.find({"product_id": pid}, {"rating": 1}))
+    avg      = round(sum(r["rating"] for r in all_revs) / len(all_revs), 1) if all_revs else rating
+    db.products.update_one(
+        {"_id": oid},
+        {"$set": {"rating": avg, "rating_count": len(all_revs)}}
+    )
+    return {"ok": True, "message": "Review submitted!", "avg_rating": avg}
+
+
 # =================== PUBLIC CATEGORIES ===================
 # ── City → Areas mapping (predefined) ──────────────────────────────
 CITY_AREAS = {
