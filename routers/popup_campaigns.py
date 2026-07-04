@@ -114,13 +114,10 @@ async def toggle_popup_campaign(cid: str, request: Request):
 # ── Public: active campaigns for Flutter ──────────────────────────────────────
 @router.get("/public/popup-campaigns")
 def get_active_popup_campaigns(city: str = ""):
-    now_iso = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-    query   = {
-        "is_active": True,
-        "start_dt":  {"$lte": now_iso},
-        "end_dt":    {"$gte": now_iso},
-    }
-    docs   = list(db.popup_campaigns.find(query).sort("_id", -1))
+    # No server-side date filter — datetimes are stored in the admin's local
+    # timezone (browser datetime-local input), so comparing against server UTC
+    # causes mismatches. The Flutter app checks dates against device local time.
+    docs = list(db.popup_campaigns.find({"is_active": True}).sort("_id", -1))
     result = []
     for d in docs:
         target = d.get("target", "all")
