@@ -661,51 +661,80 @@ def get_terms_public(type: str):
 # =================== TERMS ===================
 # /terms/{type} handled above
 
+def _nominatim_reverse(lat: float, lng: float) -> dict:
+    """Call Nominatim reverse geocoding and return state/city/area/address."""
+    import requests as _req, urllib.parse
+    try:
+        r = _req.get(
+            f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json&addressdetails=1",
+            headers={"User-Agent": "OffrO/2.0 (location-based deals app)"},
+            timeout=8,
+        )
+        data = r.json()
+        addr = data.get("address", {})
+        state   = addr.get("state", "")
+        city    = (addr.get("city") or addr.get("town") or addr.get("county") or addr.get("village") or "")
+        area    = (addr.get("suburb") or addr.get("neighbourhood") or addr.get("quarter") or addr.get("locality") or "")
+        address = data.get("display_name", "")[:250]
+        return {"state": state, "city": city, "area": area, "address": address}
+    except Exception:
+        return {}
+
+
+@router.get("/reverse-geocode")
+def reverse_geocode_endpoint(lat: float, lng: float):
+    """Reverse geocode lat/lng → state, city, area, address via Nominatim."""
+    result = _nominatim_reverse(lat, lng)
+    if not result:
+        return {"error": "Could not resolve location details. Check coordinates and try again."}
+    return result
+
+
 @router.get("/resolve-maps-link")
 def resolve_maps_link(url: str):
-    import re, urllib.request, urllib.parse, urllib.error
-    final_url = url.strip()
+    import re, urllib.parse
+    import requests as _req
+
+    raw_url = url.strip()
+    final_url = raw_url
+
+    # ── Step 1: Follow redirects (handles maps.app.goo.gl short links) ──
     try:
-        req = urllib.request.Request(
-            final_url,
-            method="GET",
-            headers={"User-Agent": "Mozilla/5.0 (compatible; OffrO/1.0)"}
+        resp = _req.get(
+            raw_url,
+            timeout=10,
+            allow_redirects=True,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Mobile Safari/537.36"
+                )
+            },
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            final_url = resp.url
+        final_url = resp.url
     except Exception:
         pass
 
     lat, lng = None, None
 
-    m = re.search(r'[!;]3d(-?\d+\.\d+)[!;]4d(-?\d+\.\d+)', final_url)
-    if m:
-        try: lat, lng = float(m.group(1)), float(m.group(2))
-        except: pass
-
-    if lat is None:
-        m = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
+    # ── Step 2: Extract coords from expanded URL ──
+    for pat in [
+        r'[!;]3d(-?\d+\.\d+)[!;]4d(-?\d+\.\d+)',
+        r'@(-?\d+\.\d+),(-?\d+\.\d+)',
+        r'[?&](?:q|query)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)',
+        r'[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)',
+        r'/maps/place/[^/@?]+/@?(-?\d+\.\d+),(-?\d+\.\d+)',
+    ]:
+        m = re.search(pat, final_url)
         if m:
-            try: lat, lng = float(m.group(1)), float(m.group(2))
-            except: pass
-
-    if lat is None:
-        m = re.search(r'[?&](?:q|query)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)', final_url)
-        if m:
-            try: lat, lng = float(m.group(1)), float(m.group(2))
-            except: pass
-
-    if lat is None:
-        m = re.search(r'[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
-        if m:
-            try: lat, lng = float(m.group(1)), float(m.group(2))
-            except: pass
-
-    if lat is None:
-        m = re.search(r'/maps/place/[^/]+/(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
-        if m:
-            try: lat, lng = float(m.group(1)), float(m.group(2))
-            except: pass
+            try:
+                la, ln = float(m.group(1)), float(m.group(2))
+                if la != 0.0 and ln != 0.0 and abs(la) <= 90 and abs(ln) <= 180:
+                    lat, lng = la, ln
+                    break
+            except Exception:
+                pass
 
     place_name = ""
     m = re.search(r'/maps/place/([^/@?]+)', final_url)
@@ -717,15 +746,22 @@ def resolve_maps_link(url: str):
         return {
             "error": (
                 "Could not extract coordinates from this link. "
-                "In Google Maps, tap Share → Copy link, then paste the link here."
+                "In Google Maps, tap Share → Copy link, then paste the full link here."
             )
         }
 
+    # ── Step 3: Nominatim reverse geocode for address auto-fill ──
+    geo = _nominatim_reverse(lat, lng)
+
     return {
-        "lat": round(lat, 6),
-        "lng": round(lng, 6),
+        "lat":        round(lat, 6),
+        "lng":        round(lng, 6),
         "place_name": place_name,
-        "maps_url": final_url,
+        "maps_url":   final_url,
+        "state":      geo.get("state", ""),
+        "city":       geo.get("city", ""),
+        "area":       geo.get("area", ""),
+        "address":    geo.get("address", ""),
     }
 
 
@@ -1098,6 +1134,27 @@ def get_gift_vouchers_public(city: str = ""):
     def _is_active(doc):
         return doc.get("is_active", True) not in (False, "false", "0", 0)
 
+    def _is_expired(doc) -> bool:
+        from datetime import datetime as _dt2
+        _now2 = _dt2.utcnow()
+        for k in ("end_date", "validity_end", "expiry", "valid_till"):
+            v = doc.get(k)
+            if not v:
+                continue
+            try:
+                if isinstance(v, _dt2):
+                    if v < _now2:
+                        return True
+                else:
+                    vs = str(v).strip()
+                    if vs and vs not in ("", "null", "None"):
+                        vdt = _dt2.fromisoformat(vs[:19].replace(" ", "T"))
+                        if vdt < _now2:
+                            return True
+            except Exception:
+                pass
+        return False
+
     def _resolve_img(doc):
         for k in ["logo", "logo_url", "image_url", "image", "thumbnail"]:
             v = str(doc.get(k, "") or "")
@@ -1120,6 +1177,21 @@ def get_gift_vouchers_public(city: str = ""):
         except Exception:
             return ""
 
+    def _get_store_name_by_merchant(mid: str) -> str:
+        """Look up a merchant's primary active store name — matches admin dashboard behaviour."""
+        if not mid: return ""
+        try:
+            clauses = [{"merchant_id": mid}]
+            try: clauses.append({"merchant_id": OId(mid)})
+            except Exception: pass
+            s = db.stores.find_one({"$or": clauses, "status": "active"}, {"store_name": 1})
+            if s: return s.get("store_name", "")
+            s = db.stores.find_one({"$or": clauses}, {"store_name": 1})
+            if s: return s.get("store_name", "")
+        except Exception:
+            pass
+        return ""
+
     def _get_store_city(sid: str) -> str:
         if not sid: return ""
         try:
@@ -1131,6 +1203,7 @@ def get_gift_vouchers_public(city: str = ""):
     # ── 1. gift_vouchers collection (Premium only — Standard are subscription-linked, shown in Store Detail) ──
     for d in db.gift_vouchers.find({"product_type": {"$ne": "standard"}}).sort("_id", -1):
         if not _is_active(d): continue
+        if _is_expired(d): continue
         vid = str(d["_id"])
         if vid in seen_ids: continue
         # City filter: check product's own city OR its store's city
@@ -1138,7 +1211,14 @@ def get_gift_vouchers_public(city: str = ""):
         if not _city_matches(doc_city): continue
         seen_ids.add(vid)
         sid = d.get("store_id", "")
-        resolved_store_name = _get_store_name(sid) or d.get("store_name", "") or d.get("merchant_name", "")
+        mid = str(d.get("merchant_id", "") or "")
+        # Store name: prefer merchant_id live lookup (matches admin dashboard) → store_id lookup → cached field
+        resolved_store_name = (
+            _get_store_name_by_merchant(mid)
+            or _get_store_name(sid)
+            or d.get("store_name", "")
+            or d.get("merchant_name", "")
+        )
         result.append({
             "id":         vid,
             "title":      d.get("title", ""),
@@ -1158,6 +1238,7 @@ def get_gift_vouchers_public(city: str = ""):
     # ── 2. products collection ───────────────────────────────────────────────
     for p in db.products.find({}).sort("_id", -1):
         if not _is_active(p): continue
+        if _is_expired(p): continue
         pid = str(p["_id"])
         if pid in seen_ids: continue
         # City filter: check product's own city OR its store's city
@@ -1171,7 +1252,14 @@ def get_gift_vouchers_public(city: str = ""):
         if price:    text_parts.append(f"₹{price}")
         offer_text = p.get("offer_text") or p.get("text") or (", ".join(text_parts) if text_parts else "")
         psid = str(p.get("store_id", ""))
-        resolved_p_store = _get_store_name(psid) or p.get("store_name", "") or p.get("merchant_name", "")
+        pmid = str(p.get("merchant_id", "") or "")
+        # Store name: prefer merchant_id live lookup (matches admin dashboard) → store_id lookup → cached field
+        resolved_p_store = (
+            _get_store_name_by_merchant(pmid)
+            or _get_store_name(psid)
+            or p.get("store_name", "")
+            or p.get("merchant_name", "")
+        )
         result.append({
             "id":         pid,
             "title":      p.get("name") or p.get("title") or "",
