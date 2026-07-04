@@ -111,6 +111,7 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('product_cards',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
   <a href="#" onclick="showSection('admin_banners',this)"><i class="fas fa-ad fa-fw"></i> Admin Banners</a>
+  <a href="#" onclick="showSection('popup_campaigns',this)"><i class="fas fa-bullhorn fa-fw"></i> Popup Campaigns</a>
   <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
   <a href="#" onclick="showSection('gift_product_requests',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
   <div class="sep"></div>
@@ -884,6 +885,130 @@ tr:hover td{background:#f7faf8;}
     </div>
   </div>
 
+  <!-- ═══ POPUP CAMPAIGNS ═══ -->
+  <div id="section-popup_campaigns" class="section">
+    <div class="section-header">
+      <div>
+        <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-bullhorn me-2"></i>Home Popup Campaigns</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:2px;">Schedule promotional popups shown on the Customer App Home Screen</div>
+      </div>
+      <button class="btn-p" onclick="openPopupCampaignModal()"><i class="fas fa-plus me-1"></i> New Campaign</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:90px">Preview</th>
+            <th>Campaign Name</th>
+            <th>Frequency</th>
+            <th>Target</th>
+            <th>Start</th>
+            <th>End</th>
+            <th style="text-align:center">Active</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="popup_campaigns_body">
+          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- POPUP CAMPAIGN MODAL -->
+  <div id="popupCampaignModal" class="modal-overlay" style="display:none">
+    <div class="modal-box" style="max-width:540px;padding:0">
+      <div class="modal-header">
+        <h3 id="pcm_title" class="modal-title">New Popup Campaign</h3>
+        <button class="btn-close btn-close-white" onclick="closePopupCampaignModal()"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="pcm_id">
+        <!-- Image -->
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Popup Image</label>
+          <div id="pcm_img_preview" style="width:100%;aspect-ratio:9/16;max-height:220px;background:#f5f5f5;border-radius:10px;overflow:hidden;margin-bottom:6px;display:flex;align-items:center;justify-content:center;">
+            <span style="color:#aaa;font-size:13px">No image selected</span>
+          </div>
+          <div style="font-size:11px;color:var(--primary);margin-bottom:8px;font-weight:600">
+            <i class="fas fa-info-circle"></i> Recommended: <strong>1080 × 1920 px</strong> (Portrait 9:16)
+          </div>
+          <input type="text" id="pcm_image_url" class="form-control mb-2" placeholder="Paste image URL (https://...)" oninput="pcmPreviewUrl(this.value)">
+          <input type="file" id="pcm_image_file" accept="image/*" class="form-control mb-2" onchange="pcmPreviewFile(this)">
+          <div style="font-size:11px;color:var(--muted)">Paste a URL <strong>or</strong> upload a file.</div>
+        </div>
+        <!-- Name -->
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Campaign Name</label>
+          <input type="text" id="pcm_name" class="form-control" placeholder="e.g. Independence Day Offer">
+        </div>
+        <!-- Dates -->
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Start Date & Time</label>
+            <input type="datetime-local" id="pcm_start_dt" class="form-control">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">End Date & Time</label>
+            <input type="datetime-local" id="pcm_end_dt" class="form-control">
+          </div>
+        </div>
+        <!-- Frequency -->
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Display Frequency</label>
+          <select id="pcm_frequency" class="form-select">
+            <option value="once_per_day">Show Once Per Day</option>
+            <option value="show_once">Show Once Only</option>
+            <option value="every_open">Show Every App Open</option>
+          </select>
+        </div>
+        <!-- Target Audience -->
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Target Audience</label>
+          <select id="pcm_target" class="form-select" onchange="pcmToggleCities()">
+            <option value="all">All Users</option>
+            <option value="selected_city">Selected City</option>
+          </select>
+        </div>
+        <!-- City selection -->
+        <div id="pcm_cities_wrap" class="mb-3" style="display:none">
+          <label class="form-label fw-semibold">Select Cities</label>
+          <div id="pcm_cities_list" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg);display:flex;flex-wrap:wrap;gap:6px;">
+            <span style="color:var(--muted);font-size:12px">Loading cities...</span>
+          </div>
+        </div>
+        <!-- Click Action -->
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Click Action</label>
+          <select id="pcm_click_action" class="form-select" onchange="pcmToggleActionValue()">
+            <option value="none">No Action</option>
+            <option value="open_store">Open Store</option>
+            <option value="open_product">Open Product</option>
+            <option value="open_deal">Open Deal</option>
+            <option value="open_category">Open Category</option>
+            <option value="open_url">Open External URL</option>
+          </select>
+        </div>
+        <div id="pcm_action_value_wrap" class="mb-3" style="display:none">
+          <label class="form-label fw-semibold" id="pcm_action_value_label">Value</label>
+          <input type="text" id="pcm_action_value" class="form-control" placeholder="">
+        </div>
+        <!-- Active -->
+        <div class="mb-2 d-flex align-items-center gap-3">
+          <label class="form-label fw-semibold mb-0">Active</label>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="pcm_is_active" checked style="width:38px;height:20px;cursor:pointer;">
+          </div>
+        </div>
+        <p id="pcm_msg" style="font-size:12px;margin-top:4px;"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-o" onclick="closePopupCampaignModal()">Cancel</button>
+        <button class="btn-p" onclick="savePopupCampaign()"><i class="fas fa-save me-1"></i> Save Campaign</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ADMIN BANNER MODAL -->
   <div id="adminBannerModal" class="modal-overlay" style="display:none">
     <div class="modal-box" style="max-width:520px;padding:0">
@@ -1586,6 +1711,7 @@ function showSection(name, el){
   if(name==="product_cards") loadGiftCards();
   if(name==="promo_sliders") { loadSliders(); }
   if(name==="notifications") loadNotifications();
+  if(name==="popup_campaigns") loadPopupCampaigns();
 }
 
 // ===== STATS =====
@@ -6500,6 +6626,263 @@ async function diUploadFile(type) {
 // Legacy aliases (not used by new UI but kept for safety)
 function saveDiUrl(type) { diAddUrl(type); }
 function saveDiFile(type) { diUploadFile(type); }
+
+// ══════════════════════════════════════════════════════════════════
+// POPUP CAMPAIGNS
+// ══════════════════════════════════════════════════════════════════
+let _pcmCitiesCache = [];
+
+async function loadPopupCampaigns() {
+  const tbody = document.getElementById('popup_campaigns_body');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
+  try {
+    const r = await fetch('/admin/popup-campaigns', { credentials: 'include' });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">No campaigns yet. Click "+ New Campaign" to create one.</td></tr>';
+      return;
+    }
+    const freqLabel = { show_once: 'Once Only', once_per_day: 'Once Per Day', every_open: 'Every App Open' };
+    tbody.innerHTML = data.map(c => {
+      const imgSrc = c.image_url
+        ? (c.image_url.startsWith('http') || c.image_url.startsWith('/popup-image')
+            ? c.image_url : '')
+        : '';
+      const preview = imgSrc
+        ? `<img src="${imgSrc}" style="width:60px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.display='none'">`
+        : `<div style="width:60px;height:80px;background:#f0f4f2;border-radius:8px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-image" style="color:#ccc"></i></div>`;
+      const target = c.target === 'selected_city'
+        ? `City: ${(c.cities||[]).join(', ') || '—'}`
+        : 'All Users';
+      const start = c.start_dt ? c.start_dt.replace('T',' ').substring(0,16) : '—';
+      const end   = c.end_dt   ? c.end_dt.replace('T',' ').substring(0,16)   : '—';
+      const badge = c.is_active
+        ? '<span class="badge-active">Active</span>'
+        : '<span class="badge-inactive">Inactive</span>';
+      return `<tr>
+        <td>${preview}</td>
+        <td><strong>${escHtml(c.name||'—')}</strong></td>
+        <td>${freqLabel[c.frequency]||c.frequency||'—'}</td>
+        <td style="font-size:12px">${escHtml(target)}</td>
+        <td style="font-size:12px">${start}</td>
+        <td style="font-size:12px">${end}</td>
+        <td style="text-align:center">
+          <input type="checkbox" ${c.is_active?'checked':''} onchange="togglePopupCampaign('${c.id}',this.checked)"
+            style="width:18px;height:18px;accent-color:var(--primary);cursor:pointer;">
+        </td>
+        <td>
+          <button class="btn-o me-1" onclick="editPopupCampaign(${JSON.stringify(c).replace(/"/g,'&quot;')})"><i class="fas fa-edit"></i></button>
+          <button class="btn-d" onclick="deletePopupCampaign('${c.id}')"><i class="fas fa-trash"></i></button>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--danger)">${e.message}</td></tr>`;
+  }
+}
+
+function openPopupCampaignModal(data = null) {
+  document.getElementById('pcm_id').value          = data?.id || '';
+  document.getElementById('pcm_title').textContent  = data ? 'Edit Campaign' : 'New Popup Campaign';
+  document.getElementById('pcm_name').value         = data?.name || '';
+  document.getElementById('pcm_image_url').value    = (data?.image_url||'').startsWith('/popup-image') ? '' : (data?.image_url||'');
+  document.getElementById('pcm_start_dt').value     = (data?.start_dt||'').replace(' ','T').substring(0,16);
+  document.getElementById('pcm_end_dt').value       = (data?.end_dt||'').replace(' ','T').substring(0,16);
+  document.getElementById('pcm_frequency').value    = data?.frequency || 'once_per_day';
+  document.getElementById('pcm_target').value       = data?.target || 'all';
+  document.getElementById('pcm_click_action').value = data?.click_action || 'none';
+  document.getElementById('pcm_action_value').value = data?.action_value || '';
+  document.getElementById('pcm_is_active').checked  = data ? !!data.is_active : true;
+  document.getElementById('pcm_msg').textContent    = '';
+  document.getElementById('pcm_image_file').value   = '';
+
+  // Image preview
+  const prev = document.getElementById('pcm_img_preview');
+  const imgUrl = data?.image_url || '';
+  if (imgUrl && (imgUrl.startsWith('http') || imgUrl.startsWith('/popup-image'))) {
+    prev.innerHTML = `<img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover">`;
+  } else {
+    prev.innerHTML = '<span style="color:#aaa;font-size:13px">No image selected</span>';
+  }
+
+  pcmToggleCities();
+  pcmToggleActionValue();
+  _pcmLoadCities(data?.cities||[]);
+  document.getElementById('popupCampaignModal').style.display = 'flex';
+}
+
+function editPopupCampaign(data) {
+  openPopupCampaignModal(data);
+}
+
+function closePopupCampaignModal() {
+  document.getElementById('popupCampaignModal').style.display = 'none';
+}
+
+function pcmPreviewUrl(url) {
+  const prev = document.getElementById('pcm_img_preview');
+  if (url && url.startsWith('http')) {
+    prev.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.innerHTML='<span style=color:#aaa;font-size:13px>Could not load image</span>'">`;
+  } else {
+    prev.innerHTML = '<span style="color:#aaa;font-size:13px">No image selected</span>';
+  }
+}
+
+function pcmPreviewFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const prev = document.getElementById('pcm_img_preview');
+  const reader = new FileReader();
+  reader.onload = e => {
+    prev.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover">`;
+    document.getElementById('pcm_image_url').value = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+function pcmToggleCities() {
+  const target = document.getElementById('pcm_target').value;
+  document.getElementById('pcm_cities_wrap').style.display = target === 'selected_city' ? 'block' : 'none';
+}
+
+function pcmToggleActionValue() {
+  const action = document.getElementById('pcm_click_action').value;
+  const wrap   = document.getElementById('pcm_action_value_wrap');
+  const label  = document.getElementById('pcm_action_value_label');
+  const input  = document.getElementById('pcm_action_value');
+  if (action === 'none') { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  const labels = {
+    open_store: 'Store ID', open_product: 'Product ID',
+    open_deal: 'Deal ID', open_category: 'Category Name',
+    open_url: 'External URL (https://...)'
+  };
+  const placeholders = {
+    open_store: 'e.g. 64abc...', open_product: 'e.g. 64abc...',
+    open_deal: 'e.g. 64abc...', open_category: 'e.g. Restaurant',
+    open_url: 'https://example.com'
+  };
+  label.textContent     = labels[action] || 'Value';
+  input.placeholder     = placeholders[action] || '';
+  input.type            = action === 'open_url' ? 'url' : 'text';
+}
+
+async function _pcmLoadCities(selectedCities = []) {
+  const container = document.getElementById('pcm_cities_list');
+  if (!container) return;
+  if (_pcmCitiesCache.length) {
+    _renderPcmCities(_pcmCitiesCache, selectedCities);
+    return;
+  }
+  container.innerHTML = '<span style="color:var(--muted);font-size:12px">Loading cities...</span>';
+  try {
+    const r = await fetch('/cities', { credentials: 'include' });
+    const data = await r.json();
+    _pcmCitiesCache = Array.isArray(data) ? data.map(c => c.name||c) : [];
+    _renderPcmCities(_pcmCitiesCache, selectedCities);
+  } catch(e) {
+    container.innerHTML = '<span style="color:var(--muted);font-size:12px">Could not load cities</span>';
+  }
+}
+
+function _renderPcmCities(cities, selected = []) {
+  const container = document.getElementById('pcm_cities_list');
+  if (!container) return;
+  const selLower = selected.map(s => s.toLowerCase());
+  container.innerHTML = cities.map(city => {
+    const checked = selLower.includes(city.toLowerCase()) ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:#fff;border:1px solid var(--border);border-radius:20px;cursor:pointer;font-size:12px;white-space:nowrap;">
+      <input type="checkbox" value="${escHtml(city)}" ${checked} style="accent-color:var(--primary);">
+      ${escHtml(city)}
+    </label>`;
+  }).join('');
+}
+
+async function savePopupCampaign() {
+  const msg  = document.getElementById('pcm_msg');
+  const id   = document.getElementById('pcm_id').value.trim();
+  const name = document.getElementById('pcm_name').value.trim();
+  if (!name) { msg.textContent='Campaign name is required'; msg.style.color='red'; return; }
+
+  const startDt = document.getElementById('pcm_start_dt').value;
+  const endDt   = document.getElementById('pcm_end_dt').value;
+  if (!startDt || !endDt) { msg.textContent='Start and End date are required'; msg.style.color='red'; return; }
+  if (endDt <= startDt) { msg.textContent='End date must be after start date'; msg.style.color='red'; return; }
+
+  // Resolve image: file takes priority over URL
+  let imageUrl = document.getElementById('pcm_image_url').value.trim();
+  const fileInput = document.getElementById('pcm_image_file');
+  if (fileInput.files[0]) {
+    imageUrl = await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result);
+      reader.readAsDataURL(fileInput.files[0]);
+    });
+  }
+
+  // Selected cities
+  const cityCheckboxes = document.querySelectorAll('#pcm_cities_list input[type=checkbox]:checked');
+  const cities = Array.from(cityCheckboxes).map(cb => cb.value);
+
+  const payload = {
+    name,
+    image_url:    imageUrl,
+    start_dt:     startDt,
+    end_dt:       endDt,
+    frequency:    document.getElementById('pcm_frequency').value,
+    target:       document.getElementById('pcm_target').value,
+    cities,
+    click_action: document.getElementById('pcm_click_action').value,
+    action_value: document.getElementById('pcm_action_value').value.trim(),
+    is_active:    document.getElementById('pcm_is_active').checked,
+  };
+
+  msg.textContent = 'Saving...'; msg.style.color = 'var(--primary)';
+  try {
+    const url    = id ? `/admin/popup-campaigns/${id}` : '/admin/popup-campaigns';
+    const method = id ? 'PUT' : 'POST';
+    const r = await fetch(url, {
+      method, credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    showToast(id ? 'Campaign updated!' : 'Campaign created!', 'success');
+    closePopupCampaignModal();
+    loadPopupCampaigns();
+  } catch(e) {
+    msg.textContent = '✗ ' + e.message; msg.style.color = 'red';
+  }
+}
+
+async function deletePopupCampaign(id) {
+  if (!confirm('Delete this popup campaign?')) return;
+  try {
+    const r = await fetch(`/admin/popup-campaigns/${id}`, { method: 'DELETE', credentials: 'include' });
+    if (!r.ok) throw new Error(await r.text());
+    showToast('Campaign deleted', 'success');
+    loadPopupCampaigns();
+  } catch(e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+async function togglePopupCampaign(id, isActive) {
+  try {
+    const r = await fetch(`/admin/popup-campaigns/${id}/toggle`, {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active: isActive }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    showToast(isActive ? 'Campaign activated' : 'Campaign deactivated', 'success');
+  } catch(e) {
+    showToast('Toggle failed: ' + e.message, 'error');
+    loadPopupCampaigns();
+  }
+}
 
 // ── City auto-fill from merchant's first store ──────────────────────
 async function gcAutoFillCity() {

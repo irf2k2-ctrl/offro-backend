@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
-from routers import admin, users, public, merchant_app
+from routers import admin, users, public, merchant_app, popup_campaigns
 from database import db
 import base64, io, re
 
@@ -21,10 +21,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # Routers
-app.include_router(merchant_app.router, prefix="/merchant")
-app.include_router(admin.router,        prefix="/admin")
-app.include_router(users.router,        prefix="/user")
-app.include_router(public.router)       # /stores /categories /store-image — public
+app.include_router(merchant_app.router,    prefix="/merchant")
+app.include_router(admin.router,          prefix="/admin")
+app.include_router(users.router,          prefix="/user")
+app.include_router(public.router)
+app.include_router(popup_campaigns.router)
 
 
 # ── File download endpoints ──
