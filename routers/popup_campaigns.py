@@ -49,7 +49,6 @@ async def create_popup_campaign(request: Request):
         "updated_at":   now,
     }
     result = db.popup_campaigns.insert_one(doc)
-    # If base64 image came in, store it and return proxy URL
     if doc["image_url"].startswith("data:image"):
         proxy = f"/popup-image/{result.inserted_id}"
         db.popup_campaigns.update_one(
@@ -63,6 +62,7 @@ async def create_popup_campaign(request: Request):
 async def update_popup_campaign(cid: str, request: Request):
     _require_admin(request)
     data = await request.json()
+    now  = datetime.datetime.utcnow()
     upd  = {
         "name":         (data.get("name") or "").strip(),
         "image_url":    (data.get("image_url") or "").strip(),
@@ -74,9 +74,8 @@ async def update_popup_campaign(cid: str, request: Request):
         "click_action": data.get("click_action", "none"),
         "action_value": (data.get("action_value") or "").strip(),
         "is_active":    bool(data.get("is_active", True)),
-        "updated_at":   datetime.datetime.utcnow(),
+        "updated_at":   now,
     }
-    # If a new base64 image was sent, store raw and swap with proxy URL
     if upd["image_url"].startswith("data:image"):
         upd["_raw_image"] = upd["image_url"]
         upd["image_url"]  = f"/popup-image/{cid}"
@@ -114,9 +113,6 @@ async def toggle_popup_campaign(cid: str, request: Request):
 # ── Public: active campaigns for Flutter ──────────────────────────────────────
 @router.get("/public/popup-campaigns")
 def get_active_popup_campaigns(city: str = ""):
-    # No server-side date filter — datetimes are stored in the admin's local
-    # timezone (browser datetime-local input), so comparing against server UTC
-    # causes mismatches. The Flutter app checks dates against device local time.
     docs = list(db.popup_campaigns.find({"is_active": True}).sort("_id", -1))
     result = []
     for d in docs:
@@ -127,8 +123,18 @@ def get_active_popup_campaigns(city: str = ""):
                 continue
         image_url = d.get("image_url") or ""
         doc_id    = str(d["_id"])
+
+        # Cache-bust: append ?v=<updated_at_ms> so CachedNetworkImage treats
+        # a newly uploaded image as a different URL and fetches it fresh.
+        updated_at = d.get("updated_at")
+        v = int(updated_at.timestamp() * 1000) if updated_at else 0
+
         if image_url.startswith("data:image"):
-            image_url = f"/popup-image/{doc_id}"
+            image_url = f"/popup-image/{doc_id}?v={v}"
+        elif image_url.startswith("/popup-image/"):
+            base = image_url.split("?")[0]
+            image_url = f"{base}?v={v}"
+
         result.append({
             "id":           doc_id,
             "name":         d.get("name", ""),
@@ -165,6 +171,8 @@ def get_popup_image(cid: str):
     return Response(
         content=img_bytes,
         media_type=m.group(1),
-        headers={"Cache-Control": "public, max-age=86400",
+        # no-cache forces the client to revalidate; the ?v= param in the URL
+        # is the primary bust so CachedNetworkImage sees a new URL on update.
+        headers={"Cache-Control": "no-cache",
                  "Content-Length": str(len(img_bytes))},
     )
