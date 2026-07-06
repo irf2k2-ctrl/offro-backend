@@ -167,21 +167,37 @@ def delete_deal(deal_id: str, merchant=Depends(get_current_merchant)):
     db.deals.delete_one({"_id": ObjectId(deal_id), "merchant_id": merchant_id})
     return {"message": "Deal deleted"}
 
+# ── shared phone-variant helper ──────────────────────────────────────────────
+def _phone_variants(raw: str) -> list:
+    p = str(raw).strip().replace(" ", "").replace("-", "")
+    d = p[1:] if p.startswith("+") else p
+    if len(d) == 12 and d.startswith("91"):
+        d = d[2:]
+    elif len(d) == 11 and d.startswith("0"):
+        d = d[1:]
+    last10 = d[-10:] if len(d) >= 10 else d
+    return list({p, f"+91{last10}", f"91{last10}", last10, f"0{last10}"})
+
 # ---------------- PROFILE ---------------- #
 @router.get("/profile/me")
 def merchant_me(merchant=Depends(get_current_merchant)):
-    # profile_image is stored in accounts collection — look it up by phone
     phone = str(merchant.get("phone", ""))
-    acct = db.accounts.find_one({"phone": phone}, {"profile_image": 1}) or {}
+    variants = _phone_variants(phone)
+    # profile_image lives in accounts — search by all normalised phone formats
+    acct = db.accounts.find_one({"phone": {"$in": variants}}, {"profile_image": 1}) or {}
     profile_image = acct.get("profile_image") or merchant.get("profile_image", "")
-    return {
-        "id": str(merchant["_id"]),
-        "name": merchant.get("name"),
-        "phone": merchant.get("phone"),
-        "city": merchant.get("city"),
-        "area": merchant.get("area"),
-        "profile_image": profile_image
+    response = {
+        "id":            str(merchant["_id"]),
+        "name":          merchant.get("name"),
+        "phone":         merchant.get("phone"),
+        "city":          merchant.get("city"),
+        "area":          merchant.get("area"),
+        "profile_image": profile_image,
     }
+    # verification log — visible in Railway logs after upload
+    print(f"[profile/me] phone={phone} variants={variants} "
+          f"acct_found={bool(acct)} has_image={bool(profile_image)}")
+    return response
 
 # ---------------- UPDATE PROFILE ---------------- #
 @router.put("/profile")
@@ -193,9 +209,20 @@ def update_merchant_profile(data: dict, merchant=Depends(get_current_merchant)):
             update_fields[field] = data.get(field)
 
     if update_fields:
+        # Always update merchants collection
         db.merchants.update_one(
             {"_id": merchant["_id"]},
             {"$set": update_fields}
         )
+        # Keep accounts collection in sync when profile_image changes
+        if "profile_image" in update_fields:
+            phone = str(merchant.get("phone", ""))
+            variants = _phone_variants(phone)
+            result = db.accounts.update_one(
+                {"phone": {"$in": variants}},
+                {"$set": {"profile_image": update_fields["profile_image"]}}
+            )
+            print(f"[profile/put] synced profile_image to accounts "
+                  f"phone={phone} matched={result.matched_count}")
 
     return {"success": True}
