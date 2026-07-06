@@ -148,14 +148,15 @@ def logout_user():
 @router.get("/me")
 def get_profile(user=Depends(get_current_user)):
     return {
-        "user_id":      str(user["_id"]),
-        "_id":          str(user["_id"]),
-        "name":         user.get("name", ""),
-        "phone":        user.get("phone", ""),
-        "city":         user.get("city", ""),
-        "visit_points": user.get("visit_points", 0),
-        "pool_points":  user.get("pool_points", 0),
-        "total_points": user.get("visit_points", 0) + user.get("pool_points", 0),
+        "user_id":       str(user["_id"]),
+        "_id":           str(user["_id"]),
+        "name":          user.get("name", ""),
+        "phone":         user.get("phone", ""),
+        "city":          user.get("city", ""),
+        "visit_points":  user.get("visit_points", 0),
+        "pool_points":   user.get("pool_points", 0),
+        "total_points":  user.get("visit_points", 0) + user.get("pool_points", 0),
+        "profile_image": user.get("profile_image", ""),
     }
 
 

@@ -100,8 +100,11 @@ def _razorpay_request(method: str, path: str, auth: tuple, json_data: dict, time
             continue
     raise last_err
 
-RAZORPAY_KEY_ID     = _os.getenv("RAZORPAY_KEY_ID",     "rzp_live_SdiI6kcuZzZjsl")
-RAZORPAY_KEY_SECRET = _os.getenv("RAZORPAY_KEY_SECRET", "3JzhKnKuGkhCrelaUgCaFfQr")
+RAZORPAY_KEY_ID     = _os.environ.get("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = _os.environ.get("RAZORPAY_KEY_SECRET")
+if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
+    import warnings as _w
+    _w.warn("RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET not set — payment endpoints will fail.", RuntimeWarning)
 
 # ───────────── helpers ─────────────
 
@@ -306,9 +309,13 @@ def merchant_logout():
 @router.get("/me")
 def merchant_me(m=Depends(get_merchant)):
     return {
-        "merchant_id": _mid(m), "name": m.get("name"),
-        "phone": m.get("phone"),       "city": m.get("city", ""),
-        "area": m.get("area", ""),     "status": m.get("status", "active"),
+        "merchant_id":   _mid(m),
+        "name":          m.get("name"),
+        "phone":         m.get("phone"),
+        "city":          m.get("city", ""),
+        "area":          m.get("area", ""),
+        "status":        m.get("status", "active"),
+        "profile_image": m.get("profile_image", ""),
     }
 
 # ───────────── stores ─────────────
@@ -658,6 +665,8 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
         raise HTTPException(400, "Missing payment fields")
 
     # Verify Razorpay signature
+    if not RAZORPAY_KEY_SECRET:
+        raise HTTPException(503, "Payment verification unavailable — Razorpay not configured")
     msg      = f"{order_id}|{payment_id}"
     expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature):
@@ -1079,15 +1088,13 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     inserted = db.banner_orders.insert_one(order_doc)
     order_id = str(inserted.inserted_id)
 
-    RZP_KEY_ID     = _os.getenv("RAZORPAY_KEY_ID", "")
-    RZP_KEY_SECRET = _os.getenv("RAZORPAY_KEY_SECRET", "")
     rp_order_id    = None
     pay_mode       = "manual"
 
-    if amount_paise > 0 and RZP_KEY_ID and RZP_KEY_SECRET:
+    if amount_paise > 0 and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
         try:
             rp = _razorpay_request("POST", "/v1/orders",
-                auth=(RZP_KEY_ID, RZP_KEY_SECRET),
+                auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
                 json_data={"amount": amount_paise, "currency": "INR",
                            "receipt": f"bnr_{order_id[:8]}"})
             rp_data = rp.json() if hasattr(rp, 'json') else {}
@@ -1219,10 +1226,9 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_banner or {}).get("invoice_no") or order.get("invoice_no", "")
         return {"message": "Payment already verified.", "banner_id": order.get("banner_id", ""), "invoice_no": existing_inv_no}
 
-    RZP_KEY_SECRET = _os.getenv("RAZORPAY_KEY_SECRET", "")
-    if RZP_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
+    if RAZORPAY_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
         msg = f"{razorpay_order_id}|{razorpay_payment_id}"
-        expected = hmac.new(RZP_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
+        expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
 
@@ -1406,15 +1412,13 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
     inserted = db.voucher_orders.insert_one(order_doc)
     order_id = str(inserted.inserted_id)
 
-    RZP_KEY_ID     = _os.getenv("RAZORPAY_KEY_ID", "")
-    RZP_KEY_SECRET = _os.getenv("RAZORPAY_KEY_SECRET", "")
     rp_order_id    = None
     pay_mode       = "manual"
 
-    if amount_paise > 0 and RZP_KEY_ID and RZP_KEY_SECRET:
+    if amount_paise > 0 and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
         try:
             rp = _razorpay_request("POST", "/v1/orders",
-                auth=(RZP_KEY_ID, RZP_KEY_SECRET),
+                auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
                 json_data={"amount": amount_paise, "currency": "INR",
                            "receipt": f"vch_{order_id[:8]}"})
             rp_data = rp.json() if hasattr(rp, 'json') else {}
@@ -1573,10 +1577,9 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_vch or {}).get("invoice_no") or order.get("invoice_no", "")
         return {"message": "Payment already verified.", "voucher_id": order.get("voucher_id", ""), "invoice_no": existing_inv_no}
 
-    RZP_KEY_SECRET = _os.getenv("RAZORPAY_KEY_SECRET", "")
-    if RZP_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
+    if RAZORPAY_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
         msg = f"{razorpay_order_id}|{razorpay_payment_id}"
-        expected = hmac.new(RZP_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
+        expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
 
@@ -2152,6 +2155,8 @@ def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
     payment_id = data.get("razorpay_payment_id", "")
     signature  = data.get("razorpay_signature", "")
     plan       = data.get("plan", "1month")
+    if not RAZORPAY_KEY_SECRET:
+        raise HTTPException(503, "Payment verification unavailable — Razorpay not configured")
     body   = f"{order_id}|{payment_id}"
     digest = hmac.new(RAZORPAY_KEY_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
     if digest != signature:
@@ -2267,6 +2272,8 @@ def verify_renewal_payment(pid: str, data: dict, m=Depends(get_merchant)):
     payment_id = data.get("razorpay_payment_id", "")
     signature  = data.get("razorpay_signature", "")
     plan       = data.get("plan", "1month")
+    if not RAZORPAY_KEY_SECRET:
+        raise HTTPException(503, "Payment verification unavailable — Razorpay not configured")
     body   = f"{order_id}|{payment_id}"
     digest = hmac.new(RAZORPAY_KEY_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
     if digest != signature:
