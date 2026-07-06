@@ -4088,9 +4088,13 @@ async function loadGiftCards() {
       const fromD = v.from_date || '';
       const toD   = v.end_date   || '';
       let isActive = v.is_active !== false;
-      // Trust backend status for products (which now compute expiry server-side)
+      // For merchant-created products in gift_vouchers, use approval_status for badge (not is_active)
+      const _isMerchSrc = v.source && v.source.startsWith('merchant_');
+      const _approvalSt = v.approval_status || v.status || '';
       let computedStatus = (v.status === 'expired') ? 'expired'
-                         : isActive ? 'approved' : 'hidden';
+                         : _isMerchSrc
+                           ? (_approvalSt === 'approved' ? 'approved' : _approvalSt === 'rejected' ? 'rejected' : 'pending')
+                           : (isActive ? 'approved' : 'hidden');
       // Check expiry — fall back to parsing validity string when end_date is empty
       if (computedStatus !== 'expired') {
         let _adminExpStr = toD;

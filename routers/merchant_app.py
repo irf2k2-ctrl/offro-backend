@@ -1833,9 +1833,9 @@ def list_merchant_products(m=Depends(get_merchant)):
         sub_active    = _is_store_subscription_active(store_id) if store_id else False
         prod_approval = (v.get("approval_status") or v.get("status") or "waiting_approval")
         # Only show as Live if BOTH: store subscription active AND admin has approved the product
-        if prod_approval == "approved" and sub_active:
+        if prod_approval == "approved":
             app_status = "approved"
-        elif not sub_active and prod_approval == "approved":
+        elif prod_approval == "subscription_expired":
             app_status = "subscription_expired"
         else:
             # Still pending admin approval (waiting_approval, pending_approval, etc.)

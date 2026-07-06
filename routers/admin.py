@@ -1375,6 +1375,8 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
             "merchant_name":     merchant_name,
             "merchant_phone":    merchant_phone,
             "is_active":         v.get("is_active", True),
+            "approval_status":   v.get("approval_status", ""),
+            "status":            v.get("status", ""),
             "from_date":         v.get("from_date", ""),
             "end_date":          v.get("end_date", ""),
             "created_at":        created_at_iso,
