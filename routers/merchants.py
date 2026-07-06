@@ -103,7 +103,9 @@ def merchant_stores(merchant=Depends(get_current_merchant)):
             "phone": s.get("phone"),
             "status": s.get("status", "active"),
             "qr_code": s.get("qr_code", ""),
-            "points_per_scan": s.get("points_per_scan", 10),
+            "points_per_scan": s.get("points_per_scan", 0),
+            "visit_points": s.get("visit_points", 0),
+            "image": s.get("image") or "",
             "deal_count": deal_count
         })
     return result
@@ -173,5 +175,23 @@ def merchant_me(merchant=Depends(get_current_merchant)):
         "name": merchant.get("name"),
         "phone": merchant.get("phone"),
         "city": merchant.get("city"),
-        "area": merchant.get("area")
+        "area": merchant.get("area"),
+        "profile_image": merchant.get("profile_image", "")
     }
+
+# ---------------- UPDATE PROFILE ---------------- #
+@router.put("/profile")
+def update_merchant_profile(data: dict, merchant=Depends(get_current_merchant)):
+    allowed_fields = ["name", "city", "area", "profile_image"]
+    update_fields = {}
+    for field in allowed_fields:
+        if field in data:
+            update_fields[field] = data.get(field)
+
+    if update_fields:
+        db.merchants.update_one(
+            {"_id": merchant["_id"]},
+            {"$set": update_fields}
+        )
+
+    return {"success": True}
