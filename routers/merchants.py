@@ -170,13 +170,17 @@ def delete_deal(deal_id: str, merchant=Depends(get_current_merchant)):
 # ---------------- PROFILE ---------------- #
 @router.get("/profile/me")
 def merchant_me(merchant=Depends(get_current_merchant)):
+    # profile_image is stored in accounts collection — look it up by phone
+    phone = str(merchant.get("phone", ""))
+    acct = db.accounts.find_one({"phone": phone}, {"profile_image": 1}) or {}
+    profile_image = acct.get("profile_image") or merchant.get("profile_image", "")
     return {
         "id": str(merchant["_id"]),
         "name": merchant.get("name"),
         "phone": merchant.get("phone"),
         "city": merchant.get("city"),
         "area": merchant.get("area"),
-        "profile_image": merchant.get("profile_image", "")
+        "profile_image": profile_image
     }
 
 # ---------------- UPDATE PROFILE ---------------- #
