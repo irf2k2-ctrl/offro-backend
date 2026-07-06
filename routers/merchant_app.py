@@ -2053,7 +2053,7 @@ def toggle_product_availability(pid: str, data: dict, m=Depends(get_merchant)):
         oid = ObjectId(pid)
     except Exception:
         raise HTTPException(400, "Invalid product ID")
-    upd = {"$set": {"is_available": available, "updated_at": datetime.utcnow()}}
+    upd = {"$set": {"is_active": available, "updated_at": datetime.utcnow()}}
     res = db.gift_vouchers.update_one({"_id": oid, "merchant_id": merchant_id}, upd)
     if res.matched_count == 0:
         res = db.merchant_vouchers.update_one({"_id": oid, "merchant_id": merchant_id}, upd)
