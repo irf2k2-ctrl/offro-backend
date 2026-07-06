@@ -2768,6 +2768,7 @@ def _fmt_admin_product_row(v, collection):
         "end_date":          end_d,
         "validity":          computed_validity,
         "is_active":         v.get("is_active", True),
+        "approval_status":   v.get("approval_status", ""),
         "status":            v.get("status", "approved"),
         "source":            "merchant" if is_merchant_src else "admin",
         "product_type":      ptype,

@@ -4089,8 +4089,9 @@ async function loadGiftCards() {
       const toD   = v.end_date   || '';
       let isActive = v.is_active !== false;
       // For merchant-created products in gift_vouchers, use approval_status for badge (not is_active)
-      const _isMerchSrc = v.source && v.source.startsWith('merchant_');
-      const _approvalSt = v.approval_status || v.status || '';
+      // Backend normalizes source to 'merchant' (no suffix), so check both forms
+      const _isMerchSrc = v.source === 'merchant' || (v.source && v.source.startsWith('merchant_'));
+      const _approvalSt = v.approval_status || '';
       let computedStatus = (v.status === 'expired') ? 'expired'
                          : _isMerchSrc
                            ? (_approvalSt === 'approved' ? 'approved' : _approvalSt === 'rejected' ? 'rejected' : 'pending')
@@ -4476,8 +4477,27 @@ function openVZViewModal(r) {
 }
 
 function approveProductCard(id, source) {
-  if (source==='merchant') approveMerchantProduct(id);
-  else if(confirm('Activate this product?')) loadGiftCards();
+  if (source === 'merchant') {
+    // Standard products live in gift_vouchers — route to the correct approve endpoint
+    const row = _allProductRows.find(r => r._id === id);
+    if (row && row._collection === 'gift_vouchers') {
+      approveStandardProduct(id);
+    } else {
+      approveMerchantProduct(id);  // Premium products live in merchant_vouchers
+    }
+  } else if (confirm('Activate this product?')) {
+    loadGiftCards();
+  }
+}
+
+async function approveStandardProduct(id) {
+  if (!confirm('Approve this standard product?')) return;
+  try {
+    const r = await fetch(`/admin/gift-vouchers/${id}/approve`, {method:'PUT', credentials:'include'});
+    if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Approval failed'); }
+    showToast('✅ Standard product approved!');
+    loadGiftCards();
+  } catch(e) { showToast('❌ ' + e.message, true); }
 }
 
 function openVZMoreMenu(evt, id, source, status) {
