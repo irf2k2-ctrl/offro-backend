@@ -421,35 +421,35 @@ def submit_product_review(pid: str, data: dict, request: _Req):
     if len(text) < 3:
         raise _HTTPEx(400, "Review text too short (min 3 chars)")
 
-    user      = _get_user_optional(request)
-    user_id   = str(user["_id"]) if user else None
-    user_name = (user.get("name") or user.get("full_name") or "").strip() if user else ""
+    # FIX: this used to fall back to user_id=None ("Anonymous") and still
+    # return {"ok": True} whenever the token was missing/expired — so a
+    # review with an expired session looked identical to a successful save,
+    # but was never attached to the user's account. get_my_product_review
+    # (also user-scoped) could then never find it again, making the review
+    # appear to silently vanish. Now an invalid/expired session is rejected
+    # the same way toggle_product_favorite already rejects it, so the app can
+    # show "Session expired" and the user knows to log in again.
+    user = _get_user_optional(request)
+    if not user:
+        raise _HTTPEx(401, "Session expired")
+    user_id   = str(user["_id"])
+    user_name = (user.get("name") or user.get("full_name") or "").strip()
     if not user_name:
         user_name = (data.get("user_name", "") or "").strip() or "Anonymous"
 
     from datetime import datetime as _dt
-    if user_id:
-        db.product_reviews.update_one(
-            {"product_id": pid, "user_id": user_id},
-            {"$set": {
-                "product_id": pid,
-                "user_id":    user_id,
-                "user_name":  user_name,
-                "rating":     rating,
-                "text":       text,
-                "updated_at": _dt.utcnow().isoformat(),
-            }, "$setOnInsert": {"created_at": _dt.utcnow().isoformat()}},
-            upsert=True,
-        )
-    else:
-        db.product_reviews.insert_one({
+    db.product_reviews.update_one(
+        {"product_id": pid, "user_id": user_id},
+        {"$set": {
             "product_id": pid,
-            "user_id":    None,
+            "user_id":    user_id,
             "user_name":  user_name,
             "rating":     rating,
             "text":       text,
-            "created_at": _dt.utcnow().isoformat(),
-        })
+            "updated_at": _dt.utcnow().isoformat(),
+        }, "$setOnInsert": {"created_at": _dt.utcnow().isoformat()}},
+        upsert=True,
+    )
 
     all_revs = list(db.product_reviews.find({"product_id": pid}, {"rating": 1}))
     avg      = round(sum(r["rating"] for r in all_revs) / len(all_revs), 1) if all_revs else rating
