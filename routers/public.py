@@ -1512,7 +1512,10 @@ def get_products_by_store(store_id: str, limit: int = 20):
         results.append({"_id": pid, "title": p.get("title",""),
                         "offer_text": p.get("offer_text",""),
                         "logo_url": (p.get("logo_url") or p.get("image_url") or ""),
-                        "price": str(p.get("price","") or ""), "product_type": "premium"})
+                        "price": str(p.get("price","") or ""),
+                        "original_price": str(p.get("original_price","") or ""),
+                        "rating": float(p.get("rating") or p.get("avg_rating") or 0),
+                        "product_type": "premium"})
     for p in db.gift_vouchers.find(q_oid).sort("_id", -1).limit(limit):
         if p.get("is_active", True) in (False, "false", "0", 0): continue
         pid = str(p["_id"])
@@ -1521,5 +1524,8 @@ def get_products_by_store(store_id: str, limit: int = 20):
         results.append({"_id": pid, "title": p.get("title",""),
                         "offer_text": p.get("offer_text","") or p.get("text",""),
                         "logo_url": (p.get("logo_url") or p.get("image_url") or ""),
-                        "price": str(p.get("price","") or ""), "product_type": "standard"})
+                        "price": str(p.get("price","") or ""),
+                        "original_price": str(p.get("original_price","") or ""),
+                        "rating": float(p.get("rating") or p.get("avg_rating") or 0),
+                        "product_type": "standard"})
     return results[:limit]
