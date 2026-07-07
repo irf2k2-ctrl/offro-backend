@@ -1051,7 +1051,12 @@ kyc@localsaver.in"""
 def _get_user_optional(request: _Req):
     token = request.cookies.get("user_token") or request.headers.get("Authorization","").replace("Bearer ","").strip()
     if not token: return None
-    return db.users.find_one({"token": token})
+    # FIX: this only ever checked the legacy 'users' collection, so any user
+    # logged in via the unified 'accounts' collection (the primary path today)
+    # was never found here — submit_product_review then saved their review
+    # as user_id=None (anonymous), and get_my_product_review always returned {}.
+    # That's why a submitted rating always "disappeared" on refresh/return.
+    return db.accounts.find_one({"token": token}) or db.users.find_one({"token": token})
 
 @router.post("/stores/{store_id}/rate")
 def rate_store(store_id: str, data: dict, request: _Req):

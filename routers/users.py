@@ -429,15 +429,26 @@ def list_product_favorites(user=Depends(get_current_user)):
     """Return all product IDs favourited by the current user."""
     return [str(pid) for pid in user.get("favorite_product_ids", [])]
 
+def _persist_user_update(user_id, update_dict):
+    """FIX: get_current_user can return a doc from either 'accounts' (primary,
+    unified login) or the legacy 'users' collection (fallback). Writing
+    unconditionally to 'accounts' silently no-ops (matched_count=0, no error)
+    when the doc actually lives in 'users' — the favorite then never
+    persists, which is exactly why it "disappeared" after refresh. Try both,
+    whichever collection actually holds the record gets the write."""
+    res = db.accounts.update_one({"_id": user_id}, update_dict)
+    if res.matched_count == 0:
+        db.users.update_one({"_id": user_id}, update_dict)
+
 @router.post("/product-favorites/{product_id}")
 def toggle_product_favorite(product_id: str, user=Depends(get_current_user)):
     user_id  = user["_id"]
     fav_ids  = [str(f) for f in user.get("favorite_product_ids", [])]
     if product_id in fav_ids:
-        db.accounts.update_one({"_id": user_id}, {"$pull":     {"favorite_product_ids": product_id}})
+        _persist_user_update(user_id, {"$pull":     {"favorite_product_ids": product_id}})
         return {"is_favorite": False}
     else:
-        db.accounts.update_one({"_id": user_id}, {"$addToSet": {"favorite_product_ids": product_id}})
+        _persist_user_update(user_id, {"$addToSet": {"favorite_product_ids": product_id}})
         return {"is_favorite": True}
 
 @router.get("/product-favorites/{product_id}/check")
@@ -450,10 +461,10 @@ def toggle_favorite(store_id: str, user=Depends(get_current_user)):
     user_id = user["_id"]
     fav_ids = [str(f) for f in user.get("favorite_store_ids", [])]
     if store_id in fav_ids:
-        db.accounts.update_one({"_id": user_id}, {"$pull":     {"favorite_store_ids": store_id}})
+        _persist_user_update(user_id, {"$pull":     {"favorite_store_ids": store_id}})
         return {"is_favorite": False}
     else:
-        db.accounts.update_one({"_id": user_id}, {"$addToSet": {"favorite_store_ids": store_id}})
+        _persist_user_update(user_id, {"$addToSet": {"favorite_store_ids": store_id}})
         return {"is_favorite": True}
 
 @router.get("/favorites/{store_id}/check")
