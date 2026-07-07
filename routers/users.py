@@ -440,16 +440,24 @@ def _persist_user_update(user_id, update_dict):
     if res.matched_count == 0:
         db.users.update_one({"_id": user_id}, update_dict)
 
+def _read_fresh_favorites(user_id, field):
+    """Re-read the account doc after a write and return the field as it
+    ACTUALLY is in the DB — instead of just assuming the write direction we
+    intended succeeded. This exposes any silent persistence failure directly
+    in the API response so the client can react to it correctly."""
+    doc = db.accounts.find_one({"_id": user_id}, {field: 1}) or db.users.find_one({"_id": user_id}, {field: 1}) or {}
+    return [str(f) for f in doc.get(field, [])]
+
 @router.post("/product-favorites/{product_id}")
 def toggle_product_favorite(product_id: str, user=Depends(get_current_user)):
     user_id  = user["_id"]
     fav_ids  = [str(f) for f in user.get("favorite_product_ids", [])]
     if product_id in fav_ids:
         _persist_user_update(user_id, {"$pull":     {"favorite_product_ids": product_id}})
-        return {"is_favorite": False}
     else:
         _persist_user_update(user_id, {"$addToSet": {"favorite_product_ids": product_id}})
-        return {"is_favorite": True}
+    fresh_ids = _read_fresh_favorites(user_id, "favorite_product_ids")
+    return {"is_favorite": product_id in fresh_ids}
 
 @router.get("/product-favorites/{product_id}/check")
 def check_product_favorite(product_id: str, user=Depends(get_current_user)):
@@ -462,10 +470,10 @@ def toggle_favorite(store_id: str, user=Depends(get_current_user)):
     fav_ids = [str(f) for f in user.get("favorite_store_ids", [])]
     if store_id in fav_ids:
         _persist_user_update(user_id, {"$pull":     {"favorite_store_ids": store_id}})
-        return {"is_favorite": False}
     else:
         _persist_user_update(user_id, {"$addToSet": {"favorite_store_ids": store_id}})
-        return {"is_favorite": True}
+    fresh_ids = _read_fresh_favorites(user_id, "favorite_store_ids")
+    return {"is_favorite": store_id in fresh_ids}
 
 @router.get("/favorites/{store_id}/check")
 def check_favorite(store_id: str, user=Depends(get_current_user)):
