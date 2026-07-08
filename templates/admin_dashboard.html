@@ -1324,8 +1324,6 @@ tr:hover td{background:#f7faf8;}
             <input id="store_phone" class="form-control" placeholder="Phone"></div>
           <div class="col-md-6"><label class="form-label">Visit Points per Scan</label>
             <input id="store_points" class="form-control" type="number" value="10" min="0"></div>
-          <div class="mb-3"><label class="form-label">Visit Points (per check-in)</label>
-            <input id="store_visit_points_primary" class="form-control" type="number" value="0" min="0" placeholder="Points earned per store visit"></div>
           <div class="col-md-6"><label class="form-label">Latitude</label>
             <input id="store_lat" class="form-control" placeholder="17.3850"></div>
           <div class="col-md-6"><label class="form-label">Longitude</label>
@@ -2122,7 +2120,7 @@ function renderStoresPage(){
       </td>
       <td style="font-size:12px">${s.category||"—"}</td>
       <td style="font-size:12px">${s.city||"—"}${s.area?`<br><small style="color:var(--muted)">${s.area}</small>`:""}  </td>
-      <td style="font-size:12px">${s.visit_points||0}</td>
+      <td style="font-size:12px">${s.points_per_scan||0}</td>
       <td>${newBadge}</td><td>${statusBadge}</td><td>${dealBadge}</td>
       <td>
         ${(()=>{
@@ -2281,7 +2279,6 @@ async function openCreateStore(){
   if (_csCitySel) _csCitySel.innerHTML = '<option value="">— Select City —</option>';
   loadAreasForCity(""); // reset area dropdown
   document.getElementById("store_points").value="10";
-  document.getElementById("store_visit_points_primary").value="0";
   document.getElementById("store_image_b64").value="";
   document.getElementById("store_image_preview").style.display="none";
   // store_new_in_town removed
@@ -2317,7 +2314,6 @@ async function openEditStore(id){
   setStoreCityDropdown(s.state||"", s.city||"", s.area||"");
   document.getElementById("store_phone").value=s.phone||"";
   document.getElementById("store_points").value=(s.points_per_scan!=null&&s.points_per_scan!==undefined)?s.points_per_scan:10;
-  document.getElementById("store_visit_points_primary").value=s.visit_points||0;
   document.getElementById("store_lat").value=s.lat||"";
   document.getElementById("store_lng").value=s.lng||"";
   // store_new_in_town removed (is_new_in_town preserved via backend)
@@ -2371,7 +2367,6 @@ async function submitStore(){
     city:document.getElementById("store_city").value,area:document.getElementById("store_area").value,
     address:document.getElementById("store_address").value,phone:document.getElementById("store_phone").value,
     points_per_scan:document.getElementById("store_points").value===""?0:parseInt(document.getElementById("store_points").value),
-    visit_points:document.getElementById("store_visit_points_primary").value===""?0:parseInt(document.getElementById("store_visit_points_primary").value),
     lat:document.getElementById("store_lat").value,lng:document.getElementById("store_lng").value,
     image:document.getElementById("store_image_b64").value||null,
     is_new_in_town:false,
