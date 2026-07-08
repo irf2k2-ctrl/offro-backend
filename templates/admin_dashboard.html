@@ -155,7 +155,7 @@ tr:hover td{background:#f7faf8;}
   <div class="section-header">
     <div>
       <div class="fw-bold" style="font-size:18px;color:var(--primary)">🎁 Gift Voucher Requests</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Pending and fulfilled gift voucher withdrawal requests</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Pending and fulfilled gift voucher redemption requests</div>
     </div>
     <button class="btn-p" onclick="loadGiftProductRequests()"><i class="fas fa-sync me-1"></i> Refresh</button>
   </div>
@@ -622,7 +622,7 @@ tr:hover td{background:#f7faf8;}
       <div id="plans_editor"></div>
       <hr style="margin:24px 0;">
       <div style="background:#f0f9f4;border-radius:12px;padding:20px;border:1px solid #c3dfc6;">
-        <div class="fw-bold mb-3" style="color:#3E5F55;font-size:15px;">💰 Withdrawal / Conversion Settings</div>
+        <div class="fw-bold mb-3" style="color:#3E5F55;font-size:15px;">💰 Reward Redemption / Conversion Settings</div>
         <div class="mb-3">
           <label class="form-label">Points → ₹ Conversion Rate <small style="color:#6b8c7e;">(₹ per 1 point)</small></label>
           <div style="display:flex;align-items:center;gap:8px;">
@@ -633,9 +633,9 @@ tr:hover td{background:#f7faf8;}
           <small class="text-muted">Default: ₹0.10 per point (100 pts = ₹10)</small>
         </div>
         <div class="mb-3">
-          <label class="form-label">Minimum Points to Withdraw</label>
+          <label class="form-label">Minimum Points to Redeem Rewards</label>
           <input id="min_withdraw_input" class="form-control" type="number" min="1" style="max-width:160px;" placeholder="200">
-          <small class="text-muted">Users need at least this many points to request withdrawal</small>
+          <small class="text-muted">Users need at least this many points to request reward redemption</small>
         </div>
       </div>
       <button class="btn-p mt-3" onclick="savePricing()">Save All Settings</button>
@@ -1637,7 +1637,7 @@ async function loadGiftProductRequests() {
         if (res.status===401||res.status===403) { window.location.href="/admin/login"; return; }
         let vouchers = await res.json();
         if (!vouchers.length) {
-            tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No withdrawal requests yet.</td></tr>";
+            tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No reward redemption requests yet.</td></tr>";
             return;
         }
         tbody.innerHTML = vouchers.map(v => {
@@ -6096,7 +6096,7 @@ function renderAccountDetailHTML(d) {
     <!-- Action buttons -->
     <div class="d-flex gap-2 mb-4 flex-wrap">
       <button class="btn-p" style="font-size:13px;" onclick="openWalletFromAcct('${acctId}','${acctName}')">
-        <i class="fas fa-history me-1"></i> Wallet History
+        <i class="fas fa-history me-1"></i> Rewards History
       </button>
       <button class="btn-o" style="font-size:13px;" onclick="openAddPointsFromAcct('${acctId}','${acctName}')">
         <i class="fas fa-plus-circle me-1"></i> Add Points
