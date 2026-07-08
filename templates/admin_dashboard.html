@@ -241,10 +241,10 @@ tr:hover td{background:#f7faf8;}
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Product</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
+          <tr><th>Product</th><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
         </thead>
         <tbody id="prod_reviews_table">
-          <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
+          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
         </tbody>
       </table>
     </div>
@@ -3906,13 +3906,13 @@ function switchReviewTab(tab) {
 async function loadProductReviews() {
   const tbody = document.getElementById("prod_reviews_table");
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading...</td></tr>`;
   try {
     const r = await fetch("/admin/product-reviews", { credentials:"include" });
     _prodReviewsCache = await r.json();
     _renderProductReviews(_prodReviewsCache);
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="6" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
   }
 }
 
@@ -3925,7 +3925,7 @@ function _renderProductReviews(data) {
     rows = rows.filter(r => (r.product_title||"").toLowerCase().includes(q) || (r.product_id||"").includes(q));
   }
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No product reviews found</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">No product reviews found</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(r => {
@@ -3935,6 +3935,7 @@ function _renderProductReviews(data) {
     const text = (r.text||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     return `<tr>
       <td><div style="font-weight:600;color:var(--text)">${r.product_title||r.product_id||"—"}</div></td>
+      <td><div style="font-size:13px;color:var(--text)">${r.store_name||"—"}</div></td>
       <td><div style="font-size:13px;color:var(--text)">${r.user_name||"Anonymous"}</div>
           <div style="font-size:11px;color:var(--muted)">${r.user_id||""}</div></td>
       <td><span style="color:${starColor};font-size:15px;letter-spacing:1px">${stars}</span>

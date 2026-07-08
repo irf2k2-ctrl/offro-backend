@@ -211,6 +211,11 @@ def get_store(store_id: str):
                 "discount":       str(p.get("discount_label","") or ""),
                 "validity":       (str(p.get("end_date","") or "")[:10]) or (p.get("validity","") or ""),
                 "end_date":       str(p.get("end_date","") or ""),
+                # FIX: this endpoint never returned 'rating', so the Store
+                # Detail product cards (which read this list, not
+                # /products/by-store/) always showed no rating overlay even
+                # after a review was submitted and averaged elsewhere.
+                "rating":         float(p.get("rating") or p.get("avg_rating") or 0),
             })
 
     # 2. gift_vouchers — linked to this store_id, active
@@ -237,6 +242,8 @@ def get_store(store_id: str):
                 "discount":       "",
                 "validity":       (str(p.get("end_date","") or "")[:10]) or (p.get("validity","") or ""),
                 "end_date":       str(p.get("end_date","") or ""),
+                # FIX: this endpoint never returned 'rating' (see merchant_vouchers block above)
+                "rating":         float(p.get("rating") or p.get("avg_rating") or 0),
             })
 
     # Rating count

@@ -3166,10 +3166,56 @@ def admin_deactivate_product(pid: str, a=Depends(get_current_admin)):
 @router.get("/product-reviews")
 def list_product_reviews(a=Depends(get_current_admin)):
     """Admin: list all product reviews across all products."""
-    reviews = []
-    for r in db.product_reviews.find().sort("created_at", -1):
+    reviews = list(db.product_reviews.find().sort("created_at", -1))
+
+    # FIX: reviews only stored product_id, so the dashboard showed a raw
+    # Mongo ObjectId hash with no way to tell which product/store it was for.
+    # Batch-resolve product title + store name and attach them to each row.
+    pids = {r.get("product_id") for r in reviews if r.get("product_id")}
+    oids = []
+    for pid in pids:
+        try:
+            oids.append(ObjectId(pid))
+        except Exception:
+            pass
+
+    product_info = {}  # pid(str) -> {"title": ..., "store_id": ...}
+    if oids:
+        for coll_name in ("products", "gift_vouchers", "merchant_vouchers"):
+            coll = getattr(db, coll_name)
+            for p in coll.find({"_id": {"$in": oids}}, {"title": 1, "store_id": 1}):
+                pid_str = str(p["_id"])
+                if pid_str not in product_info:
+                    product_info[pid_str] = {
+                        "title": p.get("title", ""),
+                        "store_id": p.get("store_id"),
+                    }
+
+    store_ids = set()
+    for info in product_info.values():
+        sid = info.get("store_id")
+        if sid: store_ids.add(str(sid))
+    store_oids = []
+    for sid in store_ids:
+        try:
+            store_oids.append(ObjectId(sid))
+        except Exception:
+            pass
+    store_names = {}
+    if store_oids:
+        for s in db.stores.find({"_id": {"$in": store_oids}}, {"store_name": 1}):
+            store_names[str(s["_id"])] = s.get("store_name", "")
+
+    for r in reviews:
         r["_id"] = str(r["_id"])
-        reviews.append(r)
+        pid  = r.get("product_id", "")
+        info = product_info.get(pid, {})
+        # NOTE: field name must be "product_title" — that's what the existing
+        # admin_dashboard.html JS already reads (it just never received it).
+        r["product_title"] = info.get("title") or ""
+        sid = info.get("store_id")
+        r["store_name"] = store_names.get(str(sid), "") if sid else ""
+
     return reviews
 
 
