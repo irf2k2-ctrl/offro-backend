@@ -1254,6 +1254,33 @@ def save_about(body: dict, a=Depends(get_current_admin)):
     )
     return {"ok": True}
 
+# ===================== REVIEW VISIBILITY SETTINGS =====================
+
+@router.get("/review-visibility")
+def get_review_visibility(a=Depends(get_current_admin)):
+    """Return which review sections are visible in the app."""
+    doc = db.settings.find_one({"key": "review_visibility"}) or {}
+    return {
+        "store_reviews":   doc.get("store_reviews",   True),
+        "product_reviews": doc.get("product_reviews", True),
+    }
+
+@router.post("/review-visibility")
+def save_review_visibility(body: dict, a=Depends(get_current_admin)):
+    """Persist which review sections are visible in the app."""
+    db.settings.update_one(
+        {"key": "review_visibility"},
+        {"$set": {
+            "key":             "review_visibility",
+            "store_reviews":   bool(body.get("store_reviews",   True)),
+            "product_reviews": bool(body.get("product_reviews", True)),
+            "updated_at":      datetime.utcnow(),
+        }},
+        upsert=True
+    )
+    return {"ok": True}
+
+
 # ===================== GIFT VOUCHER / WITHDRAW REQUESTS =====================
 
 @router.get("/withdraw-requests")
