@@ -955,6 +955,21 @@ def list_reviews(store_id: str = "", a=Depends(get_current_admin)):
         })
     return result
 
+@router.patch("/reviews/{review_id}/visibility")
+def set_review_visibility(review_id: str, body: dict, a=Depends(get_current_admin)):
+    """Toggle a store review's visibility in the app."""
+    try:
+        visible = bool(body.get("visible", True))
+        result = db.reviews.update_one(
+            {"_id": ObjectId(review_id)},
+            {"$set": {"visible": visible, "updated_at": datetime.utcnow()}}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(404, "Review not found")
+        return {"ok": True, "visible": visible}
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
 @router.delete("/reviews/{review_id}")
 def delete_review(review_id: str, a=Depends(get_current_admin)):
     """Delete an inappropriate review and recalculate store rating."""
@@ -3245,6 +3260,21 @@ def list_product_reviews(a=Depends(get_current_admin)):
 
     return reviews
 
+
+@router.patch("/product-reviews/{review_id}/visibility")
+def set_product_review_visibility(review_id: str, body: dict, a=Depends(get_current_admin)):
+    """Toggle a product review's visibility in the app."""
+    try:
+        visible = bool(body.get("visible", True))
+        result = db.product_reviews.update_one(
+            {"_id": ObjectId(review_id)},
+            {"$set": {"visible": visible, "updated_at": datetime.utcnow()}}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(404, "Product review not found")
+        return {"ok": True, "visible": visible}
+    except Exception as e:
+        raise HTTPException(400, str(e))
 
 @router.delete("/product-reviews/{review_id}")
 def delete_product_review(review_id: str, a=Depends(get_current_admin)):
