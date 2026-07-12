@@ -181,32 +181,12 @@ tr:hover td{background:#f7faf8;}
 
 <!-- ═══ REVIEWS ═══ -->
 <div id="section-reviews" class="section">
-  <div class="section-header" style="align-items:flex-start;flex-wrap:wrap;gap:12px;">
+  <div class="section-header">
     <div>
       <div class="fw-bold" style="font-size:18px;color:var(--primary)">⭐💬 Rating &amp; Review</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">View and moderate customer reviews submitted in the app</div>
     </div>
-    <!-- Toggle controls -->
-    <div style="display:flex;flex-direction:column;gap:10px;background:var(--light);border-radius:12px;padding:12px 18px;min-width:260px;">
-      <div style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:2px;letter-spacing:0.3px;">VISIBILITY IN APP</div>
-      <!-- Store Reviews toggle -->
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
-        <span style="font-size:13px;font-weight:600;color:var(--text);">🏪 Store Reviews</span>
-        <label class="rv-toggle">
-          <input type="checkbox" id="toggle_store_reviews" onchange="saveReviewVisibility()">
-          <span class="rv-slider"></span>
-        </label>
-      </div>
-      <!-- Product Reviews toggle -->
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
-        <span style="font-size:13px;font-weight:600;color:var(--text);">📦 Product Reviews</span>
-        <label class="rv-toggle">
-          <input type="checkbox" id="toggle_product_reviews" onchange="saveReviewVisibility()">
-          <span class="rv-slider"></span>
-        </label>
-      </div>
-      <div id="rv_save_status" style="font-size:11px;color:var(--muted);min-height:14px;"></div>
-    </div>
+
   </div>
   <!-- Sub-tabs -->
   <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:16px;">
@@ -231,10 +211,10 @@ tr:hover td{background:#f7faf8;}
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
+          <tr><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Visible</th><th>Action</th></tr>
         </thead>
         <tbody id="reviews_table">
-          <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
+          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -251,10 +231,10 @@ tr:hover td{background:#f7faf8;}
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Product</th><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
+          <tr><th>Product</th><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Visible</th><th>Action</th></tr>
         </thead>
         <tbody id="prod_reviews_table">
-          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
+          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
         </tbody>
       </table>
     </div>
@@ -1714,7 +1694,7 @@ function showSection(name, el){
   // merchant_txns handled by script block 5 override
   if(name==="discounts") loadDiscounts();
   if(name==="about") loadAbout();
-  if(name==="reviews") { loadReviews(); loadReviewVisibility(); }
+  if(name==="reviews") loadReviews();
   if(name==="product_cards") loadGiftCards();
   if(name==="promo_sliders") { loadSliders(); }
   if(name==="notifications") loadNotifications();
@@ -3858,38 +3838,6 @@ async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"
 
 
 // ═══════════ RATINGS ═══════════
-// ═══════════ REVIEW VISIBILITY TOGGLES ═══════════
-async function loadReviewVisibility() {
-  try {
-    const r = await fetch("/admin/review-visibility", { credentials:"include" });
-    if (!r.ok) return;
-    const d = await r.json();
-    document.getElementById("toggle_store_reviews").checked   = d.store_reviews   !== false;
-    document.getElementById("toggle_product_reviews").checked = d.product_reviews !== false;
-  } catch(e) { console.warn("Could not load review visibility:", e.message); }
-}
-
-async function saveReviewVisibility() {
-  const storeOn   = document.getElementById("toggle_store_reviews").checked;
-  const productOn = document.getElementById("toggle_product_reviews").checked;
-  const status = document.getElementById("rv_save_status");
-  status.textContent = "Saving…";
-  try {
-    const r = await fetch("/admin/review-visibility", {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ store_reviews: storeOn, product_reviews: productOn })
-    });
-    if (!r.ok) throw new Error(await r.text());
-    status.style.color = "var(--primary)";
-    status.textContent = "✓ Saved";
-    setTimeout(() => { status.textContent = ""; }, 2500);
-  } catch(e) {
-    status.style.color = "var(--danger)";
-    status.textContent = "Error: " + e.message;
-  }
-}
-
 // ═══════════ REVIEWS ═══════════
 let _reviewsCache = [];
 let _reviewsStoreFilter = "";
@@ -3952,6 +3900,12 @@ function _renderProductReviews(data) {
           <span style="font-size:12px;color:var(--muted);margin-left:4px">${r.rating||0}/5</span></td>
       <td style="max-width:260px;font-size:13px;color:var(--text)">${text||"<em style='color:var(--muted)'>No text</em>"}</td>
       <td style="font-size:12px;color:var(--muted);white-space:nowrap">${date}</td>
+      <td style="text-align:center">
+        <label class="rv-toggle" title="Toggle visibility in app">
+          <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleProductReviewVisibility('${r._id}',this)">
+          <span class="rv-slider"></span>
+        </label>
+      </td>
       <td>
         <button class="btn-sm" style="background:#c0392b;color:white;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px"
           onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,"\'")}')">
@@ -3962,6 +3916,19 @@ function _renderProductReviews(data) {
   }).join("");
 }
 
+
+async function toggleProductReviewVisibility(reviewId, el) {
+  const visible = el.checked;
+  try {
+    const r = await fetch(`/admin/product-reviews/${reviewId}/visibility`, {
+      method: "PATCH", credentials: "include",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({visible})
+    });
+    if (!r.ok) { el.checked = !visible; alert("Failed to update visibility"); }
+    else { const item = _prodReviewsCache.find(x => x._id === reviewId); if (item) item.visible = visible; }
+  } catch(e) { el.checked = !visible; alert("Error: " + e.message); }
+}
 async function deleteProductReview(reviewId, productTitle) {
   if (!confirm(`Delete this review for "${productTitle}"? This cannot be undone.`)) return;
   try {
@@ -4011,6 +3978,12 @@ function _renderReviews(data) {
           <span style="font-size:12px;color:var(--muted);margin-left:4px">${r.rating||0}/5</span></td>
       <td style="max-width:260px;font-size:13px;color:var(--text)">${text||"<em style='color:var(--muted)'>No text</em>"}</td>
       <td style="font-size:12px;color:var(--muted);white-space:nowrap">${date}</td>
+      <td style="text-align:center">
+        <label class="rv-toggle" title="Toggle visibility in app">
+          <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleStoreReviewVisibility('${r._id}',this)">
+          <span class="rv-slider"></span>
+        </label>
+      </td>
       <td>
         <button class="btn-sm" style="background:#c0392b;color:white;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px"
           onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,"\'")}')">
@@ -4019,6 +3992,19 @@ function _renderReviews(data) {
       </td>
     </tr>`;
   }).join("");
+}
+
+async function toggleStoreReviewVisibility(reviewId, el) {
+  const visible = el.checked;
+  try {
+    const r = await fetch(`/admin/reviews/${reviewId}/visibility`, {
+      method: "PATCH", credentials: "include",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({visible})
+    });
+    if (!r.ok) { el.checked = !visible; alert("Failed to update visibility"); }
+    else { const item = _reviewsCache.find(x => x._id === reviewId); if (item) item.visible = visible; }
+  } catch(e) { el.checked = !visible; alert("Error: " + e.message); }
 }
 
 async function deleteReview(reviewId, storeName) {
