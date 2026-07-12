@@ -75,6 +75,20 @@ tr:hover td{background:#f7faf8;}
 .plan-row input{flex:1;max-width:140px;}
 
 /* ── Star Ratings ── */
+
+/* ── Review Visibility Toggle ── */
+.rv-toggle { position:relative; display:inline-block; width:44px; height:24px; }
+.rv-toggle input { opacity:0; width:0; height:0; }
+.rv-slider {
+  position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0;
+  background:#cbd5e1; border-radius:34px; transition:.3s;
+}
+.rv-slider:before {
+  position:absolute; content:""; height:18px; width:18px; left:3px; bottom:3px;
+  background:white; border-radius:50%; transition:.3s;
+}
+.rv-toggle input:checked + .rv-slider { background:var(--primary); }
+.rv-toggle input:checked + .rv-slider:before { transform:translateX(20px); }
 .star-row .fa-star{cursor:pointer;color:#ccc;font-size:18px;transition:color 0.15s;}
 .star-row .fa-star.on{color:#f59e0b;}
 .star-row .fa-star:hover{color:#fbbf24;}
@@ -119,8 +133,7 @@ tr:hover td{background:#f7faf8;}
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
   <div class="sep"></div>
-  <a href="#" onclick="showSection('ratings',this)"><i class="fas fa-star fa-fw"></i> Ratings</a>
-<a href="#" onclick="showSection('reviews',this)"><i class="fas fa-comment-dots fa-fw"></i> Reviews</a>
+  <a href="#" onclick="showSection('reviews',this)"><i class="fas fa-comment-dots fa-fw"></i> Rating &amp; Review</a>
   <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
   <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
   <a href="#" onclick="showSection('policies',this)"><i class="fas fa-shield-alt fa-fw"></i> Policies</a>
@@ -166,36 +179,33 @@ tr:hover td{background:#f7faf8;}
 </div>
 
 
-<div id="section-ratings" class="section">
-  <div class="section-header">
-    <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)">⭐ Store Ratings</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Set the admin-controlled rating displayed to users in the app</div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;">
-        <input type="text" id="ratings_search_input" class="form-control" placeholder="Search store..." style="max-width:200px;font-size:13px;" oninput="_ratingsSearch=this.value;if(_ratingsCache.length)_renderRatings(_ratingsCache);">
-        <button class="btn-p" onclick="loadRatings()"><i class="fas fa-sync me-1"></i> Refresh</button>
-      </div>
-  </div>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th>Store</th><th>Category</th><th>User Avg</th><th>Admin Set</th><th>Set Rating</th></tr>
-      </thead>
-      <tbody id="ratings_table">
-        <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-
-
 <!-- ═══ REVIEWS ═══ -->
 <div id="section-reviews" class="section">
-  <div class="section-header">
+  <div class="section-header" style="align-items:flex-start;flex-wrap:wrap;gap:12px;">
     <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)">💬 Reviews</div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)">⭐💬 Rating &amp; Review</div>
       <div style="color:var(--muted);font-size:12px;margin-top:2px;">View and moderate customer reviews submitted in the app</div>
+    </div>
+    <!-- Toggle controls -->
+    <div style="display:flex;flex-direction:column;gap:10px;background:var(--light);border-radius:12px;padding:12px 18px;min-width:260px;">
+      <div style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:2px;letter-spacing:0.3px;">VISIBILITY IN APP</div>
+      <!-- Store Reviews toggle -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+        <span style="font-size:13px;font-weight:600;color:var(--text);">🏪 Store Reviews</span>
+        <label class="rv-toggle">
+          <input type="checkbox" id="toggle_store_reviews" onchange="saveReviewVisibility()">
+          <span class="rv-slider"></span>
+        </label>
+      </div>
+      <!-- Product Reviews toggle -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+        <span style="font-size:13px;font-weight:600;color:var(--text);">📦 Product Reviews</span>
+        <label class="rv-toggle">
+          <input type="checkbox" id="toggle_product_reviews" onchange="saveReviewVisibility()">
+          <span class="rv-slider"></span>
+        </label>
+      </div>
+      <div id="rv_save_status" style="font-size:11px;color:var(--muted);min-height:14px;"></div>
     </div>
   </div>
   <!-- Sub-tabs -->
@@ -1483,7 +1493,7 @@ let accountsList=[], _filteredAccounts=[], _acctPage=1;
 var _adminBannersList = [];  // Admin Banners
 let merchantsList=[], allStores=[], categoriesList=[], allUsers=[];
 let storeModal, qrModal, userHistoryModal, adjustModal_inst;
-let _ratingsCache=[], _ratingsSearch='';
+// Ratings module removed
 let editingStore=false;
 
 
@@ -1704,8 +1714,7 @@ function showSection(name, el){
   // merchant_txns handled by script block 5 override
   if(name==="discounts") loadDiscounts();
   if(name==="about") loadAbout();
-  if(name==="ratings") loadRatings();
-  if(name==="reviews") loadReviews();
+  if(name==="reviews") { loadReviews(); loadReviewVisibility(); }
   if(name==="product_cards") loadGiftCards();
   if(name==="promo_sliders") { loadSliders(); }
   if(name==="notifications") loadNotifications();
@@ -3849,31 +3858,37 @@ async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"
 
 
 // ═══════════ RATINGS ═══════════
-async function loadRatings(forceRefresh=false) {
-    const tbody = document.getElementById("ratings_table");
-    tbody.innerHTML = `<tr><td colspan='5' style='color:#6b8c7e;text-align:center;'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>`;
-    try {
-        // Always fetch fresh so user ratings from app are reflected immediately
-        if (true) {
-            let res = await fetch("/admin/stores", { credentials:"include" });
-            _ratingsCache = await res.json();
-        }
-        _renderRatings(_ratingsCache);
-    } catch(e) { tbody.innerHTML = `<tr><td colspan='5' style='color:#ef4444'>Error: ${e.message}</td></tr>`; }
-}
-
-async function setStoreRating(storeId, val, el) {
-  const row = el.closest(".star-row");
-  row.querySelectorAll(".fa-star").forEach((s,i) => s.classList.toggle("on", i < val));
+// ═══════════ REVIEW VISIBILITY TOGGLES ═══════════
+async function loadReviewVisibility() {
   try {
-    await fetch(`/admin/stores/${storeId}/rating`, {
-      method:"PUT", credentials:"include",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({admin_rating: val})
-    });
-  } catch(e) { console.error(e); }
+    const r = await fetch("/admin/review-visibility", { credentials:"include" });
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById("toggle_store_reviews").checked   = d.store_reviews   !== false;
+    document.getElementById("toggle_product_reviews").checked = d.product_reviews !== false;
+  } catch(e) { console.warn("Could not load review visibility:", e.message); }
 }
 
+async function saveReviewVisibility() {
+  const storeOn   = document.getElementById("toggle_store_reviews").checked;
+  const productOn = document.getElementById("toggle_product_reviews").checked;
+  const status = document.getElementById("rv_save_status");
+  status.textContent = "Saving…";
+  try {
+    const r = await fetch("/admin/review-visibility", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ store_reviews: storeOn, product_reviews: productOn })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    status.style.color = "var(--primary)";
+    status.textContent = "✓ Saved";
+    setTimeout(() => { status.textContent = ""; }, 2500);
+  } catch(e) {
+    status.style.color = "var(--danger)";
+    status.textContent = "Error: " + e.message;
+  }
+}
 
 // ═══════════ REVIEWS ═══════════
 let _reviewsCache = [];
@@ -4929,41 +4944,6 @@ async function deleteGiftCard(id) {
   loadGiftCards();
 }
 
-
-function _renderRatings(stores) {
-    const q = _ratingsSearch.toLowerCase();
-    const filtered = q ? stores.filter(s=>(s.store_name||"").toLowerCase().includes(q)||(s.category||"").toLowerCase().includes(q)) : stores;
-    let html = "";
-    filtered.forEach(s => {
-        const ur = parseFloat(s.user_rating||s.rating||0).toFixed(1);
-        const urCount = s.rating_count || 0;
-        const ar = parseFloat(s.admin_rating||0).toFixed(1);
-        html += `<tr>
-            <td><strong>${s.store_name||"-"}</strong><br><small style="color:#94a3b8">${s.city||""}</small></td>
-            <td>${s.category||"-"}</td>
-            <td>${parseFloat(ur)>0?`<span style="color:#f59e0b">★ ${ur}</span><br><small style="color:#94a3b8">${urCount} review${urCount!==1?"s":""}</small>`:"—"}</td>
-            <td>${parseFloat(ar)>0?`<span style="color:#3E5F55">★ ${ar}</span>`:"—"}</td>
-            <td>
-                <div class="star-row d-flex gap-1 align-items-center" data-id="${s._id}">
-                    ${[1,2,3,4,5].map(n=>`<i class="fas fa-star ${parseFloat(ar)>=n?'on':''}" style="cursor:pointer;font-size:18px;" data-val="${n}" onclick="setStoreRating('${s._id}',${n},this)"></i>`).join("")}
-                    <button onclick="clearRating('${s._id}')" class="btn btn-sm ms-2" style="font-size:10px;padding:2px 7px;background:rgba(255,255,255,0.15);color:#2c3e35;border-radius:6px;">Clear</button>
-                </div>
-            </td>
-        </tr>`;
-    });
-    document.getElementById("ratings_table").innerHTML = html||"<tr><td colspan='5' style='color:#94a3b8'>No stores</td></tr>";
-}
-
-async function clearRating(storeId) {
-    try {
-        await fetch(`/admin/stores/${storeId}/rating`, {
-            method:"PUT", credentials:"include",
-            headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({admin_rating:0})
-        });
-        if (_ratingsCache) { const s=_ratingsCache.find(x=>x._id===storeId); if(s) s.admin_rating=0; _renderRatings(_ratingsCache); }
-    } catch(e) { console.error(e); }
-}
 
 function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); }
 
