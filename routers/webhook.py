@@ -80,7 +80,8 @@ async def whatsapp_webhook(request: Request):
         logger.warning("[WA-Webhook] ⚠️  Received non-JSON body — ignoring")
         return JSONResponse({"status": "ok"})  # always 200 to Meta
 
-    print("WHATSAPP EVENT RECEIVED:", body)
+    print("WHATSAPP PAYLOAD RECEIVED:")
+    print(body)
     logger.debug("[WA-Webhook] Raw payload: %s", body)
 
     # Guard: only process whatsapp_business_account events
