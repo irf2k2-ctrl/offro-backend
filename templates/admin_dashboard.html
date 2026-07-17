@@ -7114,24 +7114,24 @@ function renderWaCustomerList(customers) {
     const initials = (c.name || 'U').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
     const ts       = c.last_message_time ? _waFormatTime(c.last_message_time) : '';
     const preview  = (c.last_message || '').slice(0, 42) + ((c.last_message||'').length > 42 ? '…' : '');
-    return \`<div onclick="openWaConversation('\${c.customer_id}')"
+    return `<div onclick="openWaConversation('${c.customer_id}')"
       style="display:flex;gap:10px;padding:12px 14px;cursor:pointer;border-bottom:1px solid var(--border);align-items:center;
-             background:\${isActive ? '#e8f5e9' : '#fff'};\${isActive ? 'border-left:3px solid #25D366;' : ''}
+             background:${isActive ? '#e8f5e9' : '#fff'};${isActive ? 'border-left:3px solid #25D366;' : ''}
              transition:background .15s;"
-      onmouseover="if('\${c.customer_id}'!==_waCurrentCustomerId)this.style.background='#f5f5f5'"
-      onmouseout="if('\${c.customer_id}'!==_waCurrentCustomerId)this.style.background='#fff'">
-      <div style="width:40px;height:40px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff;flex-shrink:0;">\${initials}</div>
+      onmouseover="if('${c.customer_id}'!==_waCurrentCustomerId)this.style.background='#f5f5f5'"
+      onmouseout="if('${c.customer_id}'!==_waCurrentCustomerId)this.style.background='#fff'">
+      <div style="width:40px;height:40px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff;flex-shrink:0;">${initials}</div>
       <div style="flex:1;min-width:0;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-weight:\${c.unread_count>0?'700':'600'};font-size:13px;color:var(--text);">\${c.name||'Unknown'}</span>
-          <span style="font-size:10px;color:var(--muted);">\${ts}</span>
+          <span style="font-weight:${c.unread_count>0?'700':'600'};font-size:13px;color:var(--text);">${c.name||'Unknown'}</span>
+          <span style="font-size:10px;color:var(--muted);">${ts}</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-          <span style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;">\${preview}</span>
-          \${unread}
+          <span style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;">${preview}</span>
+          ${unread}
         </div>
       </div>
-    </div>\`;
+    </div>`;
   }).join('');
 }
 
@@ -7206,15 +7206,15 @@ function _waRenderMsg(m) {
     : 'background:#fff;margin-right:auto;border-radius:12px 12px 12px 0;';
   const align  = isOut ? 'align-self:flex-end;' : 'align-self:flex-start;';
   const label  = isOut ? '<small style="color:var(--muted);font-size:9px;display:block;margin-bottom:2px;text-align:right;">You</small>' : '';
-  return \`<div style="\${align}max-width:68%;min-width:80px;">
-    \${label}
-    <div style="\${bubble}padding:8px 12px;box-shadow:0 1px 2px rgba(0,0,0,.1);">
-      <span style="font-size:13px;color:#222;white-space:pre-wrap;">\${_waEscape(m.message)}</span>
+  return `<div style="${align}max-width:68%;min-width:80px;">
+    ${label}
+    <div style="${bubble}padding:8px 12px;box-shadow:0 1px 2px rgba(0,0,0,.1);">
+      <span style="font-size:13px;color:#222;white-space:pre-wrap;">${_waEscape(m.message)}</span>
       <div style="text-align:right;margin-top:4px;">
-        <small style="font-size:9px;color:var(--muted);">\${ts}</small>
+        <small style="font-size:9px;color:var(--muted);">${ts}</small>
       </div>
     </div>
-  </div>\`;
+  </div>`;
 }
 
 // ── Send reply ────────────────────────────────────────
