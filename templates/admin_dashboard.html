@@ -2494,8 +2494,8 @@ function renderUsersPage(){
       <td><span class="badge-active">${u.redemption_count||0}</span></td>
       <td style="font-size:11px;color:var(--muted)">${u.registered_on||"-"}</td>
       <td style="white-space:nowrap;">
-        <button class="btn-o me-1" onclick="viewHistory('${u._id}','${(u.name||"").replace(/'/g,"\'")}')"><i class="fas fa-history"></i></button>
-        <button class="btn-p" onclick="openAdjust('${u._id}','${(u.name||"").replace(/'/g,"\'")}')"><i class="fas fa-coins"></i></button>
+        <button class="btn-o me-1" onclick="viewHistory('${u._id}','${(u.name||"").replace(/'/g,String.fromCharCode(39))}')"><i class="fas fa-history"></i></button>
+        <button class="btn-p" onclick="openAdjust('${u._id}','${(u.name||"").replace(/'/g,String.fromCharCode(39))}')"><i class="fas fa-coins"></i></button>
       </td></tr>`;
   });
   document.getElementById("users_table").innerHTML=html||`<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No users yet</td></tr>`;
@@ -3925,7 +3925,7 @@ function _renderProductReviews(data) {
             <span class="rv-slider"></span>
           </label>
           <button style="background:#c0392b;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1"
-            onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,\"\'\")}')"
+            onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,'')}')"
             title="Delete review">
             <i class="fas fa-trash"></i>
           </button>
@@ -4007,7 +4007,7 @@ function _renderReviews(data) {
 <<<<<<< HEAD
             onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,String.fromCharCode(39))}')" 
 =======
-            onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,\"\'\")}')"
+            onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,'')}')"
 >>>>>>> be790039d3305e41091719f266a38c1f0283d5a8
             title="Delete review">
             <i class="fas fa-trash"></i>
