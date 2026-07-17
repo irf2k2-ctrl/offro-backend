@@ -18,6 +18,7 @@ import logging
 from fastapi import APIRouter, Request, Query
 from fastapi.responses import PlainTextResponse, JSONResponse
 from services.whatsapp import WHATSAPP_VERIFY_TOKEN, send_whatsapp_message
+from routers.wa_chat import store_incoming_message
 
 logger = logging.getLogger("offro.webhook")
 
@@ -192,6 +193,17 @@ def _handle_messages(value: dict):
         logger.info(
             "[WA-Webhook] 📩 Message from %s (%s) — type=%s id=%s ts=%s body=%r",
             sender, sender_name, msg_type, msg_id, timestamp, text_body,
+        )
+
+        # ── Persist incoming message to DB (Live Chat) ────────────────────────
+        store_incoming_message(
+            phone=sender,
+            name=sender_name,
+            whatsapp_id=sender,
+            msg_type=msg_type,
+            text=text_body,
+            whatsapp_msg_id=msg_id,
+            unix_ts=timestamp,
         )
 
         # ── Auto-reply to incoming text messages ──────────────────────────────

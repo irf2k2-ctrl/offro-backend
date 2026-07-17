@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
-from routers import admin, users, public, merchant_app, popup_campaigns, webhook
+from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat
 from database import db
 import base64, io, re
 
@@ -27,6 +27,7 @@ app.include_router(users.router,          prefix="/user")
 app.include_router(public.router)
 app.include_router(popup_campaigns.router)
 app.include_router(webhook.router)          # WhatsApp Cloud API webhook — no prefix
+app.include_router(wa_chat.router, prefix="/admin")  # WhatsApp Live Chat admin API
 
 
 # ── File download endpoints ──
