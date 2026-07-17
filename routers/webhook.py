@@ -17,7 +17,7 @@ Do NOT add any prefix — Meta sends webhooks to the exact path /webhook.
 import logging
 from fastapi import APIRouter, Request, Query
 from fastapi.responses import PlainTextResponse, JSONResponse
-from services.whatsapp import WHATSAPP_VERIFY_TOKEN
+from services.whatsapp import WHATSAPP_VERIFY_TOKEN, send_whatsapp_message
 
 logger = logging.getLogger("offro.webhook")
 
@@ -202,11 +202,48 @@ def _handle_errors(value: dict):
         )
 
 
+# ── Reply helper ───────────────────────────────────────────────────────────────
+
+def reply_to_sender(sender_phone: str, message: str) -> dict:
+    """
+    Send a WhatsApp reply back to an incoming message sender.
+
+    This is the primary function to use inside any message handler when you
+    want to respond to a customer.
+
+    Args:
+        sender_phone: The 'from' field from the incoming webhook message
+                      (already in E.164 format without '+', e.g. '919876543210').
+        message:      Plain text reply body (max 4096 chars).
+
+    Returns:
+        dict — {"ok": True, "message_id": "..."} on success
+                {"ok": False, "error": "..."} on failure
+
+    Usage example inside a message handler:
+        def my_handler(sender, name, msg_type, text, ...):
+            if text.lower() == "hi":
+                reply_to_sender(sender, "Hello " + name + "! Welcome to OffrO 👋")
+
+    Then register it:
+        _MESSAGE_HANDLERS.append(my_handler)
+    """
+    result = send_whatsapp_message(sender_phone, message)
+    if result.get("ok"):
+        logger.info("[WA-Webhook] 📤 Reply sent to %s — id=%s", sender_phone, result.get("message_id"))
+    else:
+        logger.error("[WA-Webhook] ❌ Reply failed to %s — %s", sender_phone, result.get("error"))
+    return result
+
+
 # ── Handler registries (extend without touching the router) ────────────────────
 # To add a new message handler:
 #   def my_handler(sender, name, msg_type, text, msg_id, timestamp, phone_number_id, raw):
 #       ...
 #   _MESSAGE_HANDLERS.append(my_handler)
+#
+# To reply inside a handler:
+#   reply_to_sender(sender, "your reply text here")
 
 _MESSAGE_HANDLERS: list = []   # callables(sender, name, msg_type, text, msg_id, timestamp, phone_number_id, raw)
 _STATUS_HANDLERS: list  = []   # callables(msg_id, recipient, status, timestamp, raw)
