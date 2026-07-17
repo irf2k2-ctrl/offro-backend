@@ -228,7 +228,7 @@ tr:hover td{background:#f7faf8;}
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Visible</th><th>Action</th></tr>
+          <tr><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
         </thead>
         <tbody id="reviews_table">
           <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
@@ -248,10 +248,10 @@ tr:hover td{background:#f7faf8;}
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Product</th><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Visible</th><th>Action</th></tr>
+          <tr><th>Product</th><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
         </thead>
         <tbody id="prod_reviews_table">
-          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
+          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
         </tbody>
       </table>
     </div>
@@ -3882,13 +3882,13 @@ function switchReviewTab(tab) {
 async function loadProductReviews() {
   const tbody = document.getElementById("prod_reviews_table");
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading...</td></tr>`;
   try {
     const r = await fetch("/admin/product-reviews", { credentials:"include" });
     _prodReviewsCache = await r.json();
     _renderProductReviews(_prodReviewsCache);
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="7" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
   }
 }
 
@@ -3901,7 +3901,7 @@ function _renderProductReviews(data) {
     rows = rows.filter(r => (r.product_title||"").toLowerCase().includes(q) || (r.product_id||"").includes(q));
   }
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">No product reviews found</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No product reviews found</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(r => {
@@ -3918,17 +3918,18 @@ function _renderProductReviews(data) {
           <span style="font-size:12px;color:var(--muted);margin-left:4px">${r.rating||0}/5</span></td>
       <td style="max-width:260px;font-size:13px;color:var(--text)">${text||"<em style='color:var(--muted)'>No text</em>"}</td>
       <td style="font-size:12px;color:var(--muted);white-space:nowrap">${date}</td>
-      <td style="text-align:center">
-        <label class="rv-toggle" title="Toggle visibility in app">
-          <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleProductReviewVisibility('${r._id}',this)">
-          <span class="rv-slider"></span>
-        </label>
-      </td>
       <td>
-        <button class="btn-sm" style="background:#c0392b;color:white;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px"
-          onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,"\'")}')">
-          <i class="fas fa-trash me-1"></i>Delete
-        </button>
+        <div style="display:flex;align-items:center;gap:8px;justify-content:center">
+          <label class="rv-toggle" title="${r.visible !== false ? 'Visible in app' : 'Hidden in app'}">
+            <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleProductReviewVisibility('${r._id}',this)">
+            <span class="rv-slider"></span>
+          </label>
+          <button style="background:#c0392b;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1"
+            onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,\"\'\")}')"
+            title="Delete review">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
       </td>
     </tr>`;
   }).join("");
@@ -3961,13 +3962,13 @@ async function deleteProductReview(reviewId, productTitle) {
 async function loadReviews() {
   const tbody = document.getElementById("reviews_table");
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading reviews...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading reviews...</td></tr>`;
   try {
     const r = await fetch("/admin/reviews", { credentials:"include" });
     _reviewsCache = await r.json();
     _renderReviews(_reviewsCache);
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="6" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
   }
 }
 
@@ -3980,7 +3981,7 @@ function _renderReviews(data) {
     rows = rows.filter(r => (r.store_name||"").toLowerCase().includes(q) || (r.store_id||"").includes(q));
   }
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No reviews found</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">No reviews found</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(r => {
@@ -3996,17 +3997,18 @@ function _renderReviews(data) {
           <span style="font-size:12px;color:var(--muted);margin-left:4px">${r.rating||0}/5</span></td>
       <td style="max-width:260px;font-size:13px;color:var(--text)">${text||"<em style='color:var(--muted)'>No text</em>"}</td>
       <td style="font-size:12px;color:var(--muted);white-space:nowrap">${date}</td>
-      <td style="text-align:center">
-        <label class="rv-toggle" title="Toggle visibility in app">
-          <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleStoreReviewVisibility('${r._id}',this)">
-          <span class="rv-slider"></span>
-        </label>
-      </td>
       <td>
-        <button class="btn-sm" style="background:#c0392b;color:white;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px"
-          onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,"\'")}')">
-          <i class="fas fa-trash me-1"></i>Delete
-        </button>
+        <div style="display:flex;align-items:center;gap:8px;justify-content:center">
+          <label class="rv-toggle" title="${r.visible !== false ? 'Visible in app' : 'Hidden in app'}">
+            <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleStoreReviewVisibility('${r._id}',this)">
+            <span class="rv-slider"></span>
+          </label>
+          <button style="background:#c0392b;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1"
+            onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,\"\'\")}')"
+            title="Delete review">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
       </td>
     </tr>`;
   }).join("");
