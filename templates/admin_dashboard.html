@@ -28,7 +28,7 @@ body{background:#FDFBF6;color:#2c3e35;font-family:'Segoe UI',sans-serif;margin:0
 .card-stat h3{font-size:30px;color:var(--primary);font-weight:700;margin:0;}
 .card-stat p{color:var(--muted);margin:4px 0 0;font-size:12px;}
 .card-stat.warn h3{color:var(--warning);}
-.section{display:none;}.section.active{display:block;}
+.section{display:none;}.section.active{display:block;min-height:0;}
 .table-wrap{background:white;border-radius:12px;border:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;box-shadow:0 2px 8px rgba(62,95,85,.06);}
 .table-wrap table{min-width:720px;}
 table{width:100%;border-collapse:collapse;}
@@ -108,7 +108,7 @@ tr:hover td{background:#f7faf8;}
     .menu-toggle { display:block !important; }
 }
 /* ── WhatsApp Live Chat Layout ── */
-.wa-chat-wrap{display:flex;flex-direction:row!important;height:620px;min-width:0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(62,95,85,.08);}
+.wa-chat-wrap{display:flex;flex-direction:row!important;height:620px;min-width:0;width:100%;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(62,95,85,.08);}
 .wa-left{width:290px!important;min-width:290px!important;max-width:290px!important;flex:0 0 290px!important;border-right:1px solid var(--border);display:flex!important;flex-direction:column!important;background:#fafafa;}
 .wa-left-search{padding:10px 12px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;}
 .wa-left-bar{padding:6px 12px;border-bottom:1px solid var(--border);background:#fff;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;}
@@ -228,7 +228,7 @@ tr:hover td{background:#f7faf8;}
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Visible</th><th>Action</th></tr>
+          <tr><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
         </thead>
         <tbody id="reviews_table">
           <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>
@@ -248,10 +248,10 @@ tr:hover td{background:#f7faf8;}
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Product</th><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Visible</th><th>Action</th></tr>
+          <tr><th>Product</th><th>Store</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
         </thead>
         <tbody id="prod_reviews_table">
-          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
+          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
         </tbody>
       </table>
     </div>
@@ -3882,13 +3882,13 @@ function switchReviewTab(tab) {
 async function loadProductReviews() {
   const tbody = document.getElementById("prod_reviews_table");
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading...</td></tr>`;
   try {
     const r = await fetch("/admin/product-reviews", { credentials:"include" });
     _prodReviewsCache = await r.json();
     _renderProductReviews(_prodReviewsCache);
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="7" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
   }
 }
 
@@ -3901,7 +3901,7 @@ function _renderProductReviews(data) {
     rows = rows.filter(r => (r.product_title||"").toLowerCase().includes(q) || (r.product_id||"").includes(q));
   }
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">No product reviews found</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No product reviews found</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(r => {
@@ -3918,17 +3918,18 @@ function _renderProductReviews(data) {
           <span style="font-size:12px;color:var(--muted);margin-left:4px">${r.rating||0}/5</span></td>
       <td style="max-width:260px;font-size:13px;color:var(--text)">${text||"<em style='color:var(--muted)'>No text</em>"}</td>
       <td style="font-size:12px;color:var(--muted);white-space:nowrap">${date}</td>
-      <td style="text-align:center">
-        <label class="rv-toggle" title="Toggle visibility in app">
-          <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleProductReviewVisibility('${r._id}',this)">
-          <span class="rv-slider"></span>
-        </label>
-      </td>
       <td>
-        <button class="btn-sm" style="background:#c0392b;color:white;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px"
-          onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,"\'")}')">
-          <i class="fas fa-trash me-1"></i>Delete
-        </button>
+        <div style="display:flex;align-items:center;gap:8px;justify-content:center">
+          <label class="rv-toggle" title="${r.visible !== false ? 'Visible in app' : 'Hidden in app'}">
+            <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleProductReviewVisibility('${r._id}',this)">
+            <span class="rv-slider"></span>
+          </label>
+          <button style="background:#c0392b;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1"
+            onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,String.fromCharCode(39))}')" 
+            title="Delete review">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
       </td>
     </tr>`;
   }).join("");
@@ -3961,13 +3962,13 @@ async function deleteProductReview(reviewId, productTitle) {
 async function loadReviews() {
   const tbody = document.getElementById("reviews_table");
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading reviews...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading reviews...</td></tr>`;
   try {
     const r = await fetch("/admin/reviews", { credentials:"include" });
     _reviewsCache = await r.json();
     _renderReviews(_reviewsCache);
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="6" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
   }
 }
 
@@ -3980,7 +3981,7 @@ function _renderReviews(data) {
     rows = rows.filter(r => (r.store_name||"").toLowerCase().includes(q) || (r.store_id||"").includes(q));
   }
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No reviews found</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">No reviews found</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(r => {
@@ -3996,17 +3997,18 @@ function _renderReviews(data) {
           <span style="font-size:12px;color:var(--muted);margin-left:4px">${r.rating||0}/5</span></td>
       <td style="max-width:260px;font-size:13px;color:var(--text)">${text||"<em style='color:var(--muted)'>No text</em>"}</td>
       <td style="font-size:12px;color:var(--muted);white-space:nowrap">${date}</td>
-      <td style="text-align:center">
-        <label class="rv-toggle" title="Toggle visibility in app">
-          <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleStoreReviewVisibility('${r._id}',this)">
-          <span class="rv-slider"></span>
-        </label>
-      </td>
       <td>
-        <button class="btn-sm" style="background:#c0392b;color:white;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px"
-          onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,"\'")}')">
-          <i class="fas fa-trash me-1"></i>Delete
-        </button>
+        <div style="display:flex;align-items:center;gap:8px;justify-content:center">
+          <label class="rv-toggle" title="${r.visible !== false ? 'Visible in app' : 'Hidden in app'}">
+            <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleStoreReviewVisibility('${r._id}',this)">
+            <span class="rv-slider"></span>
+          </label>
+          <button style="background:#c0392b;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1"
+            onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,String.fromCharCode(39))}')" 
+            title="Delete review">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
       </td>
     </tr>`;
   }).join("");
@@ -5744,6 +5746,10 @@ window.showSection = function(name, el) {
   if (name === 'product_cards')    { loadMerchantProducts(); }
   if (name === 'pricing')         { loadPricingConfig(); }
   if (name === 'merchant_txns')   { loadMerchantTxnsFull(); }
+  // Stop WA chat polling when leaving the wa_chat section
+  if (name !== 'wa_chat' && typeof _waPollTimer !== 'undefined' && _waPollTimer) {
+    clearInterval(_waPollTimer); _waPollTimer = null;
+  }
 };
 
 // ── Phase 2 JS functions ─────────────────────────────────────────────
@@ -7266,12 +7272,8 @@ function _waEscape(s) {
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Stop polling when switching away from wa_chat section
-const _origShowSec2 = window.showSection;
-window.showSection = function(name, el) {
-  if (name !== 'wa_chat' && _waPollTimer) { clearInterval(_waPollTimer); _waPollTimer = null; }
-  _origShowSec2(name, el);
-};
+// Stop polling when switching away from wa_chat section (patched into existing showSection hook)
+// No extra override needed — handled inside showSection below
 </script>
 
 </body>
