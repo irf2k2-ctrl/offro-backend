@@ -1,22 +1,25 @@
 """
-routers/wa_chat.py  — with media support added
-===============================================
-NEW additions (existing endpoints/functions UNCHANGED):
-  store_incoming_message()     → now handles msg_type="image" and stores media_id + resolved URL
-  _fetch_and_store_media()     → background helper to resolve media_id → URL via Meta API
-  POST /admin/whatsapp/upload  → admin uploads image → get media_id back
-  POST /admin/whatsapp/send    → now accepts { message } OR { media_id, caption } OR { image_url }
+routers/wa_chat.py  — incoming image storage via MongoDB (same pattern as notification_images)
+==============================================================================================
+KEY FIX: _fetch_and_store_media() now:
+  1. Calls fetch_media_url(media_id) → gets temporary Meta download URL
+  2. Calls download_media(temp_url)  → downloads raw bytes with Bearer token
+  3. Stores bytes as base64 in MongoDB 'wa_media_images' collection (same as notification_images)
+  4. Saves a permanent /admin/whatsapp/media/{media_id} serving URL to the DB record
 
-All existing text-chat endpoints remain identical.
+This replaces the broken approach of storing the temporary Meta URL directly.
+Meta's temp URLs expire in ~5 minutes — the dashboard loads the chat later, so they were already gone.
+
+All existing text-chat endpoints and outgoing image logic are UNCHANGED.
 """
 
 import logging
-import io
 import base64
 import mimetypes
+import io
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File
+from fastapi.responses import JSONResponse, Response
 from bson import ObjectId
 from database import db
 from services.whatsapp import (
@@ -26,10 +29,13 @@ from services.whatsapp import (
     fetch_media_url,
     download_media,
 )
+import os
 
 logger = logging.getLogger("offro.wa_chat")
 
 router = APIRouter(tags=["WhatsApp Live Chat"])
+
+BASE_URL = os.environ.get("BASE_URL", "https://offro-backend-production.up.railway.app")
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -76,11 +82,8 @@ def _upsert_customer(phone: str, name: str, whatsapp_id: str,
 def _save_message(customer_id: str, direction: str, message: str,
                   msg_type: str, timestamp: datetime,
                   status: str = "received", whatsapp_msg_id: str = "",
-                  media_id: str = "", media_url: str = "") -> str:
-    """
-    Persist one message.
-    New fields: media_id, media_url (for image/document messages).
-    """
+                  media_id: str = "", media_url: str = "",
+                  mime_type: str = "", caption: str = "") -> str:
     doc = {
         "customer_id":      customer_id,
         "direction":        direction,
@@ -92,34 +95,107 @@ def _save_message(customer_id: str, direction: str, message: str,
         "read":             direction == "outgoing",
     }
     if media_id:
-        doc["media_id"] = media_id
+        doc["media_id"]   = media_id
     if media_url:
-        doc["media_url"] = media_url
+        doc["media_url"]  = media_url
+    if mime_type:
+        doc["mime_type"]  = mime_type
+    if caption:
+        doc["caption"]    = caption
 
     result = db.whatsapp_chats.insert_one(doc)
     return str(result.inserted_id)
 
 
-# ── Media helper — resolve media_id → URL and update DB record ────────────────
+# ── Media storage: download from Meta → store in MongoDB → serve permanently ──
+
+def _store_media_in_db(media_id: str, image_bytes: bytes, mime_type: str) -> str:
+    """
+    Store raw image bytes in MongoDB 'wa_media_images' collection as base64.
+    Returns the permanent serving URL: /admin/whatsapp/media/{media_id}
+    This follows the exact same pattern as /admin/notification-image/{img_id}.
+    """
+    ext = mimetypes.guess_extension(mime_type) or ".jpg"
+    ext = ext.replace(".jpe", ".jpg")
+
+    doc = {
+        "_id":          media_id,
+        "content_type": mime_type,
+        "data":         base64.b64encode(image_bytes).decode(),
+        "size":         len(image_bytes),
+        "created":      datetime.utcnow().isoformat(),
+    }
+    db.wa_media_images.replace_one({"_id": media_id}, doc, upsert=True)
+
+    url = BASE_URL + "/admin/whatsapp/media/" + media_id + ext
+    logger.info("[WA-Chat] 💾 Media stored in DB — id=%s size=%d url=%s", media_id, len(image_bytes), url)
+    return url
+
 
 def _fetch_and_store_media(chat_doc_id: str, media_id: str):
     """
-    Called synchronously after inserting an incoming image message.
-    Fetches the Meta media URL and updates the DB record with it.
-    Errors are logged and swallowed — the message is already stored.
+    Full pipeline: Meta media_id → download bytes → store in MongoDB → save permanent URL to chat record.
+
+    Called synchronously right after inserting an incoming image message.
+    Any failure is logged and swallowed — the message is already stored with a placeholder.
     """
     try:
-        result = fetch_media_url(media_id)
-        if result.get("ok"):
-            db.whatsapp_chats.update_one(
-                {"_id": ObjectId(chat_doc_id)},
-                {"$set": {"media_url": result["url"], "mime_type": result.get("mime_type", "image/jpeg")}}
-            )
-            logger.info("[WA-Chat] 📎 Media URL resolved for media_id=%s", media_id)
-        else:
-            logger.warning("[WA-Chat] ⚠️ Could not resolve media_id=%s: %s", media_id, result.get("error"))
+        # Step 1: Resolve media_id → temporary Meta download URL
+        meta_result = fetch_media_url(media_id)
+        if not meta_result.get("ok"):
+            logger.warning("[WA-Chat] ⚠️ fetch_media_url failed for id=%s: %s",
+                           media_id, meta_result.get("error"))
+            return
+
+        temp_url  = meta_result["url"]
+        mime_type = meta_result.get("mime_type", "image/jpeg")
+
+        # Step 2: Download raw bytes from Meta (requires Bearer token)
+        dl_result = download_media(temp_url)
+        if not dl_result.get("ok"):
+            logger.warning("[WA-Chat] ⚠️ download_media failed for id=%s: %s",
+                           media_id, dl_result.get("error"))
+            return
+
+        image_bytes  = dl_result["data"]
+        actual_mime  = dl_result.get("content_type", mime_type)
+
+        # Step 3: Store in MongoDB and get permanent URL
+        permanent_url = _store_media_in_db(media_id, image_bytes, actual_mime)
+
+        # Step 4: Update the chat record with the permanent URL
+        db.whatsapp_chats.update_one(
+            {"_id": ObjectId(chat_doc_id)},
+            {"$set": {"media_url": permanent_url, "mime_type": actual_mime}}
+        )
+        logger.info("[WA-Chat] ✅ Incoming image fully stored — id=%s bytes=%d", media_id, len(image_bytes))
+
     except Exception as e:
-        logger.exception("[WA-Chat] _fetch_and_store_media error: %s", e)
+        logger.exception("[WA-Chat] _fetch_and_store_media error for id=%s: %s", media_id, e)
+
+
+# ── GET /admin/whatsapp/media/{media_id} — serve stored media permanently ─────
+
+@router.get("/whatsapp/media/{media_id_with_ext}")
+def serve_whatsapp_media(media_id_with_ext: str):
+    """
+    Serve a stored WhatsApp media image from MongoDB.
+    Permanent URL — never expires (unlike Meta's temp URLs).
+    Format: /admin/whatsapp/media/{media_id}.jpg
+    """
+    # Strip extension to get bare media_id
+    bare_id = media_id_with_ext.split(".")[0]
+    doc = db.wa_media_images.find_one({"_id": bare_id})
+    if not doc:
+        raise HTTPException(404, "Media not found")
+
+    image_bytes = base64.b64decode(doc["data"])
+    content_type = doc.get("content_type", "image/jpeg")
+    return Response(
+        content=image_bytes,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=2592000"},  # 30 days
+    )
 
 
 # ── Public helper — called from webhook.py ────────────────────────────────────
@@ -130,26 +206,29 @@ def store_incoming_message(phone: str, name: str, whatsapp_id: str,
                            media_id: str = "", raw_msg: dict = None):
     """
     Called by webhook._handle_messages() to persist every incoming message.
-    Now handles image/document/audio msg_types by storing media_id and resolving URL.
+    For image messages: extracts media_id, downloads image, stores permanently in MongoDB.
     """
     try:
-        ts           = datetime.utcfromtimestamp(int(unix_ts)) if unix_ts else datetime.utcnow()
-        raw_msg      = raw_msg or {}
+        ts      = datetime.utcfromtimestamp(int(unix_ts)) if unix_ts else datetime.utcnow()
+        raw_msg = raw_msg or {}
 
-        # For media messages: extract media_id from the raw payload
+        # Extract media_id and caption from raw payload for media messages
         extracted_media_id = media_id
+        extracted_caption  = ""
+
         if not extracted_media_id:
             for media_type in ("image", "document", "audio", "video", "sticker"):
                 if msg_type == media_type and media_type in raw_msg:
-                    extracted_media_id = raw_msg[media_type].get("id", "")
+                    block = raw_msg[media_type]
+                    extracted_media_id = block.get("id", "")
+                    extracted_caption  = block.get("caption", "")
                     break
 
-        # Display text for last-message preview in sidebar
+        # Build display text for sidebar preview
         if msg_type == "text":
             display_text = text
         elif msg_type == "image":
-            caption = (raw_msg.get("image") or {}).get("caption", "")
-            display_text = "📷 Photo" + (" — " + caption if caption else "")
+            display_text = "📷 Photo" + (" — " + extracted_caption if extracted_caption else "")
         elif msg_type == "document":
             fname = (raw_msg.get("document") or {}).get("filename", "document")
             display_text = "📄 " + fname
@@ -164,14 +243,16 @@ def store_incoming_message(phone: str, name: str, whatsapp_id: str,
 
         cid = _upsert_customer(phone, name, whatsapp_id, display_text, ts)
 
+        # Insert message record (media_url will be filled in by _fetch_and_store_media)
         chat_id = _save_message(
             cid, "incoming", display_text, msg_type, ts,
             status="received", whatsapp_msg_id=whatsapp_msg_id,
             media_id=extracted_media_id,
+            caption=extracted_caption,
         )
 
-        # Resolve media URL immediately so it's ready when admin opens chat
-        if extracted_media_id:
+        # For image messages: download + store permanently (synchronous but fast enough)
+        if extracted_media_id and msg_type in ("image", "document", "video"):
             _fetch_and_store_media(chat_id, extracted_media_id)
 
         # Increment unread count
@@ -235,10 +316,10 @@ def get_conversation(customer_id: str, a=Depends(get_current_admin)):
                             if isinstance(m.get("timestamp"), datetime) else "",
             "status":       m.get("status", ""),
             "read":         m.get("read", False),
-            # New media fields
             "media_id":     m.get("media_id", ""),
             "media_url":    m.get("media_url", ""),
             "mime_type":    m.get("mime_type", ""),
+            "caption":      m.get("caption", ""),
         })
 
     return {
@@ -262,8 +343,8 @@ async def send_reply(request: Request, a=Depends(get_current_admin)):
     """
     Admin sends a reply to a customer.
     Accepts:
-      { "customer_id": "...", "message": "text" }          → plain text
-      { "customer_id": "...", "media_id": "...", "caption": "..." } → image by media_id
+      { "customer_id": "...", "message": "text" }
+      { "customer_id": "...", "media_id": "...", "caption": "..." }
     """
     try:
         body = await request.json()
@@ -296,24 +377,19 @@ async def send_reply(request: Request, a=Depends(get_current_admin)):
     now = datetime.utcnow()
 
     if media_id:
-        # Send image
         result = send_whatsapp_image(phone, media_id, caption)
         if not result.get("ok"):
             raise HTTPException(502, "WhatsApp image send failed: " + result.get("error", "unknown"))
-
         display = "📷 Photo" + (" — " + caption if caption else "")
         _save_message(customer_id, "outgoing", display, "image", now,
                       status="sent", whatsapp_msg_id=result.get("message_id", ""),
-                      media_id=media_id)
+                      media_id=media_id, caption=caption)
         db.customers_whatsapp.update_one({"_id": oid}, {"$set": {"last_message": display, "last_message_time": now}})
         return {"ok": True, "message_id": result.get("message_id"), "type": "image"}
-
     else:
-        # Send text
         result = send_whatsapp_message(phone, message)
         if not result.get("ok"):
             raise HTTPException(502, "WhatsApp send failed: " + result.get("error", "unknown"))
-
         _save_message(customer_id, "outgoing", message, "text", now,
                       status="sent", whatsapp_msg_id=result.get("message_id", ""))
         db.customers_whatsapp.update_one({"_id": oid}, {"$set": {"last_message": message, "last_message_time": now}})
@@ -323,22 +399,14 @@ async def send_reply(request: Request, a=Depends(get_current_admin)):
 # ── POST /admin/whatsapp/upload ───────────────────────────────────────────────
 
 @router.post("/whatsapp/upload")
-async def upload_media(
-    file: UploadFile = File(...),
-    a=Depends(get_current_admin)
-):
-    """
-    Admin uploads an image to Meta's media servers.
-    Returns a media_id that can be used in /admin/whatsapp/send.
-
-    Accepts: image/jpeg, image/png, image/webp (max ~5MB per Meta limits)
-    """
+async def upload_media(file: UploadFile = File(...), a=Depends(get_current_admin)):
+    """Admin uploads an image → gets media_id for use in /admin/whatsapp/send."""
     ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
-    MAX_SIZE     = 5 * 1024 * 1024  # 5 MB
+    MAX_SIZE     = 5 * 1024 * 1024
 
     mime_type = file.content_type or "image/jpeg"
     if mime_type not in ALLOWED_MIME:
-        raise HTTPException(400, "Unsupported file type: " + mime_type + ". Allowed: jpeg, png, webp, gif")
+        raise HTTPException(400, "Unsupported file type: " + mime_type)
 
     file_bytes = await file.read()
     if len(file_bytes) > MAX_SIZE:
