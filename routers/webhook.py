@@ -204,6 +204,7 @@ def _handle_messages(value: dict):
             text=text_body,
             whatsapp_msg_id=msg_id,
             unix_ts=timestamp,
+            raw_msg=msg,          # pass full raw msg so wa_chat can extract media_id
         )
 
         # ── Auto-reply to incoming text messages ──────────────────────────────

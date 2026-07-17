@@ -120,7 +120,7 @@ tr:hover td{background:#f7faf8;}
 .wa-chat-header{background:#fff;padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-shrink:0;}
 .wa-avatar{width:40px;height:40px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:#fff;flex-shrink:0;}
 .wa-messages{flex:1 1 0;overflow-y:auto;min-height:0;padding:16px 20px;display:flex;flex-direction:column;gap:8px;}
-.wa-reply-box{background:#fff;border-top:1px solid var(--border);padding:12px 16px;display:flex;gap:10px;align-items:flex-end;flex-shrink:0;}
+.wa-reply-box{background:#fff;border-top:1px solid var(--border);padding:12px 16px;display:flex;gap:10px;align-items:flex-end;flex-shrink:0;position:relative;}
 .wa-send-btn{background:#25D366;color:#fff;border:none;border-radius:50%;width:42px;height:42px;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;flex-shrink:0;}
 
 </style>
@@ -7062,6 +7062,28 @@ function gcOnStoreChange() {
         <div id="wa_messages" class="wa-messages"></div>
 
         <div class="wa-reply-box">
+          <!-- Hidden file input for image upload -->
+          <input type="file" id="wa_img_input" accept="image/jpeg,image/png,image/webp,image/gif"
+            style="display:none;" onchange="handleWaImageSelected(this)">
+          <!-- Image preview bar (shown when image is selected) -->
+          <div id="wa_img_preview" style="display:none;position:absolute;bottom:100%;left:0;right:0;
+            background:#fff;border-top:1px solid var(--border);padding:8px 14px;align-items:center;
+            gap:10px;box-shadow:0 -2px 8px rgba(0,0,0,.06);">
+            <img id="wa_img_preview_img" src="" alt="" style="height:52px;width:52px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">
+            <div style="flex:1;min-width:0;">
+              <div id="wa_img_preview_name" style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+              <div id="wa_upload_status" style="font-size:11px;margin-top:2px;"></div>
+            </div>
+            <button onclick="cancelWaImage()" title="Remove"
+              style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:4px;line-height:1;">✕</button>
+          </div>
+          <!-- Attachment button -->
+          <button id="wa_attach_btn" onclick="document.getElementById('wa_img_input').click()"
+            title="Send image"
+            style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:8px;flex-shrink:0;line-height:1;border-radius:50%;transition:color .2s;"
+            onmouseover="this.style.color='var(--primary)'" onmouseout="this.style.color='var(--muted)'">
+            <i class="fas fa-paperclip"></i>
+          </button>
           <textarea id="wa_reply_input" rows="2"
             style="flex:1;border:1px solid var(--border);border-radius:20px;padding:10px 16px;font-size:13px;resize:none;outline:none;font-family:inherit;"
             placeholder="Type a message..."
@@ -7084,6 +7106,7 @@ function gcOnStoreChange() {
 
 let _waAllCustomers = [];
 let _waCurrentCustomerId = null;
+let _waPendingMediaId = null;
 let _waPollTimer = null;
 
 // ── Load customer list ────────────────────────────────
@@ -7219,10 +7242,37 @@ function _waRenderMsg(m) {
     : 'background:#fff;margin-right:auto;border-radius:12px 12px 12px 0;';
   const align  = isOut ? 'align-self:flex-end;' : 'align-self:flex-start;';
   const label  = isOut ? '<small style="color:var(--muted);font-size:9px;display:block;margin-bottom:2px;text-align:right;">You</small>' : '';
+
+  // ── Media content rendering ──────────────────────────────────────────────
+  let content = '';
+  if (m.message_type === 'image' && m.media_url) {
+    // Clickable image thumbnail → opens full size in new tab
+    const caption = m.message && !m.message.startsWith('📷') ? `<div style="font-size:12px;color:#555;margin-top:4px;">${_waEscape(m.message)}</div>` : '';
+    content = `<a href="${m.media_url}" target="_blank" rel="noopener">
+      <img src="${m.media_url}" alt="Photo"
+        style="max-width:220px;max-height:220px;border-radius:8px;display:block;cursor:zoom-in;"
+        onerror="this.style.display='none';this.nextSibling.style.display='block';">
+      <span style="display:none;font-size:12px;color:var(--muted);">📷 Photo (tap to open)</span>
+    </a>${caption}`;
+  } else if (m.message_type === 'image' && !m.media_url) {
+    // Image received but URL not yet resolved (or expired)
+    content = `<span style="font-size:13px;color:#555;">📷 <em style="color:var(--muted);">Photo (preview unavailable)</em></span>`;
+  } else if (m.message_type === 'audio') {
+    content = `<span style="font-size:13px;color:#555;">🎵 Voice message</span>`;
+  } else if (m.message_type === 'document') {
+    content = `<span style="font-size:13px;color:#555;">📄 ${_waEscape(m.message)}</span>`;
+  } else if (m.message_type === 'video') {
+    content = `<span style="font-size:13px;color:#555;">🎬 Video</span>`;
+  } else if (m.message_type === 'sticker') {
+    content = `<span style="font-size:13px;color:#555;">🎭 Sticker</span>`;
+  } else {
+    content = `<span style="font-size:13px;color:#222;white-space:pre-wrap;">${_waEscape(m.message)}</span>`;
+  }
+
   return `<div style="${align}max-width:68%;min-width:80px;">
     ${label}
     <div style="${bubble}padding:8px 12px;box-shadow:0 1px 2px rgba(0,0,0,.1);">
-      <span style="font-size:13px;color:#222;white-space:pre-wrap;">${_waEscape(m.message)}</span>
+      ${content}
       <div style="text-align:right;margin-top:4px;">
         <small style="font-size:9px;color:var(--muted);">${ts}</small>
       </div>
@@ -7233,10 +7283,16 @@ function _waRenderMsg(m) {
 // ── Send reply ────────────────────────────────────────
 async function sendWaReply() {
   if (!_waCurrentCustomerId) return;
-  const input = document.getElementById('wa_reply_input');
-  const msg   = input.value.trim();
-  if (!msg) return;
+  const input   = document.getElementById('wa_reply_input');
+  const msg     = input.value.trim();
 
+  // If there's a pending image, send that (ignore text input)
+  if (_waPendingMediaId) {
+    await _sendWaImage(_waPendingMediaId, msg);
+    return;
+  }
+
+  if (!msg) return;
   input.disabled = true;
   try {
     const r = await fetch('/admin/whatsapp/send', {
@@ -7272,6 +7328,101 @@ function _waFormatTime(iso) {
     return d.toLocaleDateString([],{day:'numeric',month:'short'});
   } catch { return ''; }
 }
+
+// ── Image upload + send ──────────────────────────────────────────────────────
+
+async function handleWaImageSelected(input) {
+  const file = input.files && input.files[0];
+  if (!file || !_waCurrentCustomerId) { input.value = ''; return; }
+
+  // Show preview bar above reply box
+  const preview = document.getElementById('wa_img_preview');
+  const previewImg = document.getElementById('wa_img_preview_img');
+  const previewName = document.getElementById('wa_img_preview_name');
+
+  if (preview) {
+    const objUrl = URL.createObjectURL(file);
+    previewImg.src = objUrl;
+    previewName.textContent = file.name + ' (' + (file.size/1024).toFixed(0) + ' KB)';
+    preview.style.display = 'flex';
+  }
+
+  // Upload immediately to get media_id
+  const sendBtn = document.querySelector('.wa-send-btn');
+  const attachBtn = document.getElementById('wa_attach_btn');
+  if (sendBtn) sendBtn.disabled = true;
+  if (attachBtn) attachBtn.disabled = true;
+  document.getElementById('wa_upload_status').textContent = '⏳ Uploading...';
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const r = await fetch('/admin/whatsapp/upload', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    const d = await r.json();
+
+    if (d.ok && d.media_id) {
+      _waPendingMediaId = d.media_id;
+      document.getElementById('wa_upload_status').textContent = '✅ Ready to send';
+      if (sendBtn) sendBtn.disabled = false;
+    } else {
+      document.getElementById('wa_upload_status').textContent = '❌ Upload failed: ' + (d.detail || 'unknown');
+      cancelWaImage();
+    }
+  } catch(e) {
+    document.getElementById('wa_upload_status').textContent = '❌ Upload error: ' + e.message;
+    cancelWaImage();
+  }
+
+  if (attachBtn) attachBtn.disabled = false;
+  input.value = '';  // reset so same file can be re-selected
+}
+
+async function _sendWaImage(mediaId, caption) {
+  const btn  = document.querySelector('.wa-send-btn');
+  if (btn) btn.disabled = true;
+  document.getElementById('wa_upload_status').textContent = '⏳ Sending...';
+
+  try {
+    const payload = {customer_id: _waCurrentCustomerId, media_id: mediaId};
+    if (caption) payload.caption = caption;
+
+    const r = await fetch('/admin/whatsapp/send', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+
+    if (d.ok) {
+      document.getElementById('wa_reply_input').value = '';
+      cancelWaImage();
+      await refreshConversation();
+    } else {
+      alert('Image send failed: ' + (d.detail || 'unknown error'));
+      document.getElementById('wa_upload_status').textContent = '❌ Send failed';
+    }
+  } catch(e) {
+    alert('Image send error: ' + e.message);
+    document.getElementById('wa_upload_status').textContent = '❌ Error';
+  }
+
+  if (btn) btn.disabled = false;
+}
+
+function cancelWaImage() {
+  _waPendingMediaId = null;
+  const preview = document.getElementById('wa_img_preview');
+  if (preview) preview.style.display = 'none';
+  document.getElementById('wa_upload_status').textContent = '';
+}
+
+
 function _waEscape(s) {
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }

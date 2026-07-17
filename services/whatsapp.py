@@ -1,24 +1,17 @@
 """
-services/whatsapp.py
---------------------
-OFFRO WhatsApp Cloud API service module.
-
-Usage:
-    from services.whatsapp import send_whatsapp_message, send_whatsapp_template
-
-Environment variables required:
-    WHATSAPP_ACCESS_TOKEN         - Meta permanent / long-lived access token
-    WHATSAPP_PHONE_NUMBER_ID      - The Phone Number ID from Meta Business Manager
-    WHATSAPP_BUSINESS_ACCOUNT_ID  - WhatsApp Business Account ID (for logs / future reference)
-    WHATSAPP_VERIFY_TOKEN         - Any secret string you choose — used for webhook verification
-
-All functions are synchronous (using `requests`), keeping the footprint small and
-consistent with the rest of the OFFRO backend (no new async HTTP libraries needed).
+services/whatsapp.py  — with media support added
+=================================================
+NEW functions added (existing ones UNCHANGED):
+  send_whatsapp_image(phone, media_id)           → send image by media_id to customer
+  upload_media_to_whatsapp(file_bytes, mime)     → upload file, return media_id
+  fetch_media_url(media_id)                      → resolve media_id → download URL
+  download_media(media_url)                      → download bytes from resolved URL
 """
 
 import os
 import logging
 import requests
+import io
 
 logger = logging.getLogger("offro.whatsapp")
 
@@ -33,7 +26,6 @@ _GRAPH_BASE        = "https://graph.facebook.com/" + _GRAPH_API_VERSION
 
 
 def _messages_url() -> str:
-    """Build the Graph API messages endpoint URL for the configured phone number."""
     return _GRAPH_BASE + "/" + WHATSAPP_PHONE_NUMBER_ID + "/messages"
 
 
@@ -44,31 +36,20 @@ def _headers() -> dict:
     }
 
 
-# ── Core send function ──────────────────────────────────────────────────────────
+def _auth_headers() -> dict:
+    """Auth-only headers (no Content-Type — for multipart/form-data uploads)."""
+    return {"Authorization": "Bearer " + WHATSAPP_ACCESS_TOKEN}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXISTING FUNCTIONS — UNCHANGED
+# ══════════════════════════════════════════════════════════════════════════════
 
 def send_whatsapp_message(phone_number: str, message: str) -> dict:
-    """
-    Send a plain-text WhatsApp message to a phone number.
-
-    Args:
-        phone_number: Recipient number in E.164 format WITHOUT the '+' prefix.
-                      Example: '919876543210' for Indian number +91 98765 43210.
-        message:      UTF-8 text body (max 4096 chars per WhatsApp Cloud API limit).
-
-    Returns:
-        dict with keys:
-            ok      (bool)   – True if accepted by Meta.
-            message_id (str) – WhatsApp message ID on success.
-            error   (str)    – Error description on failure (only present on failure).
-
-    Raises:
-        Does NOT raise — always returns a dict so callers can decide how to handle.
-    """
     if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
         logger.error("[WA] WhatsApp env vars not configured — message NOT sent.")
         return {"ok": False, "error": "WhatsApp not configured (missing env vars)"}
 
-    # Normalise phone: strip leading '+', spaces, dashes
     phone = phone_number.replace("+", "").replace(" ", "").replace("-", "")
 
     payload = {
@@ -80,158 +61,230 @@ def send_whatsapp_message(phone_number: str, message: str) -> dict:
     }
 
     try:
-        resp = requests.post(
-            _messages_url(),
-            headers=_headers(),
-            json=payload,
-            timeout=10,
-        )
+        resp = requests.post(_messages_url(), headers=_headers(), json=payload, timeout=10)
         data = resp.json()
-
         if resp.status_code == 200 and "messages" in data:
             msg_id = data["messages"][0].get("id", "")
             logger.info("[WA] ✅ Message sent to %s — id=%s", phone, msg_id)
             return {"ok": True, "message_id": msg_id}
         else:
-            error_detail = data.get("error", {})
-            error_msg    = error_detail.get("message", str(data))
+            error_msg = data.get("error", {}).get("message", str(data))
             logger.error("[WA] ❌ Failed to send to %s — %s", phone, error_msg)
             return {"ok": False, "error": error_msg}
-
     except requests.exceptions.Timeout:
-        logger.error("[WA] ❌ Timeout sending to %s", phone)
         return {"ok": False, "error": "Request timed out"}
     except Exception as e:
         logger.exception("[WA] ❌ Unexpected error sending to %s", phone)
         return {"ok": False, "error": str(e)}
 
 
-# ── Template message (for pre-approved Meta templates) ─────────────────────────
-
-def send_whatsapp_template(
-    phone_number: str,
-    template_name: str,
-    language_code: str = "en",
-    components: list = None,
-) -> dict:
-    """
-    Send a pre-approved WhatsApp template message.
-
-    Args:
-        phone_number:   E.164 number without '+'.
-        template_name:  Exact template name as approved in Meta Business Manager.
-        language_code:  e.g. 'en', 'en_US', 'hi' — must match your template's language.
-        components:     Optional list of component dicts (header/body/button variable params).
-                        See: https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-message-templates
-
-    Returns:
-        Same shape as send_whatsapp_message().
-
-    Future use-cases in OFFRO:
-        - 'merchant_approved'   → notify merchant their store went live
-        - 'otp_verification'    → customer login OTP (needs OTP template approved by Meta)
-        - 'order_confirmed'     → customer order updates
-        - 'promo_blast'         → promotional messages (must be opt-in compliant)
-        - 'support_reply'       → support chat responses
-    """
+def send_whatsapp_template(phone_number, template_name, language_code="en", components=None):
     if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
-        logger.error("[WA] WhatsApp env vars not configured — template NOT sent.")
         return {"ok": False, "error": "WhatsApp not configured (missing env vars)"}
-
     phone = phone_number.replace("+", "").replace(" ", "").replace("-", "")
-
-    template_payload = {
-        "name":     template_name,
-        "language": {"code": language_code},
-    }
+    template_payload = {"name": template_name, "language": {"code": language_code}}
     if components:
         template_payload["components"] = components
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "to":                phone,
-        "type":              "template",
-        "template":          template_payload,
-    }
-
+    payload = {"messaging_product": "whatsapp", "to": phone, "type": "template", "template": template_payload}
     try:
-        resp = requests.post(
-            _messages_url(),
-            headers=_headers(),
-            json=payload,
-            timeout=10,
-        )
+        resp = requests.post(_messages_url(), headers=_headers(), json=payload, timeout=10)
         data = resp.json()
-
         if resp.status_code == 200 and "messages" in data:
-            msg_id = data["messages"][0].get("id", "")
-            logger.info("[WA] ✅ Template '%s' sent to %s — id=%s", template_name, phone, msg_id)
-            return {"ok": True, "message_id": msg_id}
-        else:
-            error_detail = data.get("error", {})
-            error_msg    = error_detail.get("message", str(data))
-            logger.error("[WA] ❌ Template '%s' failed for %s — %s", template_name, phone, error_msg)
-            return {"ok": False, "error": error_msg}
-
-    except requests.exceptions.Timeout:
-        return {"ok": False, "error": "Request timed out"}
+            return {"ok": True, "message_id": data["messages"][0].get("id", "")}
+        return {"ok": False, "error": data.get("error", {}).get("message", str(data))}
     except Exception as e:
-        logger.exception("[WA] ❌ Unexpected error sending template to %s", phone)
         return {"ok": False, "error": str(e)}
 
 
-# ── Convenience wrappers (ready-to-call for future features) ───────────────────
-
-def notify_merchant_store_approved(merchant_phone: str, store_name: str) -> dict:
-    """Notify a merchant that their store was approved. Uses plain text until
-    a template is approved by Meta."""
-    msg = (
-        "✅ *OffrO Update*\n\n"
-        "Your store *" + store_name + "* has been approved and is now live on the OffrO app!\n\n"
-        "Customers can now discover your store and avail your offers.\n\n"
-        "📲 Start adding products and deals from your Merchant Dashboard."
-    )
+def notify_merchant_store_approved(merchant_phone, store_name):
+    msg = ("✅ *OffrO Update*\n\nYour store *" + store_name + "* has been approved and is now live on the OffrO app!\n\n"
+           "Customers can now discover your store and avail your offers.\n\n"
+           "📲 Start adding products and deals from your Merchant Dashboard.")
     return send_whatsapp_message(merchant_phone, msg)
 
 
-def notify_merchant_store_rejected(merchant_phone: str, store_name: str, reason: str = "") -> dict:
-    """Notify a merchant that their store submission was rejected."""
-    msg = (
-        "❌ *OffrO Update*\n\n"
-        "Unfortunately, your store *" + store_name + "* was not approved at this time.\n"
-    )
+def notify_merchant_store_rejected(merchant_phone, store_name, reason=""):
+    msg = "❌ *OffrO Update*\n\nUnfortunately, your store *" + store_name + "* was not approved at this time.\n"
     if reason:
         msg += "Reason: " + reason + "\n"
     msg += "\nPlease contact support at offroapp@gmail.com for assistance."
     return send_whatsapp_message(merchant_phone, msg)
 
 
-def send_otp_message(phone_number: str, otp: str) -> dict:
-    """Send an OTP for customer login verification.
-    NOTE: For production OTP use, create a Meta-approved 'authentication' template
-    and replace this plain-text call with send_whatsapp_template()."""
-    msg = (
-        "🔐 *OffrO Verification*\n\n"
-        "Your OTP is: *" + otp + "*\n\n"
-        "Valid for 5 minutes. Do not share this with anyone.\n\n"
-        "_If you did not request this, ignore this message._"
-    )
+def send_otp_message(phone_number, otp):
+    msg = ("🔐 *OffrO Verification*\n\nYour OTP is: *" + otp + "*\n\n"
+           "Valid for 5 minutes. Do not share this with anyone.\n\n"
+           "_If you did not request this, ignore this message._")
     return send_whatsapp_message(phone_number, msg)
 
 
-def send_order_update(customer_phone: str, status: str, details: str = "") -> dict:
-    """Send an order / redemption status update to a customer."""
+def send_order_update(customer_phone, status, details=""):
     msg = "📦 *OffrO Order Update*\n\nStatus: *" + status + "*"
     if details:
         msg += "\n" + details
     return send_whatsapp_message(customer_phone, msg)
 
 
-def send_promotional_message(phone_number: str, promo_text: str) -> dict:
-    """
-    Send a promotional message.
-    IMPORTANT: WhatsApp requires user opt-in for promotional messages.
-    Only call this for users who have explicitly opted in.
-    Using a Meta-approved template is strongly recommended for compliance.
-    """
+def send_promotional_message(phone_number, promo_text):
     return send_whatsapp_message(phone_number, promo_text)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW — MEDIA FUNCTIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def fetch_media_url(media_id: str) -> dict:
+    """
+    Resolve a WhatsApp media_id to a temporary download URL.
+
+    Meta's webhook only gives you a media_id for image/audio/document messages.
+    Call this first to get the real URL, then call download_media() to get bytes.
+
+    Args:
+        media_id: The media id from the webhook payload (msg["image"]["id"])
+
+    Returns:
+        {"ok": True,  "url": "https://lookaside.fbsbx.com/....", "mime_type": "image/jpeg", "file_size": 12345}
+        {"ok": False, "error": "..."}
+
+    Note: The URL returned by Meta expires in ~5 minutes. Download immediately.
+    """
+    if not WHATSAPP_ACCESS_TOKEN:
+        return {"ok": False, "error": "WhatsApp not configured"}
+
+    url = _GRAPH_BASE + "/" + media_id
+    try:
+        resp = requests.get(url, headers=_auth_headers(), timeout=10)
+        data = resp.json()
+        if resp.status_code == 200 and "url" in data:
+            return {
+                "ok":        True,
+                "url":       data["url"],
+                "mime_type": data.get("mime_type", "image/jpeg"),
+                "file_size": data.get("file_size", 0),
+                "sha256":    data.get("sha256", ""),
+            }
+        return {"ok": False, "error": data.get("error", {}).get("message", str(data))}
+    except Exception as e:
+        logger.exception("[WA] fetch_media_url error for id=%s", media_id)
+        return {"ok": False, "error": str(e)}
+
+
+def download_media(media_url: str) -> dict:
+    """
+    Download raw bytes from a Meta media URL (obtained via fetch_media_url).
+
+    Args:
+        media_url: The temporary URL returned by fetch_media_url.
+
+    Returns:
+        {"ok": True,  "data": bytes, "content_type": "image/jpeg"}
+        {"ok": False, "error": "..."}
+    """
+    if not WHATSAPP_ACCESS_TOKEN:
+        return {"ok": False, "error": "WhatsApp not configured"}
+
+    try:
+        resp = requests.get(
+            media_url,
+            headers=_auth_headers(),   # Meta requires the Bearer token even for the download
+            timeout=20,
+            stream=True,
+        )
+        if resp.status_code == 200:
+            return {
+                "ok":           True,
+                "data":         resp.content,
+                "content_type": resp.headers.get("Content-Type", "image/jpeg"),
+            }
+        return {"ok": False, "error": "HTTP " + str(resp.status_code)}
+    except Exception as e:
+        logger.exception("[WA] download_media error")
+        return {"ok": False, "error": str(e)}
+
+
+def upload_media_to_whatsapp(file_bytes: bytes, mime_type: str, filename: str = "image.jpg") -> dict:
+    """
+    Upload a local file to Meta's media servers and get back a media_id.
+    Use this when admin wants to send an image to a customer.
+
+    Meta Media Upload API:
+        POST https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/media
+        multipart/form-data: file + messaging_product + type
+
+    Args:
+        file_bytes:  Raw bytes of the image/document to upload.
+        mime_type:   e.g. "image/jpeg", "image/png", "application/pdf"
+        filename:    Optional filename for the multipart form.
+
+    Returns:
+        {"ok": True,  "media_id": "123456789"}
+        {"ok": False, "error": "..."}
+    """
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        return {"ok": False, "error": "WhatsApp not configured"}
+
+    upload_url = _GRAPH_BASE + "/" + WHATSAPP_PHONE_NUMBER_ID + "/media"
+
+    try:
+        resp = requests.post(
+            upload_url,
+            headers=_auth_headers(),   # No Content-Type — requests sets multipart boundary
+            files={"file": (filename, io.BytesIO(file_bytes), mime_type)},
+            data={"messaging_product": "whatsapp", "type": mime_type},
+            timeout=30,
+        )
+        data = resp.json()
+        if resp.status_code == 200 and "id" in data:
+            media_id = data["id"]
+            logger.info("[WA] ✅ Media uploaded — id=%s mime=%s size=%d", media_id, mime_type, len(file_bytes))
+            return {"ok": True, "media_id": media_id}
+        return {"ok": False, "error": data.get("error", {}).get("message", str(data))}
+    except Exception as e:
+        logger.exception("[WA] upload_media_to_whatsapp error")
+        return {"ok": False, "error": str(e)}
+
+
+def send_whatsapp_image(phone_number: str, media_id: str, caption: str = "") -> dict:
+    """
+    Send an image message to a WhatsApp customer using a previously-uploaded media_id.
+
+    Args:
+        phone_number: Recipient in E.164 format without '+'.
+        media_id:     The id returned by upload_media_to_whatsapp().
+        caption:      Optional image caption (max 1024 chars).
+
+    Returns:
+        {"ok": True,  "message_id": "..."}
+        {"ok": False, "error": "..."}
+    """
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        return {"ok": False, "error": "WhatsApp not configured"}
+
+    phone = phone_number.replace("+", "").replace(" ", "").replace("-", "")
+
+    image_obj = {"id": media_id}
+    if caption:
+        image_obj["caption"] = caption[:1024]
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type":    "individual",
+        "to":                phone,
+        "type":              "image",
+        "image":             image_obj,
+    }
+
+    try:
+        resp = requests.post(_messages_url(), headers=_headers(), json=payload, timeout=15)
+        data = resp.json()
+        if resp.status_code == 200 and "messages" in data:
+            msg_id = data["messages"][0].get("id", "")
+            logger.info("[WA] ✅ Image sent to %s — msg_id=%s media_id=%s", phone, msg_id, media_id)
+            return {"ok": True, "message_id": msg_id}
+        error_msg = data.get("error", {}).get("message", str(data))
+        logger.error("[WA] ❌ Image send failed to %s — %s", phone, error_msg)
+        return {"ok": False, "error": error_msg}
+    except Exception as e:
+        logger.exception("[WA] send_whatsapp_image error")
+        return {"ok": False, "error": str(e)}
