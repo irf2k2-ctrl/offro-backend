@@ -107,6 +107,22 @@ tr:hover td{background:#f7faf8;}
     .main { margin-left:0 !important; padding:16px; }
     .menu-toggle { display:block !important; }
 }
+/* ── WhatsApp Live Chat Layout ── */
+.wa-chat-wrap{display:flex;flex-direction:row!important;height:620px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(62,95,85,.08);}
+.wa-left{width:290px!important;min-width:290px!important;max-width:290px!important;flex:0 0 290px!important;border-right:1px solid var(--border);display:flex!important;flex-direction:column!important;background:#fafafa;overflow:hidden;}
+.wa-left-search{padding:10px 12px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;}
+.wa-left-bar{padding:6px 12px;border-bottom:1px solid var(--border);background:#fff;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;}
+.wa-left-list{flex:1 1 0;overflow-y:auto;min-height:0;}
+.wa-right{flex:1 1 0!important;min-width:0!important;display:flex!important;flex-direction:column!important;background:#f0f0f0;overflow:hidden;}
+.wa-right-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);}
+.wa-right-active{display:none;flex-direction:column;height:100%;}
+.wa-right-active.open{display:flex!important;}
+.wa-chat-header{background:#fff;padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-shrink:0;}
+.wa-avatar{width:40px;height:40px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:#fff;flex-shrink:0;}
+.wa-messages{flex:1 1 0;overflow-y:auto;min-height:0;padding:16px 20px;display:flex;flex-direction:column;gap:8px;}
+.wa-reply-box{background:#fff;border-top:1px solid var(--border);padding:12px 16px;display:flex;gap:10px;align-items:flex-end;flex-shrink:0;}
+.wa-send-btn{background:#25D366;color:#fff;border:none;border-radius:50%;width:42px;height:42px;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;flex-shrink:0;}
+
 </style>
 </head>
 <body>
@@ -6988,56 +7004,40 @@ function gcOnStoreChange() {
     <span style="font-size:12px;color:var(--muted)">Incoming messages from customers &middot; Manual replies only</span>
   </div>
 
-  <!-- Chat container: fixed height, flex row, never collapses -->
-  <div style="display:flex;flex-direction:row;height:600px;min-height:520px;gap:0;
-              border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;
-              box-shadow:0 2px 8px rgba(0,0,0,.06);">
+  <div class="wa-chat-wrap">
 
-    <!-- LEFT: Customer List — fixed width, never shrinks -->
-    <div style="width:290px;flex:0 0 290px;border-right:1px solid var(--border);
-                display:flex;flex-direction:column;background:#fafafa;overflow:hidden;">
-      <!-- Search -->
-      <div style="padding:10px 12px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;">
+    <!-- LEFT PANEL: fixed 290px, never shrinks -->
+    <div class="wa-left">
+      <div class="wa-left-search">
         <input id="wa_search" type="text" class="form-control form-control-sm"
                placeholder="&#128269; Search name or number..."
                oninput="filterWaCustomers(this.value)" style="border-radius:20px;">
       </div>
-      <!-- Refresh row -->
-      <div style="padding:6px 12px;border-bottom:1px solid var(--border);background:#fff;
-                  display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+      <div class="wa-left-bar">
         <small style="color:var(--muted)">Conversations</small>
         <button onclick="loadWaChats()" style="background:none;border:none;color:var(--primary);font-size:12px;cursor:pointer;">
           <i class="fas fa-sync-alt"></i> Refresh
         </button>
       </div>
-      <!-- Scrollable list -->
-      <div id="wa_customer_list" style="flex:1;overflow-y:auto;min-height:0;">
+      <div id="wa_customer_list" class="wa-left-list">
         <div style="padding:20px;text-align:center;color:var(--muted);font-size:13px;">
           <i class="fas fa-spinner fa-spin"></i> Loading chats...
         </div>
       </div>
     </div>
 
-    <!-- RIGHT: Conversation Pane — fills remaining space -->
-    <div id="wa_chat_pane" style="flex:1;min-width:0;display:flex;flex-direction:column;background:#f0f0f0;overflow:hidden;">
+    <!-- RIGHT PANEL: fills remaining width -->
+    <div id="wa_chat_pane" class="wa-right">
 
-      <!-- Empty state -->
-      <div id="wa_chat_empty" style="flex:1;display:flex;flex-direction:column;
-           align-items:center;justify-content:center;color:var(--muted);">
+      <div id="wa_chat_empty" class="wa-right-empty">
         <i class="fab fa-whatsapp" style="font-size:52px;color:#25D366;opacity:.4;margin-bottom:12px;"></i>
         <p style="font-size:15px;font-weight:600;margin:0 0 6px;">Select a conversation</p>
         <p style="font-size:12px;margin:0;">Click a customer on the left to open the chat</p>
       </div>
 
-      <!-- Active chat — display:flex when open -->
-      <div id="wa_chat_active" style="display:none;flex-direction:column;height:100%;">
-
-        <!-- Header -->
-        <div id="wa_chat_header" style="background:#fff;padding:12px 18px;border-bottom:1px solid var(--border);
-             display:flex;align-items:center;gap:12px;flex-shrink:0;">
-          <div id="wa_avatar" style="width:40px;height:40px;border-radius:50%;background:var(--accent);
-               display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;
-               color:#fff;flex-shrink:0;">?</div>
+      <div id="wa_chat_active" class="wa-right-active">
+        <div id="wa_chat_header" class="wa-chat-header">
+          <div id="wa_avatar" class="wa-avatar">?</div>
           <div>
             <div id="wa_header_name" style="font-weight:700;font-size:15px;color:var(--text);">&mdash;</div>
             <div id="wa_header_phone" style="font-size:11px;color:var(--muted);">&mdash;</div>
@@ -7049,30 +7049,21 @@ function gcOnStoreChange() {
           </div>
         </div>
 
-        <!-- Messages — scrollable -->
-        <div id="wa_messages" style="flex:1;overflow-y:auto;min-height:0;padding:16px 20px;
-             display:flex;flex-direction:column;gap:8px;">
-        </div>
+        <div id="wa_messages" class="wa-messages"></div>
 
-        <!-- Reply box -->
-        <div style="background:#fff;border-top:1px solid var(--border);padding:12px 16px;
-             display:flex;gap:10px;align-items:flex-end;flex-shrink:0;">
+        <div class="wa-reply-box">
           <textarea id="wa_reply_input" rows="2"
-            style="flex:1;border:1px solid var(--border);border-radius:20px;padding:10px 16px;
-                   font-size:13px;resize:none;outline:none;font-family:inherit;"
+            style="flex:1;border:1px solid var(--border);border-radius:20px;padding:10px 16px;font-size:13px;resize:none;outline:none;font-family:inherit;"
             placeholder="Type a message..."
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendWaReply();}"></textarea>
-          <button onclick="sendWaReply()"
-            style="background:#25D366;color:#fff;border:none;border-radius:50%;width:42px;height:42px;
-                   display:flex;align-items:center;justify-content:center;font-size:16px;
-                   cursor:pointer;flex-shrink:0;">
+          <button class="wa-send-btn" onclick="sendWaReply()">
             <i class="fas fa-paper-plane"></i>
           </button>
         </div>
+      </div>
 
-      </div><!-- /wa_chat_active -->
-    </div><!-- /right pane -->
-  </div><!-- /chat container -->
+    </div>
+  </div>
 </div>
 <!-- /WhatsApp Live Chat Section -->
 
@@ -7148,9 +7139,8 @@ function filterWaCustomers(query) {
 // ── Open conversation ─────────────────────────────────
 async function openWaConversation(customerId) {
   _waCurrentCustomerId = customerId;
-  document.getElementById('wa_chat_empty').style.display  = 'none';
-  document.getElementById('wa_chat_active').style.display = 'flex';
-  document.getElementById('wa_chat_active').style.flexDirection = 'column';
+  document.getElementById('wa_chat_empty').style.display = 'none';
+  document.getElementById('wa_chat_active').classList.add('open');
 
   // Mark as read
   fetch('/admin/whatsapp/chats/' + customerId + '/read', {method:'POST', credentials:'include'});
