@@ -28,7 +28,7 @@ body{background:#FDFBF6;color:#2c3e35;font-family:'Segoe UI',sans-serif;margin:0
 .card-stat h3{font-size:30px;color:var(--primary);font-weight:700;margin:0;}
 .card-stat p{color:var(--muted);margin:4px 0 0;font-size:12px;}
 .card-stat.warn h3{color:var(--warning);}
-.section{display:none;}.section.active{display:block;}
+.section{display:none;}.section.active{display:block;min-height:0;}
 .table-wrap{background:white;border-radius:12px;border:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;box-shadow:0 2px 8px rgba(62,95,85,.06);}
 .table-wrap table{min-width:720px;}
 table{width:100%;border-collapse:collapse;}
@@ -108,7 +108,7 @@ tr:hover td{background:#f7faf8;}
     .menu-toggle { display:block !important; }
 }
 /* ── WhatsApp Live Chat Layout ── */
-.wa-chat-wrap{display:flex;flex-direction:row!important;height:620px;min-width:0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(62,95,85,.08);}
+.wa-chat-wrap{display:flex;flex-direction:row!important;height:620px;min-width:0;width:100%;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(62,95,85,.08);}
 .wa-left{width:290px!important;min-width:290px!important;max-width:290px!important;flex:0 0 290px!important;border-right:1px solid var(--border);display:flex!important;flex-direction:column!important;background:#fafafa;}
 .wa-left-search{padding:10px 12px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;}
 .wa-left-bar{padding:6px 12px;border-bottom:1px solid var(--border);background:#fff;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;}
@@ -5746,6 +5746,10 @@ window.showSection = function(name, el) {
   if (name === 'product_cards')    { loadMerchantProducts(); }
   if (name === 'pricing')         { loadPricingConfig(); }
   if (name === 'merchant_txns')   { loadMerchantTxnsFull(); }
+  // Stop WA chat polling when leaving the wa_chat section
+  if (name !== 'wa_chat' && typeof _waPollTimer !== 'undefined' && _waPollTimer) {
+    clearInterval(_waPollTimer); _waPollTimer = null;
+  }
 };
 
 // ── Phase 2 JS functions ─────────────────────────────────────────────
@@ -7268,12 +7272,8 @@ function _waEscape(s) {
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Stop polling when switching away from wa_chat section
-const _origShowSec2 = window.showSection;
-window.showSection = function(name, el) {
-  if (name !== 'wa_chat' && _waPollTimer) { clearInterval(_waPollTimer); _waPollTimer = null; }
-  _origShowSec2(name, el);
-};
+// Stop polling when switching away from wa_chat section (patched into existing showSection hook)
+// No extra override needed — handled inside showSection below
 </script>
 
 </body>
