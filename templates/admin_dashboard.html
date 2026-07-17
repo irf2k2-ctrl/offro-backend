@@ -3925,7 +3925,7 @@ function _renderProductReviews(data) {
             <span class="rv-slider"></span>
           </label>
           <button style="background:#c0392b;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1"
-            onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,String.fromCharCode(39))}')" 
+            onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,\"\'\")}')"
             title="Delete review">
             <i class="fas fa-trash"></i>
           </button>
@@ -4004,7 +4004,11 @@ function _renderReviews(data) {
             <span class="rv-slider"></span>
           </label>
           <button style="background:#c0392b;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1"
+<<<<<<< HEAD
             onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,String.fromCharCode(39))}')" 
+=======
+            onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,\"\'\")}')"
+>>>>>>> be790039d3305e41091719f266a38c1f0283d5a8
             title="Delete review">
             <i class="fas fa-trash"></i>
           </button>

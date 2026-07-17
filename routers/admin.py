@@ -952,6 +952,7 @@ def list_reviews(store_id: str = "", a=Depends(get_current_admin)):
             "text":       r.get("text",""),
             "created_at": r.get("created_at",""),
             "updated_at": r.get("updated_at",""),
+            "visible":    r.get("visible", True),
         })
     return result
 
@@ -3257,6 +3258,8 @@ def list_product_reviews(a=Depends(get_current_admin)):
         r["product_title"] = info.get("title") or ""
         sid = info.get("store_id")
         r["store_name"] = store_names.get(str(sid), "") if sid else ""
+        # Ensure visible field is always present (default True)
+        r["visible"] = r.get("visible", True)
 
     return reviews
 
