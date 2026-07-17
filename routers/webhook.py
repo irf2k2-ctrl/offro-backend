@@ -134,6 +134,40 @@ def _process_webhook(body: dict):
             _handle_errors(value)
 
 
+# ── Reply helper ───────────────────────────────────────────────────────────────
+
+def reply_to_sender(sender_phone: str, message: str) -> dict:
+    """
+    Send a WhatsApp reply back to an incoming message sender.
+
+    This is the primary function to use inside any message handler when you
+    want to respond to a customer.
+
+    Args:
+        sender_phone: The 'from' field from the incoming webhook message
+                      (already in E.164 format without '+', e.g. '919876543210').
+        message:      Plain text reply body (max 4096 chars).
+
+    Returns:
+        dict — {"ok": True, "message_id": "..."} on success
+                {"ok": False, "error": "..."} on failure
+
+    Usage example inside a message handler:
+        def my_handler(sender, name, msg_type, text, ...):
+            if text.lower() == "hi":
+                reply_to_sender(sender, "Hello " + name + "! Welcome to OffrO 👋")
+
+    Then register it:
+        _MESSAGE_HANDLERS.append(my_handler)
+    """
+    result = send_whatsapp_message(sender_phone, message)
+    if result.get("ok"):
+        logger.info("[WA-Webhook] 📤 Reply sent to %s — id=%s", sender_phone, result.get("message_id"))
+    else:
+        logger.error("[WA-Webhook] ❌ Reply failed to %s — %s", sender_phone, result.get("error"))
+    return result
+
+
 def _handle_messages(value: dict):
     """Process incoming customer messages."""
     messages = value.get("messages", [])
@@ -159,6 +193,17 @@ def _handle_messages(value: dict):
             "[WA-Webhook] 📩 Message from %s (%s) — type=%s id=%s ts=%s body=%r",
             sender, sender_name, msg_type, msg_id, timestamp, text_body,
         )
+
+        # ── Auto-reply to incoming text messages ──────────────────────────────
+        if msg_type == "text" and sender:
+            print("Replying to " + sender)
+            result = reply_to_sender(
+                sender,
+                "Hello " + sender_name + "! 👋 Welcome to OffrO.\n\n"
+                "We have received your message. Our team will get back to you shortly.\n\n"
+                "📲 _OffrO — Discover local stores & exclusive deals_"
+            )
+            print(result)
 
         # Dispatch to registered message handlers
         for handler in _MESSAGE_HANDLERS:
@@ -200,40 +245,6 @@ def _handle_errors(value: dict):
             "[WA-Webhook] ⚠️  Meta error — code=%s title=%s details=%s",
             err.get("code"), err.get("title"), err.get("error_data", {}).get("details", ""),
         )
-
-
-# ── Reply helper ───────────────────────────────────────────────────────────────
-
-def reply_to_sender(sender_phone: str, message: str) -> dict:
-    """
-    Send a WhatsApp reply back to an incoming message sender.
-
-    This is the primary function to use inside any message handler when you
-    want to respond to a customer.
-
-    Args:
-        sender_phone: The 'from' field from the incoming webhook message
-                      (already in E.164 format without '+', e.g. '919876543210').
-        message:      Plain text reply body (max 4096 chars).
-
-    Returns:
-        dict — {"ok": True, "message_id": "..."} on success
-                {"ok": False, "error": "..."} on failure
-
-    Usage example inside a message handler:
-        def my_handler(sender, name, msg_type, text, ...):
-            if text.lower() == "hi":
-                reply_to_sender(sender, "Hello " + name + "! Welcome to OffrO 👋")
-
-    Then register it:
-        _MESSAGE_HANDLERS.append(my_handler)
-    """
-    result = send_whatsapp_message(sender_phone, message)
-    if result.get("ok"):
-        logger.info("[WA-Webhook] 📤 Reply sent to %s — id=%s", sender_phone, result.get("message_id"))
-    else:
-        logger.error("[WA-Webhook] ❌ Reply failed to %s — %s", sender_phone, result.get("error"))
-    return result
 
 
 # ── Handler registries (extend without touching the router) ────────────────────
