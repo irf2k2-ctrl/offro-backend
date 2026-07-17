@@ -28,7 +28,7 @@ body{background:#FDFBF6;color:#2c3e35;font-family:'Segoe UI',sans-serif;margin:0
 .card-stat h3{font-size:30px;color:var(--primary);font-weight:700;margin:0;}
 .card-stat p{color:var(--muted);margin:4px 0 0;font-size:12px;}
 .card-stat.warn h3{color:var(--warning);}
-.section{display:none;}.section.active{display:block;min-height:0;}#section-wa_chat.active{display:flex;flex-direction:column;padding:0;}
+.section{display:none;}.section.active{display:block;min-height:0;}#section-wa_chat.active{position:fixed;left:230px;top:0;right:0;bottom:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;padding:12px 20px 0;margin:0;}
 .table-wrap{background:white;border-radius:12px;border:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;box-shadow:0 2px 8px rgba(62,95,85,.06);}
 .table-wrap table{min-width:720px;}
 table{width:100%;border-collapse:collapse;}
@@ -104,11 +104,11 @@ tr:hover td{background:#f7faf8;}
     .sidebar { transform: translateX(-100%); }
     .sidebar.open { transform: translateX(0); }
     .sidebar-close-btn { display:block; }
-    .main { margin-left:0 !important; padding:16px; }
+    .main { margin-left:0 !important; padding:16px; } #section-wa_chat.active { left:0 !important; }
     .menu-toggle { display:block !important; }
 }
 /* ── WhatsApp Live Chat Layout ── */
-.wa-chat-wrap{display:flex;flex-direction:row!important;height:calc(100vh - 140px);min-height:480px;min-width:0;width:100%;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(62,95,85,.08);}
+.wa-chat-wrap{display:flex;flex-direction:row!important;flex:1 1 0;min-height:0;min-width:0;width:100%;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(62,95,85,.08);margin-bottom:12px;}
 .wa-left{width:290px!important;min-width:290px!important;max-width:290px!important;flex:0 0 290px!important;border-right:1px solid var(--border);display:flex!important;flex-direction:column!important;background:#fafafa;}
 .wa-left-search{padding:10px 12px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;}
 .wa-left-bar{padding:6px 12px;border-bottom:1px solid var(--border);background:#fff;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;}
@@ -7006,8 +7006,8 @@ function gcOnStoreChange() {
 <!-- ═══════════════════════════════════════════════════════════
      WhatsApp Live Chat Section
 ═════════════════════════════════════════════════════════════ -->
-<div id="section-wa_chat" class="section" style="margin:-24px;padding:16px 24px 0;">
-  <div class="section-header" style="padding:0;margin-bottom:10px;">
+<div id="section-wa_chat" class="section">
+  <div class="section-header" style="margin-bottom:8px;flex-shrink:0;">
     <h5 style="color:var(--primary);font-weight:700;margin:0;">
       <i class="fab fa-whatsapp" style="color:#25D366"></i> WhatsApp Live Chat
     </h5>
