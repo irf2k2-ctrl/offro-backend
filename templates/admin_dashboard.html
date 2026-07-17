@@ -108,12 +108,12 @@ tr:hover td{background:#f7faf8;}
     .menu-toggle { display:block !important; }
 }
 /* ── WhatsApp Live Chat Layout ── */
-.wa-chat-wrap{display:flex;flex-direction:row!important;height:620px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(62,95,85,.08);}
-.wa-left{width:290px!important;min-width:290px!important;max-width:290px!important;flex:0 0 290px!important;border-right:1px solid var(--border);display:flex!important;flex-direction:column!important;background:#fafafa;overflow:hidden;}
+.wa-chat-wrap{display:flex;flex-direction:row!important;height:620px;min-width:0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(62,95,85,.08);}
+.wa-left{width:290px!important;min-width:290px!important;max-width:290px!important;flex:0 0 290px!important;border-right:1px solid var(--border);display:flex!important;flex-direction:column!important;background:#fafafa;}
 .wa-left-search{padding:10px 12px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;}
 .wa-left-bar{padding:6px 12px;border-bottom:1px solid var(--border);background:#fff;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;}
 .wa-left-list{flex:1 1 0;overflow-y:auto;min-height:0;}
-.wa-right{flex:1 1 0!important;min-width:0!important;display:flex!important;flex-direction:column!important;background:#f0f0f0;overflow:hidden;}
+.wa-right{flex:1 1 0!important;min-width:0!important;display:flex!important;flex-direction:column!important;background:#f0f0f0;}
 .wa-right-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);}
 .wa-right-active{display:none;flex-direction:column;height:100%;}
 .wa-right-active.open{display:flex!important;}
@@ -7004,7 +7004,7 @@ function gcOnStoreChange() {
     <span style="font-size:12px;color:var(--muted)">Incoming messages from customers &middot; Manual replies only</span>
   </div>
 
-  <div class="wa-chat-wrap">
+  <div class="wa-chat-wrap" style="overflow:hidden;">
 
     <!-- LEFT PANEL: fixed 290px, never shrinks -->
     <div class="wa-left">
@@ -7079,14 +7079,25 @@ let _waPollTimer = null;
 // ── Load customer list ────────────────────────────────
 async function loadWaChats() {
   try {
+    console.log('[WA-Chat] Loading customer list...');
     const r = await fetch('/admin/whatsapp/chats', {credentials:'include'});
+    console.log('[WA-Chat] /admin/whatsapp/chats status:', r.status);
+    if (!r.ok) {
+      const txt = await r.text();
+      throw new Error('HTTP ' + r.status + ': ' + txt.slice(0,200));
+    }
     const d = await r.json();
+    console.log('[WA-Chat] Customers received:', d.customers ? d.customers.length : 0);
     _waAllCustomers = d.customers || [];
     renderWaCustomerList(_waAllCustomers);
     if (_waCurrentCustomerId) refreshConversation();
   } catch(e) {
-    document.getElementById('wa_customer_list').innerHTML =
-      '<div style="padding:16px;color:red;font-size:12px;">Error loading chats: ' + e.message + '</div>';
+    console.error('[WA-Chat] loadWaChats error:', e);
+    const el = document.getElementById('wa_customer_list');
+    if (el) el.innerHTML =
+      '<div style="padding:16px;color:red;font-size:12px;border:1px solid #ffcccc;margin:8px;border-radius:8px;">' +
+      '&#9888; Error loading chats:<br><code>' + e.message + '</code>' +
+      '<br><br><button onclick="loadWaChats()" style="font-size:11px;padding:4px 10px;cursor:pointer;">Retry</button></div>';
   }
 }
 
@@ -7183,7 +7194,9 @@ async function refreshConversation() {
     // Also refresh unread counts in list
     loadWaChats();
   } catch(e) {
-    console.error('[WA-Chat]', e);
+    console.error('[WA-Chat] refreshConversation error:', e);
+    const el = document.getElementById('wa_messages');
+    if (el) el.innerHTML = '<div style="text-align:center;color:red;font-size:12px;margin-top:40px;">&#9888; ' + e.message + '</div>';
   }
 }
 
