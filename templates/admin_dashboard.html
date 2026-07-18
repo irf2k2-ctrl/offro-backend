@@ -1248,7 +1248,8 @@ tr:hover td{background:#f7faf8;}
           <input type="text" id="di_merchant_banner_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste HTTPS image URL…">
           <input type="file" id="di_merchant_banner_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
           <button class="btn" onclick="diAddUrl('merchant_banner')"><i class="fas fa-plus me-1"></i>Add URL</button>
-          <button class="btn btn-secondary" onclick="diUploadFile('merchant_banner')"><i class="fas fa-upload me-1"></i>Upload</button>
+          <button class="btn btn-secondary" id="di_merchant_banner_upload_btn" onclick="diUploadMerchantBanner()"><i class="fas fa-upload me-1"></i>Upload</button>
+          <span id="di_merchant_banner_status" style="font-size:12px;font-weight:600"></span>
         </div>
       </div>
 
@@ -6631,6 +6632,47 @@ async function diUploadFile(type) {
     if (fileInput) fileInput.value = '';
     loadDefaultImages();
   } catch(e) { msg.textContent = '✗ ' + (e.message || 'Upload failed'); msg.style.color='red'; }
+}
+
+// ── Dedicated merchant banner upload with inline status feedback ──
+async function diUploadMerchantBanner() {
+  const fileInput = document.getElementById('di_merchant_banner_file_new');
+  const file      = fileInput?.files[0];
+  const statusEl  = document.getElementById('di_merchant_banner_status');
+  const btn       = document.getElementById('di_merchant_banner_upload_btn');
+
+  if (!file) {
+    if (statusEl) { statusEl.textContent = '⚠ Please choose a file first'; statusEl.style.color = 'red'; }
+    return;
+  }
+
+  // Show uploading state
+  if (btn) btn.disabled = true;
+  if (statusEl) { statusEl.textContent = '⏳ Uploading…'; statusEl.style.color = 'var(--primary)'; }
+
+  const fd = new FormData();
+  fd.append('merchant_banner_file', file);
+
+  try {
+    const r = await fetch('/admin/default-images', { method: 'PUT', credentials: 'include', body: fd });
+    if (!r.ok) {
+      const txt = await r.text();
+      throw new Error('Server error: ' + txt.substring(0, 120));
+    }
+    if (statusEl) { statusEl.textContent = '✅ Added!'; statusEl.style.color = 'green'; }
+    if (fileInput) fileInput.value = '';
+    // Also update global di_msg for consistency
+    const msg = document.getElementById('di_msg');
+    if (msg) { msg.textContent = '✓ Merchant banner image uploaded'; msg.style.color = 'green'; }
+    await loadDefaultImages();
+    // Clear status after 4 seconds
+    setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 4000);
+  } catch(e) {
+    if (statusEl) { statusEl.textContent = '❌ ' + (e.message || 'Upload failed'); statusEl.style.color = 'red'; }
+    console.error('[MerchantBanner Upload]', e);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // Legacy aliases (not used by new UI but kept for safety)
