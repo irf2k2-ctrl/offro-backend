@@ -6570,16 +6570,31 @@ function _renderDiTable(type, urls) {
     const isVideo  = !isBase64 && url && (/\.mp4(\?|$)/i.test(url) || /video\/mp4/i.test(url));
     const displayUrl = isBase64 ? '[Uploaded file — replace with a public HTTPS URL using the URL field below]' : url;
     const safeUrl = (url || '').replace(/'/g, "\\'");
-    const previewCell = isBase64
-      ? `<td style="padding:6px 10px;vertical-align:middle"><div style="width:56px;height:40px;background:#f5f5f5;border-radius:6px;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:9px;color:#999">File</div></td>`
-      : isVideo
-        ? `<td style="padding:6px 10px;vertical-align:middle"><video src="${url}" style="width:80px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #ddd" muted playsinline autoplay loop preload="metadata"></video></td>`
-        : `<td style="padding:6px 10px;vertical-align:middle"><img src="${url}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd" onerror="this.style.display='none'"></td>`;
-    const urlLabel = isVideo
-      ? `<span style="font-size:10px;background:#3E5F55;color:#fff;padding:2px 6px;border-radius:10px;margin-right:4px">&#9654; VIDEO</span>`
+    // Detect base64 video (mp4 uploaded but Cloudinary not configured → stored as data:video/mp4)
+    const isBase64Video = isBase64 && url && url.startsWith('data:video');
+    const previewCell = isBase64Video
+      ? `<td style="padding:6px 10px;vertical-align:middle">
+           <div style="width:70px;height:46px;background:linear-gradient(135deg,#1a1a2e,#3E5F55);border-radius:6px;border:1px solid #3E5F55;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px">
+             <span style="font-size:18px;color:#fff">&#9654;</span>
+             <span style="font-size:8px;color:rgba(255,255,255,0.8);font-weight:600">VIDEO</span>
+           </div>
+         </td>`
+      : isBase64
+        ? `<td style="padding:6px 10px;vertical-align:middle"><div style="width:56px;height:40px;background:#f5f5f5;border-radius:6px;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:9px;color:#999">IMG</div></td>`
+        : isVideo
+          ? `<td style="padding:6px 10px;vertical-align:middle"><video src="${url}" style="width:80px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #ddd" muted playsinline autoplay loop preload="metadata"></video></td>`
+          : `<td style="padding:6px 10px;vertical-align:middle"><img src="${url}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd" onerror="this.style.display='none'"></td>`;
+    const videoLabel = (isVideo || isBase64Video)
+      ? `<span style="font-size:10px;background:#3E5F55;color:#fff;padding:2px 7px;border-radius:10px;margin-right:6px;font-weight:600">&#9654; VIDEO</span>`
       : '';
+    // For base64 video, show a friendly "Video uploaded" message instead of the giant data string
+    const urlDisplay = isBase64Video
+      ? `<span style="color:#3E5F55;font-weight:600;font-style:normal">&#10003; Video file uploaded — replace with a Cloudinary/HTTPS URL below for permanent storage</span>`
+      : isBase64
+        ? `<span style="color:#856404;font-style:italic;">${displayUrl}</span>`
+        : videoLabel + displayUrl;
     const urlCell = `<td style="padding:6px 10px;vertical-align:middle;word-break:break-all;font-size:12px;color:var(--muted)">
-      ${isBase64 ? `<span style="color:#856404;font-style:italic;">${displayUrl}</span>` : urlLabel + displayUrl}
+      ${urlDisplay}
     </td>`;
     return `<tr>
       ${previewCell}
