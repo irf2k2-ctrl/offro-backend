@@ -176,6 +176,90 @@ def _fetch_and_store_media(chat_doc_id: str, media_id: str):
 
 # ── GET /admin/whatsapp/media/{media_id} — serve stored media permanently ─────
 
+# ── GET /admin/whatsapp/media/{media_id} — serve stored media permanently ─────
+# (already defined below — this block adds cleanup + backfill endpoints)
+
+# ── POST /admin/whatsapp/backfill-media — retry old broken image records ──────
+
+@router.post("/whatsapp/backfill-media")
+def backfill_media(a=Depends(get_current_admin)):
+    """
+    Scan whatsapp_chats for image records missing media_url (failed to download at webhook time).
+    Re-attempts download and stores permanently.
+    Returns counts: found, fixed, failed.
+    """
+    import time
+    cursor = db.whatsapp_chats.find({
+        "message_type": "image",
+        "media_id": {"$exists": True, "$ne": ""},
+        "$or": [
+            {"media_url": {"$exists": False}},
+            {"media_url": ""},
+            {"media_url": None},
+        ]
+    }).limit(50)  # process 50 at a time to avoid timeout
+
+    found = fixed = failed = 0
+    for record in cursor:
+        found += 1
+        media_id = record.get("media_id", "")
+        if not media_id:
+            failed += 1
+            continue
+        try:
+            _fetch_and_store_media(str(record["_id"]), media_id)
+            # Check if it was actually fixed
+            updated = db.whatsapp_chats.find_one({"_id": record["_id"]})
+            if updated and updated.get("media_url"):
+                fixed += 1
+            else:
+                failed += 1
+        except Exception as e:
+            logger.error("[WA-Chat] backfill error for %s: %s", media_id, e)
+            failed += 1
+        time.sleep(0.1)  # gentle rate limit
+
+    return {"ok": True, "found": found, "fixed": fixed, "failed": failed,
+            "message": f"Processed {found} broken image(s): {fixed} fixed, {failed} failed"}
+
+
+# ── DELETE /admin/whatsapp/cleanup-media — delete media older than 30 days ────
+
+@router.delete("/whatsapp/cleanup-media")
+def cleanup_old_media(days: int = 30, a=Depends(get_current_admin)):
+    """
+    Delete wa_media_images documents older than `days` days (default 30).
+    Also clears media_url from the corresponding whatsapp_chats records.
+    Returns count of deleted media documents.
+    """
+    from datetime import timedelta
+    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+
+    # Find media older than cutoff
+    old_docs = list(db.wa_media_images.find(
+        {"created": {"$lt": cutoff}},
+        {"_id": 1}
+    ))
+    old_ids = [d["_id"] for d in old_docs]
+
+    if not old_ids:
+        return {"ok": True, "deleted": 0, "message": "No media older than " + str(days) + " days found"}
+
+    # Clear media_url in chat records for these media_ids
+    db.whatsapp_chats.update_many(
+        {"media_id": {"$in": old_ids}},
+        {"$unset": {"media_url": ""}, "$set": {"media_expired": True}}
+    )
+
+    # Delete the media blobs
+    result = db.wa_media_images.delete_many({"_id": {"$in": old_ids}})
+    deleted = result.deleted_count
+
+    logger.info("[WA-Chat] 🗑️ Cleanup: deleted %d media blobs older than %d days", deleted, days)
+    return {"ok": True, "deleted": deleted,
+            "message": f"Deleted {deleted} media blob(s) older than {days} days"}
+
+
 @router.get("/whatsapp/media/{media_id_with_ext}")
 def serve_whatsapp_media(media_id_with_ext: str):
     """

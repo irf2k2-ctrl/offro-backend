@@ -7025,9 +7025,15 @@ function gcOnStoreChange() {
       </div>
       <div class="wa-left-bar">
         <small style="color:var(--muted)">Conversations</small>
-        <button onclick="loadWaChats()" style="background:none;border:none;color:var(--primary);font-size:12px;cursor:pointer;">
-          <i class="fas fa-sync-alt"></i> Refresh
-        </button>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button onclick="loadWaChats()" style="background:none;border:none;color:var(--primary);font-size:12px;cursor:pointer;">
+            <i class="fas fa-sync-alt"></i> Refresh
+          </button>
+          <button onclick="backfillWaMedia(this)" title="Re-download broken image messages"
+            style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;">
+            🖼️ Fix Images
+          </button>
+        </div>
       </div>
       <div id="wa_customer_list" class="wa-left-list">
         <div style="padding:20px;text-align:center;color:var(--muted);font-size:13px;">
@@ -7216,12 +7222,16 @@ async function refreshConversation() {
     document.getElementById('wa_header_phone').textContent = '+' + (cust.phone_number || '');
     document.getElementById('wa_avatar').textContent = initials;
 
-    // Render messages
+    // Render messages — diff-based to prevent flicker on 8s poll
     const msgs   = d.messages || [];
     const el     = document.getElementById('wa_messages');
     const wasAtBottom = el.scrollHeight - el.clientHeight <= el.scrollTop + 40;
-    el.innerHTML = msgs.length ? msgs.map(m => _waRenderMsg(m)).join('') :
-      '<div style="text-align:center;color:var(--muted);font-size:12px;margin-top:40px;">No messages yet</div>';
+
+    if (msgs.length === 0) {
+      el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;margin-top:40px;">No messages yet</div>';
+    } else {
+      _waDiffRender(el, msgs);
+    }
     if (wasAtBottom || msgs.length < 5) el.scrollTop = el.scrollHeight;
 
     // Also refresh unread counts in list
@@ -7231,6 +7241,55 @@ async function refreshConversation() {
     const el = document.getElementById('wa_messages');
     if (el) el.innerHTML = '<div style="text-align:center;color:red;font-size:12px;margin-top:40px;">&#9888; ' + e.message + '</div>';
   }
+}
+
+// ── Diff-render: only add/update new message bubbles, never re-create existing ones ──
+function _waDiffRender(container, msgs) {
+  const existing = Array.from(container.querySelectorAll('[data-msg-id]'));
+  const existingIds = new Set(existing.map(el => el.getAttribute('data-msg-id')));
+
+  msgs.forEach(m => {
+    const msgId = m.id || (m.timestamp + m.direction);
+    if (existingIds.has(msgId)) {
+      // Message already rendered — check if media_url became available
+      const el = container.querySelector('[data-msg-id="' + msgId + '"]');
+      if (el && m.message_type === 'image' && m.media_url) {
+        // If still showing placeholder, upgrade to real image
+        if (el.querySelector('.wa-img-placeholder')) {
+          el.querySelector('.wa-content').innerHTML = _waImageContent(m);
+        }
+      }
+    } else {
+      // New message — append it
+      const div = document.createElement('div');
+      div.setAttribute('data-msg-id', msgId);
+      div.innerHTML = _waRenderMsg(m, true);
+      container.appendChild(div.firstElementChild || div);
+    }
+  });
+
+  // Remove bubbles for messages no longer in the list (edge case)
+  const newIds = new Set(msgs.map(m => m.id || (m.timestamp + m.direction)));
+  existing.forEach(el => {
+    if (!newIds.has(el.getAttribute('data-msg-id'))) el.remove();
+  });
+}
+
+// ── Build image content HTML (extracted for reuse) ───────────────────────────
+function _waImgError(el) {
+  // Replace broken img with fallback text cleanly
+  el.parentElement.innerHTML = '<span style="font-size:12px;color:var(--muted);">📷 Image not available</span>';
+}
+
+function _waImageContent(m) {
+  const captionText = m.caption || (m.message && !m.message.startsWith('📷') ? m.message : '');
+  const captionHtml = captionText
+    ? '<div style="font-size:12px;color:#555;margin-top:5px;word-break:break-word;">' + _waEscape(captionText) + '</div>'
+    : '';
+  return '<a href="' + m.media_url + '" target="_blank" rel="noopener" style="display:block;">'
+    + '<img src="' + m.media_url + '" alt="Photo" loading="lazy" onerror="_waImgError(this)"'
+    + ' style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:zoom-in;object-fit:cover;">'
+    + '</a>' + captionHtml;
 }
 
 // ── Render a single message bubble ───────────────────
@@ -7246,20 +7305,10 @@ function _waRenderMsg(m) {
   // ── Media content rendering ──────────────────────────────────────────────
   let content = '';
   if (m.message_type === 'image' && m.media_url) {
-    // Clickable image thumbnail → opens full size in new tab
-    // caption field (from DB) or fall back to message text if it's not the placeholder
-    const captionText = m.caption || (m.message && !m.message.startsWith('📷') ? m.message : '');
-    const captionHtml = captionText
-      ? `<div style="font-size:12px;color:#555;margin-top:5px;word-break:break-word;">${_waEscape(captionText)}</div>`
-      : '';
-    content = `<a href="${m.media_url}" target="_blank" rel="noopener" style="display:block;">
-      <img src="${m.media_url}" alt="Photo"
-        style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:zoom-in;object-fit:cover;"
-        onerror="this.parentElement.innerHTML='<span style=\'font-size:12px;color:var(--muted);\'>📷 Photo (could not load)</span>';">
-    </a>${captionHtml}`;
+    content = '<span class="wa-content">' + _waImageContent(m) + '</span>';
   } else if (m.message_type === 'image' && !m.media_url) {
-    // Still downloading from Meta — should only flash briefly on first load
-    content = `<span style="font-size:13px;color:#555;">📷 <em style="color:var(--muted);font-size:12px;">Downloading image…</em></span>`;
+    // No media_url yet — show placeholder (diff-render will upgrade it once URL is available)
+    content = '<span class="wa-img-placeholder" style="font-size:13px;color:#888;"><span class="wa-content">📷 <em style=\"color:var(--muted);font-size:12px;\">Image not available</em></span></span>';
   } else if (m.message_type === 'audio') {
     content = `<span style="font-size:13px;color:#555;">🎵 Voice message</span>`;
   } else if (m.message_type === 'document') {
@@ -7272,7 +7321,8 @@ function _waRenderMsg(m) {
     content = `<span style="font-size:13px;color:#222;white-space:pre-wrap;">${_waEscape(m.message)}</span>`;
   }
 
-  return `<div style="${align}max-width:68%;min-width:80px;">
+  const msgId = m.id || (m.timestamp + m.direction);
+  return `<div data-msg-id="${msgId}" style="${align}max-width:68%;min-width:80px;">
     ${label}
     <div style="${bubble}padding:8px 12px;box-shadow:0 1px 2px rgba(0,0,0,.1);">
       ${content}
