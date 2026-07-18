@@ -1431,7 +1431,7 @@ def get_default_images():
         "product":          _first(doc.get("product", "")),
         "offer":            _first(doc.get("offer", "")),
         "city":             _all_urls(doc.get("city", "")),
-        "merchant_banner":  _first(doc.get("merchant_banner", "")),
+        "merchant_banner":  _all_urls(doc.get("merchant_banner", "")),  # array — same pattern as city
         "no_service_url":   _ns_val,
         "no_service_title": str(doc.get("no_service_title", "") or ""),
         "no_service_message": str(doc.get("no_service_message", "") or ""),

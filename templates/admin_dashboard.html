@@ -1234,7 +1234,7 @@ tr:hover td{background:#f7faf8;}
           <span id="di_merchant_banner_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0</span>
         </div>
         <div style="padding:6px 16px 4px;background:#e8f5ee;font-size:11px;color:var(--primary);font-weight:600">
-          <i class="fas fa-info-circle me-1"></i>Shown on the app home screen when no city-specific promo slider exists. Recommended: <strong>1200 × 400 px</strong> (3:1 banner ratio).
+          <i class="fas fa-info-circle me-1"></i>Shown on the app home screen when no city-specific promo slider exists. Supports <strong>images</strong> and <strong>MP4 videos</strong>. Recommended: <strong>1200 × 400 px</strong> (3:1 ratio).
         </div>
         <table class="table table-sm mb-0" id="di_merchant_banner_table">
           <thead style="background:#f8f9fa"><tr>
@@ -1246,7 +1246,7 @@ tr:hover td{background:#f7faf8;}
         </table>
         <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="text" id="di_merchant_banner_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste HTTPS image URL…">
-          <input type="file" id="di_merchant_banner_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
+          <input type="file" id="di_merchant_banner_file_new" accept="image/*,video/mp4" class="form-control" style="flex:1;min-width:160px">
           <button class="btn" onclick="diAddUrl('merchant_banner')"><i class="fas fa-plus me-1"></i>Add URL</button>
           <button class="btn btn-secondary" id="di_merchant_banner_upload_btn" onclick="diUploadMerchantBanner()"><i class="fas fa-upload me-1"></i>Upload</button>
           <span id="di_merchant_banner_status" style="font-size:12px;font-weight:600"></span>
@@ -6555,23 +6555,35 @@ function _renderDiTable(type, urls) {
   const tbody = document.getElementById(`di_${type}_body`);
   const count = document.getElementById(`di_${type}_count`);
   if (!tbody) return;
-  if (count) count.textContent = `${urls.length} image${urls.length !== 1 ? 's' : ''}`;
+  // merchant_banner supports images AND mp4 videos — use "Media" label
+  const plural = type === 'merchant_banner'
+    ? urls.length + ' Media'
+    : urls.length + ' image' + (urls.length !== 1 ? 's' : '');
+  if (count) count.textContent = plural;
   if (!urls.length) {
-    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr>';
+    const emptyTxt = type === 'merchant_banner' ? 'No media yet' : 'No images yet';
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">${emptyTxt}</td></tr>`;
     return;
   }
   tbody.innerHTML = urls.map((url, i) => {
     const isBase64 = url && url.startsWith('data:');
+    const isVideo  = !isBase64 && url && (/\.mp4(\?|$)/i.test(url) || /video\/mp4/i.test(url));
     const displayUrl = isBase64 ? '[Uploaded file — replace with a public HTTPS URL using the URL field below]' : url;
     const safeUrl = (url || '').replace(/'/g, "\\'");
+    const previewCell = isBase64
+      ? `<td style="padding:6px 10px;vertical-align:middle"><div style="width:56px;height:40px;background:#f5f5f5;border-radius:6px;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:9px;color:#999">File</div></td>`
+      : isVideo
+        ? `<td style="padding:6px 10px;vertical-align:middle"><video src="${url}" style="width:80px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #ddd" muted playsinline autoplay loop preload="metadata"></video></td>`
+        : `<td style="padding:6px 10px;vertical-align:middle"><img src="${url}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd" onerror="this.style.display='none'"></td>`;
+    const urlLabel = isVideo
+      ? `<span style="font-size:10px;background:#3E5F55;color:#fff;padding:2px 6px;border-radius:10px;margin-right:4px">&#9654; VIDEO</span>`
+      : '';
+    const urlCell = `<td style="padding:6px 10px;vertical-align:middle;word-break:break-all;font-size:12px;color:var(--muted)">
+      ${isBase64 ? `<span style="color:#856404;font-style:italic;">${displayUrl}</span>` : urlLabel + displayUrl}
+    </td>`;
     return `<tr>
-      <td style="padding:6px 10px;vertical-align:middle">
-        <img src="${url}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd"
-          onerror="this.style.display='none'">
-      </td>
-      <td style="padding:6px 10px;vertical-align:middle;word-break:break-all;font-size:12px;color:var(--muted)">
-        ${isBase64 ? `<span style="color:#856404;font-style:italic;">${displayUrl}</span>` : displayUrl}
-      </td>
+      ${previewCell}
+      ${urlCell}
       <td style="padding:6px 10px;vertical-align:middle">
         <button class="btn btn-sm" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px"
           onclick="diRemoveUrl('${type}','${safeUrl}')">

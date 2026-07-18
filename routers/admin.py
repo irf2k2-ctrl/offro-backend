@@ -44,6 +44,45 @@ def _cloudinary_upload(b64_or_url: str, folder: str = "offro") -> str:
         print(f"[CDN] upload failed: {e}")
     return b64_or_url
 
+def _cloudinary_upload_video(b64_data: str, folder: str = "offro") -> str:
+    """Upload an mp4 video to Cloudinary → returns permanent secure_url.
+    Falls back to the raw b64 string if Cloudinary is not configured."""
+    import os as _cld_os2, hashlib as _cld_hash2, time as _cld_time2
+    try:
+        import requests as _cld_req2
+    except ImportError:
+        return b64_data
+    cloud   = _cld_os2.getenv("CLOUDINARY_CLOUD_NAME", "")
+    api_key = _cld_os2.getenv("CLOUDINARY_API_KEY", "")
+    secret  = _cld_os2.getenv("CLOUDINARY_API_SECRET", "")
+    if not (cloud and api_key and secret):
+        return b64_data
+    if b64_data.startswith("http://") or b64_data.startswith("https://"):
+        return b64_data
+    data_str  = b64_data.split(",", 1)[-1] if "," in b64_data else b64_data
+    timestamp = str(int(_cld_time2.time()))
+    sig_str   = "folder=" + folder + "&resource_type=video&timestamp=" + timestamp + secret
+    signature = _cld_hash2.sha1(sig_str.encode()).hexdigest()
+    try:
+        resp = _cld_req2.post(
+            "https://api.cloudinary.com/v1_1/" + cloud + "/video/upload",
+            data={
+                "file":          "data:video/mp4;base64," + data_str,
+                "folder":        folder,
+                "resource_type": "video",
+                "timestamp":     timestamp,
+                "api_key":       api_key,
+                "signature":     signature,
+            },
+            timeout=90,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("secure_url", b64_data)
+    except Exception:
+        pass
+    return b64_data
+
+
 def _make_thumb_url(cdn_url: str, w: int = 300) -> str:
     if "cloudinary.com" in str(cdn_url):
         return cdn_url.replace("/upload/", f"/upload/w_{w},c_fill,q_auto,f_auto/")
@@ -2696,17 +2735,21 @@ async def admin_update_default_images(
         if f and f.filename:
             content = await f.read()
             mime = f.content_type or "image/jpeg"
+            is_video = mime == "video/mp4" or (f.filename or "").lower().endswith(".mp4")
             b64_str = "data:" + mime + ";base64," + base64.b64encode(content).decode()
-            # Try Cloudinary upload — returns a permanent HTTPS URL
-            cdn_url = _cloudinary_upload(b64_str, folder="offro/defaults/" + field)
-            final_url = cdn_url if cdn_url.startswith("http") else b64_str
+            # Upload to Cloudinary: images via image endpoint, mp4 via video endpoint
+            if is_video:
+                cdn_url = _cloudinary_upload_video(b64_str, folder="offro/defaults/" + field)
+            else:
+                cdn_url = _cloudinary_upload(b64_str, folder="offro/defaults/" + field)
+            final_url = cdn_url if (cdn_url and cdn_url.startswith("http")) else b64_str
 
-            # Migrate field from legacy string to array first (MongoDB $addToSet
-            # throws 'Cannot apply $addToSet to non-array field' on old string values).
+            # Migrate legacy single-string field to array before $addToSet
+            # (MongoDB throws 'Cannot apply $addToSet to non-array field' on string fields)
             existing_doc = db.settings.find_one({"_type": "default_images"}, {field: 1})
             existing_val = (existing_doc or {}).get(field, []) if existing_doc else []
             if isinstance(existing_val, str):
-                # Convert old single-string value to array
+                # Convert old single-string value to array, append new URL
                 new_list = [existing_val, final_url] if existing_val else [final_url]
                 db.settings.update_one(
                     {"_type": "default_images"},
