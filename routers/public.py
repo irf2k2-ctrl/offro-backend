@@ -1415,10 +1415,13 @@ def get_default_images():
         return val if isinstance(val, str) else ""
 
     def _all_urls(val):
-        """Return ALL HTTP URLs as a list (used for city hero rotation)."""
+        """Return ALL URLs as a list (http AND data: URIs — used for banner/city rotation)."""
+        def _ok(v):
+            if not isinstance(v, str): return False
+            return v.startswith("http") or v.startswith("data:image") or v.startswith("data:video")
         if isinstance(val, list):
-            return [v for v in val if isinstance(v, str) and v.startswith("http")]
-        if isinstance(val, str) and val.startswith("http"):
+            return [v for v in val if _ok(v)]
+        if isinstance(val, str) and _ok(val):
             return [val]
         return []
 
