@@ -2682,7 +2682,10 @@ async def admin_update_default_images(
     merchant_banner_file: UploadFile = File(None),
     a=Depends(get_current_admin),
 ):
-    update = {}
+    """
+    File-upload variant. All image types store as arrays ($addToSet) — uploads never replace,
+    they always append. Uploads go to Cloudinary when configured; fall back to base64 otherwise.
+    """
     for field, f in [
         ("store", store_file),
         ("product", product_file),
@@ -2693,10 +2696,16 @@ async def admin_update_default_images(
         if f and f.filename:
             content = await f.read()
             mime = f.content_type or "image/jpeg"
-            b64 = base64.b64encode(content).decode()
-            update[field] = f"data:{mime};base64,{b64}"
-    if update:
-        db.settings.update_one({"_type": "default_images"}, {"$set": update}, upsert=True)
+            b64_str = "data:" + mime + ";base64," + base64.b64encode(content).decode()
+            # Try Cloudinary upload — returns a permanent HTTPS URL
+            cdn_url = _cloudinary_upload(b64_str, folder="offro/defaults/" + field)
+            final_url = cdn_url if cdn_url.startswith("http") else b64_str
+            # Always APPEND — never overwrite the existing list
+            db.settings.update_one(
+                {"_type": "default_images"},
+                {"$addToSet": {field: final_url}},
+                upsert=True,
+            )
     return {"ok": True}
 
 
