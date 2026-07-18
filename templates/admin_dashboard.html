@@ -7247,16 +7247,19 @@ function _waRenderMsg(m) {
   let content = '';
   if (m.message_type === 'image' && m.media_url) {
     // Clickable image thumbnail → opens full size in new tab
-    const caption = m.message && !m.message.startsWith('📷') ? `<div style="font-size:12px;color:#555;margin-top:4px;">${_waEscape(m.message)}</div>` : '';
-    content = `<a href="${m.media_url}" target="_blank" rel="noopener">
+    // caption field (from DB) or fall back to message text if it's not the placeholder
+    const captionText = m.caption || (m.message && !m.message.startsWith('📷') ? m.message : '');
+    const captionHtml = captionText
+      ? `<div style="font-size:12px;color:#555;margin-top:5px;word-break:break-word;">${_waEscape(captionText)}</div>`
+      : '';
+    content = `<a href="${m.media_url}" target="_blank" rel="noopener" style="display:block;">
       <img src="${m.media_url}" alt="Photo"
-        style="max-width:220px;max-height:220px;border-radius:8px;display:block;cursor:zoom-in;"
-        onerror="this.style.display='none';this.nextSibling.style.display='block';">
-      <span style="display:none;font-size:12px;color:var(--muted);">📷 Photo (tap to open)</span>
-    </a>${caption}`;
+        style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:zoom-in;object-fit:cover;"
+        onerror="this.parentElement.innerHTML='<span style=\'font-size:12px;color:var(--muted);\'>📷 Photo (could not load)</span>';">
+    </a>${captionHtml}`;
   } else if (m.message_type === 'image' && !m.media_url) {
-    // Image received but URL not yet resolved (or expired)
-    content = `<span style="font-size:13px;color:#555;">📷 <em style="color:var(--muted);">Photo (preview unavailable)</em></span>`;
+    // Still downloading from Meta — should only flash briefly on first load
+    content = `<span style="font-size:13px;color:#555;">📷 <em style="color:var(--muted);font-size:12px;">Downloading image…</em></span>`;
   } else if (m.message_type === 'audio') {
     content = `<span style="font-size:13px;color:#555;">🎵 Voice message</span>`;
   } else if (m.message_type === 'document') {
