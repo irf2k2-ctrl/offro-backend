@@ -2700,12 +2700,26 @@ async def admin_update_default_images(
             # Try Cloudinary upload — returns a permanent HTTPS URL
             cdn_url = _cloudinary_upload(b64_str, folder="offro/defaults/" + field)
             final_url = cdn_url if cdn_url.startswith("http") else b64_str
-            # Always APPEND — never overwrite the existing list
-            db.settings.update_one(
-                {"_type": "default_images"},
-                {"$addToSet": {field: final_url}},
-                upsert=True,
-            )
+
+            # Migrate field from legacy string to array first (MongoDB $addToSet
+            # throws 'Cannot apply $addToSet to non-array field' on old string values).
+            existing_doc = db.settings.find_one({"_type": "default_images"}, {field: 1})
+            existing_val = (existing_doc or {}).get(field, []) if existing_doc else []
+            if isinstance(existing_val, str):
+                # Convert old single-string value to array
+                new_list = [existing_val, final_url] if existing_val else [final_url]
+                db.settings.update_one(
+                    {"_type": "default_images"},
+                    {"$set": {field: new_list}},
+                    upsert=True,
+                )
+            else:
+                # Field is already an array (or missing) — safe to $addToSet
+                db.settings.update_one(
+                    {"_type": "default_images"},
+                    {"$addToSet": {field: final_url}},
+                    upsert=True,
+                )
     return {"ok": True}
 
 
