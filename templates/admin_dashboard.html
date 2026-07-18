@@ -4004,11 +4004,7 @@ function _renderReviews(data) {
             <span class="rv-slider"></span>
           </label>
           <button style="background:#c0392b;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1"
-<<<<<<< HEAD
-            onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,String.fromCharCode(39))}')" 
-=======
             onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,'')}')"
->>>>>>> be790039d3305e41091719f266a38c1f0283d5a8
             title="Delete review">
             <i class="fas fa-trash"></i>
           </button>
@@ -7440,6 +7436,10 @@ async function _sendWaImage(mediaId, caption) {
   if (btn) btn.disabled = true;
   document.getElementById('wa_upload_status').textContent = '⏳ Sending...';
 
+  // Grab the local preview URL BEFORE cancelling (it gets cleared by cancelWaImage)
+  const previewImg   = document.getElementById('wa_img_preview_img');
+  const localBlobUrl = previewImg?.src || '';
+
   try {
     const payload = {customer_id: _waCurrentCustomerId, media_id: mediaId};
     if (caption) payload.caption = caption;
@@ -7455,7 +7455,24 @@ async function _sendWaImage(mediaId, caption) {
     if (d.ok) {
       document.getElementById('wa_reply_input').value = '';
       cancelWaImage();
-      await refreshConversation();
+      // Show optimistic bubble with local preview while waiting for DB refresh
+      if (localBlobUrl && localBlobUrl.startsWith('blob:')) {
+        const el = document.getElementById('wa_messages');
+        if (el) {
+          const tmpId = 'tmp_' + Date.now();
+          const tmpHtml = '<div data-msg-id="' + tmpId + '" style="align-self:flex-end;max-width:68%;min-width:80px;">'
+            + '<small style="color:var(--muted);font-size:9px;display:block;margin-bottom:2px;text-align:right;">You</small>'
+            + '<div style="background:#dcf8c6;margin-left:auto;border-radius:12px 12px 0 12px;padding:8px 12px;box-shadow:0 1px 2px rgba(0,0,0,.1);">'
+            + '<img src="' + localBlobUrl + '" style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:zoom-in;object-fit:cover;">'
+            + (caption ? '<div style="font-size:12px;color:#555;margin-top:5px;">' + _waEscape(caption) + '</div>' : '')
+            + '<div style="text-align:right;margin-top:4px;"><small style="font-size:9px;color:var(--muted);">sending…</small></div>'
+            + '</div></div>';
+          el.insertAdjacentHTML('beforeend', tmpHtml);
+          el.scrollTop = el.scrollHeight;
+        }
+      }
+      // Refresh from DB after a short delay (backend stores permanent URL)
+      setTimeout(() => refreshConversation(), 1200);
     } else {
       alert('Image send failed: ' + (d.detail || 'unknown error'));
       document.getElementById('wa_upload_status').textContent = '❌ Send failed';

@@ -176,90 +176,6 @@ def _fetch_and_store_media(chat_doc_id: str, media_id: str):
 
 # ── GET /admin/whatsapp/media/{media_id} — serve stored media permanently ─────
 
-# ── GET /admin/whatsapp/media/{media_id} — serve stored media permanently ─────
-# (already defined below — this block adds cleanup + backfill endpoints)
-
-# ── POST /admin/whatsapp/backfill-media — retry old broken image records ──────
-
-@router.post("/whatsapp/backfill-media")
-def backfill_media(a=Depends(get_current_admin)):
-    """
-    Scan whatsapp_chats for image records missing media_url (failed to download at webhook time).
-    Re-attempts download and stores permanently.
-    Returns counts: found, fixed, failed.
-    """
-    import time
-    cursor = db.whatsapp_chats.find({
-        "message_type": "image",
-        "media_id": {"$exists": True, "$ne": ""},
-        "$or": [
-            {"media_url": {"$exists": False}},
-            {"media_url": ""},
-            {"media_url": None},
-        ]
-    }).limit(50)  # process 50 at a time to avoid timeout
-
-    found = fixed = failed = 0
-    for record in cursor:
-        found += 1
-        media_id = record.get("media_id", "")
-        if not media_id:
-            failed += 1
-            continue
-        try:
-            _fetch_and_store_media(str(record["_id"]), media_id)
-            # Check if it was actually fixed
-            updated = db.whatsapp_chats.find_one({"_id": record["_id"]})
-            if updated and updated.get("media_url"):
-                fixed += 1
-            else:
-                failed += 1
-        except Exception as e:
-            logger.error("[WA-Chat] backfill error for %s: %s", media_id, e)
-            failed += 1
-        time.sleep(0.1)  # gentle rate limit
-
-    return {"ok": True, "found": found, "fixed": fixed, "failed": failed,
-            "message": f"Processed {found} broken image(s): {fixed} fixed, {failed} failed"}
-
-
-# ── DELETE /admin/whatsapp/cleanup-media — delete media older than 30 days ────
-
-@router.delete("/whatsapp/cleanup-media")
-def cleanup_old_media(days: int = 30, a=Depends(get_current_admin)):
-    """
-    Delete wa_media_images documents older than `days` days (default 30).
-    Also clears media_url from the corresponding whatsapp_chats records.
-    Returns count of deleted media documents.
-    """
-    from datetime import timedelta
-    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-
-    # Find media older than cutoff
-    old_docs = list(db.wa_media_images.find(
-        {"created": {"$lt": cutoff}},
-        {"_id": 1}
-    ))
-    old_ids = [d["_id"] for d in old_docs]
-
-    if not old_ids:
-        return {"ok": True, "deleted": 0, "message": "No media older than " + str(days) + " days found"}
-
-    # Clear media_url in chat records for these media_ids
-    db.whatsapp_chats.update_many(
-        {"media_id": {"$in": old_ids}},
-        {"$unset": {"media_url": ""}, "$set": {"media_expired": True}}
-    )
-
-    # Delete the media blobs
-    result = db.wa_media_images.delete_many({"_id": {"$in": old_ids}})
-    deleted = result.deleted_count
-
-    logger.info("[WA-Chat] 🗑️ Cleanup: deleted %d media blobs older than %d days", deleted, days)
-    return {"ok": True, "deleted": deleted,
-            "message": f"Deleted {deleted} media blob(s) older than {days} days"}
-
-
 @router.get("/whatsapp/media/{media_id_with_ext}")
 def serve_whatsapp_media(media_id_with_ext: str):
     """
@@ -465,9 +381,23 @@ async def send_reply(request: Request, a=Depends(get_current_admin)):
         if not result.get("ok"):
             raise HTTPException(502, "WhatsApp image send failed: " + result.get("error", "unknown"))
         display = "📷 Photo" + (" — " + caption if caption else "")
+        # Resolve permanent preview_url from wa_media_images (if stored at upload time)
+        outgoing_media_url = ""
+        try:
+            stored = db.wa_media_images.find_one({"_id": media_id}, {"_id": 1})
+            if stored:
+                import mimetypes as _mt
+                _ext = _mt.guess_extension("image/jpeg") or ".jpg"
+                # Try to find the actual mime from DB
+                _doc = db.wa_media_images.find_one({"_id": media_id}, {"content_type": 1})
+                if _doc:
+                    _ext = (_mt.guess_extension(_doc.get("content_type","image/jpeg")) or ".jpg").replace(".jpe",".jpg")
+                outgoing_media_url = BASE_URL + "/admin/whatsapp/media/" + media_id + _ext
+        except Exception:
+            pass
         _save_message(customer_id, "outgoing", display, "image", now,
                       status="sent", whatsapp_msg_id=result.get("message_id", ""),
-                      media_id=media_id, caption=caption)
+                      media_id=media_id, media_url=outgoing_media_url, caption=caption)
         db.customers_whatsapp.update_one({"_id": oid}, {"$set": {"last_message": display, "last_message_time": now}})
         return {"ok": True, "message_id": result.get("message_id"), "type": "image"}
     else:
@@ -504,8 +434,19 @@ async def upload_media(file: UploadFile = File(...), a=Depends(get_current_admin
     if not result.get("ok"):
         raise HTTPException(502, "Media upload to WhatsApp failed: " + result.get("error", "unknown"))
 
-    logger.info("[WA-Chat] 📤 Admin uploaded media — id=%s size=%d", result["media_id"], len(file_bytes))
-    return {"ok": True, "media_id": result["media_id"], "mime_type": mime_type, "size": len(file_bytes)}
+    media_id = result["media_id"]
+
+    # Also store locally in MongoDB so admin can see a preview in the dashboard
+    # Uses same pattern as incoming images — permanent serving URL
+    preview_url = ""
+    try:
+        preview_url = _store_media_in_db(media_id, file_bytes, mime_type)
+    except Exception as e:
+        logger.warning("[WA-Chat] Could not store admin upload locally: %s", e)
+        # Non-fatal — outgoing still sends fine, just no preview
+
+    logger.info("[WA-Chat] 📤 Admin uploaded media — id=%s size=%d preview=%s", media_id, len(file_bytes), preview_url)
+    return {"ok": True, "media_id": media_id, "mime_type": mime_type, "size": len(file_bytes), "preview_url": preview_url}
 
 
 # ── POST /admin/whatsapp/chats/{customer_id}/read ─────────────────────────────
