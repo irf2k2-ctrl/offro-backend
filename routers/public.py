@@ -182,20 +182,16 @@ def get_store(store_id: str):
             if v.startswith("http"): return v
         return ""
 
-    # 1. merchant_vouchers — approved, not expired
+    # 1. merchant_vouchers — approved, not expired, SCOPED TO THIS STORE
+    # FIX Issue-1: was querying by merchant_id which leaked products from other stores.
+    # Now strictly filtered by store_id so each store only shows its own products.
     if "merchant_vouchers" in cols:
         from bson import ObjectId as _OId2
-        merchant_id = store.get("merchant_id", "")
-        merchant_phone = str(store.get("phone", ""))
-        q = {"status": "approved"}
-        if merchant_id:
-            # FIX: merchant_id may be ObjectId or string — match both
-            _mid_oid = None
-            try: _mid_oid = _OId2(merchant_id)
-            except Exception: pass
-            _or_clauses = [{"merchant_id": merchant_id}, {"merchant_phone": merchant_phone}]
-            if _mid_oid: _or_clauses.append({"merchant_id": _mid_oid})
-            q = {"$or": _or_clauses, "status": "approved"}
+        # Build store_id clauses (may be stored as str or ObjectId)
+        _mv_clauses = [{"store_id": store_id}]
+        try: _mv_clauses.append({"store_id": _OId2(store_id)})
+        except Exception: pass
+        q = {"$or": _mv_clauses, "status": "approved", "approval_status": "approved"}
         for p in db.merchant_vouchers.find(q).sort("created_at", -1).limit(30):
             if _prod_expired(p): continue
             pid = str(p["_id"])
@@ -225,7 +221,8 @@ def get_store(store_id: str):
         _gv_clauses = [{"store_id": store_id}]
         try: _gv_clauses.append({"store_id": _OId3(store_id)})
         except Exception: pass
-        _gv_q = {"$or": _gv_clauses}
+        # FIX Issue-3: also require approval_status approved — unapproved/pending standards were leaking through
+        _gv_q = {"$or": _gv_clauses, "approval_status": "approved"}
         for p in db.gift_vouchers.find(_gv_q).sort("_id", -1).limit(30):
             if p.get("is_active", True) in (False, "false", "0", 0): continue
             if _prod_expired(p): continue
@@ -1531,7 +1528,9 @@ def get_products_by_store(store_id: str, limit: int = 20):
                         "original_price": str(p.get("original_price","") or ""),
                         "rating": float(p.get("rating") or p.get("avg_rating") or 0),
                         "product_type": "premium"})
-    for p in db.gift_vouchers.find(q_oid).sort("_id", -1).limit(limit):
+    # FIX Issue-3: require approved status so pending/rejected standards don't show
+    _gv_by_store_q = {**q_oid, "approval_status": "approved"}
+    for p in db.gift_vouchers.find(_gv_by_store_q).sort("_id", -1).limit(limit):
         if p.get("is_active", True) in (False, "false", "0", 0): continue
         pid = str(p["_id"])
         if pid in seen: continue

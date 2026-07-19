@@ -2181,6 +2181,12 @@ def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
     # ── Move the product IN-PLACE: same _id, gift_vouchers → merchant_vouchers ──
     # This avoids creating a duplicate — the product list shows it as the same item,
     # now as premium/pending_approval.
+    # FIX Issue-2: standard products store offer text in "text" field; premium products
+    # read "offer_text". Carry the value across so offer text is not lost on upgrade.
+    # Also carry price/original_price ensuring they are preserved as strings.
+    _offer_text_upgraded = (prod.get("offer_text") or "").strip() or (prod.get("text") or "").strip()
+    _price_upgraded       = str(prod.get("price") or prod.get("offer_price") or "").strip()
+    _orig_price_upgraded  = str(prod.get("original_price") or prod.get("mrp") or "").strip()
     updated_doc = {
         **prod,
         "product_type":       "premium",
@@ -2193,6 +2199,11 @@ def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
         "razorpay_payment_id": payment_id,
         "is_active":          True,
         "updated_at":         datetime.utcnow(),
+        # FIX Issue-2: normalise field names for premium tier
+        "offer_text":         _offer_text_upgraded,
+        "text":               _offer_text_upgraded,
+        "price":              _price_upgraded,
+        "original_price":     _orig_price_upgraded,
     }
     updated_doc.pop("upgraded",    None)
     updated_doc.pop("upgraded_at", None)
