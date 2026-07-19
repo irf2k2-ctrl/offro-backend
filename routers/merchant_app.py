@@ -1861,9 +1861,16 @@ def list_merchant_products(m=Depends(get_merchant)):
         })
 
     # ── 2. Premium products from merchant_vouchers ──
-    prem_query: dict = {"$or": [{"merchant_id": merchant_id}]}
+    # FIX: merchant_id in merchant_vouchers may be stored as ObjectId (from **prod spread
+    # during upgrade) or as string — match both variants + phone fallback.
+    _prem_or: list = [{"merchant_id": merchant_id}]
+    try:
+        _prem_or.append({"merchant_id": ObjectId(merchant_id)})
+    except Exception:
+        pass
     if merchant_phone:
-        prem_query["$or"].append({"merchant_phone": merchant_phone})
+        _prem_or.append({"merchant_phone": merchant_phone})
+    prem_query: dict = {"$or": _prem_or}
     for v in db.merchant_vouchers.find(prem_query).sort("created_at", -1):
         result.append({
             "_id":             str(v["_id"]),
