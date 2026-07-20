@@ -446,10 +446,11 @@ def list_accounts(a=Depends(get_current_admin)):
                 store_q = {**bq, **active_sq}
 
             store_count   = int(db.stores.count_documents(store_q)         or 0)
-            # Only count merchant_vouchers (standard) + products (premium).
-            # gift_vouchers is excluded — it's a mirror of approved merchant_vouchers.
-            product_count = int((db.merchant_vouchers.count_documents(bq) or 0) +
-                                (db.products.count_documents(bq)           or 0))
+            # gift_vouchers = standards (admin-created + approved merchant-submitted, all have merchant_id).
+            # products = premium products (also have merchant_id).
+            # merchant_vouchers excluded — mirror records, no store_id, and bq merchant_id overlaps.
+            product_count = int((db.gift_vouchers.count_documents(bq) or 0) +
+                                (db.products.count_documents(bq)       or 0))
             banner_count  = int(db.merchant_banners.count_documents(bq)    or 0)
 
             # Auto-promote: if account has stores but no merchant role
@@ -624,9 +625,10 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     broad_store_q = _broad_q(eff_mid, acct_id, phone)
     store_count   = db.stores.count_documents(broad_store_q)
     banner_count  = db.merchant_banners.count_documents(broad_store_q)
-    # merchant_vouchers (standard) + products (premium) only — gift_vouchers excluded (mirror).
+    # gift_vouchers = standards (both admin-created and approved merchant-submitted).
+    # products = premium products. merchant_vouchers excluded (mirror, inconsistent store_id).
     voucher_count = (
-        db.merchant_vouchers.count_documents(broad_store_q) +
+        db.gift_vouchers.count_documents(broad_store_q) +
         db.products.count_documents(broad_store_q)
     )
 
@@ -667,11 +669,11 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     stores_list = []
     for st in db.stores.find(broad_store_q).sort("created_at", -1).limit(20):
         sid = str(st["_id"])
-        # Count only merchant_vouchers (standard) + products (premium).
-        # gift_vouchers is intentionally excluded — approved merchant_vouchers are
-        # mirrored into gift_vouchers on approval, so counting both = double-count.
+        # gift_vouchers has store_id for both admin-created standards AND approved
+        # merchant-submitted standards. products has store_id for premium products.
+        # merchant_vouchers is excluded — its records have no store_id field.
         s_prod = (
-            db.merchant_vouchers.count_documents({"store_id": sid}) +
+            db.gift_vouchers.count_documents({"store_id": sid}) +
             db.products.count_documents({"store_id": sid})
         )
         paid_sub_for_store = db.subscriptions.find_one(
