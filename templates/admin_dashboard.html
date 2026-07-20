@@ -6215,13 +6215,13 @@ function renderAccountDetailHTML(d) {
                 ? `<button class="btn-approve" onclick="approveStore('${s.store_id}')">✓ Approve</button>`
                 : '';
               return `<tr>
-                <td><strong>\${escHtml(s.store_name||'—')}</strong></td>
-                <td>\${escHtml(s.category||'—')}</td>
-                <td>\${escHtml(s.city||'—')}</td>
-                <td><span style="background:\${stColor};color:#fff;border-radius:5px;padding:2px 7px;font-size:11px;">\${stLabel}</span></td>
-                <td>\${s.product_count||0}</td>
-                <td>\${subHtml}</td>
-                <td>\${approveBtn}</td>
+                <td><strong>${escHtml(s.store_name||'—')}</strong></td>
+                <td>${escHtml(s.category||'—')}</td>
+                <td>${escHtml(s.city||'—')}</td>
+                <td><span style="background:${stColor};color:#fff;border-radius:5px;padding:2px 7px;font-size:11px;">${stLabel}</span></td>
+                <td>${s.product_count||0}</td>
+                <td>${subHtml}</td>
+                <td>${approveBtn}</td>
               </tr>`;
             }).join('')}
           </tbody>
