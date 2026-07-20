@@ -1126,7 +1126,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
         "amount_display":    total,
         "amount_paise":      amount_paise,
         "pay_mode":          pay_mode,
-        "razorpay_key":      RZP_KEY_ID,
+        "razorpay_key":      RAZORPAY_KEY_ID,
         "razorpay_order_id": rp_order_id,
     }
 
@@ -1450,7 +1450,7 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
         "amount_display":    total,
         "amount_paise":      amount_paise,
         "pay_mode":          pay_mode,
-        "razorpay_key":      RZP_KEY_ID,
+        "razorpay_key":      RAZORPAY_KEY_ID,
         "razorpay_order_id": rp_order_id,
     }
 
