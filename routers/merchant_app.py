@@ -999,8 +999,10 @@ def get_my_banners(m=Depends(get_merchant)):
                     "from_date":       s.get("from_date", ""),
                     "end_date":        s.get("end_date", s.get("expires_at", "")),
                     "amount":          0,
-                    "status":          "expired" if is_expired else ("approved" if s.get("is_active") else "hidden"),
-                    "approval_status": "expired" if is_expired else "approved",
+                    "status":          "expired" if is_expired else ("removed" if s.get("deleted_by_admin") else ("approved" if s.get("is_active") else "hidden")),
+                    "approval_status": "expired" if is_expired else ("removed" if s.get("deleted_by_admin") else "approved"),
+                    "is_active":       bool(s.get("is_active", True)),
+                    "deleted_by_admin": bool(s.get("deleted_by_admin", False)),
                     "created_at":      _safe_str_date(s.get("created_at", "")),
                     "source":          "admin",
                     "is_expired":      is_expired,
@@ -1026,26 +1028,47 @@ def get_banner_pricing_merchant(m=Depends(get_merchant)):
 @router.put("/banners/{bid}/toggle")
 def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
     """Merchant can turn their own approved banner ON or OFF.
-    OFF banners are hidden from stores but stay in merchant's list as 'Turned Off'."""
+    PERMANENT FIX: Searches merchant_banners first, then promo_sliders.
+    Always syncs both collections."""
     merchant_id = _mid(m)
     merchant_phone = str(m.get("phone", ""))
-    # Only allow toggling own banners
-    b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
+    try:
+        oid = ObjectId(bid)
+    except Exception:
+        raise HTTPException(400, "Invalid banner id")
+
+    ts = datetime.utcnow().isoformat()
+    b = db.merchant_banners.find_one({"_id": oid})
+    found_in = "merchant_banners"
+    if not b:
+        b = db.promo_sliders.find_one({"_id": oid})
+        found_in = "promo_sliders"
     if not b:
         raise HTTPException(404, "Banner not found")
+
     # Verify ownership
-    if str(b.get("merchant_id","")) != merchant_id and str(b.get("merchant_phone","")) != merchant_phone:
+    b_phone = re.sub(r'\D', '', str(b.get("merchant_phone", "")))[-10:]
+    m_phone = re.sub(r'\D', '', merchant_phone)[-10:] if merchant_phone else ""
+    if str(b.get("merchant_id","")) != merchant_id and (not m_phone or b_phone != m_phone):
         raise HTTPException(403, "Not your banner")
-    # Cannot re-activate a banner that was removed by admin
+
+    # Cannot re-activate a banner removed by admin
     if b.get("deleted_by_admin") and not bool(b.get("is_active", True)):
         raise HTTPException(403, "This banner was removed by admin and cannot be reactivated.")
+
     new_active = not bool(b.get("is_active", True))
-    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
-        "is_active": new_active,
-        "toggled_at": datetime.utcnow().isoformat(),
-    }})
-    # Sync promo_slider active state
-    db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": new_active}})
+
+    if found_in == "merchant_banners":
+        db.merchant_banners.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+        db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+    else:
+        db.promo_sliders.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+        src_bid = b.get("source_banner_id", "")
+        if src_bid:
+            try:
+                db.merchant_banners.update_one({"_id": ObjectId(src_bid)}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+            except Exception:
+                pass
     return {"ok": True, "is_active": new_active}
 
 # ── POST /merchant/banners/order  ──────────────────────────────────────────

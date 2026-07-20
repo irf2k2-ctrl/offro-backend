@@ -2362,38 +2362,88 @@ def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.delete("/merchant-banners/{bid}")
 def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
-    """Soft-delete: marks banner as inactive + deleted_by_admin instead of hard delete.
-    This keeps the record visible in merchant app as 'Removed by Admin'."""
-    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
-        "is_active":        False,
-        "deleted_by_admin": True,
-        "approval_status":  "removed",
-        "deleted_at":       datetime.utcnow().isoformat(),
-    }})
-    # Also deactivate from promo_sliders (hidden from stores but record kept)
-    db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": False}})
+    """Soft-delete: marks banner as inactive + deleted_by_admin in BOTH collections.
+    PERMANENT FIX: Searches merchant_banners first, then promo_sliders.
+    Always syncs deleted_by_admin flag to both so Flutter shows 'Removed by Admin'."""
+    try:
+        oid = ObjectId(bid)
+    except Exception:
+        raise HTTPException(400, "Invalid banner id")
+
+    ts = datetime.utcnow().isoformat()
+    delete_set = {"is_active": False, "deleted_by_admin": True, "approval_status": "removed", "deleted_at": ts}
+
+    b = db.merchant_banners.find_one({"_id": oid})
+    if b:
+        db.merchant_banners.update_one({"_id": oid}, {"$set": delete_set})
+        # Sync promo_sliders linked record
+        db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {
+            "is_active": False, "deleted_by_admin": True, "deleted_at": ts
+        }})
+    else:
+        # Banner might be a promo_slider id (admin-created banners or direct promo)
+        ps = db.promo_sliders.find_one({"_id": oid})
+        if not ps:
+            raise HTTPException(404, "Banner not found")
+        db.promo_sliders.update_one({"_id": oid}, {"$set": {
+            "is_active": False, "deleted_by_admin": True, "deleted_at": ts
+        }})
+        # Sync back to merchant_banners if source exists
+        src_bid = ps.get("source_banner_id", "")
+        if src_bid:
+            try:
+                db.merchant_banners.update_one({"_id": ObjectId(src_bid)}, {"$set": delete_set})
+            except Exception:
+                pass
+
     return {"ok": True}
 
 @router.put("/merchant-banners/{bid}/toggle")
 def toggle_merchant_banner(bid: str, a=Depends(get_current_admin)):
     """Toggle is_active ON/OFF for a merchant banner.
-    When OFF: hidden from stores and merchant app shows 'Turned Off' status.
-    When ON: restored to previous approved state."""
-    b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
+    PERMANENT FIX: Searches merchant_banners first, then promo_sliders (approved banners live there).
+    Always syncs both collections to stay in agreement."""
+    try:
+        oid = ObjectId(bid)
+    except Exception:
+        raise HTTPException(400, "Invalid banner id")
+
+    # 1. Try merchant_banners first (pending/rejected/not-yet-approved)
+    b = db.merchant_banners.find_one({"_id": oid})
+    found_in = "merchant_banners"
+
+    # 2. Fall back to promo_sliders (approved banners live here)
     if not b:
-        raise HTTPException(404, "Banner not found")
-    # Cannot toggle a banner removed by admin via the toggle — use delete/restore separately
+        b = db.promo_sliders.find_one({"_id": oid})
+        found_in = "promo_sliders"
+
+    if not b:
+        raise HTTPException(404, "Banner not found in any collection")
+
     new_active = not bool(b.get("is_active", True))
-    update_fields = {"is_active": new_active, "toggled_at": datetime.utcnow().isoformat()}
-    if new_active:
-        # Restoring: clear deleted_by_admin flag if it was soft-deleted
-        update_fields["deleted_by_admin"] = False
-        if b.get("approval_status") == "removed":
-            update_fields["approval_status"] = "approved"
-    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": update_fields})
-    # Sync promo_slider active state
-    db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": new_active}})
-    return {"ok": True, "is_active": new_active}
+    ts = datetime.utcnow().isoformat()
+
+    if found_in == "merchant_banners":
+        update_fields = {"is_active": new_active, "toggled_at": ts}
+        if new_active:
+            update_fields["deleted_by_admin"] = False
+            if b.get("approval_status") == "removed":
+                update_fields["approval_status"] = "approved"
+        db.merchant_banners.update_one({"_id": oid}, {"$set": update_fields})
+        # Also sync the linked promo_slider (if it was approved)
+        db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+    else:
+        # Found directly in promo_sliders — toggle it there
+        db.promo_sliders.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+        # Also sync back to merchant_banners if source_banner_id is present
+        src_bid = b.get("source_banner_id", "")
+        if src_bid:
+            try:
+                db.merchant_banners.update_one({"_id": ObjectId(src_bid)}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+            except Exception:
+                pass
+
+    return {"ok": True, "is_active": new_active, "found_in": found_in}
 
 
 # ═══════════════════════════════════════════════════════════
