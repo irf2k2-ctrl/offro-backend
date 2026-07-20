@@ -2165,7 +2165,9 @@ function renderStoresPage(){
 }
 
 function populateCityFilter(elId,data,field){
-  let sel=document.getElementById(elId);let cur=sel.value;
+  let sel=document.getElementById(elId);
+  if(!sel) return;
+  let cur=sel.value;
   let cities=[...new Set(data.map(x=>x[field]).filter(Boolean))].sort();
   sel.innerHTML='<option value="">All Cities</option>';
   cities.forEach(c=>{let o=document.createElement("option");o.value=c;o.innerText=c;if(c===cur)o.selected=true;sel.appendChild(o);});
@@ -6212,7 +6214,7 @@ function renderAccountDetailHTML(d) {
               const approveBtn = (s.status==='waiting_approval'||s.status==='draft'&&s.subscription)
                 ? `<button class="btn-approve" onclick="approveStore('${s.store_id}')">✓ Approve</button>`
                 : '';
-              return \`<tr>
+              return `<tr>
                 <td><strong>\${escHtml(s.store_name||'—')}</strong></td>
                 <td>\${escHtml(s.category||'—')}</td>
                 <td>\${escHtml(s.city||'—')}</td>
@@ -6220,7 +6222,7 @@ function renderAccountDetailHTML(d) {
                 <td>\${s.product_count||0}</td>
                 <td>\${subHtml}</td>
                 <td>\${approveBtn}</td>
-              </tr>\`;
+              </tr>`;
             }).join('')}
           </tbody>
         </table>
