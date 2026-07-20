@@ -6150,9 +6150,43 @@ function renderAccountDetailHTML(d) {
       <div class="row g-2" style="font-size:13px;">
         <div class="col-md-3"><span style="color:var(--muted);">Stores</span><br><strong>${d.store_count||0}</strong></div>
         <div class="col-md-3"><span style="color:var(--muted);">Banners</span><br><strong>${d.banner_count||0}</strong></div>
-        <div class="col-md-3"><span style="color:var(--muted);">Products</span><br><strong>${d.product_count||0}</strong></div>
+        <div class="col-md-3"><span style="color:var(--muted);">Products</span><br><strong>${d.voucher_count||d.product_count||0}</strong></div>
         <div class="col-md-3"><span style="color:var(--muted);">Subscription</span><br>${subBadge}</div>
       </div>
+    </div>
+
+    <!-- Stores list -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
+      <div class="fw-bold mb-3" style="color:var(--primary);">🏬 Stores</div>
+      ${(d.stores||[]).length === 0 ? '<p class="text-muted" style="font-size:13px;">No stores found.</p>' : `
+      <div class="table-responsive">
+        <table class="table table-sm" style="font-size:13px;">
+          <thead style="background:var(--primary);color:#fff;">
+            <tr><th>Store Name</th><th>Category</th><th>City</th><th>Status</th><th>Products</th><th>Subscription</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            ${(d.stores||[]).map(s => {
+              const stColor = s.status==='active'?'#1a6640':s.status==='waiting_approval'?'#e67e22':s.status==='draft'?'#888':'#c0392b';
+              const stLabel = s.status==='waiting_approval'?'⏳ Waiting':s.status==='active'?'✅ Active':s.status==='draft'?'📝 Draft':'❌ '+s.status;
+              const subHtml = s.subscription
+                ? `<span style="color:#1a6640;font-size:11px;">✅ ${escHtml(s.subscription.plan||'')} till ${s.subscription.end_date||''}</span>`
+                : `<span style="color:#c0392b;font-size:11px;">No plan</span>`;
+              const approveBtn = (s.status==='waiting_approval'||s.status==='draft'&&s.subscription)
+                ? `<button class="btn-approve" onclick="approveStore('${s.store_id}')">✓ Approve</button>`
+                : '';
+              return \`<tr>
+                <td><strong>\${escHtml(s.store_name||'—')}</strong></td>
+                <td>\${escHtml(s.category||'—')}</td>
+                <td>\${escHtml(s.city||'—')}</td>
+                <td><span style="background:\${stColor};color:#fff;border-radius:5px;padding:2px 7px;font-size:11px;">\${stLabel}</span></td>
+                <td>\${s.product_count||0}</td>
+                <td>\${subHtml}</td>
+                <td>\${approveBtn}</td>
+              </tr>\`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`}
     </div>
 
     <!-- Invoices -->
