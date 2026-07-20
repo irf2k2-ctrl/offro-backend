@@ -434,7 +434,20 @@ def list_accounts(a=Depends(get_current_admin)):
             return {"$or": parts}
 
         broad_q = _broad_store_q(eff_mid, acct_id, phone)
-        store_count   = db.stores.count_documents(broad_q)
+        # Auto-activate: draft stores that have a paid subscription → waiting_approval
+        for draft_s in db.stores.find({**broad_q, "status": "draft"}):
+            paid_sub = db.subscriptions.find_one({
+                "store_id": str(draft_s["_id"]),
+                "status": {"$in": ["paid", "active"]},
+            })
+            if paid_sub:
+                db.stores.update_one(
+                    {"_id": draft_s["_id"]},
+                    {"$set": {"status": "waiting_approval"}}
+                )
+        # Only count non-draft stores for the Accounts table
+        active_store_q = {**broad_q, "status": {"$in": ["active", "waiting_approval", "inactive"]}}
+        store_count   = db.stores.count_documents(active_store_q)
         product_count = (
             db.merchant_vouchers.count_documents(broad_q) +
             db.gift_vouchers.count_documents(broad_q)
@@ -612,6 +625,32 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     visit_pts = acct.get("visit_pts", acct.get("visit_points", 0) or 0)
     pool_pts  = acct.get("pool_pts", 0)
 
+    # Build stores list with status + product counts for View modal
+    stores_list = []
+    for st in db.stores.find(broad_store_q).sort("created_at", -1).limit(20):
+        sid = str(st["_id"])
+        s_prod = (
+            db.merchant_vouchers.count_documents({"store_id": sid}) +
+            db.gift_vouchers.count_documents({"store_id": sid}) +
+            db.products.count_documents({"store_id": sid})
+        )
+        paid_sub_for_store = db.subscriptions.find_one(
+            {"store_id": sid, "status": {"$in": ["paid","active"]}},
+            {"plan": 1, "end_date": 1}
+        )
+        stores_list.append({
+            "store_id":    sid,
+            "store_name":  st.get("store_name",""),
+            "category":    st.get("category",""),
+            "city":        st.get("city",""),
+            "status":      st.get("status","draft"),
+            "product_count": s_prod,
+            "subscription": {
+                "plan":     paid_sub_for_store.get("plan","") if paid_sub_for_store else "",
+                "end_date": str(paid_sub_for_store.get("end_date",""))[:10] if paid_sub_for_store else "",
+            } if paid_sub_for_store else None,
+        })
+
     return {
         "account_id":    acct_id,
         "user_id":       acct.get("user_id", acct_id),
@@ -631,6 +670,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
         "voucher_count": voucher_count,
         "subscriptions": subscriptions,
         "invoices":      invoices,
+        "stores":        stores_list,
     }
 
 
