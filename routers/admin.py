@@ -2250,24 +2250,28 @@ def list_merchant_banners(a=Depends(get_current_admin)):
                 except Exception:
                     pass
 
+        is_active       = bool(b.get("is_active", True))
+        deleted_by_admin = bool(b.get("deleted_by_admin", False))
         result.append({
-            "_id":            str(b["_id"]),
-            "merchant_id":    merchant_id,
-            "merchant_name":  b.get("merchant_name", ""),
-            "merchant_phone": merchant_phone,
-            "title":          b.get("title", ""),
-            "image_url":      b.get("image_url", ""),
-            "duration_days":  b.get("duration_days", b.get("duration", 30)),
-            "plan":           b.get("plan", ""),
-            "status":         approval_status,
-            "from_date":      b.get("from_date", b.get("start_date", "")),
-            "end_date":       b.get("end_date", ""),
-            "invoice_no":     b.get("invoice_no", ""),
-            "amount":         b.get("total", 0),
-            "created_at":     b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at", ""))[:16],
-            "store_id":       store_id,
-            "city":           city,
-            "store_name":     store_name,
+            "_id":             str(b["_id"]),
+            "merchant_id":     merchant_id,
+            "merchant_name":   b.get("merchant_name", ""),
+            "merchant_phone":  merchant_phone,
+            "title":           b.get("title", ""),
+            "image_url":       b.get("image_url", ""),
+            "duration_days":   b.get("duration_days", b.get("duration", 30)),
+            "plan":            b.get("plan", ""),
+            "status":          approval_status,
+            "from_date":       b.get("from_date", b.get("start_date", "")),
+            "end_date":        b.get("end_date", ""),
+            "invoice_no":      b.get("invoice_no", ""),
+            "amount":          b.get("total", 0),
+            "created_at":      b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at", ""))[:16],
+            "store_id":        store_id,
+            "city":            city,
+            "store_name":      store_name,
+            "is_active":       is_active,
+            "deleted_by_admin": deleted_by_admin,
         })
     return result
 
@@ -2354,9 +2358,38 @@ def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.delete("/merchant-banners/{bid}")
 def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
-    db.merchant_banners.delete_one({"_id": ObjectId(bid)})
-    db.promo_sliders.delete_many({"source_banner_id": bid})
+    """Soft-delete: marks banner as inactive + deleted_by_admin instead of hard delete.
+    This keeps the record visible in merchant app as 'Removed by Admin'."""
+    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
+        "is_active":        False,
+        "deleted_by_admin": True,
+        "approval_status":  "removed",
+        "deleted_at":       datetime.utcnow().isoformat(),
+    }})
+    # Also deactivate from promo_sliders (hidden from stores but record kept)
+    db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": False}})
     return {"ok": True}
+
+@router.patch("/merchant-banners/{bid}/toggle")
+def toggle_merchant_banner(bid: str, a=Depends(get_current_admin)):
+    """Toggle is_active ON/OFF for a merchant banner.
+    When OFF: hidden from stores and merchant app shows 'Turned Off' status.
+    When ON: restored to previous approved state."""
+    b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
+    if not b:
+        raise HTTPException(404, "Banner not found")
+    # Cannot toggle a banner removed by admin via the toggle — use delete/restore separately
+    new_active = not bool(b.get("is_active", True))
+    update_fields = {"is_active": new_active, "toggled_at": datetime.utcnow().isoformat()}
+    if new_active:
+        # Restoring: clear deleted_by_admin flag if it was soft-deleted
+        update_fields["deleted_by_admin"] = False
+        if b.get("approval_status") == "removed":
+            update_fields["approval_status"] = "approved"
+    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": update_fields})
+    # Sync promo_slider active state
+    db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": new_active}})
+    return {"ok": True, "is_active": new_active}
 
 
 # ═══════════════════════════════════════════════════════════

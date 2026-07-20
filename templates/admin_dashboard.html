@@ -2998,17 +2998,26 @@ function renderBanners(rows) {
         if (!isNaN(_endMs) && _endMs < Date.now()) st = 'expired';
       } catch(_) {}
     }
-    const statusBadge = st==='approved'
+    // Determine effective status considering is_active + deleted_by_admin
+    const _isActive       = r.is_active !== false;
+    const _deletedByAdmin = !!r.deleted_by_admin;
+    const _effectiveSt    = _deletedByAdmin ? 'removed' : (!_isActive ? 'off' : st);
+
+    const statusBadge = _effectiveSt==='removed'
+      ? `<div><span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">Removed by Admin</span></div>`
+      : _effectiveSt==='off'
+      ? `<div><span style="background:#f0f0f0;color:#6c757d;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">Turned Off</span></div>`
+      : _effectiveSt==='approved'
       ? `<div><span style="background:#d1f0e0;color:#1a6640;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Approved</span>
          <div style="font-size:10px;color:var(--muted);margin-top:3px">(${isAdmin?'Admin':'Merchant'})</div></div>`
-      : (st==='pending'||st==='pending_approval')
+      : (_effectiveSt==='pending'||_effectiveSt==='pending_approval')
       ? `<div><span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600"><i class="fas fa-clock" style="font-size:9px"></i> Pending Approval</span>
          <div style="font-size:10px;color:var(--muted);margin-top:3px">(Merchant)</div></div>`
-      : st==='rejected'
-      ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">✕ Rejected</span>`
-      : st==='expired'
-      ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Expired</span>`
-      : `<span style="background:#f8f9fa;color:#6c757d;padding:3px 10px;border-radius:20px;font-size:11px">○ Hidden</span>`;
+      : _effectiveSt==='rejected'
+      ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">Rejected</span>`
+      : _effectiveSt==='expired'
+      ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">Expired</span>`
+      : `<span style="background:#f8f9fa;color:#6c757d;padding:3px 10px;border-radius:20px;font-size:11px">Hidden</span>`;
 
     const createdFmt = (r.created_at||'').replace('T',' ').slice(0,16);
 
@@ -3043,6 +3052,7 @@ function renderBanners(rows) {
       <td>
         <button class="btn-o me-1" onclick='openBnViewModal(${viewJson})'>View</button>
         ${approveBtn}
+        ${!_deletedByAdmin && r._source==='merchant' ? `<button onclick="toggleBnBanner('${r._id}',${_isActive})" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid ${_isActive?'#e0b84d':'#3E5F55'};background:${_isActive?'#fff9e6':'#e8f4ef'};color:${_isActive?'#856404':'#1a6640'};cursor:pointer;margin-right:4px">${_isActive?'Turn Off':'Turn On'}</button>` : ''}
         <button class="btn-o" style="border:none;padding:4px 8px" onclick='openBnMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>
       </td>
     </tr>`;
@@ -3068,6 +3078,16 @@ function openBnViewModal(r) {
 }
 
 function approveBnBanner(id) { approveMerchantBanner(id); }
+
+async function toggleBnBanner(id, currentActive) {
+  const label = currentActive ? 'Turn Off' : 'Turn On';
+  if (!confirm(currentActive ? 'Turn OFF this banner? It will be hidden from stores.' : 'Turn ON this banner? It will become live again.')) return;
+  try {
+    const r = await fetch('/admin/merchant-banners/'+id+'/toggle', {method:'PATCH', credentials:'include'});
+    if (!r.ok) { const e = await r.json(); alert('Error: '+(e.detail||'Failed')); return; }
+    await loadSliders();
+  } catch(e) { alert('Network error: '+e.message); }
+}
 
 function openBnMoreMenu(evt, id, source, status) {
   const existing = document.getElementById('_bnCtxMenu');

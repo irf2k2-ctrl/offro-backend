@@ -973,6 +973,8 @@ def get_my_banners(m=Depends(get_merchant)):
                 "created_at":      _safe_str_date(b.get("created_at", "")),
                 "source":          "merchant",
                 "is_expired":      is_expired,
+                "is_active":       bool(b.get("is_active", True)),
+                "deleted_by_admin": bool(b.get("deleted_by_admin", False)),
             })
     except Exception as e:
         print(f"[BANNERS] merchant_banners query error: {e}")
@@ -1019,6 +1021,32 @@ def get_banner_pricing_merchant(m=Depends(get_merchant)):
         "price_per_day":  float(doc.get("banner_price_per_day", 15)),
         "gst_pct":        gst_pct,
     }
+
+# ── PATCH /merchant/banners/{bid}/toggle  ──────────────────────────────────
+@router.patch("/banners/{bid}/toggle")
+def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
+    """Merchant can turn their own approved banner ON or OFF.
+    OFF banners are hidden from stores but stay in merchant's list as 'Turned Off'."""
+    merchant_id = _mid(m)
+    merchant_phone = str(m.get("phone", ""))
+    # Only allow toggling own banners
+    b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
+    if not b:
+        raise HTTPException(404, "Banner not found")
+    # Verify ownership
+    if str(b.get("merchant_id","")) != merchant_id and str(b.get("merchant_phone","")) != merchant_phone:
+        raise HTTPException(403, "Not your banner")
+    # Cannot re-activate a banner that was removed by admin
+    if b.get("deleted_by_admin") and not bool(b.get("is_active", True)):
+        raise HTTPException(403, "This banner was removed by admin and cannot be reactivated.")
+    new_active = not bool(b.get("is_active", True))
+    db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
+        "is_active": new_active,
+        "toggled_at": datetime.utcnow().isoformat(),
+    }})
+    # Sync promo_slider active state
+    db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": new_active}})
+    return {"ok": True, "is_active": new_active}
 
 # ── POST /merchant/banners/order  ──────────────────────────────────────────
 @router.post("/banners/order")
