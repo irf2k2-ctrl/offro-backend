@@ -2370,7 +2370,7 @@ def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
     db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": False}})
     return {"ok": True}
 
-@router.patch("/merchant-banners/{bid}/toggle")
+@router.put("/merchant-banners/{bid}/toggle")
 def toggle_merchant_banner(bid: str, a=Depends(get_current_admin)):
     """Toggle is_active ON/OFF for a merchant banner.
     When OFF: hidden from stores and merchant app shows 'Turned Off' status.

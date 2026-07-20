@@ -1023,7 +1023,7 @@ def get_banner_pricing_merchant(m=Depends(get_merchant)):
     }
 
 # ── PATCH /merchant/banners/{bid}/toggle  ──────────────────────────────────
-@router.patch("/banners/{bid}/toggle")
+@router.put("/banners/{bid}/toggle")
 def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
     """Merchant can turn their own approved banner ON or OFF.
     OFF banners are hidden from stores but stay in merchant's list as 'Turned Off'."""

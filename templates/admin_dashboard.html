@@ -3083,7 +3083,7 @@ async function toggleBnBanner(id, currentActive) {
   const label = currentActive ? 'Turn Off' : 'Turn On';
   if (!confirm(currentActive ? 'Turn OFF this banner? It will be hidden from stores.' : 'Turn ON this banner? It will become live again.')) return;
   try {
-    const r = await fetch('/admin/merchant-banners/'+id+'/toggle', {method:'PATCH', credentials:'include'});
+    const r = await fetch('/admin/merchant-banners/'+id+'/toggle', {method:'PUT', credentials:'include'});
     if (!r.ok) { const e = await r.json(); alert('Error: '+(e.detail||'Failed')); return; }
     await loadSliders();
   } catch(e) { alert('Network error: '+e.message); }
