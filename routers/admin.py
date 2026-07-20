@@ -446,11 +446,10 @@ def list_accounts(a=Depends(get_current_admin)):
                 store_q = {**bq, **active_sq}
 
             store_count   = int(db.stores.count_documents(store_q)         or 0)
-            # gift_vouchers = standards (admin-created + approved merchant-submitted, all have merchant_id).
-            # products = premium products (also have merchant_id).
-            # merchant_vouchers excluded — mirror records, no store_id, and bq merchant_id overlaps.
-            product_count = int((db.gift_vouchers.count_documents(bq) or 0) +
-                                (db.products.count_documents(bq)       or 0))
+            # Only count merchant_vouchers (standard) + products (premium).
+            # gift_vouchers is excluded — it's a mirror of approved merchant_vouchers.
+            product_count = int((db.merchant_vouchers.count_documents(bq) or 0) +
+                                (db.products.count_documents(bq)           or 0))
             banner_count  = int(db.merchant_banners.count_documents(bq)    or 0)
 
             # Auto-promote: if account has stores but no merchant role
@@ -625,10 +624,9 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     broad_store_q = _broad_q(eff_mid, acct_id, phone)
     store_count   = db.stores.count_documents(broad_store_q)
     banner_count  = db.merchant_banners.count_documents(broad_store_q)
-    # gift_vouchers = standards (both admin-created and approved merchant-submitted).
-    # products = premium products. merchant_vouchers excluded (mirror, inconsistent store_id).
+    # merchant_vouchers (standard) + products (premium) only — gift_vouchers excluded (mirror).
     voucher_count = (
-        db.gift_vouchers.count_documents(broad_store_q) +
+        db.merchant_vouchers.count_documents(broad_store_q) +
         db.products.count_documents(broad_store_q)
     )
 
@@ -669,11 +667,11 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     stores_list = []
     for st in db.stores.find(broad_store_q).sort("created_at", -1).limit(20):
         sid = str(st["_id"])
-        # gift_vouchers has store_id for both admin-created standards AND approved
-        # merchant-submitted standards. products has store_id for premium products.
-        # merchant_vouchers is excluded — its records have no store_id field.
+        # Count only merchant_vouchers (standard) + products (premium).
+        # gift_vouchers is intentionally excluded — approved merchant_vouchers are
+        # mirrored into gift_vouchers on approval, so counting both = double-count.
         s_prod = (
-            db.gift_vouchers.count_documents({"store_id": sid}) +
+            db.merchant_vouchers.count_documents({"store_id": sid}) +
             db.products.count_documents({"store_id": sid})
         )
         paid_sub_for_store = db.subscriptions.find_one(
@@ -1796,6 +1794,9 @@ def list_promo_sliders(a=Depends(get_current_admin)):
             "merchant_phone": d.get("merchant_phone", ""),
             "source":         d.get("source", "admin"),
             "source_banner_id": d.get("source_banner_id", ""),
+            "city":           d.get("city", ""),
+            "store_id":       str(d.get("store_id", "") or ""),
+            "store_name":     d.get("store_name", ""),
             # audit
             "created_at":    created_str,
         })
@@ -2207,17 +2208,53 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
 @router.get("/merchant-banners")
 def list_merchant_banners(a=Depends(get_current_admin)):
     """All merchant-submitted banners with approval status.
-    Only returns pending/rejected — approved ones live in promo_sliders to avoid duplicates."""
+    Only returns pending/rejected — approved ones live in promo_sliders to avoid duplicates.
+    Auto-enriches city/store_name from stores collection when missing (fixes old records)."""
     result = []
     for b in db.merchant_banners.find().sort("created_at", -1):
         approval_status = b.get("approval_status", "pending_approval")
         # Skip approved — they are already in promo_sliders (source_banner_id links them)
         if approval_status == "approved":
             continue
+
+        store_id   = str(b.get("store_id",   "") or "").strip()
+        city       = str(b.get("city", "")       or b.get("store_city", "") or "").strip()
+        store_name = str(b.get("store_name", "") or "").strip()
+        merchant_id    = str(b.get("merchant_id",    "") or "").strip()
+        merchant_phone = str(b.get("merchant_phone", b.get("phone", "")) or "").strip()
+
+        # Enrich missing city/store_name from stores collection (fixes old records created before city was saved)
+        if not city or not store_name:
+            store_doc = None
+            if store_id:
+                try:
+                    store_doc = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1, "store_name": 1})
+                except Exception:
+                    pass
+            if not store_doc and merchant_id:
+                store_doc = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1, "store_name": 1, "_id": 1})
+            if not store_doc and merchant_phone:
+                store_doc = db.stores.find_one({"merchant_phone": merchant_phone}, {"city": 1, "store_name": 1, "_id": 1})
+            if store_doc:
+                if not city:       city       = str(store_doc.get("city",       "") or "")
+                if not store_name: store_name = str(store_doc.get("store_name", "") or "")
+                if not store_id:   store_id   = str(store_doc.get("_id",        "") or "")
+            # Persist the enriched data back so it only needs to be looked up once
+            if (city or store_name) and (not b.get("city") or not b.get("store_name")):
+                try:
+                    db.merchant_banners.update_one(
+                        {"_id": b["_id"]},
+                        {"$set": {k: v for k, v in
+                                  {"city": city, "store_name": store_name, "store_id": store_id}.items() if v}}
+                    )
+                except Exception:
+                    pass
+
         result.append({
             "_id":            str(b["_id"]),
+            "merchant_id":    merchant_id,
             "merchant_name":  b.get("merchant_name", ""),
-            "merchant_phone": str(b.get("merchant_phone", b.get("phone", ""))),
+            "merchant_phone": merchant_phone,
             "title":          b.get("title", ""),
             "image_url":      b.get("image_url", ""),
             "duration_days":  b.get("duration_days", b.get("duration", 30)),
@@ -2227,12 +2264,13 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             "end_date":       b.get("end_date", ""),
             "invoice_no":     b.get("invoice_no", ""),
             "amount":         b.get("total", 0),
-            "created_at":     b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at",""))[:16],
-            "store_id":       str(b.get("store_id", "")),
-            "city":           b.get("city", "") or b.get("store_city", ""),
-            "store_name":     b.get("store_name", ""),
+            "created_at":     b["created_at"].strftime("%d %b %Y %H:%M") if isinstance(b.get("created_at"), datetime) else str(b.get("created_at", ""))[:16],
+            "store_id":       store_id,
+            "city":           city,
+            "store_name":     store_name,
         })
     return result
+
 
 @router.put("/merchant-banners/{bid}/approve")
 def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
@@ -2241,6 +2279,25 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     if not b: raise HTTPException(404, "Banner not found")
     db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"approval_status":"approved","approved_at":datetime.utcnow()}})
     # TASK 9 FIX: upsert into promo_sliders — never create duplicates
+    # Enrich city/store_name from stores if missing on old records
+    _approve_city       = str(b.get("city", "")       or "").strip()
+    _approve_store_id   = str(b.get("store_id", "")   or "").strip()
+    _approve_store_name = str(b.get("store_name", "") or "").strip()
+    if not _approve_city or not _approve_store_name:
+        _st_doc = None
+        if _approve_store_id:
+            try: _st_doc = db.stores.find_one({"_id": ObjectId(_approve_store_id)}, {"city":1,"store_name":1})
+            except Exception: pass
+        if not _st_doc:
+            _st_doc = db.stores.find_one({"merchant_id": str(b.get("merchant_id",""))}, {"city":1,"store_name":1,"_id":1})
+        if _st_doc:
+            if not _approve_city:       _approve_city       = str(_st_doc.get("city","")       or "")
+            if not _approve_store_name: _approve_store_name = str(_st_doc.get("store_name","") or "")
+            if not _approve_store_id:   _approve_store_id   = str(_st_doc.get("_id","")        or "")
+        # Persist back to merchant_banners too
+        if _approve_city or _approve_store_name:
+            db.merchant_banners.update_one({"_id": ObjectId(bid)},
+                {"$set": {k: v for k, v in {"city": _approve_city, "store_name": _approve_store_name, "store_id": _approve_store_id}.items() if v}})
     db.promo_sliders.update_one(
         {"source_banner_id": bid},
         {"$set": {
@@ -2252,6 +2309,13 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
             "source_banner_id": bid,
             "merchant_name": b.get("merchant_name",""),
             "expires_at":    b.get("end_date",""),
+            "from_date":     b.get("from_date",""),
+            "end_date":      b.get("end_date",""),
+            "duration_days": b.get("duration_days",""),
+            "merchant_phone": b.get("merchant_phone",""),
+            "city":          _approve_city,
+            "store_id":      _approve_store_id,
+            "store_name":    _approve_store_name,
             "updated_at":    datetime.utcnow().isoformat(),
         },
          "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}},
