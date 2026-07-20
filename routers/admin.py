@@ -422,14 +422,24 @@ def list_accounts(a=Depends(get_current_admin)):
         store_count = 0
         product_count = 0
         banner_count = 0
-        if eff_mid or phone:
-            store_q = _or_query(eff_mid, phone)
-            store_count   = db.stores.count_documents(store_q)
-            product_count = (
-                db.merchant_vouchers.count_documents(_or_query(eff_mid, phone)) +
-                db.gift_vouchers.count_documents(_or_query(eff_mid, phone))
-            )
-            banner_count = db.merchant_banners.count_documents(_or_query(eff_mid, phone))
+
+        # Build a broad store query: check by merchant_id (all 3 variants) + merchant_phone
+        def _broad_store_q(mid_val, acc_id, phone_val):
+            parts = []
+            if mid_val:   parts.append({"merchant_id": mid_val})
+            if acc_id:    parts.append({"merchant_id": acc_id})   # acct_id as merchant_id
+            if phone_val: parts.append({"merchant_phone": phone_val})
+            if len(parts) == 0: return {"_id": None}
+            if len(parts) == 1: return parts[0]
+            return {"$or": parts}
+
+        broad_q = _broad_store_q(eff_mid, acct_id, phone)
+        store_count   = db.stores.count_documents(broad_q)
+        product_count = (
+            db.merchant_vouchers.count_documents(broad_q) +
+            db.gift_vouchers.count_documents(broad_q)
+        )
+        banner_count = db.merchant_banners.count_documents(broad_q)
 
         # Auto-promote: if this account has stores but lacks merchant role, fix it in DB
         if store_count > 0 and "merchant" not in roles:
@@ -551,16 +561,34 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
         if ph_v:  parts.append({"merchant_phone": ph_v})
         return {"$or": parts} if len(parts) > 1 else (parts[0] if parts else {"_id": None})
 
-    if is_merchant and (eff_mid or phone):
-        store_count   = db.stores.count_documents(_or_q(eff_mid, phone))
-        banner_count  = db.merchant_banners.count_documents(_or_q(eff_mid, phone))
-        voucher_count = (
-            db.merchant_vouchers.count_documents(_or_q(eff_mid, phone)) +
-            db.gift_vouchers.count_documents(_or_q(eff_mid, phone))
-        )
+    # Query stores/products for ALL accounts (not just merchants) — handles
+    # accounts created as "user" that also have stores linked via acct_id.
+    def _broad_q(mid_v, acc_id, ph_v):
+        parts = []
+        if mid_v:  parts.append({"merchant_id": mid_v})
+        if acc_id: parts.append({"merchant_id": acc_id})
+        if ph_v:   parts.append({"merchant_phone": ph_v})
+        if not parts: return {"_id": None}
+        return {"$or": parts} if len(parts) > 1 else parts[0]
 
+    broad_store_q = _broad_q(eff_mid, acct_id, phone)
+    store_count   = db.stores.count_documents(broad_store_q)
+    banner_count  = db.merchant_banners.count_documents(broad_store_q)
+    voucher_count = (
+        db.merchant_vouchers.count_documents(broad_store_q) +
+        db.gift_vouchers.count_documents(broad_store_q)
+    )
+
+    # Auto-promote in detail view too
+    if store_count > 0 and "merchant" not in roles:
+        db.accounts.update_one({"_id": acct["_id"]}, {"$addToSet": {"roles": "merchant"}})
+        roles = list(set(roles + ["merchant"]))
+        is_merchant = True
+        if not eff_mid: eff_mid = acct_id
+
+    if eff_mid or phone:
         for s in db.subscriptions.find(
-            _or_q(eff_mid, phone)
+            broad_store_q
         ).sort("created_at", -1).limit(5):
             subscriptions.append({
                 "plan":       s.get("plan",""),
@@ -569,8 +597,8 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
                 "status":     s.get("status",""),
             })
 
-        for inv in db.invoices.find(
-            _or_q(eff_mid, phone)
+    for inv in db.invoices.find(
+            broad_store_q
         ).sort("created_at", -1).limit(10):
             invoices.append({
                 "invoice_no":  inv.get("invoice_no",""),
