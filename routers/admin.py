@@ -434,18 +434,7 @@ def list_accounts(a=Depends(get_current_admin)):
             return {"$or": parts}
 
         broad_q = _broad_store_q(eff_mid, acct_id, phone)
-        # Auto-activate: draft stores that have a paid subscription → waiting_approval
-        for draft_s in db.stores.find({**broad_q, "status": "draft"}):
-            paid_sub = db.subscriptions.find_one({
-                "store_id": str(draft_s["_id"]),
-                "status": {"$in": ["paid", "active"]},
-            })
-            if paid_sub:
-                db.stores.update_one(
-                    {"_id": draft_s["_id"]},
-                    {"$set": {"status": "waiting_approval"}}
-                )
-        # Only count non-draft stores for the Accounts table
+        # Count only non-draft stores for the Accounts table
         active_store_q = {**broad_q, "status": {"$in": ["active", "waiting_approval", "inactive"]}}
         store_count   = db.stores.count_documents(active_store_q)
         product_count = (
