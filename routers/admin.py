@@ -406,8 +406,8 @@ def list_accounts(a=Depends(get_current_admin)):
         acct_id = str(acct["_id"])
         mid     = acct.get("merchant_id", "")
 
-        total_pts = (acct.get("visit_pts", acct.get("visit_points", 0) or 0) +
-                     acct.get("pool_pts", 0))
+        total_pts = ((acct.get("visit_pts") or acct.get("visit_points") or 0) +
+                     (acct.get("pool_pts") or 0))
 
         is_merchant = "merchant" in roles
         # mid may be missing from account doc; fall back to acct_id for merchant accounts
@@ -464,9 +464,9 @@ def list_accounts(a=Depends(get_current_admin)):
             "roles":         roles,
             "status":        acct.get("status", "active"),
             "total_points":  total_pts,
-            "visit_pts":     acct.get("visit_pts", acct.get("visit_points", 0) or 0),
-            "pool_pts":      acct.get("pool_pts", 0),
-            "scans":         acct.get("scans", 0),
+            "visit_pts":     (acct.get("visit_pts") or acct.get("visit_points") or 0),
+            "pool_pts":      (acct.get("pool_pts") or 0),
+            "scans":         (acct.get("scans") or 0),
             "store_count":   store_count,
             "product_count": product_count,
             "banner_count":  banner_count,
@@ -611,8 +611,8 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
                 "created_at":  str(inv.get("created_at",""))[:10],
             })
 
-    visit_pts = acct.get("visit_pts", acct.get("visit_points", 0) or 0)
-    pool_pts  = acct.get("pool_pts", 0)
+    visit_pts = (acct.get("visit_pts") or acct.get("visit_points") or 0)
+    pool_pts  = (acct.get("pool_pts") or 0)
 
     # Build stores list with status + product counts for View modal
     stores_list = []
