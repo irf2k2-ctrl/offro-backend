@@ -431,6 +431,17 @@ def list_accounts(a=Depends(get_current_admin)):
             )
             banner_count = db.merchant_banners.count_documents(_or_query(eff_mid, phone))
 
+        # Auto-promote: if this account has stores but lacks merchant role, fix it in DB
+        if store_count > 0 and "merchant" not in roles:
+            db.accounts.update_one(
+                {"_id": acct["_id"]},
+                {"$addToSet": {"roles": "merchant"}}
+            )
+            roles = list(set(roles + ["merchant"]))
+            is_merchant = True
+            if not eff_mid:
+                eff_mid = acct_id
+
         result.append({
             "account_id":    acct_id,
             "merchant_id":   eff_mid,
@@ -450,6 +461,55 @@ def list_accounts(a=Depends(get_current_admin)):
             "created_at":    str(acct.get("created_at", ""))[:10],
         })
     return result
+
+
+@router.post("/accounts/fix-roles")
+def fix_account_roles(a=Depends(get_current_admin)):
+    """
+    Batch-fix: any account that has stores but lacks 'merchant' in roles
+    gets merchant role added. Safe to run multiple times (idempotent).
+    Returns a summary of accounts that were updated.
+    """
+    fixed = []
+    skipped = 0
+    for acct in db.accounts.find():
+        acct_id = str(acct["_id"])
+        phone   = acct.get("phone", "")
+        mid     = acct.get("merchant_id", acct_id)
+        roles   = acct.get("roles", ["user"])
+
+        phone_variants = []
+        if phone:
+            p = phone.strip().replace(" ", "").replace("-", "")
+            last10 = p[-10:] if len(p) >= 10 else p
+            phone_variants = list({p, last10, "+91" + last10, "91" + last10})
+
+        parts = [{"merchant_id": mid}, {"merchant_id": acct_id}]
+        if phone_variants:
+            parts.append({"merchant_phone": {"$in": phone_variants}})
+        store_q = {"$or": parts}
+        store_count = db.stores.count_documents(store_q)
+
+        if store_count > 0 and "merchant" not in roles:
+            db.accounts.update_one(
+                {"_id": acct["_id"]},
+                {"$addToSet": {"roles": "merchant"}}
+            )
+            fixed.append({
+                "account_id": acct_id,
+                "name":       acct.get("name", ""),
+                "phone":      phone,
+                "stores":     store_count,
+                "old_roles":  roles,
+                "new_roles":  list(set(roles + ["merchant"])),
+            })
+        else:
+            skipped += 1
+
+    return {
+        "message": f"Fixed {len(fixed)} account(s). {skipped} already correct.",
+        "fixed":   fixed,
+    }
 
 
 @router.get("/accounts/{account_id}")
