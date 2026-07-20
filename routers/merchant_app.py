@@ -1148,6 +1148,19 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     if disc_code:
         db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
 
+    # Read store/city from Flutter payload (Flutter sends these on activation)
+    store_id   = (data.get("store_id")   or "").strip()
+    store_name = (data.get("store_name") or "").strip()
+    city       = (data.get("city")       or "").strip()
+    # Fallback: look up city from store record if not provided directly
+    if not city and store_id:
+        try:
+            st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
+            if st:
+                city = st.get("city", "")
+        except Exception:
+            pass
+
     banner = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
@@ -1155,6 +1168,9 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "title":            title,
         "image_url":        image_url,
         "image_thumb":      image_thumb,
+        "store_id":         store_id,
+        "store_name":       store_name,
+        "city":             city,
         "duration_days":    order.get("days", 30),
         "from_date":        order.get("from_date", ""),
         "end_date":         order.get("end_date", ""),
@@ -1172,7 +1188,8 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     }
     res = db.merchant_banners.insert_one(banner)
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
-        {"$set": {"status": "submitted", "banner_id": str(res.inserted_id)}})
+        {"$set": {"status": "submitted", "banner_id": str(res.inserted_id),
+                  "store_id": store_id, "city": city}})
 
     # Write free invoice for record-keeping
     invoice_no = f"BNR-FREE-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
@@ -1232,6 +1249,19 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
 
+    # Read store/city from Flutter payload (Flutter sends these on payment verification)
+    store_id   = (data.get("store_id")   or "").strip()
+    store_name = (data.get("store_name") or "").strip()
+    city       = (data.get("city")       or "").strip()
+    # Fallback: look up city from store record if not provided directly
+    if not city and store_id:
+        try:
+            st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
+            if st:
+                city = st.get("city", "")
+        except Exception:
+            pass
+
     banner = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
@@ -1239,6 +1269,9 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "title":            title,
         "image_url":        image_url,
         "image_thumb":      image_thumb,
+        "store_id":         store_id,
+        "store_name":       store_name,
+        "city":             city,
         "duration_days":    order.get("days", 30),
         "from_date":        order.get("from_date", ""),
         "end_date":         order.get("end_date", ""),
@@ -1258,7 +1291,8 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     }
     res = db.merchant_banners.insert_one(banner)
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
-        {"$set": {"status": "paid", "banner_id": str(res.inserted_id)}})
+        {"$set": {"status": "paid", "banner_id": str(res.inserted_id),
+                  "store_id": store_id, "city": city}})
 
     # Generate invoice for banner payment (mirrors store subscription verify_payment)
     invoice_no = f"BNR-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
