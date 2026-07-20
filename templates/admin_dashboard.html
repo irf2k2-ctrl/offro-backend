@@ -1521,6 +1521,8 @@ async function loadDiscounts() {
   try {
     let r = await fetch("/admin/discounts", {credentials:"include"});
     if (!r.ok) return;
+    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+    if (!r.ok) { console.error('loadDiscounts error', r.status); return; }
     allDiscounts = await r.json();
     document.getElementById("disc_total_count").innerText = allDiscounts.length;
     document.getElementById("disc_active_count").innerText = allDiscounts.filter(d=>d.active).length;
@@ -1743,6 +1745,8 @@ async function loadStats() {
 async function loadCategories(){
   try{
     let r=await fetch("/admin/categories",{credentials:"include"});
+    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+    if (!r.ok) { console.error('loadCategories error', r.status); return; }
     if(r.ok){ categoriesList=await r.json(); }
   }catch{}
 }
@@ -2042,7 +2046,13 @@ async function loadStores(){
   document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--muted)"><div class="spinner-border spinner-border-sm text-success me-2"></div>Loading stores...</td></tr>`;
   try {
     let r=await fetch("/admin/stores",{credentials:"include"});
-    allStores=await r.json();
+    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+    const raw=await r.json();
+    if (!r.ok) {
+      document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:24px;color:#c0392b;">⚠️ ${raw.detail||('Server error '+r.status)}</td></tr>`;
+      return;
+    }
+    allStores=Array.isArray(raw)?raw:[];
     populateCityFilter("store_city_filter",allStores,"city");
     filterStores();
   } catch(e) {
@@ -2473,6 +2483,8 @@ async function deleteStore(id){if(!confirm("Delete this store?"))return;await fe
 async function loadUsers(){
   let r=await fetch("/admin/users",{credentials:"include"});
   if(!r.ok){window.location.href="/admin";return;}
+  if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+  if (!r.ok) { console.error('loadUsers error', r.status); return; }
   allUsers=await r.json();filterUsers();
 }
 function filterUsers(){
@@ -3886,6 +3898,8 @@ async function loadProductReviews() {
   tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading...</td></tr>`;
   try {
     const r = await fetch("/admin/product-reviews", { credentials:"include" });
+    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+    if (!r.ok) { console.error('loadProductReviews error', r.status); return; }
     _prodReviewsCache = await r.json();
     _renderProductReviews(_prodReviewsCache);
   } catch(e) {
@@ -3966,6 +3980,8 @@ async function loadReviews() {
   tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin me-2"></i>Loading reviews...</td></tr>`;
   try {
     const r = await fetch("/admin/reviews", { credentials:"include" });
+    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+    if (!r.ok) { console.error('loadReviews error', r.status); return; }
     _reviewsCache = await r.json();
     _renderReviews(_reviewsCache);
   } catch(e) {
@@ -5941,7 +5957,22 @@ async function grantMerchantRole(accountId, name) {
 async function loadAccounts() {
   try {
     const r = await fetch('/admin/accounts', {credentials:'include'});
-    accountsList = await r.json();
+    if (r.status === 401 || r.status === 403) { window.location.href = '/admin'; return; }
+    if (!r.ok) {
+      let errMsg = 'Server error ' + r.status;
+      try { const e = await r.json(); errMsg = e.detail || errMsg; } catch(_) {}
+      const tb = document.getElementById('accounts_table');
+      if (tb) tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:32px;color:#c0392b;">
+        ⚠️ Failed to load accounts: ${errMsg}<br>
+        <button onclick="loadAccounts()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button>
+      </td></tr>`;
+      return;
+    }
+    const raw = await r.json();
+    accountsList = Array.isArray(raw) ? raw.filter(a => a.account_id !== '__errors__') : [];
+    // Log debug errors if any
+    const errRec = Array.isArray(raw) ? raw.find(a => a.account_id === '__errors__') : null;
+    if (errRec && errRec._debug_errors) console.warn('Accounts with parse errors:', errRec._debug_errors);
     // Populate city filter
     const cities = [...new Set(accountsList.map(a=>a.city).filter(Boolean))].sort();
     const cityEl = document.getElementById('acct_city_filter');
@@ -5951,7 +5982,14 @@ async function loadAccounts() {
     }
     _acctPage = 1;
     filterAccounts();
-  } catch(e) { console.error('loadAccounts error', e); }
+  } catch(e) {
+    console.error('loadAccounts error', e);
+    const tb = document.getElementById('accounts_table');
+    if (tb) tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:32px;color:#c0392b;">
+      ⚠️ Network error loading accounts.<br>
+      <button onclick="loadAccounts()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button>
+    </td></tr>`;
+  }
 }
 
 function filterAccounts() {
@@ -6233,6 +6271,8 @@ async function loadAdminBanners() {
   try {
     const r = await fetch('/admin/banners', {credentials:'include'});
     if (!r.ok) throw new Error(await r.text());
+    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+    if (!r.ok) { console.error('loadAdminBanners error', r.status); return; }
     const data = await r.json();
     _adminBannersList = Array.isArray(data) ? data : [];
     renderAdminBanners();
@@ -6560,6 +6600,8 @@ async function loadDefaultImages() {
   try {
     const r = await fetch('/admin/default-images', {credentials:'include'});
     if (!r.ok) throw new Error(await r.text());
+    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+    if (!r.ok) { console.error('loadDefaultImages error', r.status); return; }
     const d = await r.json();
     for (const type of ['store', 'product', 'offer', 'city', 'merchant_banner']) {
       const urls = Array.isArray(d[type]) ? d[type] : (d[type] ? [d[type]] : []);
@@ -6752,6 +6794,8 @@ async function loadPopupCampaigns() {
   try {
     const r = await fetch('/admin/popup-campaigns', { credentials: 'include' });
     if (!r.ok) throw new Error(await r.text());
+    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+    if (!r.ok) { console.error('loadPopupCampaigns error', r.status); return; }
     const data = await r.json();
     if (!data.length) {
       tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">No campaigns yet. Click "+ New Campaign" to create one.</td></tr>';

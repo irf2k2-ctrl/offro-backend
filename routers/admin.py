@@ -398,82 +398,128 @@ def delete_merchant(id: str, a=Depends(get_current_admin)):
 
 @router.get("/accounts")
 def list_accounts(a=Depends(get_current_admin)):
-    """Unified accounts view — single accounts collection."""
+    """Unified accounts view — single accounts collection. Bulletproof version."""
     result = []
-    for acct in db.accounts.find().sort("created_at", -1):
-        phone   = acct.get("phone", "")
-        roles   = acct.get("roles", ["user"])
-        acct_id = str(acct["_id"])
-        mid     = acct.get("merchant_id", "")
+    _errors = []
 
-        total_pts = ((acct.get("visit_pts") or acct.get("visit_points") or 0) +
-                     (acct.get("pool_pts") or 0))
+    try:
+        all_accounts = list(db.accounts.find().sort("created_at", -1))
+    except Exception as e:
+        raise HTTPException(500, f"DB fetch failed: {e}")
 
-        is_merchant = "merchant" in roles
-        # mid may be missing from account doc; fall back to acct_id for merchant accounts
-        eff_mid = mid or (acct_id if is_merchant else "")
+    for acct in all_accounts:
+        try:
+            phone   = str(acct.get("phone") or "")
+            roles   = acct.get("roles") or ["user"]
+            if not isinstance(roles, list):
+                roles = [str(roles)]
+            acct_id = str(acct["_id"])
+            mid     = str(acct.get("merchant_id") or "")
 
-        def _or_query(mid_val, phone_val):
-            parts = []
-            if mid_val:  parts += [{"merchant_id": mid_val}]
-            if phone_val: parts += [{"merchant_phone": phone_val}]
-            return {"$or": parts} if len(parts) > 1 else (parts[0] if parts else {"_id": None})
+            visit_pts = acct.get("visit_pts") or acct.get("visit_points") or 0
+            pool_pts  = acct.get("pool_pts") or 0
+            try:
+                visit_pts = int(visit_pts)
+                pool_pts  = int(pool_pts)
+            except Exception:
+                visit_pts = 0
+                pool_pts  = 0
+            total_pts = visit_pts + pool_pts
 
-        store_count = 0
-        product_count = 0
-        banner_count = 0
+            is_merchant = "merchant" in roles
+            eff_mid = mid or (acct_id if is_merchant else "")
 
-        # Build a broad store query: check by merchant_id (all 3 variants) + merchant_phone
-        def _broad_store_q(mid_val, acc_id, phone_val):
-            parts = []
-            if mid_val:   parts.append({"merchant_id": mid_val})
-            if acc_id:    parts.append({"merchant_id": acc_id})   # acct_id as merchant_id
-            if phone_val: parts.append({"merchant_phone": phone_val})
-            if len(parts) == 0: return {"_id": None}
-            if len(parts) == 1: return parts[0]
-            return {"$or": parts}
+            # Build store query — handles all merchant_id variants + phone
+            def _bsq(mv, aid, ph):
+                parts = []
+                if mv:  parts.append({"merchant_id": mv})
+                if aid and aid != mv: parts.append({"merchant_id": aid})
+                if ph:  parts.append({"merchant_phone": ph})
+                if not parts: return {"_id": None}
+                return parts[0] if len(parts) == 1 else {"$or": parts}
 
-        broad_q = _broad_store_q(eff_mid, acct_id, phone)
-        # Count only non-draft stores for the Accounts table
-        active_store_q = {**broad_q, "status": {"$in": ["active", "waiting_approval", "inactive"]}}
-        store_count   = db.stores.count_documents(active_store_q)
-        product_count = (
-            db.merchant_vouchers.count_documents(broad_q) +
-            db.gift_vouchers.count_documents(broad_q)
-        )
-        banner_count = db.merchant_banners.count_documents(broad_q)
+            bq = _bsq(eff_mid, acct_id, phone)
+            active_sq = {"status": {"$in": ["active", "waiting_approval", "inactive"]}}
+            if "$or" in bq:
+                store_q = {"$and": [bq, active_sq]}
+            else:
+                store_q = {**bq, **active_sq}
 
-        # Auto-promote: if this account has stores but lacks merchant role, fix it in DB
-        if store_count > 0 and "merchant" not in roles:
-            db.accounts.update_one(
-                {"_id": acct["_id"]},
-                {"$addToSet": {"roles": "merchant"}}
-            )
-            roles = list(set(roles + ["merchant"]))
-            is_merchant = True
-            if not eff_mid:
-                eff_mid = acct_id
+            store_count   = int(db.stores.count_documents(store_q)         or 0)
+            product_count = int((db.merchant_vouchers.count_documents(bq)  or 0) +
+                                (db.gift_vouchers.count_documents(bq)      or 0))
+            banner_count  = int(db.merchant_banners.count_documents(bq)    or 0)
 
-        result.append({
-            "account_id":    acct_id,
-            "merchant_id":   eff_mid,
-            "user_id":       acct.get("user_id", acct_id),
-            "full_name":     acct.get("name", ""),
-            "mobile_number": phone,
-            "city":          acct.get("city", ""),
-            "roles":         roles,
-            "status":        acct.get("status", "active"),
-            "total_points":  total_pts,
-            "visit_pts":     (acct.get("visit_pts") or acct.get("visit_points") or 0),
-            "pool_pts":      (acct.get("pool_pts") or 0),
-            "scans":         (acct.get("scans") or 0),
-            "store_count":   store_count,
-            "product_count": product_count,
-            "banner_count":  banner_count,
-            "created_at":    str(acct.get("created_at", ""))[:10],
-        })
+            # Auto-promote: if account has stores but no merchant role
+            if store_count > 0 and "merchant" not in roles:
+                try:
+                    db.accounts.update_one(
+                        {"_id": acct["_id"]},
+                        {"$addToSet": {"roles": "merchant"}}
+                    )
+                except Exception:
+                    pass
+                roles = list(set(roles + ["merchant"]))
+                is_merchant = True
+                if not eff_mid:
+                    eff_mid = acct_id
+
+            result.append({
+                "account_id":    acct_id,
+                "merchant_id":   eff_mid,
+                "user_id":       acct.get("user_id", acct_id),
+                "full_name":     str(acct.get("name") or ""),
+                "mobile_number": phone,
+                "city":          str(acct.get("city") or ""),
+                "roles":         roles,
+                "status":        str(acct.get("status") or "active"),
+                "total_points":  total_pts,
+                "visit_pts":     visit_pts,
+                "pool_pts":      pool_pts,
+                "scans":         int(acct.get("scans") or 0),
+                "store_count":   store_count,
+                "product_count": product_count,
+                "banner_count":  banner_count,
+                "created_at":    str(acct.get("created_at", ""))[:10],
+            })
+        except Exception as e:
+            _errors.append({"id": str(acct.get("_id", "?")), "error": str(e)})
+            continue
+
+    # Attach errors at end for debugging (won't break the dashboard)
+    if _errors:
+        result.append({"_debug_errors": _errors, "account_id": "__errors__",
+                        "full_name": f"[{len(_errors)} accounts had errors]",
+                        "mobile_number": "", "city": "", "roles": ["__debug__"],
+                        "status": "error", "total_points": 0, "store_count": 0,
+                        "product_count": 0, "banner_count": 0, "created_at": ""})
     return result
 
+
+
+
+@router.get("/accounts/debug")
+def accounts_debug(a=Depends(get_current_admin)):
+    """Debug endpoint — returns raw info about why accounts may fail."""
+    try:
+        count = db.accounts.count_documents({})
+        sample = None
+        err = None
+        try:
+            raw = db.accounts.find_one()
+            if raw:
+                sample = {k: str(v)[:80] for k, v in raw.items() if k != '_id'}
+                sample['_id'] = str(raw['_id'])
+        except Exception as e2:
+            err = str(e2)
+        return {
+            "ok": True,
+            "accounts_count": count,
+            "sample_account": sample,
+            "sample_error": err,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 @router.post("/accounts/fix-roles")
 def fix_account_roles(a=Depends(get_current_admin)):
