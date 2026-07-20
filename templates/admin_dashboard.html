@@ -2803,8 +2803,10 @@ async function loadSliders() {
       const isMerchantBanner = !!(s.source_banner_id || s.source === 'merchant');
       return {
         _id:           s.id || s._id,
-        _source:       'admin',
+        _source:       isMerchantBanner ? 'merchant' : 'admin',
         _is_merchant_approved: isMerchantBanner,
+        is_active:     s.is_active !== false,
+        deleted_by_admin: !!(s.deleted_by_admin),
         image_url:     s.image_url || '',
         title:         s.title || '',
         subtitle:      s.link_url || '',
@@ -2817,6 +2819,7 @@ async function loadSliders() {
         sort_order:    s.sort_order || 0,
         created_at:    s.created_at || '',
         source_banner_id: s.source_banner_id || '',
+        invoice_no:    s.invoice_no || '',
         city:          s.city       || '',
         store_id:      s.store_id   || '',
         store_name:    s.store_name || '',

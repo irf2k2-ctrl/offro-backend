@@ -1799,6 +1799,10 @@ def list_promo_sliders(a=Depends(get_current_admin)):
             "store_name":     d.get("store_name", ""),
             # audit
             "created_at":    created_str,
+            # soft-delete & toggle fields
+            "deleted_by_admin": d.get("deleted_by_admin", False),
+            "invoice_no":    d.get("invoice_no", ""),
+            "approval_status": d.get("approval_status", "approved"),
         })
     return result
 
