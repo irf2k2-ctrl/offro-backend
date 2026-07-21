@@ -1313,6 +1313,9 @@ def get_gift_vouchers_public(city: str = ""):
     for d in db.gift_vouchers.find({"product_type": {"$ne": "standard"}}).sort("_id", -1):
         if not _is_active(d): continue
         if _is_expired(d): continue
+        # Skip if admin explicitly expired or rejected:
+        _as = d.get("approval_status", d.get("status", ""))
+        if _as in ("expired", "rejected", "removed"): continue
         vid = str(d["_id"])
         if vid in seen_ids: continue
         # City filter: check product's own city OR its store's city
@@ -1350,6 +1353,9 @@ def get_gift_vouchers_public(city: str = ""):
     for p in db.products.find({}).sort("_id", -1):
         if not _is_active(p): continue
         if _is_expired(p): continue
+        # Skip if admin explicitly expired or rejected:
+        _ps = p.get("approval_status", p.get("status", ""))
+        if _ps in ("expired", "rejected", "removed"): continue
         pid = str(p["_id"])
         if pid in seen_ids: continue
         # City filter: check product's own city OR its store's city

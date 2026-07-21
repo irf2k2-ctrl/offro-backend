@@ -2212,14 +2212,16 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
 @router.get("/merchant-banners")
 def list_merchant_banners(a=Depends(get_current_admin)):
     """All merchant-submitted banners with approval status.
-    Only returns pending/rejected — approved ones live in promo_sliders to avoid duplicates.
+    Returns ALL banners: pending/rejected from merchant_banners + approved from promo_sliders.
     Auto-enriches city/store_name from stores collection when missing (fixes old records)."""
     result = []
-    for b in db.merchant_banners.find().sort("created_at", -1):
-        approval_status = b.get("approval_status", "pending_approval")
-        # Skip approved — they are already in promo_sliders (source_banner_id links them)
-        if approval_status == "approved":
-            continue
+    seen_ids = set()
+
+    def _enrich_and_build(b, source_col="merchant_banners", override_status=None):
+        bid_str = str(b["_id"])
+        if bid_str in seen_ids:
+            return None
+        seen_ids.add(bid_str)
 
         store_id   = str(b.get("store_id",   "") or "").strip()
         city       = str(b.get("city", "")       or b.get("store_city", "") or "").strip()
@@ -2227,14 +2229,11 @@ def list_merchant_banners(a=Depends(get_current_admin)):
         merchant_id    = str(b.get("merchant_id",    "") or "").strip()
         merchant_phone = str(b.get("merchant_phone", b.get("phone", "")) or "").strip()
 
-        # Enrich missing city/store_name from stores collection (fixes old records created before city was saved)
         if not city or not store_name:
             store_doc = None
             if store_id:
-                try:
-                    store_doc = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1, "store_name": 1})
-                except Exception:
-                    pass
+                try: store_doc = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1, "store_name": 1})
+                except Exception: pass
             if not store_doc and merchant_id:
                 store_doc = db.stores.find_one({"merchant_id": merchant_id}, {"city": 1, "store_name": 1, "_id": 1})
             if not store_doc and merchant_phone:
@@ -2243,27 +2242,29 @@ def list_merchant_banners(a=Depends(get_current_admin)):
                 if not city:       city       = str(store_doc.get("city",       "") or "")
                 if not store_name: store_name = str(store_doc.get("store_name", "") or "")
                 if not store_id:   store_id   = str(store_doc.get("_id",        "") or "")
-            # Persist the enriched data back so it only needs to be looked up once
             if (city or store_name) and (not b.get("city") or not b.get("store_name")):
                 try:
-                    db.merchant_banners.update_one(
+                    db[source_col].update_one(
                         {"_id": b["_id"]},
                         {"$set": {k: v for k, v in
                                   {"city": city, "store_name": store_name, "store_id": store_id}.items() if v}}
                     )
-                except Exception:
-                    pass
+                except Exception: pass
 
-        is_active       = bool(b.get("is_active", True))
+        approval_status = override_status or b.get("approval_status", b.get("status", "pending_approval"))
+        is_active        = bool(b.get("is_active", True))
         deleted_by_admin = bool(b.get("deleted_by_admin", False))
-        result.append({
-            "_id":             str(b["_id"]),
+        if deleted_by_admin:
+            approval_status = "removed"
+        return {
+            "_id":             bid_str,
             "merchant_id":     merchant_id,
             "merchant_name":   b.get("merchant_name", ""),
             "merchant_phone":  merchant_phone,
             "title":           b.get("title", ""),
             "image_url":       b.get("image_url", ""),
             "duration_days":   b.get("duration_days", b.get("duration", 30)),
+            "duration":        b.get("duration_days", b.get("duration", 30)),
             "plan":            b.get("plan", ""),
             "status":          approval_status,
             "from_date":       b.get("from_date", b.get("start_date", "")),
@@ -2276,8 +2277,26 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             "store_name":      store_name,
             "is_active":       is_active,
             "deleted_by_admin": deleted_by_admin,
-        })
+            "source":          source_col,
+        }
+
+    # ── 1. All merchant_banners (pending, rejected, removed) ──
+    for b in db.merchant_banners.find().sort("created_at", -1):
+        row = _enrich_and_build(b, "merchant_banners")
+        if row:
+            result.append(row)
+
+    # ── 2. promo_sliders — approved merchant banners (have source_banner_id) ──
+    for s in db.promo_sliders.find({"source_banner_id": {"$exists": True, "$ne": ""}}).sort("created_at", -1):
+        row = _enrich_and_build(s, "promo_sliders", override_status="approved")
+        if row:
+            result.append(row)
+
+    # Sort all combined by created_at desc
+    result.sort(key=lambda x: x.get("created_at",""), reverse=True)
     return result
+
+
 
 
 @router.put("/merchant-banners/{bid}/approve")
@@ -2452,19 +2471,20 @@ def toggle_merchant_banner(bid: str, a=Depends(get_current_admin)):
 
 
 def _compute_voucher_status(v):
-    """Return real-time status — auto-expire if end_date has passed."""
+    """Return real-time status — auto-expire if end_date has passed. stdlib only."""
+    from datetime import datetime as _dt
     stored = v.get("approval_status", v.get("status", "pending_approval"))
     if stored in ("pending_approval", "rejected"):
         return stored
     end_raw = v.get("end_date", "")
     if end_raw:
         try:
-            from dateutil.parser import parse as _dp
-            import pytz
-            end_dt = _dp(str(end_raw))
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=pytz.UTC)
-            now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
+            now_utc = _dt.utcnow()
+            if hasattr(end_raw, 'strftime'):
+                end_dt = end_raw
+            else:
+                s = str(end_raw).strip().replace("Z","").replace(" ","T")[:19]
+                end_dt = _dt.fromisoformat(s)
             if end_dt < now_utc:
                 try:
                     db.merchant_vouchers.update_one(

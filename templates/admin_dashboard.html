@@ -465,12 +465,13 @@ tr:hover td{background:#f7faf8;}
   <div class="table-wrap">
     <table id="bn_table">
       <thead><tr>
-        <th style="width:110px">Preview</th>
+        <th style="width:90px">Preview</th>
+        <th>Merchant</th>
         <th>Title</th>
-        <th>Merchant / Type</th>
         <th>Store</th>
         <th>City</th>
-        <th>Duration</th>
+        <th>Days</th>
+        <th>Amount</th>
         <th>Status</th>
         <th>Created On</th>
         <th>Actions</th>
@@ -5465,37 +5466,55 @@ async function loadMerchantBanners() {
   try {
     const r = await fetch('/admin/merchant-banners', {credentials:'include'});
     const data = r.ok ? await r.json() : [];
-    if (cnt) cnt.textContent = `${data.length} submitted`;
+    if (cnt) cnt.textContent = data.length + ' submitted';
     if (!data.length) {
-      el.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">No merchant banner submissions yet.</td></tr>';
+      el.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted)">No merchant banner submissions yet.</td></tr>';
       return;
     }
     el.innerHTML = data.map(b => {
       const st = b.status || 'pending_approval';
-      const badge = st === 'approved'
-        ? `<span class="badge-active">✅ Approved</span>`
-        : st === 'rejected'
-        ? `<span style="background:#fde8e8;color:#c0392b;padding:3px 10px;border-radius:12px;font-size:11px;">❌ Rejected</span>`
-        : `<span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:12px;font-size:11px;">⏳ Pending</span>`;
+      let badge;
+      if (st === 'approved' && b.is_active !== false) {
+        badge = '<span class="badge-active">✅ Approved — Live</span>';
+      } else if (st === 'approved' && b.is_active === false) {
+        badge = '<span style="background:#e9e9e9;color:#555;padding:3px 10px;border-radius:12px;font-size:11px;">⏸ Approved — Off</span>';
+      } else if (st === 'removed' || b.deleted_by_admin) {
+        badge = '<span style="background:#fde8e8;color:#c0392b;padding:3px 10px;border-radius:12px;font-size:11px;">🗑 Removed by Admin</span>';
+      } else if (st === 'rejected') {
+        badge = '<span style="background:#fde8e8;color:#c0392b;padding:3px 10px;border-radius:12px;font-size:11px;">❌ Rejected</span>';
+      } else {
+        badge = '<span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:12px;font-size:11px;">⏳ Pending</span>';
+      }
       const thumb = b.image_url
-        ? `<img src="${b.image_url.startsWith('data:') ? b.image_url : b.image_url}" style="width:80px;height:32px;object-fit:cover;border-radius:5px;border:1px solid var(--border)" onerror="this.outerHTML='<span style=color:var(--muted);font-size:11px>No image</span>'">`
-        : `<span style="color:var(--muted);font-size:11px">—</span>`;
-      const actions = (st==='pending_approval'||st==='pending')
-        ? `<button class="btn-p me-1" style="font-size:11px;padding:4px 10px" onclick="approveMerchantBanner('${b._id}')">✅ Approve</button>
-           <button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="rejectMerchantBanner('${b._id}')">❌ Reject</button>`
-        : `<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantBanner('${b._id}')">Del</button>`;
-      return `<tr>
-        <td>${thumb}</td>
-        <td style="font-size:13px">${b.merchant_name||'—'}</td>
-        <td style="font-size:13px;font-weight:600">${b.title||'—'}</td>
-        <td style="font-size:12px">${b.duration||30} days</td>
-        <td style="font-size:13px">₹${b.amount||0}</td>
-        <td>${badge}</td>
-        <td style="font-size:11px;color:var(--muted)">${b.created_at||''}</td>
-        <td>${actions}</td>
-      </tr>`;
+        ? '<img src="' + b.image_url + '" style="width:80px;height:32px;object-fit:cover;border-radius:5px;border:1px solid var(--border)" onerror="this.outerHTML='<span style=color:var(--muted);font-size:11px>No img</span>'">'
+        : '<span style="color:var(--muted);font-size:11px">—</span>';
+      const storeName = b.store_name || '—';
+      const city = b.city || '—';
+      let actions;
+      if (st === 'pending_approval' || st === 'pending') {
+        actions = '<button class="btn-p me-1" style="font-size:11px;padding:4px 10px" onclick="approveMerchantBanner('' + b._id + '')">✅ Approve</button>'
+                + '<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="rejectMerchantBanner('' + b._id + '')">❌ Reject</button>';
+      } else if (st === 'approved') {
+        const toggleLbl = b.is_active !== false ? '⏸ Turn Off' : '▶ Turn On';
+        actions = '<button class="btn-secondary me-1" style="font-size:11px;padding:4px 10px;background:#e9e9e9;border:none;border-radius:6px;cursor:pointer" onclick="toggleMerchantBanner('' + b._id + '', this)">' + toggleLbl + '</button>'
+                + '<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantBanner('' + b._id + '')">🗑 Remove</button>';
+      } else {
+        actions = '<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantBanner('' + b._id + '')">🗑 Remove</button>';
+      }
+      return '<tr>'
+        + '<td>' + thumb + '</td>'
+        + '<td style="font-size:13px">' + (b.merchant_name||'—') + '</td>'
+        + '<td style="font-size:13px;font-weight:600">' + (b.title||'—') + '</td>'
+        + '<td style="font-size:12px;color:var(--primary);font-weight:600">' + storeName + '</td>'
+        + '<td style="font-size:12px;color:var(--muted)">' + city + '</td>'
+        + '<td style="font-size:12px">' + (b.duration_days||b.duration||30) + ' days</td>'
+        + '<td style="font-size:13px">₹' + (b.amount||0) + '</td>'
+        + '<td>' + badge + '</td>'
+        + '<td style="font-size:11px;color:var(--muted)">' + (b.created_at||'') + '</td>'
+        + '<td>' + actions + '</td>'
+        + '</tr>';
     }).join('');
-  } catch(e) { if(el) el.innerHTML = `<tr><td colspan="8" style="color:red;text-align:center">${e.message}</td></tr>`; }
+  } catch(e) { if(el) el.innerHTML = '<tr><td colspan="10" style="color:red;text-align:center">' + e.message + '</td></tr>'; }
 }
 
 
