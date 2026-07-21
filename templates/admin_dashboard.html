@@ -3081,7 +3081,24 @@ function openBnViewModal(r) {
   bnViewModalInst.show();
 }
 
-function approveBnBanner(id) { approveMerchantBanner(id); }
+async function approveBnBanner(id) {
+  const btn = event?.target;
+  if (btn) { btn.disabled=true; btn.textContent='Approving...'; }
+  try {
+    const res = await fetch('/admin/merchant-banners/' + id + '/approve', {method:'PUT', credentials:'include'});
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({detail:'Unknown error'}));
+      showToast('❌ Approve failed: ' + (err.detail||res.status), 'danger');
+      if (btn) { btn.disabled=false; btn.textContent='Approve'; }
+      return;
+    }
+    showToast('✅ Banner approved and published!', 'success');
+    await loadSliders();
+  } catch(e) {
+    showToast('❌ Network error: ' + e.message, 'danger');
+    if (btn) { btn.disabled=false; btn.textContent='Approve'; }
+  }
+}
 
 async function toggleBnBanner(id, currentActive) {
   const label = currentActive ? 'Turn Off' : 'Turn On';
@@ -3248,11 +3265,31 @@ async function saveBnMerchantEdit() {
   }
 }
 
-async function deleteBnBanner(id, source) {
-  if (!confirm('Delete this banner?')) return;
-  if (source==='admin') await fetch(`/admin/promo-sliders/${id}`,{method:'DELETE',credentials:'include'});
-  else await fetch(`/admin/merchant-banners/${id}`,{method:'DELETE',credentials:'include'});
-  loadSliders();
+async async function deleteBnBanner(id, source) {
+  if (!confirm('Permanently delete this banner? This will remove it completely.')) return;
+  try {
+    let res;
+    if (source === 'admin') {
+      // Admin banners: delete from promo_sliders
+      res = await fetch('/admin/promo-sliders/' + id, {method:'DELETE', credentials:'include'});
+      if (!res.ok) {
+        // Fallback to admin_banners collection
+        res = await fetch('/admin/banners/' + id, {method:'DELETE', credentials:'include'});
+      }
+    } else {
+      // Merchant banners: hard delete from both merchant_banners + promo_sliders
+      res = await fetch('/admin/merchant-banners/' + id + '/hard', {method:'DELETE', credentials:'include'});
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({detail:'Unknown error'}));
+      showToast('❌ Delete failed: ' + (err.detail||res.status), 'danger');
+      return;
+    }
+    showToast('✅ Banner deleted successfully.', 'success');
+    await loadSliders();
+  } catch(e) {
+    showToast('❌ Network error: ' + e.message, 'danger');
+  }
 }
 
 async function openSliderModal() {
