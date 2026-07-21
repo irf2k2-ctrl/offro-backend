@@ -3194,6 +3194,11 @@ function openBnMerchantEditModal(row) {
         </div>
       </div>`;
     document.body.appendChild(modal);
+    // Click outside modal to close:
+    modal.addEventListener('click', function(e) { if(e.target===modal) modal.remove(); });
+    // ESC key to close:
+    const _bnEscClose = function(e) { if(e.key==='Escape') { modal.remove(); document.removeEventListener('keydown',_bnEscClose); } };
+    document.addEventListener('keydown', _bnEscClose);
     // Live preview for image URL
     document.getElementById('bn_edit_image').addEventListener('input', function(){
       const img = document.getElementById('bn_edit_preview');
@@ -4129,9 +4134,7 @@ window.addEventListener("DOMContentLoaded", function() {
     return el ? new bootstrap.Modal(el) : null;
   };
   gcModalInst      = _safeModal("giftCardModal");
-  storeModalInst   = _safeModal("storeModal");
-  vzViewModalInst  = _safeModal("vzViewModal");
-  bnViewModalInst  = _safeModal("bnViewModal");
+  // NOTE: storeModalInst / vzViewModalInst / bnViewModalInst initialized in window.onload above — do NOT re-init here or Bootstrap creates duplicate instances causing stuck backdrops.
   productModalInst = _safeModal("giftCardModal"); // product edit reuses gcModal
   accountDetailModalInst = _safeModal("accountDetailModal");
 });
@@ -4714,6 +4717,9 @@ function openVZMerchantEditModal(row) {
       _vzShowLogoPreview(this.value);
     });
     document.body.appendChild(modal);
+    modal.addEventListener('click', function(e) { if(e.target===modal) modal.remove(); });
+    const _pcEscClose = function(e) { if(e.key==='Escape') { modal.remove(); document.removeEventListener('keydown',_pcEscClose); } };
+    document.addEventListener('keydown', _pcEscClose);
 // Logo listener now inside modal build block above
   }
   const el2 = id => document.getElementById(id);
