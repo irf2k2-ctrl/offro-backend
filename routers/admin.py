@@ -2427,6 +2427,36 @@ def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
 
     return {"ok": True}
 
+
+@router.delete("/merchant-banners/{bid}/hard")
+def hard_delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
+    """Permanently delete a merchant banner from both collections.
+    Use this when admin wants to fully remove the record (not just soft-delete)."""
+    try:
+        oid = ObjectId(bid)
+    except Exception:
+        raise HTTPException(400, "Invalid banner id")
+
+    b = db.merchant_banners.find_one({"_id": oid})
+    if b:
+        db.merchant_banners.delete_one({"_id": oid})
+        # Also remove from promo_sliders if approved:
+        db.promo_sliders.delete_many({"source_banner_id": bid})
+        return {"ok": True, "message": "Banner permanently deleted."}
+    else:
+        # Try promo_sliders directly:
+        ps = db.promo_sliders.find_one({"_id": oid})
+        if ps:
+            src_bid = ps.get("source_banner_id", "")
+            db.promo_sliders.delete_one({"_id": oid})
+            if src_bid:
+                try:
+                    db.merchant_banners.delete_one({"_id": ObjectId(src_bid)})
+                except Exception:
+                    pass
+            return {"ok": True, "message": "Promo slider deleted."}
+        raise HTTPException(404, "Banner not found")
+
 @router.put("/merchant-banners/{bid}/toggle")
 def toggle_merchant_banner(bid: str, a=Depends(get_current_admin)):
     """Toggle is_active ON/OFF for a merchant banner.
