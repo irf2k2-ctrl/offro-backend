@@ -1523,7 +1523,15 @@ def get_products_by_store(store_id: str, limit: int = 20):
         {**q_oid, "status": "approved", "approval_status": "approved"}
     ).sort("created_at", -1).limit(limit):
         ed = p.get("end_date")
-        if ed and isinstance(ed, _dt3) and ed < _now3: continue
+        if ed:
+            try:
+                if isinstance(ed, _dt3):
+                    if ed < _now3: continue
+                else:
+                    ed_s = str(ed).strip().replace("Z","").replace(" ","T")[:19]
+                    if ed_s and _dt3.fromisoformat(ed_s) < _now3: continue
+            except Exception:
+                pass
         pid = str(p["_id"])
         if pid in seen: continue
         seen.add(pid)
@@ -1538,6 +1546,17 @@ def get_products_by_store(store_id: str, limit: int = 20):
     _gv_by_store_q = {**q_oid, "approval_status": "approved"}
     for p in db.gift_vouchers.find(_gv_by_store_q).sort("_id", -1).limit(limit):
         if p.get("is_active", True) in (False, "false", "0", 0): continue
+        # FIX: skip expired gift_vouchers by end_date string or datetime
+        _gv_ed = p.get("end_date") or p.get("validity_end") or p.get("expiry")
+        if _gv_ed:
+            try:
+                if isinstance(_gv_ed, _dt3):
+                    if _gv_ed < _now3: continue
+                else:
+                    _gv_eds = str(_gv_ed).strip().replace("Z","").replace(" ","T")[:19]
+                    if _gv_eds and _dt3.fromisoformat(_gv_eds) < _now3: continue
+            except Exception:
+                pass
         pid = str(p["_id"])
         if pid in seen: continue
         seen.add(pid)

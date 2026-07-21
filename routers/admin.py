@@ -829,10 +829,14 @@ def list_stores(a=Depends(get_current_admin)):
     if _store_cache["data"] is not None and (now_ts - _store_cache["ts"]) < _STORE_CACHE_TTL:
         return _store_cache["data"]
     # Exclude large base64 image fields from list for performance
-    stores = list(db.stores.find({}, {
-        "store_image2": 0,  # heavy base64 — loaded separately in edit form
-        "qr_code": 0,       # always base64 — loaded separately in detail view
-    }).sort("created_at", -1))  # newest first
+    stores = list(db.stores.find(
+        {"$or": [{"is_deleted": {"$ne": True}}, {"is_deleted": {"$exists": False}}],
+         "status": {"$ne": "deleted"}},
+        {
+            "store_image2": 0,  # heavy base64 — loaded separately in edit form
+            "qr_code": 0,       # always base64 — loaded separately in detail view
+        }
+    ).sort("created_at", -1))  # newest first
     if not stores:
         return []
     
@@ -1220,7 +1224,13 @@ def toggle_store(id: str, a=Depends(get_current_admin)):
 @router.delete("/stores/{id}")
 def delete_store(id: str, a=Depends(get_current_admin)):
     global _store_cache; _store_cache["data"] = None
-    db.stores.delete_one({"_id": ObjectId(id)})
+    # Soft delete: marks store instead of hard-removing.
+    # Prevents phantom duplicates (waiting_approval siblings) re-appearing after delete.
+    ts = datetime.utcnow().isoformat()
+    db.stores.update_one(
+        {"_id": ObjectId(id)},
+        {"$set": {"status": "deleted", "is_deleted": True, "deleted_at": ts}}
+    )
     return {"message": "Deleted"}
 
 # ===================== USERS =====================
