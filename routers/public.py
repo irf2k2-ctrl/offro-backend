@@ -1316,6 +1316,10 @@ def get_gift_vouchers_public(city: str = ""):
         # Skip if admin explicitly expired or rejected:
         _as = d.get("approval_status", d.get("status", ""))
         if _as in ("expired", "rejected", "removed"): continue
+        # FIX: Skip mirror copies — these are premium products mirrored from merchant_vouchers.
+        # Section 3 queries merchant_vouchers directly with proper end_date checks.
+        # Keeping the mirror here causes ghost products when end_date is missing from the mirror.
+        if d.get("source_voucher_id"): continue
         vid = str(d["_id"])
         if vid in seen_ids: continue
         # City filter: check product's own city OR its store's city
