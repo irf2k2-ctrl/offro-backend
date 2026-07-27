@@ -3394,6 +3394,8 @@ def approve_merchant_product_card(vid: str, a=Depends(get_current_admin)):
                                          f"{v.get('from_date', '')} → {v.get('end_date', '')}"
                                          if v.get("from_date") else "30 days"),
                 "is_active":         final_status == "approved",
+                "approval_status":   final_status,
+                "status":            final_status,
                 "source":            "merchant",
                 "source_voucher_id": vid,
                 "merchant_id":       str(v.get("merchant_id", "")),
@@ -3404,6 +3406,8 @@ def approve_merchant_product_card(vid: str, a=Depends(get_current_admin)):
                 "product_type":      v.get("product_type", "premium"),
                 "amount":            v.get("amount", v.get("total", 0)),
                 "duration_days":     v.get("duration_days", 0),
+                "end_date":          v.get("end_date", ""),
+                "from_date":         v.get("from_date", ""),
                 "updated_at":        datetime.utcnow().isoformat(),
             },
              "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}},

@@ -185,7 +185,7 @@ def get_store(store_id: str):
     # 1. merchant_vouchers — approved, not expired, SCOPED TO THIS STORE
     # FIX Issue-1: was querying by merchant_id which leaked products from other stores.
     # Now strictly filtered by store_id so each store only shows its own products.
-    if "merchant_vouchers" in cols:
+    if True:  # merchant_vouchers always available
         from bson import ObjectId as _OId2
         # Build store_id clauses (may be stored as str or ObjectId)
         _mv_clauses = [{"store_id": store_id}]
@@ -1394,6 +1394,49 @@ def get_gift_vouchers_public(city: str = ""):
             "rating":       float(p.get("rating") or p.get("avg_rating") or 0),
             "rating_count": int(p.get("rating_count") or p.get("review_count") or 0),
         })
+
+    # ── 3. merchant_vouchers collection (Premium products — source of truth) ──
+    # Premium products live here after upgrade from standard. They have proper
+    # end_date fields and should show on the home screen regardless of store
+    # subscription status (premium is a separate product-level subscription).
+    if True:  # merchant_vouchers always available
+        for mv in db.merchant_vouchers.find({"product_type": "premium"}).sort("_id", -1):
+            if not _is_active(mv): continue
+            if _is_expired(mv): continue
+            # Skip if admin explicitly expired or rejected:
+            _mvs = mv.get("approval_status", mv.get("status", ""))
+            if _mvs in ("expired", "rejected", "removed", "pending_approval"): continue
+            mvid = str(mv["_id"])
+            if mvid in seen_ids: continue
+            # City filter: check product's own city OR its store's city
+            mv_city = mv.get("city", "") or _get_store_city(str(mv.get("store_id", "")))
+            if not _city_matches(mv_city): continue
+            seen_ids.add(mvid)
+            mvsid = str(mv.get("store_id", ""))
+            mvmid = str(mv.get("merchant_id", "") or "")
+            resolved_mv_store = (
+                _get_store_name_by_merchant(mvmid)
+                or _get_store_name(mvsid)
+                or mv.get("store_name", "")
+                or mv.get("merchant_name", "")
+            )
+            result.append({
+                "id":           mvid,
+                "title":        mv.get("title") or mv.get("name") or "",
+                "text":         mv.get("offer_text") or mv.get("text") or "",
+                "validity":     (str(mv.get("end_date",""))[:10]) or (mv.get("validity","") or ""),
+                "logo":         _resolve_img(mv),
+                "logo_url":     _resolve_img(mv),
+                "store_id":     mvsid,
+                "store_name":   resolved_mv_store,
+                "city":         mv_city,
+                "from_date":    mv.get("from_date") or mv.get("start_date") or "",
+                "end_date":     mv.get("end_date") or "",
+                "is_active":    True,
+                "source":       "merchant_vouchers",
+                "rating":       float(mv.get("rating") or mv.get("avg_rating") or 0),
+                "rating_count": int(mv.get("rating_count") or mv.get("review_count") or 0),
+            })
 
     return result
 
