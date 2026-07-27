@@ -7288,9 +7288,12 @@ function gcOnStoreChange() {
             <div id="wa_header_name" style="font-weight:700;font-size:15px;color:var(--text);">&mdash;</div>
             <div id="wa_header_phone" style="font-size:11px;color:var(--muted);">&mdash;</div>
           </div>
-          <div style="margin-left:auto;">
-            <button onclick="refreshConversation()" style="background:none;border:none;color:var(--primary);font-size:13px;cursor:pointer;">
+          <div style="margin-left:auto;display:flex;gap:4px;align-items:center;">
+            <button onclick="refreshConversation()" title="Refresh" style="background:none;border:none;color:var(--primary);font-size:13px;cursor:pointer;padding:4px 8px;">
               <i class="fas fa-sync-alt"></i>
+            </button>
+            <button onclick="deleteWaConversation()" title="Delete conversation" style="background:none;border:none;color:var(--danger);font-size:13px;cursor:pointer;padding:4px 8px;">
+              <i class="fas fa-trash"></i>
             </button>
           </div>
         </div>
@@ -7552,7 +7555,9 @@ function _waRenderMsg(m) {
   }
 
   const msgId = m.id || (m.timestamp + m.direction);
-  return `<div data-msg-id="${msgId}" style="${align}max-width:68%;min-width:80px;">
+  return `<div data-msg-id="${msgId}" style="${align}max-width:68%;min-width:80px;position:relative;group wa-msg-row;"
+    onmouseenter="if(this.querySelector('.wa-msg-del'))this.querySelector('.wa-msg-del').style.opacity=1"
+    onmouseleave="if(this.querySelector('.wa-msg-del'))this.querySelector('.wa-msg-del').style.opacity=0">
     ${label}
     <div style="${bubble}padding:8px 12px;box-shadow:0 1px 2px rgba(0,0,0,.1);">
       ${content}
@@ -7560,6 +7565,11 @@ function _waRenderMsg(m) {
         <small style="font-size:9px;color:var(--muted);">${ts}</small>
       </div>
     </div>
+    <button onclick="event.stopPropagation();deleteWaMessage('${msgId}')" class="wa-msg-del"
+      style="position:absolute;top:-4px;right:-4px;background:rgba(192,57,43,.9);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:9px;cursor:pointer;opacity:0;transition:opacity .2s;display:flex;align-items:center;justify-content:center;padding:0;z-index:5;"
+      title="Delete message">
+      <i class="fas fa-times"></i>
+    </button>
   </div>`;
 }
 
@@ -7733,6 +7743,77 @@ function _waEscape(s) {
 
 // Stop polling when switching away from wa_chat section (patched into existing showSection hook)
 // No extra override needed — handled inside showSection below
+
+// ── Delete entire conversation ─────────────────────────────
+async function deleteWaConversation() {
+  if (!_waCurrentCustomerId) {
+    showToast('No conversation selected.', 'warning');
+    return;
+  }
+  const customer = _waAllCustomers.find(c => c.customer_id === _waCurrentCustomerId);
+  const name = customer ? customer.name : 'this customer';
+  if (!confirm('Delete entire conversation with "' + name + '"?\n\nAll messages will be permanently removed. This cannot be undone.')) return;
+
+  try {
+    const r = await fetch('/admin/whatsapp/chats/' + _waCurrentCustomerId, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({detail: 'Unknown error'}));
+      showToast('❌ Delete failed: ' + (e.detail || r.status), 'danger');
+      return;
+    }
+    const d = await r.json();
+    showToast('✅ Conversation deleted (' + (d.deleted_messages || 0) + ' messages removed).', 'success');
+
+    // Clear active conversation view
+    _waCurrentCustomerId = null;
+    if (_waPollTimer) { clearInterval(_waPollTimer); _waPollTimer = null; }
+    document.getElementById('wa_chat_active').classList.remove('open');
+    document.getElementById('wa_chat_empty').style.display = 'flex';
+
+    // Reload customer list
+    await loadWaChats();
+  } catch(e) {
+    showToast('❌ Network error: ' + e.message, 'danger');
+  }
+}
+
+// ── Delete a single message ───────────────────────────────
+async function deleteWaMessage(msgId) {
+  if (!_waCurrentCustomerId) return;
+  if (!confirm('Delete this message?')) return;
+
+  try {
+    const r = await fetch('/admin/whatsapp/chats/' + _waCurrentCustomerId + '/messages/' + msgId, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({detail: 'Unknown error'}));
+      showToast('❌ Delete failed: ' + (e.detail || r.status), 'danger');
+      return;
+    }
+    // Remove the message element from DOM immediately
+    const el = document.querySelector('[data-msg-id="' + msgId + '"]');
+    if (el) el.remove();
+    showToast('✅ Message deleted.', 'success');
+    // Refresh to update sidebar preview
+    await loadWaChats();
+  } catch(e) {
+    showToast('❌ Network error: ' + e.message, 'danger');
+  }
+}
+
+// ── Add delete button on individual message hover ────────────────────────────
+function waMsgDeleteBtn(msgId) {
+  return '<button onclick="event.stopPropagation();deleteWaMessage(\''+msgId+'\')" ' +
+    'style="position:absolute;top:2px;right:2px;background:rgba(192,57,43,.85);color:#fff;border:none;border-radius:4px;padding:2px 6px;font-size:10px;cursor:pointer;opacity:0;transition:opacity .2s;" ' +
+    'onmouseenter="this.style.opacity=1" ' +
+    'class="wa-msg-del"><i class="fas fa-trash-alt"></i></button>';
+}
+
 </script>
 
 </body>
