@@ -174,6 +174,102 @@ td[style*="sticky"]{background:#fff;}
 <button class="menu-toggle" onclick="openSidebar()"><i class="fas fa-bars"></i> Menu</button>
 
   <!-- OVERVIEW -->
+
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     RBAC: USER MANAGEMENT
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="section-rbac_users" class="section">
+  <div class="page-title"><i class="fas fa-users-cog me-2"></i>User Management</div>
+  <div class="section-header">
+    <div style="color:var(--muted);font-size:12px;">Manage staff accounts, roles, and city access</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-p" onclick="rbacLoadUsers()"><i class="fas fa-sync me-1"></i> Refresh</button>
+      <button class="btn-p" onclick="rbacShowUserModal()"><i class="fas fa-plus me-1"></i> Add User</button>
+    </div>
+  </div>
+  <div id="rbac_users_msg" style="margin-bottom:10px;font-weight:600;font-size:13px"></div>
+  <div class="table-wrap"><table style="min-width:900px">
+    <thead><tr>
+      <th style="position:sticky;left:0;z-index:2;background:#3E5F55;min-width:120px">Name</th>
+      <th style="min-width:110px">Mobile</th>
+      <th style="min-width:110px">Designation</th>
+      <th style="min-width:110px">Role</th>
+      <th style="min-width:90px">Cities</th>
+      <th style="min-width:70px">Status</th>
+      <th style="min-width:110px">Last Login</th>
+      <th style="min-width:80px">Actions</th>
+    </tr></thead>
+    <tbody id="rbac_users_table"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+  </table></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     RBAC: ROLES & PERMISSIONS
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="section-rbac_roles" class="section">
+  <div class="page-title"><i class="fas fa-user-shield me-2"></i>Roles &amp; Permissions</div>
+  <div class="section-header">
+    <div style="color:var(--muted);font-size:12px;">Manage role templates and module-level permissions</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-p" onclick="rbacLoadRoles()"><i class="fas fa-sync me-1"></i> Refresh</button>
+      <button class="btn-p" onclick="rbacShowRoleModal()"><i class="fas fa-plus me-1"></i> Add Role</button>
+    </div>
+  </div>
+  <div id="rbac_roles_msg" style="margin-bottom:10px;font-weight:600;font-size:13px"></div>
+  <div class="table-wrap"><table style="min-width:600px">
+    <thead><tr>
+      <th style="min-width:160px">Role Name</th>
+      <th>Description</th>
+      <th style="min-width:160px">Permissions</th>
+      <th style="min-width:90px">Type</th>
+      <th style="min-width:80px">Actions</th>
+    </tr></thead>
+    <tbody id="rbac_roles_table"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+  </table></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     RBAC: ACTIVITY LOGS
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="section-rbac_logs" class="section">
+  <div class="page-title"><i class="fas fa-history me-2"></i>Activity Logs</div>
+  <div class="section-header">
+    <div style="color:var(--muted);font-size:12px;">Audit trail of all dashboard actions</div>
+    <button class="btn-p" onclick="rbacLoadLogs()"><i class="fas fa-sync me-1"></i> Refresh</button>
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <input id="rbac_log_user" class="form-control" style="flex:1;min-width:120px" placeholder="Filter by user" onkeyup="rbacLoadLogs()">
+    <select id="rbac_log_module" class="form-control" style="width:140px" onchange="rbacLoadLogs()">
+      <option value="">All Modules</option>
+      <option value="Auth">Auth</option><option value="Stores">Stores</option><option value="Products">Products</option>
+      <option value="Banners">Banners</option><option value="Deals">Deals</option><option value="Merchants">Merchants</option>
+      <option value="Users">Users</option><option value="Settings">Settings</option><option value="Payments">Payments</option>
+      <option value="Categories">Categories</option><option value="Reports">Reports</option>
+    </select>
+    <select id="rbac_log_action" class="form-control" style="width:130px" onchange="rbacLoadLogs()">
+      <option value="">All Actions</option>
+      <option value="LOGIN_SUCCESS">Login</option><option value="LOGIN_FAIL">Login Fail</option>
+      <option value="LOGOUT">Logout</option><option value="LOCKOUT">Lockout</option>
+      <option value="ADD">Add</option><option value="EDIT">Edit</option><option value="DELETE">Delete</option>
+      <option value="APPROVE">Approve</option><option value="EXPORT">Export</option>
+    </select>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Time</th><th>User</th><th>Mobile</th><th>Module</th><th>Action</th><th>Record</th><th>City</th><th>IP</th></tr></thead>
+    <tbody id="rbac_logs_table"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+  </table></div>
+  <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
+    <span id="rbac_logs_count" style="color:var(--muted);font-size:12px"></span>
+    <div>
+      <button class="btn-o" id="rbac_logs_prev" onclick="rbacLogsPrev()" disabled>← Prev</button>
+      <button class="btn-o" id="rbac_logs_next" onclick="rbacLogsNext()">Next →</button>
+    </div>
+  </div>
+</div>
+
+
   <div id="section-overview" class="section active">
     <div class="page-title">Overview <button class="btn-o" style="font-size:12px;padding:3px 10px;margin-left:10px;vertical-align:middle;" onclick="loadStats()">↻ Refresh</button></div>
     <div class="row g-3">
@@ -1479,101 +1575,6 @@ td[style*="sticky"]{background:#fff;}
         <button class="btn-o" data-bs-dismiss="modal">Cancel</button>
         <button class="btn-p" onclick="submitFulfill()">✅ Mark as Sent</button>
       </div>
-    </div>
-  </div>
-</div>
-
-
-
-
-<!-- ═══════════════════════════════════════════════════════════════
-     RBAC: USER MANAGEMENT
-     ═══════════════════════════════════════════════════════════════ -->
-<div id="section-rbac_users" class="section">
-  <div class="page-title"><i class="fas fa-users-cog me-2"></i>User Management</div>
-  <div class="section-header">
-    <div style="color:var(--muted);font-size:12px;">Manage staff accounts, roles, and city access</div>
-    <div style="display:flex;gap:8px">
-      <button class="btn-p" onclick="rbacLoadUsers()"><i class="fas fa-sync me-1"></i> Refresh</button>
-      <button class="btn-p" onclick="rbacShowUserModal()"><i class="fas fa-plus me-1"></i> Add User</button>
-    </div>
-  </div>
-  <div id="rbac_users_msg" style="margin-bottom:10px;font-weight:600;font-size:13px"></div>
-  <div class="table-wrap"><table style="min-width:900px">
-    <thead><tr>
-      <th style="position:sticky;left:0;z-index:2;background:#3E5F55;min-width:120px">Name</th>
-      <th style="min-width:110px">Mobile</th>
-      <th style="min-width:110px">Designation</th>
-      <th style="min-width:110px">Role</th>
-      <th style="min-width:90px">Cities</th>
-      <th style="min-width:70px">Status</th>
-      <th style="min-width:110px">Last Login</th>
-      <th style="min-width:80px">Actions</th>
-    </tr></thead>
-    <tbody id="rbac_users_table"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
-  </table></div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════════
-     RBAC: ROLES & PERMISSIONS
-     ═══════════════════════════════════════════════════════════════ -->
-<div id="section-rbac_roles" class="section">
-  <div class="page-title"><i class="fas fa-user-shield me-2"></i>Roles &amp; Permissions</div>
-  <div class="section-header">
-    <div style="color:var(--muted);font-size:12px;">Manage role templates and module-level permissions</div>
-    <div style="display:flex;gap:8px">
-      <button class="btn-p" onclick="rbacLoadRoles()"><i class="fas fa-sync me-1"></i> Refresh</button>
-      <button class="btn-p" onclick="rbacShowRoleModal()"><i class="fas fa-plus me-1"></i> Add Role</button>
-    </div>
-  </div>
-  <div id="rbac_roles_msg" style="margin-bottom:10px;font-weight:600;font-size:13px"></div>
-  <div class="table-wrap"><table style="min-width:600px">
-    <thead><tr>
-      <th style="min-width:160px">Role Name</th>
-      <th>Description</th>
-      <th style="min-width:160px">Permissions</th>
-      <th style="min-width:90px">Type</th>
-      <th style="min-width:80px">Actions</th>
-    </tr></thead>
-    <tbody id="rbac_roles_table"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
-  </table></div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════════
-     RBAC: ACTIVITY LOGS
-     ═══════════════════════════════════════════════════════════════ -->
-<div id="section-rbac_logs" class="section">
-  <div class="page-title"><i class="fas fa-history me-2"></i>Activity Logs</div>
-  <div class="section-header">
-    <div style="color:var(--muted);font-size:12px;">Audit trail of all dashboard actions</div>
-    <button class="btn-p" onclick="rbacLoadLogs()"><i class="fas fa-sync me-1"></i> Refresh</button>
-  </div>
-  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-    <input id="rbac_log_user" class="form-control" style="flex:1;min-width:120px" placeholder="Filter by user" onkeyup="rbacLoadLogs()">
-    <select id="rbac_log_module" class="form-control" style="width:140px" onchange="rbacLoadLogs()">
-      <option value="">All Modules</option>
-      <option value="Auth">Auth</option><option value="Stores">Stores</option><option value="Products">Products</option>
-      <option value="Banners">Banners</option><option value="Deals">Deals</option><option value="Merchants">Merchants</option>
-      <option value="Users">Users</option><option value="Settings">Settings</option><option value="Payments">Payments</option>
-      <option value="Categories">Categories</option><option value="Reports">Reports</option>
-    </select>
-    <select id="rbac_log_action" class="form-control" style="width:130px" onchange="rbacLoadLogs()">
-      <option value="">All Actions</option>
-      <option value="LOGIN_SUCCESS">Login</option><option value="LOGIN_FAIL">Login Fail</option>
-      <option value="LOGOUT">Logout</option><option value="LOCKOUT">Lockout</option>
-      <option value="ADD">Add</option><option value="EDIT">Edit</option><option value="DELETE">Delete</option>
-      <option value="APPROVE">Approve</option><option value="EXPORT">Export</option>
-    </select>
-  </div>
-  <div class="table-wrap"><table>
-    <thead><tr><th>Time</th><th>User</th><th>Mobile</th><th>Module</th><th>Action</th><th>Record</th><th>City</th><th>IP</th></tr></thead>
-    <tbody id="rbac_logs_table"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
-  </table></div>
-  <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
-    <span id="rbac_logs_count" style="color:var(--muted);font-size:12px"></span>
-    <div>
-      <button class="btn-o" id="rbac_logs_prev" onclick="rbacLogsPrev()" disabled>← Prev</button>
-      <button class="btn-o" id="rbac_logs_next" onclick="rbacLogsNext()">Next →</button>
     </div>
   </div>
 </div>
