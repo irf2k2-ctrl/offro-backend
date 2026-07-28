@@ -161,6 +161,10 @@ tr:hover td{background:#f7faf8;}
 
   <a href="#" onclick="showSection('default_images',this)"><i class="fas fa-image fa-fw"></i> Default Images</a>
   <div class="sep"></div>
+  <a href="#" onclick="showSection('rbac_users',this)"><i class="fas fa-users-cog fa-fw"></i> User Management</a>
+  <a href="#" onclick="showSection('rbac_roles',this)"><i class="fas fa-user-shield fa-fw"></i> Roles &amp; Permissions</a>
+  <a href="#" onclick="showSection('rbac_logs',this)"><i class="fas fa-history fa-fw"></i> Activity Logs</a>
+  <div class="sep"></div>
   <a href="#" class="logout" onclick="logout()"><i class="fas fa-sign-out-alt fa-fw"></i> Logout</a>
 </div>
 
@@ -1479,6 +1483,187 @@ tr:hover td{background:#f7faf8;}
 
 
 
+
+<!-- ═══════════════════════════════════════════════════════════════
+     RBAC: USER MANAGEMENT
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="section-rbac_users" class="section">
+  <div class="section-header">
+    <div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-users-cog me-2"></i>Dashboard Users</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage staff accounts, roles, and city access</div>
+    </div>
+    <button class="btn-p" onclick="rbacLoadUsers()"><i class="fas fa-sync me-1"></i> Refresh</button>
+    <button class="btn-p" onclick="rbacShowUserModal()"><i class="fas fa-plus me-1"></i> Add User</button>
+  </div>
+  <div id="rbac_users_msg" style="margin-bottom:10px;font-weight:600;font-size:13px"></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Name</th><th>Mobile</th><th>Designation</th><th>Role</th><th>Cities</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+    <tbody id="rbac_users_table"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+  </table></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     RBAC: ROLES & PERMISSIONS
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="section-rbac_roles" class="section">
+  <div class="section-header">
+    <div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-user-shield me-2"></i>Roles &amp; Permissions</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage role templates and module permissions</div>
+    </div>
+    <div>
+      <button class="btn-p" onclick="rbacLoadRoles()"><i class="fas fa-sync me-1"></i> Refresh</button>
+      <button class="btn-p" onclick="rbacShowRoleModal()"><i class="fas fa-plus me-1"></i> Add Role</button>
+    </div>
+  </div>
+  <div id="rbac_roles_msg" style="margin-bottom:10px;font-weight:600;font-size:13px"></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Role Name</th><th>Description</th><th>Permissions</th><th>Type</th><th>Actions</th></tr></thead>
+    <tbody id="rbac_roles_table"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+  </table></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     RBAC: ACTIVITY LOGS
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="section-rbac_logs" class="section">
+  <div class="section-header">
+    <div>
+      <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-history me-2"></i>Activity Logs</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Audit trail of all dashboard actions</div>
+    </div>
+    <button class="btn-p" onclick="rbacLoadLogs()"><i class="fas fa-sync me-1"></i> Refresh</button>
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <input id="rbac_log_user" class="form-control" style="flex:1;min-width:120px" placeholder="Filter by user" onkeyup="rbacLoadLogs()">
+    <select id="rbac_log_module" class="form-control" style="width:140px" onchange="rbacLoadLogs()">
+      <option value="">All Modules</option>
+      <option value="Auth">Auth</option><option value="Stores">Stores</option><option value="Products">Products</option>
+      <option value="Banners">Banners</option><option value="Deals">Deals</option><option value="Merchants">Merchants</option>
+      <option value="Users">Users</option><option value="Settings">Settings</option><option value="Payments">Payments</option>
+      <option value="Categories">Categories</option><option value="Reports">Reports</option>
+    </select>
+    <select id="rbac_log_action" class="form-control" style="width:130px" onchange="rbacLoadLogs()">
+      <option value="">All Actions</option>
+      <option value="LOGIN_SUCCESS">Login</option><option value="LOGIN_FAIL">Login Fail</option>
+      <option value="LOGOUT">Logout</option><option value="LOCKOUT">Lockout</option>
+      <option value="ADD">Add</option><option value="EDIT">Edit</option><option value="DELETE">Delete</option>
+      <option value="APPROVE">Approve</option><option value="EXPORT">Export</option>
+    </select>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Time</th><th>User</th><th>Mobile</th><th>Module</th><th>Action</th><th>Record</th><th>City</th><th>IP</th></tr></thead>
+    <tbody id="rbac_logs_table"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+  </table></div>
+  <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
+    <span id="rbac_logs_count" style="color:var(--muted);font-size:12px"></span>
+    <div>
+      <button class="btn-o" id="rbac_logs_prev" onclick="rbacLogsPrev()" disabled>← Prev</button>
+      <button class="btn-o" id="rbac_logs_next" onclick="rbacLogsNext()">Next →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ RBAC: USER MODAL ═══ -->
+<div class="modal fade" id="rbacUserModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content" style="background:#FDFBF6;border-radius:16px">
+      <div class="modal-header" style="background:var(--sidebar);border-radius:14px 14px 0 0">
+        <h5 class="modal-title text-white fw-bold" id="rbacUserModalTitle">Add Dashboard User</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="padding:24px">
+        <input type="hidden" id="rbac_user_id">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label-custom">Full Name *</label>
+            <input id="rbac_user_name" class="form-control" placeholder="e.g. John Doe">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label-custom">Mobile Number *</label>
+            <input id="rbac_user_mobile" class="form-control" placeholder="e.g. 9876543210" maxlength="15">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label-custom">PIN (4 or 6 digits) *</label>
+            <input id="rbac_user_pin" type="password" class="form-control" placeholder="••••" maxlength="6" inputmode="numeric">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label-custom">Designation</label>
+            <input id="rbac_user_designation" class="form-control" placeholder="e.g. Sales Executive">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label-custom">Email (optional)</label>
+            <input id="rbac_user_email" type="email" class="form-control" placeholder="name@offro.com">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label-custom">Role *</label>
+            <select id="rbac_user_role" class="form-control"></select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label-custom">Status</label>
+            <select id="rbac_user_status" class="form-control">
+              <option value="active">Active</option>
+              <option value="disabled">Disabled</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label-custom">Assigned Cities</label>
+            <div id="rbac_city_checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px"></div>
+            <small style="color:var(--muted)">Select one or more cities. Users will only see data for assigned cities.</small>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top:1px solid var(--border)">
+        <button class="btn-o" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn-p" onclick="rbacSaveUser()"><i class="fas fa-check me-1"></i> Save User</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ RBAC: ROLE MODAL (Permission Matrix) ═══ -->
+<div class="modal fade" id="rbacRoleModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content" style="background:#FDFBF6;border-radius:16px">
+      <div class="modal-header" style="background:var(--sidebar);border-radius:14px 14px 0 0">
+        <h5 class="modal-title text-white fw-bold" id="rbacRoleModalTitle">Add Role</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="padding:24px">
+        <input type="hidden" id="rbac_role_id">
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label-custom">Role Name *</label>
+            <input id="rbac_role_name" class="form-control" placeholder="e.g. Regional Manager">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label-custom">Description</label>
+            <input id="rbac_role_desc" class="form-control" placeholder="What does this role do?">
+          </div>
+        </div>
+        <h6 style="color:var(--primary);font-weight:700;margin:14px 0 8px">Permission Matrix</h6>
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm align-middle text-center" style="font-size:12px">
+            <thead style="background:var(--sidebar);color:white">
+              <tr><th class="text-start" style="color:white">Module</th>
+              <th style="color:white">View</th><th style="color:white">Add</th><th style="color:white">Edit</th>
+              <th style="color:white">Delete</th><th style="color:white">Approve</th><th style="color:white">Export</th>
+              <th style="color:white">All</th></tr>
+            </thead>
+            <tbody id="rbac_perm_matrix"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top:1px solid var(--border)">
+        <button class="btn-o" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn-p" onclick="rbacSaveRole()"><i class="fas fa-check me-1"></i> Save Role</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 window.addEventListener('error', (e) => {
@@ -1721,6 +1906,9 @@ function showSection(name, el){
   if(name==="notifications") loadNotifications();
   if(name==="wa_chat") loadWaChats();
   if(name==="popup_campaigns") loadPopupCampaigns();
+  if(name==="rbac_users") rbacLoadUsers();
+  if(name==="rbac_roles") rbacLoadRoles();
+  if(name==="rbac_logs") rbacLoadLogs();
 }
 
 // ===== STATS =====
@@ -7813,6 +8001,269 @@ function waMsgDeleteBtn(msgId) {
     'onmouseenter="this.style.opacity=1" ' +
     'class="wa-msg-del"><i class="fas fa-trash-alt"></i></button>';
 }
+
+
+
+// ═══════════════════════════════════════════════════════════════
+// RBAC JAVASCRIPT — User Management, Roles, Activity Logs
+// ═══════════════════════════════════════════════════════════════
+
+const RBAC_MODULES = ["Merchants","Stores","Products","Banners","Deals","Users","Payments","Invoices","Categories","Cities","Reports","Notifications","Settings"];
+const RBAC_ACTIONS = ["view","add","edit","delete","approve","export"];
+const RBAC_CITIES = ["Ballari","Bengaluru","Hyderabad","Hubli","Dharwad","Mysuru"];
+let rbacLogSkip = 0;
+const rbacLogLimit = 50;
+
+// ── Users ──
+async function rbacLoadUsers() {
+  try {
+    let res = await fetch("/admin/auth/users", { credentials: "include" });
+    if (!res.ok) { document.getElementById("rbac_users_table").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load</td></tr>'; return; }
+    let users = await res.json();
+    let html = "";
+    if (users.length === 0) {
+      html = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">No dashboard users yet</td></tr>';
+    } else {
+      for (let u of users) {
+        let statusBadge = u.status === "active" ? '<span style="color:#2d8a56;font-weight:600">● Active</span>'
+          : u.status === "disabled" ? '<span style="color:var(--muted)">● Disabled</span>'
+          : '<span style="color:var(--danger)">● Suspended</span>';
+        let cities = (u.assigned_cities || []).join(", ") || "—";
+        if (u.assigned_cities && u.assigned_cities.includes("*")) cities = "All Cities";
+        let lastLogin = u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never";
+        html += '<tr><td><strong>' + (u.full_name||"") + '</strong></td><td>' + (u.mobile||"") + '</td><td>' + (u.designation||"—") + '</td><td>' + (u.role_name||"—") + '</td><td style="font-size:11px">' + cities + '</td><td>' + statusBadge + '</td><td style="font-size:11px">' + lastLogin + '</td><td><button class="btn btn-sm" onclick="rbacEditUser(\''+u.id+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteUser(\''+u.id+'\',\''+u.full_name+'\')"><i class="fas fa-trash text-danger"></i></button></td></tr>';
+      }
+    }
+    document.getElementById("rbac_users_table").innerHTML = html;
+  } catch (e) { console.error("rbacLoadUsers", e); }
+}
+
+async function rbacShowUserModal(userId) {
+  document.getElementById("rbac_user_id").value = userId || "";
+  document.getElementById("rbacUserModalTitle").innerText = userId ? "Edit User" : "Add Dashboard User";
+  document.getElementById("rbac_user_pin").parentElement.style.display = userId ? "none" : "block";
+  document.getElementById("rbac_user_pin").required = !userId;
+
+  // Load roles into dropdown
+  try {
+    let res = await fetch("/admin/auth/roles", { credentials: "include" });
+    let roles = await res.json();
+    let opts = '<option value="">Select Role...</option>';
+    for (let r of roles) opts += '<option value="' + r.id + '">' + r.role_name + '</option>';
+    document.getElementById("rbac_user_role").innerHTML = opts;
+  } catch (e) { console.error("rbacLoadRoles for modal", e); }
+
+  // Render city checkboxes
+  let cityHtml = "";
+  for (let c of RBAC_CITIES) {
+    cityHtml += '<label style="display:flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" value="' + c + '" class="rbac-city-chk"> ' + c + '</label>';
+  }
+  cityHtml += '<label style="display:flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--accent);border-radius:8px;cursor:pointer;font-size:13px;background:var(--light)"><input type="checkbox" value="*" class="rbac-city-chk" onchange="document.querySelectorAll(\'.rbac-city-chk\').forEach(c=>{if(c.value!==\'*\')c.disabled=this.checked})"> All Cities (Super Admin)</label>';
+  document.getElementById("rbac_city_checkboxes").innerHTML = cityHtml;
+
+  if (userId) {
+    // Load existing user data
+    let users = await (await fetch("/admin/auth/users", { credentials: "include" })).json();
+    let u = users.find(x => x.id === userId);
+    if (u) {
+      document.getElementById("rbac_user_name").value = u.full_name || "";
+      document.getElementById("rbac_user_mobile").value = u.mobile || "";
+      document.getElementById("rbac_user_designation").value = u.designation || "";
+      document.getElementById("rbac_user_email").value = u.email || "";
+      document.getElementById("rbac_user_role").value = u.role_id || "";
+      document.getElementById("rbac_user_status").value = u.status || "active";
+      for (let c of (u.assigned_cities || [])) {
+        let chk = document.querySelector('.rbac-city-chk[value="' + c + '"]');
+        if (chk) chk.checked = true;
+      }
+    }
+  } else {
+    document.getElementById("rbac_user_name").value = "";
+    document.getElementById("rbac_user_mobile").value = "";
+    document.getElementById("rbac_user_designation").value = "";
+    document.getElementById("rbac_user_email").value = "";
+    document.getElementById("rbac_user_status").value = "active";
+  }
+
+  new bootstrap.Modal(document.getElementById("rbacUserModal")).show();
+}
+
+async function rbacSaveUser() {
+  let userId = document.getElementById("rbac_user_id").value;
+  let name = document.getElementById("rbac_user_name").value.trim();
+  let mobile = document.getElementById("rbac_user_mobile").value.trim();
+  let pin = document.getElementById("rbac_user_pin").value.trim();
+  let designation = document.getElementById("rbac_user_designation").value.trim();
+  let email = document.getElementById("rbac_user_email").value.trim();
+  let roleId = document.getElementById("rbac_user_role").value;
+  let status = document.getElementById("rbac_user_status").value;
+  let cities = Array.from(document.querySelectorAll(".rbac-city-chk:checked")).map(c => c.value);
+
+  if (!name || !mobile || !roleId) { alert("Name, Mobile, and Role are required"); return; }
+  if (!userId && !pin) { alert("PIN is required for new users"); return; }
+
+  let body = { full_name: name, mobile, designation, email: email || null, role_id: roleId, status, assigned_cities: cities };
+  if (pin) body.pin = pin;
+
+  try {
+    let url = userId ? "/admin/auth/users/" + userId : "/admin/auth/users";
+    let method = userId ? "PUT" : "POST";
+    let res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
+    let data = await res.json();
+    if (!res.ok) { alert(data.detail || "Failed to save user"); return; }
+    bootstrap.Modal.getInstance(document.getElementById("rbacUserModal")).hide();
+    rbacLoadUsers();
+    document.getElementById("rbac_users_msg").innerText = "✓ User " + (userId ? "updated" : "created") + " successfully";
+    document.getElementById("rbac_users_msg").style.color = "#2d8a56";
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+async function rbacDeleteUser(id, name) {
+  if (!confirm("Delete user \"" + name + "\"? This cannot be undone.")) return;
+  try {
+    let res = await fetch("/admin/auth/users/" + id, { method: "DELETE", credentials: "include" });
+    let data = await res.json();
+    if (!res.ok) { alert(data.detail || "Delete failed"); return; }
+    rbacLoadUsers();
+    document.getElementById("rbac_users_msg").innerText = "✓ User deleted";
+    document.getElementById("rbac_users_msg").style.color = "#2d8a56";
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+async function rbacEditUser(id) { await rbacShowUserModal(id); }
+
+// ── Roles ──
+async function rbacLoadRoles() {
+  try {
+    let res = await fetch("/admin/auth/roles", { credentials: "include" });
+    if (!res.ok) { document.getElementById("rbac_roles_table").innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger)">Failed to load</td></tr>'; return; }
+    let roles = await res.json();
+    let html = "";
+    for (let r of roles) {
+      let permCount = 0, permTotal = RBAC_MODULES.length * RBAC_ACTIONS.length;
+      for (let mod of RBAC_MODULES) { for (let act of RBAC_ACTIONS) { if (r.permissions[mod] && r.permissions[mod][act]) permCount++; } }
+      let permPct = Math.round((permCount / permTotal) * 100);
+      let typeBadge = r.is_system_role ? '<span style="background:var(--light);color:var(--primary);padding:2px 10px;border-radius:20px;font-size:10px;font-weight:700">SYSTEM</span>' : '<span style="background:#f0f0f0;color:var(--muted);padding:2px 10px;border-radius:20px;font-size:10px;font-weight:700">CUSTOM</span>';
+      let editBtn = r.is_system_role ? '<button class="btn btn-sm" onclick="rbacEditRole(\''+r.id+'\')"><i class="fas fa-edit"></i></button>' : '<button class="btn btn-sm" onclick="rbacEditRole(\''+r.id+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteRole(\''+r.id+'\',\''+r.role_name+'\')"><i class="fas fa-trash text-danger"></i></button>';
+      html += '<tr><td><strong>' + r.role_name + '</strong></td><td style="font-size:12px">' + (r.description||"—") + '</td><td><div style="background:#e0e0e0;border-radius:10px;height:8px;width:100px;overflow:hidden"><div style="background:var(--primary);height:8px;border-radius:10px;width:' + permPct + '%"></div></div><small style="color:var(--muted)">' + permPct + '% (' + permCount + '/' + permTotal + ')</small></td><td>' + typeBadge + '</td><td>' + editBtn + '</td></tr>';
+    }
+    document.getElementById("rbac_roles_table").innerHTML = html || '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No roles found</td></tr>';
+  } catch (e) { console.error("rbacLoadRoles", e); }
+}
+
+function rbacShowRoleModal() {
+  document.getElementById("rbac_role_id").value = "";
+  document.getElementById("rbacRoleModalTitle").innerText = "Add Role";
+  document.getElementById("rbac_role_name").value = "";
+  document.getElementById("rbac_role_desc").value = "";
+  rbacRenderPermMatrix({});
+  new bootstrap.Modal(document.getElementById("rbacRoleModal")).show();
+}
+
+async function rbacEditRole(id) {
+  try {
+    let res = await fetch("/admin/auth/roles", { credentials: "include" });
+    let roles = await res.json();
+    let r = roles.find(x => x.id === id);
+    if (!r) return;
+    document.getElementById("rbac_role_id").value = id;
+    document.getElementById("rbacRoleModalTitle").innerText = "Edit: " + r.role_name;
+    document.getElementById("rbac_role_name").value = r.role_name;
+    document.getElementById("rbac_role_desc").value = r.description || "";
+    rbacRenderPermMatrix(r.permissions || {});
+    new bootstrap.Modal(document.getElementById("rbacRoleModal")).show();
+  } catch (e) { console.error("rbacEditRole", e); }
+}
+
+function rbacRenderPermMatrix(existing) {
+  let html = "";
+  for (let mod of RBAC_MODULES) {
+    let p = existing[mod] || {};
+    html += '<tr><td class="text-start fw-bold" style="font-size:12px">' + mod + '</td>';
+    for (let act of RBAC_ACTIONS) {
+      let checked = p[act] ? "checked" : "";
+      html += '<td><input type="checkbox" class="form-check-input perm-chk" data-mod="' + mod + '" data-act="' + act + '" ' + checked + '></td>';
+    }
+    html += '<td><input type="checkbox" class="form-check-input perm-all" data-mod="' + mod + '" onchange="rbacToggleRow(this)"></td></tr>';
+  }
+  document.getElementById("rbac_perm_matrix").innerHTML = html;
+}
+
+function rbacToggleRow(chk) {
+  let mod = chk.dataset.mod;
+  document.querySelectorAll('.perm-chk[data-mod="' + mod + '"]').forEach(c => c.checked = chk.checked);
+}
+
+async function rbacSaveRole() {
+  let roleId = document.getElementById("rbac_role_id").value;
+  let name = document.getElementById("rbac_role_name").value.trim();
+  let desc = document.getElementById("rbac_role_desc").value.trim();
+  if (!name) { alert("Role name is required"); return; }
+
+  let perms = {};
+  for (let mod of RBAC_MODULES) {
+    perms[mod] = {};
+    for (let act of RBAC_ACTIONS) {
+      let chk = document.querySelector('.perm-chk[data-mod="' + mod + '"][data-act="' + act + '"]');
+      perms[mod][act] = chk ? chk.checked : false;
+    }
+  }
+
+  let body = { role_name: name, description: desc, permissions: perms };
+  try {
+    let url = roleId ? "/admin/auth/roles/" + roleId : "/admin/auth/roles";
+    let method = roleId ? "PUT" : "POST";
+    let res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
+    let data = await res.json();
+    if (!res.ok) { alert(data.detail || "Failed to save role"); return; }
+    bootstrap.Modal.getInstance(document.getElementById("rbacRoleModal")).hide();
+    rbacLoadRoles();
+    document.getElementById("rbac_roles_msg").innerText = "✓ Role " + (roleId ? "updated" : "created") + " successfully";
+    document.getElementById("rbac_roles_msg").style.color = "#2d8a56";
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+async function rbacDeleteRole(id, name) {
+  if (!confirm("Delete role \"" + name + "\"? Users assigned to this role must be reassigned first.")) return;
+  try {
+    let res = await fetch("/admin/auth/roles/" + id, { method: "DELETE", credentials: "include" });
+    let data = await res.json();
+    if (!res.ok) { alert(data.detail || "Delete failed"); return; }
+    rbacLoadRoles();
+    document.getElementById("rbac_roles_msg").innerText = "✓ Role deleted";
+    document.getElementById("rbac_roles_msg").style.color = "#2d8a56";
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+// ── Activity Logs ──
+async function rbacLoadLogs() {
+  let userName = document.getElementById("rbac_log_user").value.trim();
+  let module = document.getElementById("rbac_log_module").value;
+  let action = document.getElementById("rbac_log_action").value;
+  let params = new URLSearchParams({ skip: rbacLogSkip, limit: rbacLogLimit });
+  if (userName) params.set("user_name", userName);
+  if (module) params.set("module", module);
+  if (action) params.set("action", action);
+
+  try {
+    let res = await fetch("/admin/auth/activity-logs?" + params.toString(), { credentials: "include" });
+    if (!res.ok) { document.getElementById("rbac_logs_table").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load</td></tr>'; return; }
+    let data = await res.json();
+    let html = "";
+    for (let log of data.logs) {
+      let actionColor = log.action.includes("FAIL") || log.action.includes("LOCKOUT") || log.action === "DELETE" ? "var(--danger)" : log.action === "LOGIN_SUCCESS" ? "#2d8a56" : "var(--text)";
+      html += '<tr><td style="font-size:11px">' + (log.timestamp ? new Date(log.timestamp).toLocaleString() : "—") + '</td><td>' + (log.user_name||"—") + '</td><td style="font-size:11px">' + (log.mobile||"—") + '</td><td>' + (log.module||"—") + '</td><td style="font-weight:600;color:' + actionColor + '">' + (log.action||"—") + '</td><td style="font-size:11px">' + (log.record_name||"—") + '</td><td>' + (log.city||"—") + '</td><td style="font-size:11px">' + (log.ip_address||"—") + '</td></tr>';
+    }
+    document.getElementById("rbac_logs_table").innerHTML = html || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">No logs found</td></tr>';
+    document.getElementById("rbac_logs_count").innerText = data.total + " total logs";
+    document.getElementById("rbac_logs_prev").disabled = rbacLogSkip === 0;
+    document.getElementById("rbac_logs_next").disabled = rbacLogSkip + rbacLogLimit >= data.total;
+  } catch (e) { console.error("rbacLoadLogs", e); }
+}
+
+function rbacLogsPrev() { rbacLogSkip = Math.max(0, rbacLogSkip - rbacLogLimit); rbacLoadLogs(); }
+function rbacLogsNext() { rbacLogSkip += rbacLogLimit; rbacLoadLogs(); }
+
 
 </script>
 
