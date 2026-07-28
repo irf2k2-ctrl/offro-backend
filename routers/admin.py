@@ -1395,7 +1395,7 @@ def admin_stats(a=Depends(get_current_admin)):
         "app_users":       app_users,
         "total_merchants": total_merchants,
         "active_merchants": db.accounts.count_documents({"roles": "merchant", "status": "active"}),
-        "total_stores":    db.stores.count_documents({}),
+        "total_stores":    db.stores.count_documents({"is_deleted": {"$ne": True}, "status": {"$ne": "deleted"}}),
         "waiting_approval": db.stores.count_documents({"status": "waiting_approval"}),
         "total_deals":     db.deals.count_documents({}) if "deals" in cols else 0,
     }
