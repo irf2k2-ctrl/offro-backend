@@ -476,7 +476,7 @@ def _serialize_user(u: dict) -> dict:
 @router.get("/users")
 async def list_users(
     request: Request,
-    user: dict = Depends(require_permission("Users", "view"))
+    user: dict = Depends(require_permission("User Management", "view"))
 ):
     """List all dashboard users."""
     users = list(db.dashboard_users.find({}, {"pin": 0}).sort("created_at", -1))
@@ -490,7 +490,7 @@ async def list_users(
 async def create_user(
     data: dict,
     request: Request,
-    user: dict = Depends(require_permission("Users", "add"))
+    user: dict = Depends(require_permission("User Management", "add"))
 ):
     """Create a new dashboard user. Requires Users:add permission."""
     full_name = str(data.get("full_name", "")).strip()
@@ -538,7 +538,7 @@ async def create_user(
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
-        "Users", "ADD",
+        "User Management", "ADD",
         record_id=str(result.inserted_id),
         record_name=full_name,
         after_value={"full_name": full_name, "mobile": mobile, "role_id": role_id, "assigned_cities": assigned_cities}
@@ -552,7 +552,7 @@ async def update_user(
     user_id: str,
     data: dict,
     request: Request,
-    user: dict = Depends(require_permission("Users", "edit"))
+    user: dict = Depends(require_permission("User Management", "edit"))
 ):
     """Update a dashboard user's profile, role, status, or cities."""
     if not ObjectId.is_valid(user_id):
@@ -567,10 +567,29 @@ async def update_user(
         if field in data:
             updates[field] = data[field]
 
+    # Mobile number update — check uniqueness against other users
+    if "mobile" in data and str(data["mobile"]).strip():
+        new_mobile = str(data["mobile"]).strip()
+        if not (new_mobile.isdigit() and len(new_mobile) == 10):
+            raise HTTPException(status_code=400, detail="Mobile number must be exactly 10 digits")
+        conflict = db.dashboard_users.find_one({"mobile": new_mobile, "_id": {"$ne": ObjectId(user_id)}})
+        if conflict:
+            raise HTTPException(status_code=409, detail="Mobile number already in use by another user")
+        updates["mobile"] = new_mobile
+
     if "role_id" in data and data["role_id"]:
         if not db.dashboard_roles.find_one({"_id": ObjectId(data["role_id"])}):
             raise HTTPException(status_code=400, detail="Invalid role_id")
         updates["role_id"] = ObjectId(data["role_id"])
+
+    # Optional PIN change during edit
+    if "pin" in data and str(data.get("pin", "")).strip():
+        new_pin = str(data["pin"]).strip()
+        if not (new_pin.isdigit() and len(new_pin) in (4, 6)):
+            raise HTTPException(status_code=400, detail="PIN must be 4 or 6 digits")
+        updates["pin"] = hash_pin(new_pin)
+        updates["login_attempts"] = 0
+        updates["lockout_until"] = None
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -590,7 +609,7 @@ async def update_user(
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
-        "Users", "EDIT",
+        "User Management", "EDIT",
         record_id=user_id,
         record_name=existing.get("full_name", ""),
         before_value=before_snapshot,
@@ -605,7 +624,7 @@ async def reset_pin(
     user_id: str,
     data: dict,
     request: Request,
-    user: dict = Depends(require_permission("Users", "edit"))
+    user: dict = Depends(require_permission("User Management", "edit"))
 ):
     """Reset a user's PIN. Super Admin only in practice."""
     if not ObjectId.is_valid(user_id):
@@ -627,7 +646,7 @@ async def reset_pin(
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
-        "Users", "RESET_PIN",
+        "User Management", "RESET_PIN",
         record_id=user_id,
         record_name=existing.get("full_name", "")
     )
@@ -639,7 +658,7 @@ async def reset_pin(
 async def delete_user(
     user_id: str,
     request: Request,
-    user: dict = Depends(require_permission("Users", "delete"))
+    user: dict = Depends(require_permission("User Management", "delete"))
 ):
     """Permanently delete a dashboard user."""
     if not ObjectId.is_valid(user_id):
@@ -662,7 +681,7 @@ async def delete_user(
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
-        "Users", "DELETE",
+        "User Management", "DELETE",
         record_id=user_id,
         record_name=existing.get("full_name", "")
     )
@@ -851,13 +870,25 @@ async def list_activity_logs(
     city: str = "",
     date_from: str = "",
     date_to: str = "",
-    user: dict = Depends(require_permission("Notifications", "view"))
+    user: dict = Depends(get_current_dashboard_user)
 ):
     """
     Get paginated activity logs with optional filters.
+    Accessible to ALL authenticated dashboard users.
+    Non-Super-Admin users see only logs for their assigned cities.
     Returns most recent first.
     """
     query = {}
+
+    # City scope: non-Super-Admin users only see their assigned city logs
+    role_name = user.get("role", {}).get("role_name", "")
+    assigned_cities = user.get("assigned_cities", [])
+    if role_name != "Super Admin" and "*" not in assigned_cities:
+        if assigned_cities:
+            # city filter on 'city' field in log
+            query["city"] = {"$in": assigned_cities}
+        # If no cities assigned, fall through — they'll see their own logs via user filter below
+
 
     if user_name:
         query["user_name"] = {"$regex": user_name, "$options": "i"}
