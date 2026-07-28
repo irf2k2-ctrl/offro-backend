@@ -36,6 +36,8 @@ th{background:#3E5F55;color:#fff;padding:10px;text-align:left;font-size:14px;}
 td{padding:9px 12px;border-bottom:1px solid var(--border);color:var(--text);font-size:12.5px;}
 tr:last-child td{border-bottom:none;}
 tr:hover td{background:#f7faf8;}
+tr:hover td[style*="sticky"]{background:#f7faf8;}
+td[style*="sticky"]{background:#fff;}
 .badge-active{background:#d1f0e0;color:#1a6640;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
 .badge-inactive{background:#fde8e6;color:#b33a2d;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
 .badge-waiting{background:#E7D7C8;color:#8a5c2e;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
@@ -1498,7 +1500,16 @@ tr:hover td{background:#f7faf8;}
   </div>
   <div id="rbac_users_msg" style="margin-bottom:10px;font-weight:600;font-size:13px"></div>
   <div class="table-wrap"><table style="min-width:900px">
-    <thead><tr><th>Name</th><th>Mobile</th><th>Designation</th><th>Role</th><th>Cities</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+    <thead><tr>
+      <th style="position:sticky;left:0;z-index:2;background:#3E5F55;min-width:120px">Name</th>
+      <th style="min-width:110px">Mobile</th>
+      <th style="min-width:110px">Designation</th>
+      <th style="min-width:110px">Role</th>
+      <th style="min-width:90px">Cities</th>
+      <th style="min-width:70px">Status</th>
+      <th style="min-width:110px">Last Login</th>
+      <th style="min-width:80px">Actions</th>
+    </tr></thead>
     <tbody id="rbac_users_table"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
   </table></div>
 </div>
@@ -1883,14 +1894,19 @@ async function submitFulfill(){
 }
 
 function showSection(name, el){
-  window.scrollTo(0, 0);
   if (name === 'cities') loadCities();
   if (name === 'default_images') loadDefaultImages();
   if (name === 'admin_banners') loadAdminBanners();
   document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));
   document.querySelectorAll(".sidebar a").forEach(a=>a.classList.remove("active"));
-  document.getElementById("section-"+name).classList.add("active");
+  let sec = document.getElementById("section-"+name);
+  if(sec) sec.classList.add("active");
   if(el) el.classList.add("active");
+  // Scroll page to top and reset any table horizontal scrolls
+  window.scrollTo({top: 0, behavior: "instant"});
+  if(sec) {
+    sec.querySelectorAll(".table-wrap").forEach(tw => tw.scrollLeft = 0);
+  }
   if(name==="accounts") loadAccounts();
   if(name==="overview") { loadStats(); loadSliders(); }
   if(name==="stores") loadStores();
@@ -8034,7 +8050,7 @@ async function rbacLoadUsers() {
         let cities = (u.assigned_cities || []).join(", ") || "—";
         if (u.assigned_cities && u.assigned_cities.includes("*")) cities = "All Cities";
         let lastLogin = u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never";
-        html += '<tr><td><strong>' + (u.full_name||"") + '</strong></td><td>' + (u.mobile||"") + '</td><td>' + (u.designation||"—") + '</td><td>' + (u.role_name||"—") + '</td><td style="font-size:11px">' + cities + '</td><td>' + statusBadge + '</td><td style="font-size:11px">' + lastLogin + '</td><td><button class="btn btn-sm" onclick="rbacEditUser(\''+u.id+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteUser(\''+u.id+'\',\''+u.full_name+'\')"><i class="fas fa-trash text-danger"></i></button></td></tr>';
+        html += '<tr><td style="position:sticky;left:0;background:#fff;z-index:1"><strong>' + (u.full_name||"") + '</strong></td><td>' + (u.mobile||"") + '</td><td>' + (u.designation||"—") + '</td><td>' + (u.role_name||"—") + '</td><td style="font-size:11px">' + cities + '</td><td>' + statusBadge + '</td><td style="font-size:11px">' + lastLogin + '</td><td><button class="btn btn-sm" onclick="rbacEditUser(\''+u.id+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteUser(\''+u.id+'\',\''+u.full_name+'\')"><i class="fas fa-trash text-danger"></i></button></td></tr>';
       }
     }
     document.getElementById("rbac_users_table").innerHTML = html;

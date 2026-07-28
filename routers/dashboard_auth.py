@@ -460,6 +460,7 @@ def _serialize_user(u: dict) -> dict:
         "designation": u.get("designation", ""),
         "profile_photo_url": u.get("profile_photo_url"),
         "role_id": str(u["role_id"]) if u.get("role_id") else None,
+        "role_name": u.get("role_name", "Unassigned"),   # ← included for dashboard display
         "status": u.get("status", "active"),
         "assigned_cities": u.get("assigned_cities", []),
         "last_login_at": u.get("last_login_at").isoformat() if u.get("last_login_at") else None,
