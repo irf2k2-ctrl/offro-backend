@@ -214,11 +214,14 @@ async def register_fcm_token(request: Request):
 def startup():
     try:
         admin.seed_admin()
-# Seed RBAC collections (roles, super admin user)
-from routers.dashboard_auth import seed_rbac
-seed_rbac()
     except Exception as e:
         print(f"⚠️  seed_admin skipped (DB unreachable at startup): {e}")
+    # Seed RBAC collections (roles, super admin user)
+    try:
+        from routers.dashboard_auth import seed_rbac
+        seed_rbac()
+    except Exception as e:
+        print(f"⚠️  seed_rbac skipped (DB unreachable at startup): {e}")
     try:
         _ensure_indexes()
     except Exception as e:
