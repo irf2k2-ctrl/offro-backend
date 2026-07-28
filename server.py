@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
-from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat
+from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, dashboard_auth
 from database import db
 import base64, io, re
 
@@ -28,6 +28,7 @@ app.include_router(public.router)
 app.include_router(popup_campaigns.router)
 app.include_router(webhook.router)          # WhatsApp Cloud API webhook — no prefix
 app.include_router(wa_chat.router, prefix="/admin")  # WhatsApp Live Chat admin API
+app.include_router(dashboard_auth.router, prefix="/admin")  # RBAC dashboard auth — /admin/auth/*
 
 
 # ── File download endpoints ──
@@ -213,6 +214,9 @@ async def register_fcm_token(request: Request):
 def startup():
     try:
         admin.seed_admin()
+# Seed RBAC collections (roles, super admin user)
+from routers.dashboard_auth import seed_rbac
+seed_rbac()
     except Exception as e:
         print(f"⚠️  seed_admin skipped (DB unreachable at startup): {e}")
     try:
