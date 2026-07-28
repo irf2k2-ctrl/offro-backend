@@ -107,7 +107,8 @@ def log_activity(
 async def get_current_dashboard_user(request: Request) -> dict:
     """
     Resolve the current dashboard user from cookie or Bearer token.
-    Enforces account status, inactivity timeout, and loads role permissions.
+    Checks dashboard_users first (new RBAC login), then falls back to
+    db.admins (old legacy login) and treats that session as Super Admin.
     """
     token = request.cookies.get("admin_token") or \
             request.headers.get("Authorization", "").replace("Bearer ", "")
@@ -116,7 +117,30 @@ async def get_current_dashboard_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     user = db.dashboard_users.find_one({"token": token})
+
+    # ── Legacy fallback: old /admin/login token → treat as Super Admin ──
     if not user:
+        legacy = db.admins.find_one({"token": token})
+        if legacy:
+            # Resolve the Super Admin role
+            super_role = db.dashboard_roles.find_one({"role_name": "Super Admin"}) or {}
+            return {
+                "_id": legacy["_id"],
+                "full_name": legacy.get("username", "Admin"),
+                "mobile": "legacy",
+                "email": None,
+                "designation": "Super Administrator (Legacy)",
+                "profile_photo_url": None,
+                "role_id": super_role.get("_id"),
+                "assigned_cities": ["*"],
+                "status": "active",
+                "role": super_role or {"role_name": "Super Admin", "permissions": {
+                    mod: {act: True for act in ["view","add","edit","delete","approve","export"]}
+                    for mod in ["Merchants","Stores","Products","Banners","Deals","Users",
+                                "Payments","Invoices","Categories","Cities","Reports",
+                                "Notifications","Settings"]
+                }}
+            }
         raise HTTPException(status_code=401, detail="Invalid session")
 
     if user.get("status") in ("disabled", "suspended"):
@@ -129,10 +153,13 @@ async def get_current_dashboard_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Session expired due to inactivity")
 
     # Update sliding activity window
-    db.dashboard_users.update_one(
-        {"_id": user["_id"]},
-        {"$set": {"last_active_at": datetime.utcnow()}}
-    )
+    try:
+        db.dashboard_users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"last_active_at": datetime.utcnow()}}
+        )
+    except Exception:
+        pass
 
     # Resolve role + permissions
     role = db.dashboard_roles.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
