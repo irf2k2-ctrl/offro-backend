@@ -26,11 +26,12 @@ INACTIVITY_TIMEOUT_MINUTES = 15
 SESSION_MAX_HOURS = 8
 PBKDF2_ITERATIONS = 100_000
 
-# All modules that support permissions
+# All modules that support permissions — must match RBAC_MODULES in admin_dashboard.html
 ALL_MODULES = [
-    "Merchants", "Stores", "Products", "Banners", "Deals",
-    "Users", "Payments", "Invoices", "Categories", "Cities",
-    "Reports", "Notifications", "Settings"
+    "Accounts", "Stores", "Products", "Banners", "Admin Banners", "Popup Campaigns",
+    "Payments", "Gift Vouchers", "Notifications", "Categories", "Pricing & GST",
+    "Reviews", "Discounts", "Terms & Conditions", "Policies",
+    "Social Media", "Live Chat", "Default Images", "User Management"
 ]
 
 # All permission actions per module
@@ -97,6 +98,9 @@ def log_activity(
     }
     try:
         db.activity_logs.insert_one(doc)
+        # Auto-purge logs older than 15 days (runs inline — cheap delete, rarely hits)
+        cutoff = datetime.utcnow() - timedelta(days=15)
+        db.activity_logs.delete_many({"timestamp": {"$lt": cutoff}})
     except Exception as e:
         print(f"[RBAC] log_activity error: {e}")
 
@@ -136,9 +140,10 @@ async def get_current_dashboard_user(request: Request) -> dict:
                 "status": "active",
                 "role": super_role or {"role_name": "Super Admin", "permissions": {
                     mod: {act: True for act in ["view","add","edit","delete","approve","export"]}
-                    for mod in ["Merchants","Stores","Products","Banners","Deals","Users",
-                                "Payments","Invoices","Categories","Cities","Reports",
-                                "Notifications","Settings"]
+                    for mod in ["Accounts","Stores","Products","Banners","Admin Banners","Popup Campaigns",
+                                "Payments","Gift Vouchers","Notifications","Categories","Pricing & GST",
+                                "Reviews","Discounts","Terms & Conditions","Policies",
+                                "Social Media","Live Chat","Default Images","User Management"]
                 }}
             }
         raise HTTPException(status_code=401, detail="Invalid session")
@@ -224,7 +229,7 @@ def seed_rbac():
         admin_perms = {}
         for mod in ALL_MODULES:
             admin_perms[mod] = {act: True for act in ALL_ACTIONS}
-        admin_perms["Settings"] = {act: (act == "view") for act in ALL_ACTIONS}
+        admin_perms["User Management"] = {act: (act == "view") for act in ALL_ACTIONS}
 
         readonly_perms = {}
         for mod in ALL_MODULES:
@@ -233,29 +238,29 @@ def seed_rbac():
         sales_perms = {}
         for mod in ALL_MODULES:
             sales_perms[mod] = {act: False for act in ALL_ACTIONS}
-        for mod in ["Stores", "Products", "Deals"]:
+        for mod in ["Stores", "Products"]:
             sales_perms[mod] = {"view": True, "add": True, "edit": False, "delete": False, "approve": False, "export": True}
-        sales_perms["Merchants"] = {"view": True, "add": False, "edit": False, "delete": False, "approve": False, "export": True}
-        sales_perms["Reports"] = {"view": True, "add": False, "edit": False, "delete": False, "approve": False, "export": True}
+        sales_perms["Accounts"] = {"view": True, "add": False, "edit": False, "delete": False, "approve": False, "export": True}
+        sales_perms["Notifications"] = {"view": True, "add": False, "edit": False, "delete": False, "approve": False, "export": True}
 
         city_mgr_perms = {}
         for mod in ALL_MODULES:
             city_mgr_perms[mod] = {act: False for act in ALL_ACTIONS}
-        for mod in ["Stores", "Products", "Banners", "Deals", "Categories"]:
+        for mod in ["Stores", "Products", "Banners", "Categories"]:
             city_mgr_perms[mod] = {"view": True, "add": True, "edit": True, "delete": False, "approve": True, "export": True}
-        city_mgr_perms["Merchants"] = {"view": True, "add": False, "edit": True, "delete": False, "approve": False, "export": True}
-        city_mgr_perms["Reports"] = {"view": True, "add": False, "edit": False, "delete": False, "approve": False, "export": True}
+        city_mgr_perms["Accounts"] = {"view": True, "add": False, "edit": True, "delete": False, "approve": False, "export": True}
+        city_mgr_perms["Notifications"] = {"view": True, "add": False, "edit": False, "delete": False, "approve": False, "export": True}
 
         finance_perms = {}
         for mod in ALL_MODULES:
             finance_perms[mod] = {act: False for act in ALL_ACTIONS}
-        for mod in ["Payments", "Invoices", "Reports"]:
+        for mod in ["Payments", "Gift Vouchers"]:
             finance_perms[mod] = {"view": True, "add": False, "edit": False, "delete": False, "approve": False, "export": True}
 
         marketing_perms = {}
         for mod in ALL_MODULES:
             marketing_perms[mod] = {act: False for act in ALL_ACTIONS}
-        for mod in ["Banners", "Notifications", "Deals"]:
+        for mod in ["Banners", "Notifications"]:
             marketing_perms[mod] = {"view": True, "add": True, "edit": True, "delete": True, "approve": False, "export": True}
         marketing_perms["Stores"] = {"view": True, "add": False, "edit": False, "delete": False, "approve": False, "export": True}
 
@@ -682,7 +687,7 @@ def _serialize_role(r: dict) -> dict:
 
 @router.get("/roles")
 async def list_roles(
-    user: dict = Depends(require_permission("Settings", "view"))
+    user: dict = Depends(require_permission("User Management", "view"))
 ):
     """List all roles with their permission grids."""
     roles = list(db.dashboard_roles.find().sort("created_at", 1))
@@ -693,7 +698,7 @@ async def list_roles(
 async def create_role(
     data: dict,
     request: Request,
-    user: dict = Depends(require_permission("Settings", "edit"))
+    user: dict = Depends(require_permission("User Management", "edit"))
 ):
     """Create a new custom role with a permission grid."""
     role_name = str(data.get("role_name", "")).strip()
@@ -727,7 +732,7 @@ async def create_role(
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
-        "Settings", "ADD_ROLE",
+        "User Management", "ADD_ROLE",
         record_id=str(result.inserted_id),
         record_name=role_name
     )
@@ -740,7 +745,7 @@ async def update_role(
     role_id: str,
     data: dict,
     request: Request,
-    user: dict = Depends(require_permission("Settings", "edit"))
+    user: dict = Depends(require_permission("User Management", "edit"))
 ):
     """Update a role's name, description, or permission grid."""
     if not ObjectId.is_valid(role_id):
@@ -785,7 +790,7 @@ async def update_role(
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
-        "Settings", "EDIT_ROLE",
+        "User Management", "EDIT_ROLE",
         record_id=role_id,
         record_name=existing.get("role_name", ""),
         before_value=before_snapshot,
@@ -799,7 +804,7 @@ async def update_role(
 async def delete_role(
     role_id: str,
     request: Request,
-    user: dict = Depends(require_permission("Settings", "edit"))
+    user: dict = Depends(require_permission("User Management", "edit"))
 ):
     """Delete a custom role. Cannot delete system roles or roles assigned to active users."""
     if not ObjectId.is_valid(role_id):
@@ -823,7 +828,7 @@ async def delete_role(
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
-        "Settings", "DELETE_ROLE",
+        "User Management", "DELETE_ROLE",
         record_id=role_id,
         record_name=existing.get("role_name", "")
     )
@@ -846,7 +851,7 @@ async def list_activity_logs(
     city: str = "",
     date_from: str = "",
     date_to: str = "",
-    user: dict = Depends(require_permission("Reports", "view"))
+    user: dict = Depends(require_permission("Notifications", "view"))
 ):
     """
     Get paginated activity logs with optional filters.

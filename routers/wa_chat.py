@@ -45,6 +45,13 @@ def get_current_admin(request: Request):
             request.headers.get("X-Admin-Token", "")
     if not token:
         raise HTTPException(401, "Not authenticated")
+    # Check RBAC dashboard_users first (mobile+PIN login)
+    du = db.dashboard_users.find_one({"token": token})
+    if du:
+        if du.get("status") in ("disabled", "suspended"):
+            raise HTTPException(403, "Account is " + str(du.get("status", "disabled")))
+        return du
+    # Fallback: legacy admin (username+password login)
     a = db.admins.find_one({"token": token})
     if not a:
         raise HTTPException(403, "Invalid session")

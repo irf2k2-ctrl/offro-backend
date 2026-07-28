@@ -1668,11 +1668,17 @@ td[style*="sticky"]{background:#fff;}
         <h6 style="color:var(--primary);font-weight:700;margin:14px 0 8px">Permission Matrix</h6>
         <div class="table-responsive">
           <table class="table table-bordered table-sm align-middle text-center" style="font-size:12px">
-            <thead style="background:var(--sidebar);color:white">
-              <tr><th class="text-start" style="color:white">Module</th>
-              <th style="color:white">View</th><th style="color:white">Add</th><th style="color:white">Edit</th>
-              <th style="color:white">Delete</th><th style="color:white">Approve</th><th style="color:white">Export</th>
-              <th style="color:white">All</th></tr>
+            <thead>
+              <tr style="background:#3E5F55!important">
+                <th class="text-start" style="background:#3E5F55;color:#fff;min-width:130px">Module</th>
+                <th style="background:#3E5F55;color:#fff;min-width:56px">View</th>
+                <th style="background:#3E5F55;color:#fff;min-width:46px">Add</th>
+                <th style="background:#3E5F55;color:#fff;min-width:46px">Edit</th>
+                <th style="background:#3E5F55;color:#fff;min-width:56px">Delete</th>
+                <th style="background:#3E5F55;color:#fff;min-width:60px">Approve</th>
+                <th style="background:#3E5F55;color:#fff;min-width:56px">Export</th>
+                <th style="background:#3E5F55;color:#fff;min-width:40px">All</th>
+              </tr>
             </thead>
             <tbody id="rbac_perm_matrix"></tbody>
           </table>
@@ -8058,7 +8064,12 @@ function waMsgDeleteBtn(msgId) {
 // RBAC JAVASCRIPT — User Management, Roles, Activity Logs
 // ═══════════════════════════════════════════════════════════════
 
-const RBAC_MODULES = ["Merchants","Stores","Products","Banners","Deals","Users","Payments","Invoices","Categories","Cities","Reports","Notifications","Settings"];
+const RBAC_MODULES = [
+  "Accounts","Stores","Products","Banners","Admin Banners","Popup Campaigns",
+  "Payments","Gift Vouchers","Notifications","Categories","Pricing & GST",
+  "Reviews","Discounts","Terms & Conditions","Policies",
+  "Social Media","Live Chat","Default Images","User Management"
+];
 const RBAC_ACTIONS = ["view","add","edit","delete","approve","export"];
 const RBAC_CITIES = ["Ballari","Bengaluru","Hyderabad","Hubli","Dharwad","Mysuru"];
 let rbacLogSkip = 0;
