@@ -1488,16 +1488,16 @@ tr:hover td{background:#f7faf8;}
      RBAC: USER MANAGEMENT
      ═══════════════════════════════════════════════════════════════ -->
 <div id="section-rbac_users" class="section">
+  <div class="page-title"><i class="fas fa-users-cog me-2"></i>User Management</div>
   <div class="section-header">
-    <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-users-cog me-2"></i>Dashboard Users</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage staff accounts, roles, and city access</div>
+    <div style="color:var(--muted);font-size:12px;">Manage staff accounts, roles, and city access</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-p" onclick="rbacLoadUsers()"><i class="fas fa-sync me-1"></i> Refresh</button>
+      <button class="btn-p" onclick="rbacShowUserModal()"><i class="fas fa-plus me-1"></i> Add User</button>
     </div>
-    <button class="btn-p" onclick="rbacLoadUsers()"><i class="fas fa-sync me-1"></i> Refresh</button>
-    <button class="btn-p" onclick="rbacShowUserModal()"><i class="fas fa-plus me-1"></i> Add User</button>
   </div>
   <div id="rbac_users_msg" style="margin-bottom:10px;font-weight:600;font-size:13px"></div>
-  <div class="table-wrap"><table>
+  <div class="table-wrap"><table style="min-width:900px">
     <thead><tr><th>Name</th><th>Mobile</th><th>Designation</th><th>Role</th><th>Cities</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
     <tbody id="rbac_users_table"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
   </table></div>
@@ -1507,19 +1507,23 @@ tr:hover td{background:#f7faf8;}
      RBAC: ROLES & PERMISSIONS
      ═══════════════════════════════════════════════════════════════ -->
 <div id="section-rbac_roles" class="section">
+  <div class="page-title"><i class="fas fa-user-shield me-2"></i>Roles &amp; Permissions</div>
   <div class="section-header">
-    <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-user-shield me-2"></i>Roles &amp; Permissions</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Manage role templates and module permissions</div>
-    </div>
-    <div>
+    <div style="color:var(--muted);font-size:12px;">Manage role templates and module-level permissions</div>
+    <div style="display:flex;gap:8px">
       <button class="btn-p" onclick="rbacLoadRoles()"><i class="fas fa-sync me-1"></i> Refresh</button>
       <button class="btn-p" onclick="rbacShowRoleModal()"><i class="fas fa-plus me-1"></i> Add Role</button>
     </div>
   </div>
   <div id="rbac_roles_msg" style="margin-bottom:10px;font-weight:600;font-size:13px"></div>
-  <div class="table-wrap"><table>
-    <thead><tr><th>Role Name</th><th>Description</th><th>Permissions</th><th>Type</th><th>Actions</th></tr></thead>
+  <div class="table-wrap"><table style="min-width:600px">
+    <thead><tr>
+      <th style="min-width:160px">Role Name</th>
+      <th>Description</th>
+      <th style="min-width:160px">Permissions</th>
+      <th style="min-width:90px">Type</th>
+      <th style="min-width:80px">Actions</th>
+    </tr></thead>
     <tbody id="rbac_roles_table"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
   </table></div>
 </div>
@@ -1528,11 +1532,9 @@ tr:hover td{background:#f7faf8;}
      RBAC: ACTIVITY LOGS
      ═══════════════════════════════════════════════════════════════ -->
 <div id="section-rbac_logs" class="section">
+  <div class="page-title"><i class="fas fa-history me-2"></i>Activity Logs</div>
   <div class="section-header">
-    <div>
-      <div class="fw-bold" style="font-size:18px;color:var(--primary)"><i class="fas fa-history me-2"></i>Activity Logs</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px;">Audit trail of all dashboard actions</div>
-    </div>
+    <div style="color:var(--muted);font-size:12px;">Audit trail of all dashboard actions</div>
     <button class="btn-p" onclick="rbacLoadLogs()"><i class="fas fa-sync me-1"></i> Refresh</button>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
@@ -1881,6 +1883,7 @@ async function submitFulfill(){
 }
 
 function showSection(name, el){
+  window.scrollTo(0, 0);
   if (name === 'cities') loadCities();
   if (name === 'default_images') loadDefaultImages();
   if (name === 'admin_banners') loadAdminBanners();
