@@ -1606,9 +1606,16 @@ td[style*="sticky"]{background:#fff;}
             <label class="form-label-custom">Mobile Number *</label>
             <input id="rbac_user_mobile" class="form-control" placeholder="e.g. 9876543210" maxlength="10" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
           </div>
-          <div class="col-md-4">
-            <label class="form-label-custom">PIN (4 or 6 digits) *</label>
-            <input id="rbac_user_pin" type="password" class="form-control" placeholder="••••" maxlength="6" inputmode="numeric">
+          <!-- PIN field for NEW user (required) -->
+          <div id="rbac_pin_add_row" class="col-md-4">
+            <label class="form-label-custom">PIN (4 or 6 digits) <span style="color:var(--danger)">*</span></label>
+            <input id="rbac_user_pin" type="password" class="form-control" placeholder="Enter 4 or 6 digit PIN" maxlength="6" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,6)">
+          </div>
+          <!-- Change PIN field for EDIT (optional) -->
+          <div id="rbac_pin_edit_row" class="col-md-4" style="display:none">
+            <label class="form-label-custom">Change PIN <span style="color:var(--muted);font-size:11px">(optional)</span></label>
+            <input id="rbac_user_pin_change" type="password" class="form-control" placeholder="Leave blank to keep current" maxlength="6" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,6)">
+            <small style="color:var(--muted)">Enter new 4 or 6 digit PIN to change it</small>
           </div>
           <div class="col-md-4">
             <label class="form-label-custom">Designation</label>
@@ -1827,11 +1834,84 @@ setInterval(() => {
   if (hasModalOpen && !hasVisibleModal) cleanupModals();
 }, 5000);
 
+// Global: current user permissions (loaded from /admin/auth/me)
+window._rbacMe = null;
+
+// Maps RBAC module name → sidebar section IDs that need "view" permission
+const RBAC_SECTION_MAP = {
+  "Accounts":          ["accounts"],
+  "Stores":            ["stores"],
+  "Products":          ["product_cards"],
+  "Banners":           ["promo_sliders"],
+  "Admin Banners":     ["admin_banners"],
+  "Popup Campaigns":   ["popup_campaigns"],
+  "Payments":          ["merchant_txns"],
+  "Gift Vouchers":     ["gift_product_requests"],
+  "Notifications":     ["notifications"],
+  "Categories":        ["categories"],
+  "Pricing & GST":     ["pricing"],
+  "Reviews":           ["reviews"],
+  "Discounts":         ["discounts"],
+  "Terms & Conditions":["terms"],
+  "Policies":          ["policies"],
+  "Social Media":      ["social"],
+  "Live Chat":         ["wa_chat"],
+  "Default Images":    ["default_images"],
+  "User Management":   ["rbac_users","rbac_roles","rbac_logs"]
+};
+
+function _rbacCanView(sectionId) {
+  if (!window._rbacMe) return true; // not loaded yet — allow
+  if (window._rbacMe.role === "Super Admin") return true; // super admin: always yes
+  let perms = window._rbacMe.permissions || {};
+  // Find which module this section belongs to
+  for (let [mod, sections] of Object.entries(RBAC_SECTION_MAP)) {
+    if (sections.includes(sectionId)) {
+      return !!(perms[mod] && perms[mod]["view"]);
+    }
+  }
+  return true; // overview and unprotected sections: always visible
+}
+
+function _rbacApplySidebarVisibility() {
+  if (!window._rbacMe) return;
+  let isSuperAdmin = window._rbacMe.role === "Super Admin";
+  let perms = window._rbacMe.permissions || {};
+
+  // For each sidebar link, hide if user has no view permission for that section
+  document.querySelectorAll(".sidebar a[onclick]").forEach(link => {
+    let match = link.getAttribute("onclick").match(/showSection\([\'"]([^\'",]+)[\'"],/);
+    if (!match) return;
+    let sectionId = match[1];
+    // Find module for this section
+    let canView = isSuperAdmin;
+    if (!isSuperAdmin) {
+      canView = _rbacCanView(sectionId);
+    }
+    link.style.display = canView ? "" : "none";
+  });
+
+  // Also hide separators (div.sep) that have ALL following links hidden
+  document.querySelectorAll(".sidebar .sep").forEach(sep => {
+    let nextEl = sep.nextElementSibling;
+    let hasVisible = false;
+    while (nextEl && !nextEl.classList.contains("sep") && nextEl.tagName !== "A" || (nextEl && nextEl.tagName === "A")) {
+      if (nextEl.tagName === "A" && nextEl.style.display !== "none") { hasVisible = true; break; }
+      if (nextEl.classList && nextEl.classList.contains("sep")) break;
+      nextEl = nextEl.nextElementSibling;
+      if (!nextEl) break;
+    }
+    sep.style.display = hasVisible ? "" : "none";
+  });
+}
+
 async function loadSidebarProfile() {
   try {
     let res = await fetch("/admin/auth/me", { credentials: "include" });
     if (!res.ok) return;
     let u = await res.json();
+    window._rbacMe = u; // store globally
+
     let name = (u.full_name || u.mobile || "Admin").trim();
     let role = u.role || "—";
     let initial = name.charAt(0).toUpperCase() || "A";
@@ -1841,6 +1921,9 @@ async function loadSidebarProfile() {
     if(el2) el2.innerText = name;
     let el3 = document.getElementById("sidebar_role");
     if(el3) el3.innerText = role;
+
+    // Apply sidebar visibility after loading user
+    _rbacApplySidebarVisibility();
   } catch(e) { console.error("loadSidebarProfile", e); }
 }
 
@@ -1931,6 +2014,24 @@ async function submitFulfill(){
 }
 
 function showSection(name, el){
+  // RBAC: block access to sections the current user cannot view
+  if (window._rbacMe && window._rbacMe.role !== "Super Admin" && !_rbacCanView(name)) {
+    // Show a friendly access-denied screen instead of loading the section
+    document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));
+    document.querySelectorAll(".sidebar a").forEach(a=>a.classList.remove("active"));
+    // Find or create a temp denied section
+    let denied = document.getElementById("_rbac_denied_section");
+    if (!denied) {
+      denied = document.createElement("div");
+      denied.id = "_rbac_denied_section";
+      denied.className = "section";
+      denied.innerHTML = '<div class="page-title">Access Denied</div><div style="text-align:center;padding:60px 0"><div style="font-size:48px;margin-bottom:16px">🔒</div><div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:8px">You don\'t have access to this module</div><div style="color:var(--muted);font-size:14px">Contact your Super Admin to request permission.</div></div>';
+      document.querySelector("main") && document.querySelector("main").appendChild(denied);
+    }
+    denied.classList.add("active");
+    window.scrollTo({top:0, behavior:"instant"});
+    return;
+  }
   if (name === 'cities') loadCities();
   if (name === 'default_images') loadDefaultImages();
   if (name === 'admin_banners') loadAdminBanners();
@@ -8102,8 +8203,12 @@ async function rbacLoadUsers() {
 async function rbacShowUserModal(userId) {
   document.getElementById("rbac_user_id").value = userId || "";
   document.getElementById("rbacUserModalTitle").innerText = userId ? "Edit User" : "Add Dashboard User";
-  document.getElementById("rbac_user_pin").parentElement.style.display = userId ? "none" : "block";
+  // Toggle PIN fields based on mode
+  document.getElementById("rbac_pin_add_row").style.display = userId ? "none" : "block";
+  document.getElementById("rbac_pin_edit_row").style.display = userId ? "block" : "none";
   document.getElementById("rbac_user_pin").required = !userId;
+  document.getElementById("rbac_user_pin").value = "";
+  document.getElementById("rbac_user_pin_change").value = "";
 
   // Load roles into dropdown
   try {
@@ -8153,18 +8258,25 @@ async function rbacSaveUser() {
   let userId = document.getElementById("rbac_user_id").value;
   let name = document.getElementById("rbac_user_name").value.trim();
   let mobile = document.getElementById("rbac_user_mobile").value.trim();
-  let pin = document.getElementById("rbac_user_pin").value.trim();
   let designation = document.getElementById("rbac_user_designation").value.trim();
   let email = document.getElementById("rbac_user_email").value.trim();
   let roleId = document.getElementById("rbac_user_role").value;
   let status = document.getElementById("rbac_user_status").value;
   let cities = Array.from(document.querySelectorAll(".rbac-city-chk:checked")).map(c => c.value);
 
+  // PIN handling: required for new users, optional change for existing
+  let pin = userId
+    ? document.getElementById("rbac_user_pin_change").value.trim()   // edit: optional
+    : document.getElementById("rbac_user_pin").value.trim();          // add: required
+
   if (!name || !mobile || !roleId) { alert("Name, Mobile, and Role are required"); return; }
   if (!userId && !pin) { alert("PIN is required for new users"); return; }
+  if (pin && !(pin.length === 4 || pin.length === 6) || (pin && !/^\d+$/.test(pin))) {
+    alert("PIN must be exactly 4 or 6 digits"); return;
+  }
 
   let body = { full_name: name, mobile, designation, email: email || null, role_id: roleId, status, assigned_cities: cities };
-  if (pin) body.pin = pin;
+  if (pin) body.pin = pin;  // only sent if non-empty
 
   try {
     let url = userId ? "/admin/auth/users/" + userId : "/admin/auth/users";
