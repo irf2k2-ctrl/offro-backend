@@ -23,7 +23,7 @@ body{background:#FDFBF6;color:#2c3e35;font-family:'Segoe UI',sans-serif;margin:0
 .sidebar .logout{margin-top:auto;color:#f4a49a!important;}
 .sidebar .logout:hover{background:rgba(255,100,80,.15)!important;}
 .main{margin-left:230px;padding:24px;min-height:100vh;}
-.page-title{font-size:18px;font-weight:700;color:var(--primary);margin-bottom:18px;}
+.page-title{font-size:18px;font-weight:700;color:var(--primary);margin-bottom:18px;white-space:normal;overflow:visible;}
 .card-stat{background:#fff;border:1px solid #d4e8de;border-radius:12px;padding:24px;text-align:center;}
 .card-stat h3{font-size:30px;color:var(--primary);font-weight:700;margin:0;}
 .card-stat p{color:var(--muted);margin:4px 0 0;font-size:12px;}
@@ -136,6 +136,14 @@ td[style*="sticky"]{background:#fff;}
          style="height:38px;width:auto;object-fit:contain;filter:brightness(0) invert(1);" alt="OffrO">
   </div>
   <div class="sidebar-sub">Admin Panel</div>
+  <!-- ── Logged-in user profile card ── -->
+  <div id="sidebar_profile" style="background:rgba(255,255,255,0.10);border-radius:10px;padding:8px 11px;margin:8px 0 4px 0;display:flex;align-items:center;gap:9px;">
+    <div id="sidebar_avatar" style="width:32px;height:32px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--sidebar);flex-shrink:0;">?</div>
+    <div style="min-width:0;flex:1;overflow:hidden;">
+      <div id="sidebar_name" style="color:#fff;font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Loading...</div>
+      <div id="sidebar_role" style="color:rgba(255,255,255,0.55);font-size:10px;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
+    </div>
+  </div>
   <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('accounts',this)"><i class="fas fa-id-badge fa-fw"></i> Accounts</a>
@@ -1596,7 +1604,7 @@ td[style*="sticky"]{background:#fff;}
           </div>
           <div class="col-md-6">
             <label class="form-label-custom">Mobile Number *</label>
-            <input id="rbac_user_mobile" class="form-control" placeholder="e.g. 9876543210" maxlength="15">
+            <input id="rbac_user_mobile" class="form-control" placeholder="e.g. 9876543210" maxlength="10" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
           </div>
           <div class="col-md-4">
             <label class="form-label-custom">PIN (4 or 6 digits) *</label>
@@ -1813,6 +1821,27 @@ setInterval(() => {
   if (hasModalOpen && !hasVisibleModal) cleanupModals();
 }, 5000);
 
+async function loadSidebarProfile() {
+  try {
+    let res = await fetch("/admin/auth/me", { credentials: "include" });
+    if (!res.ok) return;
+    let u = await res.json();
+    let name = (u.full_name || u.mobile || "Admin").trim();
+    let role = u.role || "—";
+    let initial = name.charAt(0).toUpperCase() || "A";
+    let el = document.getElementById("sidebar_avatar");
+    if(el) el.innerText = initial;
+    let el2 = document.getElementById("sidebar_name");
+    if(el2) el2.innerText = name;
+    let el3 = document.getElementById("sidebar_role");
+    if(el3) el3.innerText = role;
+  } catch(e) { console.error("loadSidebarProfile", e); }
+}
+
+function _accessDeniedHtml(module) {
+  return '<tr><td colspan="20" style="text-align:center;padding:32px"><div style="display:inline-block;background:#fff8f0;border:1px solid #e8d5c0;border-radius:12px;padding:20px 32px;max-width:400px"><div style="font-size:22px;margin-bottom:8px">🔒</div><div style="font-weight:700;color:var(--text);font-size:14px;margin-bottom:4px">Access Denied</div><div style="color:var(--muted);font-size:12px">You do not have permission to view <strong>' + module + '</strong>.<br>Contact your Super Admin to request access.</div></div></td></tr>';
+}
+
 window.onload = () => {
   // Safe modal init — null-guarded so a missing element never crashes page load
   function safeModal(id) {
@@ -1829,6 +1858,7 @@ window.onload = () => {
   bnViewModalInst   = safeModal("bnViewModal");
 
   try { loadStats(); }      catch(e) { console.error("loadStats:", e); }
+  loadSidebarProfile();
   try { loadCategories(); } catch(e) { console.error("loadCategories:", e); }
 
   // Auto-refresh stats every 60s when on overview
@@ -7088,8 +7118,8 @@ async function loadPopupCampaigns() {
   tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
   try {
     const r = await fetch('/admin/popup-campaigns', { credentials: 'include' });
+    if (r.status === 401 || r.status === 403) { tbody.innerHTML = _accessDeniedHtml("Popup Campaigns"); return; }
     if (!r.ok) throw new Error(await r.text());
-    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
     if (!r.ok) { console.error('loadPopupCampaigns error', r.status); return; }
     const data = await r.json();
     if (!data.length) {
@@ -8038,7 +8068,7 @@ const rbacLogLimit = 50;
 async function rbacLoadUsers() {
   try {
     let res = await fetch("/admin/auth/users", { credentials: "include" });
-    if (!res.ok) { document.getElementById("rbac_users_table").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load</td></tr>'; return; }
+    if (res.status===403||res.status===401) { document.getElementById("rbac_users_table").innerHTML = _accessDeniedHtml("User Management"); return; } if (!res.ok) { document.getElementById("rbac_users_table").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>'; return; }
     let users = await res.json();
     let html = "";
     if (users.length === 0) {
@@ -8050,7 +8080,7 @@ async function rbacLoadUsers() {
           : '<span style="color:var(--danger)">● Suspended</span>';
         let cities = (u.assigned_cities || []).join(", ") || "—";
         if (u.assigned_cities && u.assigned_cities.includes("*")) cities = "All Cities";
-        let lastLogin = u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never";
+        let lastLogin = u.last_login_at ? new Date(u.last_login_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : "Never";
         html += '<tr><td style="position:sticky;left:0;background:#fff;z-index:1"><strong>' + (u.full_name||"") + '</strong></td><td>' + (u.mobile||"") + '</td><td>' + (u.designation||"—") + '</td><td>' + (u.role_name||"—") + '</td><td style="font-size:11px">' + cities + '</td><td>' + statusBadge + '</td><td style="font-size:11px">' + lastLogin + '</td><td><button class="btn btn-sm" onclick="rbacEditUser(\''+u.id+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteUser(\''+u.id+'\',\''+u.full_name+'\')"><i class="fas fa-trash text-danger"></i></button></td></tr>';
       }
     }
@@ -8156,7 +8186,7 @@ async function rbacEditUser(id) { await rbacShowUserModal(id); }
 async function rbacLoadRoles() {
   try {
     let res = await fetch("/admin/auth/roles", { credentials: "include" });
-    if (!res.ok) { document.getElementById("rbac_roles_table").innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger)">Failed to load</td></tr>'; return; }
+    if (res.status===403||res.status===401) { document.getElementById("rbac_roles_table").innerHTML = _accessDeniedHtml("Roles & Permissions"); return; } if (!res.ok) { document.getElementById("rbac_roles_table").innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>'; return; }
     let roles = await res.json();
     let html = "";
     for (let r of roles) {
@@ -8272,7 +8302,7 @@ async function rbacLoadLogs() {
     let html = "";
     for (let log of data.logs) {
       let actionColor = log.action.includes("FAIL") || log.action.includes("LOCKOUT") || log.action === "DELETE" ? "var(--danger)" : log.action === "LOGIN_SUCCESS" ? "#2d8a56" : "var(--text)";
-      html += '<tr><td style="font-size:11px">' + (log.timestamp ? new Date(log.timestamp).toLocaleString() : "—") + '</td><td>' + (log.user_name||"—") + '</td><td style="font-size:11px">' + (log.mobile||"—") + '</td><td>' + (log.module||"—") + '</td><td style="font-weight:600;color:' + actionColor + '">' + (log.action||"—") + '</td><td style="font-size:11px">' + (log.record_name||"—") + '</td><td>' + (log.city||"—") + '</td><td style="font-size:11px">' + (log.ip_address||"—") + '</td></tr>';
+      html += '<tr><td style="font-size:11px">' + (log.timestamp ? new Date(log.timestamp).toLocaleString('en-IN', {timeZone:'Asia/Kolkata',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : "—") + '</td><td>' + (log.user_name||"—") + '</td><td style="font-size:11px">' + (log.mobile||"—") + '</td><td>' + (log.module||"—") + '</td><td style="font-weight:600;color:' + actionColor + '">' + (log.action||"—") + '</td><td style="font-size:11px">' + (log.record_name||"—") + '</td><td>' + (log.city||"—") + '</td><td style="font-size:11px">' + (log.ip_address||"—") + '</td></tr>';
     }
     document.getElementById("rbac_logs_table").innerHTML = html || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">No logs found</td></tr>';
     document.getElementById("rbac_logs_count").innerText = data.total + " total logs";

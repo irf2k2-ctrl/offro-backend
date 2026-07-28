@@ -890,13 +890,17 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
     global _store_cache
+    city_f = _city_filter(a)
+    is_restricted = bool(city_f)  # True if user has city restrictions
     now_ts = _time.time()
-    if _store_cache["data"] is not None and (now_ts - _store_cache["ts"]) < _STORE_CACHE_TTL:
+    # Only use cache for unrestricted (Super Admin) users
+    if not is_restricted and _store_cache["data"] is not None and (now_ts - _store_cache["ts"]) < _STORE_CACHE_TTL:
         return _store_cache["data"]
     # Exclude large base64 image fields from list for performance
+    base_query = {"$or": [{"is_deleted": {"$ne": True}}, {"is_deleted": {"$exists": False}}],
+         "status": {"$ne": "deleted"}, **city_f}
     stores = list(db.stores.find(
-        {"$or": [{"is_deleted": {"$ne": True}}, {"is_deleted": {"$exists": False}}],
-         "status": {"$ne": "deleted"}},
+        base_query,
         {
             "store_image2": 0,  # heavy base64 — loaded separately in edit form
             "qr_code": 0,       # always base64 — loaded separately in detail view
@@ -940,8 +944,9 @@ def list_stores(a=Depends(get_current_admin)):
         merchants[str(m["_id"])] = m
     
     result = [_fmt_store_fast(s, sub_map, deal_map, merchants) for s in stores]
-    _store_cache["data"] = result
-    _store_cache["ts"] = _time.time()
+    if not is_restricted:
+        _store_cache["data"] = result
+        _store_cache["ts"] = _time.time()
     return result
 
 
@@ -3405,14 +3410,18 @@ def _fmt_admin_product_row(v, collection):
 @router.get("/products")
 def list_admin_products(a=Depends(get_current_admin)):
     """All admin product cards (gift_vouchers + products collections)."""
+    city_f = _city_filter(a)
     result = []
     # Exclude gift_vouchers that were auto-created from merchant_voucher approval (source_voucher_id set)
     # — those are already shown in the Merchant Products tab; showing them here causes duplicates.
-    for v in db.gift_vouchers.find(
-        {"$or": [{"source_voucher_id": {"$exists": False}}, {"source_voucher_id": ""}]}
-    ).sort("_id", -1):
+    gv_query = {"$or": [{"source_voucher_id": {"$exists": False}}, {"source_voucher_id": ""}]}
+    if city_f:
+        # gift_vouchers have a city field (set from the parent store at approval time)
+        gv_query = {"$and": [gv_query, city_f]}
+    for v in db.gift_vouchers.find(gv_query).sort("_id", -1):
         result.append(_fmt_admin_product_row(v, "gift_vouchers"))
-    for v in db.products.find().sort("_id", -1):
+    prod_query = {**city_f} if city_f else {}
+    for v in db.products.find(prod_query).sort("_id", -1):
         result.append(_fmt_admin_product_row(v, "products"))
     return result
 
@@ -3610,8 +3619,9 @@ def update_merchant_product_card(vid: str, data: dict, a=Depends(get_current_adm
 @router.get("/merchant-products")
 def list_merchant_products(a=Depends(get_current_admin)):
     """Merchant-submitted product cards (merchant_vouchers collection)."""
+    city_f = _city_filter(a)
     result = []
-    for v in db.merchant_vouchers.find().sort("_id", -1):
+    for v in db.merchant_vouchers.find({**city_f} if city_f else {}).sort("_id", -1):
         result.append({
             "id":              str(v["_id"]),
             "_id":             str(v["_id"]),

@@ -80,7 +80,7 @@ body {
 
     <div class="mb-3 text-start">
         <label class="form-label-custom">Mobile Number</label>
-        <input id="mobile" class="form-control" placeholder="e.g. 9999999999" maxlength="15" autocomplete="off">
+        <input id="mobile" class="form-control" placeholder="e.g. 9999999999" maxlength="10" inputmode="numeric" autocomplete="off" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
     </div>
     <div class="mb-3 text-start">
         <label class="form-label-custom">PIN</label>

@@ -12,6 +12,13 @@ def _require_admin(request: Request):
              request.headers.get("x-admin-token", "")).strip()
     if not token:
         raise HTTPException(401, "Unauthorized")
+    # Check new RBAC dashboard_users first (mobile+PIN login)
+    du = db.dashboard_users.find_one({"token": token})
+    if du:
+        if du.get("status") in ("disabled", "suspended"):
+            raise HTTPException(403, "Account is " + du.get("status", "disabled"))
+        return du
+    # Fallback: legacy admin session (username+password login)
     admin = db.admins.find_one({"token": token})
     if not admin:
         raise HTTPException(401, "Unauthorized")
