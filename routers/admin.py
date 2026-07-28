@@ -101,12 +101,65 @@ def generate_qr_base64(store_id: str) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.read()).decode()
 
 def get_current_admin(request: Request):
+    """Resolve current admin — checks dashboard_users (RBAC) then admins (legacy fallback)."""
     token = request.cookies.get("admin_token") or \
             request.headers.get("Authorization", "").replace("Bearer ", "")
     if not token: raise HTTPException(401, "Not authenticated")
+
+    # ── Try new RBAC system first ──
+    du = db.dashboard_users.find_one({"token": token})
+    if du:
+        if du.get("status") in ("disabled", "suspended"):
+            raise HTTPException(403, "Account is " + du.get("status", "disabled"))
+        # Update activity
+        try:
+            db.dashboard_users.update_one({"_id": du["_id"]}, {"$set": {"last_active_at": datetime.utcnow()}})
+        except Exception:
+            pass
+        # Resolve role
+        role = db.dashboard_roles.find_one({"_id": du["role_id"]}) if du.get("role_id") else None
+        if not role:
+            role = {"role_name": "Unknown", "permissions": {}}
+        du["role"] = role
+        du["role_name"] = role.get("role_name", "Unknown")
+        du["permissions"] = role.get("permissions", {})
+        du["assigned_cities"] = du.get("assigned_cities", [])
+        return du
+
+    # ── Legacy fallback: old admins collection → Super Admin ──
     a = db.admins.find_one({"token": token})
     if not a: raise HTTPException(403, "Invalid session")
+    super_role = db.dashboard_roles.find_one({"role_name": "Super Admin"}) or {}
+    a["role"] = super_role or {"role_name": "Super Admin", "permissions": {
+        mod: {act: True for act in ["view","add","edit","delete","approve","export"]}
+        for mod in ["Merchants","Stores","Products","Banners","Deals","Users",
+                    "Payments","Invoices","Categories","Cities","Reports",
+                    "Notifications","Settings"]
+    }}
+    a["role_name"] = "Super Admin"
+    a["permissions"] = a["role"].get("permissions", {})
+    a["assigned_cities"] = ["*"]
     return a
+
+
+def _check_perm(a, module, action):
+    """Check if the current admin has a specific permission. Super Admin bypasses."""
+    if a.get("role_name") == "Super Admin":
+        return
+    perms = a.get("permissions", {})
+    mod_perms = perms.get(module, {})
+    if not mod_perms.get(action, False):
+        raise HTTPException(403, "Access denied: Missing " + action + " permission for " + module)
+
+
+def _city_filter(a):
+    """Return a MongoDB query fragment restricting data to the admin's assigned cities."""
+    cities = a.get("assigned_cities", [])
+    if a.get("role_name") == "Super Admin" or "*" in cities:
+        return {}
+    if not cities:
+        return {"city": "____IMPOSSIBLE_CITY_NONE____"}
+    return {"city": {"$in": cities}}
 
 def seed_admin():
     if not db.admins.find_one({"username": "admin"}):
@@ -200,6 +253,7 @@ def get_categories(a=Depends(get_current_admin)):
 
 @router.post("/categories")
 def add_category(data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Categories", "add")
     name = data.get("name", "").strip()
     if not name: raise HTTPException(400, "Name required")
     # Only block if a NON-deleted category with this name exists
@@ -221,6 +275,7 @@ def add_category(data: dict, a=Depends(get_current_admin)):
 
 @router.put("/categories/{name}")
 def update_category(name: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Categories", "edit")
     upd = {}
     if "image_url"  in data: upd["image_url"]  = data["image_url"]
     if "subtitle"   in data: upd["subtitle"]    = data["subtitle"]
@@ -233,6 +288,7 @@ def update_category(name: str, data: dict, a=Depends(get_current_admin)):
 
 @router.post("/categories/{name}/upload-image")
 async def upload_category_image(name: str, file: UploadFile = File(...), a=Depends(get_current_admin)):
+    _check_perm(a, "Categories", "edit")
     """Upload an image for a category card.
     Uses Cloudinary if configured, otherwise stores as base64 directly in MongoDB.
     Always works regardless of Cloudinary configuration.
@@ -279,6 +335,7 @@ async def upload_category_image(name: str, file: UploadFile = File(...), a=Depen
 
 @router.post("/categories/reinit")
 def reinit_categories(a=Depends(get_current_admin)):
+    _check_perm(a, "Categories", "edit")
     """Force re-initialize all categories to v2 defaults. Preserves existing images."""
     preserved = {}
     for cat in db.categories.find({"name": {"$exists": True}}, {"_id": 0}):
@@ -307,6 +364,7 @@ def reinit_categories(a=Depends(get_current_admin)):
 
 @router.delete("/categories/{name}")
 def delete_category(name: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Categories", "delete")
     db.categories.update_one({"name": name}, {"$set": {"status": "deleted"}})
     return _category_list()
 
@@ -328,6 +386,7 @@ def get_pricing(a=Depends(get_current_admin)):
 
 @router.put("/pricing")
 def update_pricing(data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
     """Update GST %, plan prices, withdrawal conversion rate, and standard product limit."""
     doc = db.pricing.find_one({})
     update = {}
@@ -350,6 +409,7 @@ def get_terms(type: str, a=Depends(get_current_admin)):
 
 @router.put("/terms/{type}")
 def update_terms(type: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
     if type not in ("merchant", "user"): raise HTTPException(400, "type must be merchant or user")
     content = data.get("content", "")
     doc = db.terms.find_one({"type": type})
@@ -369,6 +429,7 @@ def list_merchants(a=Depends(get_current_admin)):
 
 @router.put("/merchants/{id}")
 def update_merchant(id: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Merchants", "edit")
     upd = {f: data[f] for f in ["name","phone","city","area"] if data.get(f) is not None}
     if upd:
         db.accounts.update_one({"_id": ObjectId(id)}, {"$set": upd})
@@ -377,6 +438,7 @@ def update_merchant(id: str, data: dict, a=Depends(get_current_admin)):
 
 @router.put("/merchants/{id}/status")
 def toggle_merchant(id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Merchants", "edit")
     m = db.accounts.find_one({"_id": ObjectId(id)}) or db.merchants.find_one({"_id": ObjectId(id)})
     if not m: raise HTTPException(404, "Not found")
     ns = "inactive" if m.get("status") == "active" else "active"
@@ -386,6 +448,7 @@ def toggle_merchant(id: str, a=Depends(get_current_admin)):
 
 @router.delete("/merchants/{id}")
 def delete_merchant(id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Merchants", "delete")
     db.accounts.delete_one({"_id": ObjectId(id)})
     db.merchants.delete_one({"_id": ObjectId(id)})  # sync
     db.stores.delete_many({"merchant_id": id})
@@ -403,7 +466,7 @@ def list_accounts(a=Depends(get_current_admin)):
     _errors = []
 
     try:
-        all_accounts = list(db.accounts.find().sort("created_at", -1))
+        all_accounts = list(db.accounts.find({**_city_filter(a)}).sort("created_at", -1))
     except Exception as e:
         raise HTTPException(500, f"DB fetch failed: {e}")
 
@@ -525,6 +588,7 @@ def accounts_debug(a=Depends(get_current_admin)):
 
 @router.post("/accounts/fix-roles")
 def fix_account_roles(a=Depends(get_current_admin)):
+    _check_perm(a, "Users", "edit")
     """
     Batch-fix: any account that has stores but lacks 'merchant' in roles
     gets merchant role added. Safe to run multiple times (idempotent).
@@ -716,6 +780,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
 
 @router.patch("/accounts/{account_id}/status")
 def toggle_account_status(account_id: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Users", "edit")
     """Toggle account status in unified accounts collection."""
     from bson import ObjectId
     new_status = data.get("status", "active")
@@ -883,6 +948,7 @@ def list_stores(a=Depends(get_current_admin)):
 
 @router.post("/migrate-store-images")
 def migrate_store_images(a=Depends(get_current_admin)):
+    _check_perm(a, "Stores", "edit")
     """Upload base64 store images to Cloudinary (or consolidate into image field if CDN not set)."""
     global _store_cache; _store_cache["data"] = None
     # NO projection — fetch every field so we catch all possible image field names
@@ -969,6 +1035,7 @@ def migrate_store_images(a=Depends(get_current_admin)):
 
 @router.post("/stores")
 def create_store(data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Stores", "add")
     global _store_cache; _store_cache["data"] = None
     mid = data.get("merchant_id","").strip()
     name = data.get("store_name","").strip()
@@ -1010,7 +1077,7 @@ def create_store(data: dict, a=Depends(get_current_admin)):
 @router.get("/stores/slim")
 def get_stores_slim(a=Depends(get_current_admin)):
     """Lightweight store list for ratings — no images, no heavy data."""
-    stores = list(db.stores.find({}, {
+    stores = list(db.stores.find({**_city_filter(a)}, {
         "_id":1,"store_name":1,"category":1,"city":1,"area":1,
         "rating":1,"admin_rating":1,"user_rating":1,"rating_count":1,"status":1
     }))
@@ -1077,6 +1144,7 @@ def get_store_qr(id: str, a=Depends(get_current_admin)):
 
 @router.put("/stores/{id}")
 def update_store(id: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Stores", "edit")
     global _store_cache; _store_cache["data"] = None
     """Update any store field — used by admin dashboard Edit Store form."""
     store = db.stores.find_one({"_id": ObjectId(id)})
@@ -1121,6 +1189,7 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
 
 @router.put("/stores/{id}/rating")
 def set_store_rating(id: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Stores", "edit")
     """Set the admin-controlled rating for a store (1-5 stars).
     This overwrites the displayed rating so the admin can curate what users see.
     The raw user ratings are preserved separately in the 'user_rating' field.
@@ -1169,6 +1238,7 @@ def list_reviews(store_id: str = "", a=Depends(get_current_admin)):
 
 @router.patch("/reviews/{review_id}/visibility")
 def set_review_visibility(review_id: str, body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Reports", "edit")
     """Toggle a store review's visibility in the app."""
     try:
         visible = bool(body.get("visible", True))
@@ -1184,6 +1254,7 @@ def set_review_visibility(review_id: str, body: dict, a=Depends(get_current_admi
 
 @router.delete("/reviews/{review_id}")
 def delete_review(review_id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Reports", "delete")
     """Delete an inappropriate review and recalculate store rating."""
     try:
         r = db.reviews.find_one({"_id": ObjectId(review_id)})
@@ -1208,12 +1279,14 @@ def delete_review(review_id: str, a=Depends(get_current_admin)):
 
 @router.put("/stores/{id}/approve")
 def approve_store(id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Stores", "approve")
     global _store_cache; _store_cache["data"] = None
     db.stores.update_one({"_id": ObjectId(id)}, {"$set": {"status": "active"}})
     return {"message": "Store approved and live"}
 
 @router.put("/stores/{id}/status")
 def toggle_store(id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Stores", "edit")
     global _store_cache; _store_cache["data"] = None
     s = db.stores.find_one({"_id": ObjectId(id)})
     if not s: raise HTTPException(404, "Not found")
@@ -1223,6 +1296,7 @@ def toggle_store(id: str, a=Depends(get_current_admin)):
 
 @router.delete("/stores/{id}")
 def delete_store(id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Stores", "delete")
     global _store_cache; _store_cache["data"] = None
     # Soft delete: marks store instead of hard-removing.
     # Prevents phantom duplicates (waiting_approval siblings) re-appearing after delete.
@@ -1279,6 +1353,7 @@ def user_history(id: str, a=Depends(get_current_admin)):
 
 @router.post("/users/{id}/adjust-points")
 def adjust_points(id: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Users", "edit")
     u = db.accounts.find_one({"_id": ObjectId(id)}) or db.users.find_one({"_id": ObjectId(id)})
     if not u: raise HTTPException(404, "Not found")
     t = data.get("type","credit"); pts = int(data.get("points",0))
@@ -1325,7 +1400,7 @@ def admin_stats(a=Depends(get_current_admin)):
 @router.get("/subscriptions")
 def list_subscriptions(a=Depends(get_current_admin)):
     result = []
-    for s in db.subscriptions.find().sort("created_at", -1):
+    for s in db.subscriptions.find({**_city_filter(a)}).sort("created_at", -1):
         merchant = None
         try:
             merchant = (db.accounts.find_one({"_id": ObjectId(s.get("merchant_id",""))}) or db.merchants.find_one({"_id": ObjectId(s.get("merchant_id",""))}))
@@ -1356,7 +1431,7 @@ def list_subscriptions(a=Depends(get_current_admin)):
 def list_merchant_transactions(a=Depends(get_current_admin)):
     """All payment transactions made by merchants (subscriptions + invoices)."""
     result = []
-    for inv in db.invoices.find().sort("created_at", -1):
+    for inv in db.invoices.find({**_city_filter(a)}).sort("created_at", -1):
         fd = inv.get("from_date"); ed = inv.get("end_date")
         result.append({
             "invoice_no":    inv.get("invoice_no", ""),
@@ -1378,6 +1453,7 @@ def list_merchant_transactions(a=Depends(get_current_admin)):
 
 @router.put("/policy/{policy_type}")
 def save_policy(policy_type: str, body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
     allowed = ["privacy", "refund", "kyc"]
     if policy_type not in allowed:
         raise HTTPException(status_code=400, detail="Invalid policy type")
@@ -1403,6 +1479,7 @@ def get_social(a=Depends(get_current_admin)):
 @router.put("/social")
 @router.post("/social")
 def save_social(body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
     db.settings.update_one(
         {"key": "social_links"},
         {"$set": {"key": "social_links", **{k: body.get(k,"") for k in ["whatsapp","facebook","instagram","youtube"]}, "updated_at": datetime.utcnow()}},
@@ -1432,6 +1509,7 @@ def list_discounts(a=Depends(get_current_admin)):
 
 @router.post("/discounts")
 def create_discount(body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Deals", "add")
     code = (body.get("code","")).strip().upper()
     value = float(body.get("value",0))
     if not code:
@@ -1457,6 +1535,7 @@ def create_discount(body: dict, a=Depends(get_current_admin)):
 
 @router.put("/discounts/{discount_id}")
 def update_discount(discount_id: str, body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Deals", "edit")
     update = {}
     if "active" in body: update["active"] = body["active"]
     if "value" in body: update["value"] = float(body["value"])
@@ -1468,6 +1547,7 @@ def update_discount(discount_id: str, body: dict, a=Depends(get_current_admin)):
 
 @router.delete("/discounts/{discount_id}")
 def delete_discount(discount_id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Deals", "delete")
     db.discounts.delete_one({"_id": ObjectId(discount_id)})
     return {"ok": True}
 
@@ -1480,6 +1560,7 @@ def get_about(a=Depends(get_current_admin)):
 
 @router.put("/about")
 def save_about(body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
     db.settings.update_one(
         {"key": "about_us"},
         {"$set": {"key": "about_us", "content": body.get("content",""), "updated_at": datetime.utcnow()}},
@@ -1500,6 +1581,7 @@ def get_review_visibility(a=Depends(get_current_admin)):
 
 @router.post("/review-visibility")
 def save_review_visibility(body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
     """Persist which review sections are visible in the app."""
     db.settings.update_one(
         {"key": "review_visibility"},
@@ -1519,7 +1601,7 @@ def save_review_visibility(body: dict, a=Depends(get_current_admin)):
 @router.get("/withdraw-requests")
 def get_withdraw_requests(a=Depends(get_current_admin)):
     """Get all pending gift voucher withdrawal requests"""
-    requests = list(db.withdraw_requests.find({}).sort("_id", -1))
+    requests = list(db.withdraw_requests.find({**_city_filter(a)}).sort("_id", -1))
     result = []
     for r in requests:
         result.append({
@@ -1540,6 +1622,7 @@ def get_withdraw_requests(a=Depends(get_current_admin)):
 
 @router.post("/withdraw-requests/{request_id}/fulfill")
 def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Payments", "edit")
     """Send gift voucher to user - deduct points and clear pending flag"""
     voucher_code = (body.get("voucher_code","")).strip()
     voucher_type = body.get("voucher_type","Amazon")  # Amazon or Flipkart
@@ -1649,6 +1732,7 @@ def list_gift_vouchers(a=Depends(get_current_admin)):
 
 @router.post("/gift-vouchers")
 def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "add")
     """Create a new gift voucher card visible in the app."""
     text = (data.get("text") or "").strip()
     if not text:
@@ -1717,6 +1801,7 @@ def create_gift_voucher(data: dict, a=Depends(get_current_admin)):
 
 @router.put("/gift-vouchers/{vid}")
 def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "edit")
     """Update an existing gift voucher."""
     upd = {}
     for field in ["title", "text", "validity", "logo", "merchant_id", "store_id", "from_date", "end_date", "duration_days", "approval_status", "status"]:
@@ -1740,6 +1825,7 @@ def update_gift_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.put("/gift-vouchers/{vid}/approve")
 def approve_standard_product(vid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "approve")
     """Approve a standard product (gift_vouchers) — sets approval_status to approved and activates it."""
     v = db.gift_vouchers.find_one({"_id": ObjectId(vid)})
     if not v: raise HTTPException(404, "Product not found")
@@ -1756,6 +1842,7 @@ def approve_standard_product(vid: str, a=Depends(get_current_admin)):
 
 @router.put("/gift-vouchers/{vid}/reject")
 def reject_standard_product(vid: str, body: dict = {}, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "approve")
     """Reject a standard product."""
     reason = body.get("reason", "")
     db.gift_vouchers.update_one(
@@ -1772,6 +1859,7 @@ def reject_standard_product(vid: str, body: dict = {}, a=Depends(get_current_adm
 
 @router.delete("/gift-vouchers/{vid}")
 def delete_gift_voucher(vid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "delete")
     """Delete a gift voucher."""
     db.gift_vouchers.delete_one({"_id": ObjectId(vid)})
     return {"message": "Deleted"}
@@ -1818,6 +1906,7 @@ def list_promo_sliders(a=Depends(get_current_admin)):
 
 @router.post("/promo-sliders")
 def create_promo_slider(data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "add")
     if not data.get("image_url"):
         raise HTTPException(400, "image_url required")
     # Auto-calculate end_date from from_date + days if not provided
@@ -1856,6 +1945,7 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
 
 @router.put("/promo-sliders/{sid}")
 def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "edit")
     upd = {}
     import re as _re
     for f in ["title", "image_url", "link_url", "from_date", "end_date", "merchant_name"]:
@@ -1885,6 +1975,7 @@ def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.delete("/promo-sliders/{sid}")
 def delete_promo_slider(sid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "delete")
     db.promo_sliders.delete_one({"_id": ObjectId(sid)})
     return {"message": "Deleted"}
 
@@ -1893,6 +1984,8 @@ def delete_promo_slider(sid: str, a=Depends(get_current_admin)):
 
 @router.post("/upload-image")
 async def upload_notification_image(file: UploadFile = File(...), a=Depends(get_current_admin)):
+    _check_perm(a, "Notifications", "edit")
+    _check_perm(a, "Notifications", "edit")
     """Upload an image for use in notifications. Returns a public URL."""
     import base64, mimetypes, time
     try:
@@ -1967,6 +2060,7 @@ def list_notifications(a=Depends(get_current_admin)):
 
 @router.delete("/notifications/{notif_id}")
 def delete_notification(notif_id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Notifications", "delete")
     """Delete a single notification record from history."""
     from bson import ObjectId
     try:
@@ -1981,6 +2075,7 @@ def delete_notification(notif_id: str, a=Depends(get_current_admin)):
 
 @router.post("/notifications/process-queue")
 def process_notification_queue(a=Depends(get_current_admin)):
+    _check_perm(a, "Notifications", "edit")
     """Retry all queued/failed notifications."""
     queued = list(db.notifications.find(
         {"status": {"$in": ["queued", "failed", "error"]}},
@@ -2003,6 +2098,7 @@ def process_notification_queue(a=Depends(get_current_admin)):
 
 @router.post("/notifications/send")
 def send_notification(data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Notifications", "add")
     import json as _json, time as _time, urllib.request as _ureq, base64 as _b64
 
     title      = (data.get("title") or "").strip()
@@ -2311,6 +2407,7 @@ def list_merchant_banners(a=Depends(get_current_admin)):
 
 @router.put("/merchant-banners/{bid}/approve")
 def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "approve")
     """Approve a merchant banner — publishes it as a promo slider."""
     b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
     if not b: raise HTTPException(404, "Banner not found")
@@ -2362,6 +2459,7 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
 
 @router.put("/merchant-banners/{bid}/reject")
 def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "approve")
     reason = body.get("reason","")
     db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
         "approval_status":"rejected",
@@ -2374,6 +2472,7 @@ def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admi
 
 @router.put("/merchant-banners/{bid}")
 def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "edit")
     """FIX 9: Admin edit merchant banner fields + status."""
     allowed = {"title", "image_url", "from_date", "end_date", "status", "duration_days"}
     update_data = {k: v for k, v in data.items() if k in allowed}
@@ -2391,6 +2490,7 @@ def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.delete("/merchant-banners/{bid}")
 def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "delete")
     """Soft-delete: marks banner as inactive + deleted_by_admin in BOTH collections.
     PERMANENT FIX: Searches merchant_banners first, then promo_sliders.
     Always syncs deleted_by_admin flag to both so Flutter shows 'Removed by Admin'."""
@@ -2430,6 +2530,7 @@ def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
 
 @router.delete("/merchant-banners/{bid}/hard")
 def hard_delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "delete")
     """Permanently delete a merchant banner from both collections.
     Use this when admin wants to fully remove the record (not just soft-delete)."""
     try:
@@ -2459,6 +2560,7 @@ def hard_delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
 
 @router.put("/merchant-banners/{bid}/toggle")
 def toggle_merchant_banner(bid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "edit")
     """Toggle is_active ON/OFF for a merchant banner.
     PERMANENT FIX: Searches merchant_banners first, then promo_sliders (approved banners live there).
     Always syncs both collections to stay in agreement."""
@@ -2562,6 +2664,7 @@ def list_merchant_vouchers(a=Depends(get_current_admin)):
 
 @router.put("/merchant-vouchers/{vid}/approve")
 def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "approve")
     v = db.merchant_vouchers.find_one({"_id": ObjectId(vid)})
     if not v: raise HTTPException(404, "Voucher not found")
     # TASK 8: check if product has already expired before setting status
@@ -2615,6 +2718,7 @@ def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
 
 @router.put("/merchant-vouchers/{vid}/reject")
 def reject_merchant_voucher(vid: str, body: dict = {}, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "approve")
     reason = body.get("reason","")
     db.merchant_vouchers.update_one({"_id": ObjectId(vid)}, {"$set":{
         "approval_status":"rejected","rejection_reason":reason,"rejected_at":datetime.utcnow()
@@ -2624,6 +2728,7 @@ def reject_merchant_voucher(vid: str, body: dict = {}, a=Depends(get_current_adm
 
 @router.put("/merchant-vouchers/{vid}")
 def update_merchant_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "edit")
     """FIX 10: Admin edit merchant voucher fields + status."""
     # ISSUES 5+7: also allow from_date, end_date, logo_url updates
     allowed = {"title", "offer_text", "validity", "logo", "logo_url", "from_date", "end_date", "status", "approval_status"}
@@ -2662,6 +2767,7 @@ def update_merchant_voucher(vid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.delete("/merchant-vouchers/{vid}")
 def delete_merchant_voucher(vid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "delete")
     db.merchant_vouchers.delete_one({"_id": ObjectId(vid)})
     db.gift_vouchers.delete_many({"source_voucher_id": vid})
     return {"ok": True}
@@ -2800,6 +2906,7 @@ def get_banner_pricing(a=Depends(get_current_admin)):
 
 @router.put("/banner-pricing")
 def update_banner_pricing(data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
     fields = ["banner_price_per_day","voucher_price_per_day",
               "banner_price_7","banner_price_14","banner_price_30",
               "voucher_price_30","voucher_price_60","voucher_price_90"]
@@ -2914,6 +3021,7 @@ def admin_get_cities(a=Depends(get_current_admin)):
 
 @router.post("/cities/seed")
 def admin_seed_cities(a=Depends(get_current_admin)):
+    _check_perm(a, "Cities", "add")
     """Auto-populate default cities with placeholder images. Skips existing cities."""
     DEFAULT_CITIES = [
         {"name": "Ballari",   "sort_order": 1, "image_url": ""},
@@ -2953,6 +3061,7 @@ def admin_seed_cities(a=Depends(get_current_admin)):
 
 @router.post("/cities")
 def admin_create_city(body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Cities", "add")
     name = body.get("name", "").strip()
     if not name:
         raise HTTPException(400, "City name required")
@@ -2974,6 +3083,7 @@ def admin_create_city(body: dict, a=Depends(get_current_admin)):
 
 @router.put("/cities/{city_id}")
 def admin_update_city(city_id: str, body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Cities", "edit")
     update = {}
     for field in ["name", "image_url", "sort_order", "active"]:
         if field in body:
@@ -2989,12 +3099,14 @@ def admin_update_city(city_id: str, body: dict, a=Depends(get_current_admin)):
 
 @router.delete("/cities/{city_id}")
 def admin_delete_city(city_id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Cities", "delete")
     db.cities.delete_one({"_id": ObjectId(city_id)})
     return {"ok": True}
 
 
 @router.post("/cities/{city_id}/upload-image")
 async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=Depends(get_current_admin)):
+    _check_perm(a, "Cities", "edit")
     content = await file.read()
     mime = file.content_type or "image/jpeg"
     b64 = base64.b64encode(content).decode()
@@ -3033,6 +3145,7 @@ def admin_get_default_images(a=Depends(get_current_admin)):
 
 @router.put("/default-images/urls")
 def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
     field  = body.get("type", "")
     url    = body.get("url", "")
     action = body.get("action", "add")
@@ -3060,6 +3173,7 @@ async def admin_save_no_service(
     no_service_message: str = Form(""),
     a=Depends(get_current_admin),
 ):
+    _check_perm(a, "Settings", "edit")
     update = {
         "no_service_title":   no_service_title.strip(),
         "no_service_message": no_service_message.strip(),
@@ -3080,6 +3194,7 @@ async def admin_save_no_service(
 
 @router.put("/default-images/no-service")
 def admin_update_no_service_json(body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
     """JSON body version: { url, title, message }"""
     update = {}
     if body.get("url"):
@@ -3102,6 +3217,7 @@ async def admin_update_default_images(
     merchant_banner_file: UploadFile = File(None),
     a=Depends(get_current_admin),
 ):
+    _check_perm(a, "Settings", "edit")
     """
     File-upload variant. All image types store as arrays ($addToSet) — uploads never replace,
     they always append. Uploads go to Cloudinary when configured; fall back to base64 otherwise.
@@ -3174,6 +3290,7 @@ def list_admin_banners(a=Depends(get_current_admin)):
 
 @router.post("/banners")
 def create_admin_banner(data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "add")
     """Creates an admin banner in the admin_banners collection."""
     doc = {
         "image_url":  data.get("image_url", ""),
@@ -3192,6 +3309,7 @@ def create_admin_banner(data: dict, a=Depends(get_current_admin)):
 
 @router.put("/banners/{bid}")
 def update_admin_banner(bid: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "edit")
     from bson import ObjectId
     update = {}
     for f in ["image_url", "title", "subtitle", "link_url", "is_pinned", "is_active"]:
@@ -3210,6 +3328,7 @@ def update_admin_banner(bid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.delete("/banners/{bid}")
 def delete_admin_banner(bid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Banners", "delete")
     from bson import ObjectId
     try:
         db.admin_banners.delete_one({"_id": ObjectId(bid)})
@@ -3300,6 +3419,7 @@ def list_admin_products(a=Depends(get_current_admin)):
 
 @router.post("/products")
 def create_admin_product(data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "add")
     from datetime import datetime
     doc = {
         "title":          data.get("title", ""),
@@ -3329,6 +3449,7 @@ def create_admin_product(data: dict, a=Depends(get_current_admin)):
 
 @router.put("/products/{vid}")
 def update_admin_product(vid: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "edit")
     from bson import ObjectId
     col = data.pop("_collection", "gift_vouchers")
     update = {k: v for k, v in data.items() if k not in ["_id", "id"]}
@@ -3346,6 +3467,7 @@ def update_admin_product(vid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.delete("/products/{vid}")
 def delete_admin_product(vid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "delete")
     from bson import ObjectId
     try:
         oid = ObjectId(vid)
@@ -3359,6 +3481,7 @@ def delete_admin_product(vid: str, a=Depends(get_current_admin)):
 
 @router.put("/merchant-products/{vid}/approve")
 def approve_merchant_product_card(vid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "approve")
     """Approve a merchant-submitted product card (standard or premium)."""
     try:
         oid = ObjectId(vid)
@@ -3430,6 +3553,7 @@ def approve_merchant_product_card(vid: str, a=Depends(get_current_admin)):
 
 @router.put("/merchant-products/{vid}/reject")
 def reject_merchant_product_card(vid: str, body: dict = {}, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "approve")
     try:
         oid = ObjectId(vid)
     except Exception:
@@ -3457,6 +3581,7 @@ def reject_merchant_product_card(vid: str, body: dict = {}, a=Depends(get_curren
 
 @router.delete("/merchant-products/{vid}")
 def delete_merchant_product_card(vid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "delete")
     try:
         oid = ObjectId(vid)
     except Exception:
@@ -3470,6 +3595,7 @@ def delete_merchant_product_card(vid: str, a=Depends(get_current_admin)):
 
 @router.put("/merchant-products/{vid}")
 def update_merchant_product_card(vid: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "edit")
     try:
         oid = ObjectId(vid)
     except Exception:
@@ -3596,6 +3722,7 @@ def admin_top_merchants(limit: int = 10, a=Depends(get_current_admin)):
 
 @router.put("/merchant-vouchers/{vid}/extend")
 def admin_extend_premium(vid: str, data: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "edit")
     """Admin manually extends a premium product's end_date by N days."""
     from datetime import datetime as _dt7, timedelta as _td7
     try:
@@ -3619,6 +3746,7 @@ def admin_extend_premium(vid: str, data: dict, a=Depends(get_current_admin)):
 
 @router.put("/products/{pid}/activate")
 def admin_activate_product(pid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "edit")
     """Admin activates a product."""
     from datetime import datetime as _dt8
     try:
@@ -3637,6 +3765,7 @@ def admin_activate_product(pid: str, a=Depends(get_current_admin)):
 
 @router.put("/products/{pid}/deactivate")
 def admin_deactivate_product(pid: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Products", "edit")
     """Admin deactivates/suspends a product."""
     from datetime import datetime as _dt9
     try:
@@ -3717,6 +3846,7 @@ def list_product_reviews(a=Depends(get_current_admin)):
 
 @router.patch("/product-reviews/{review_id}/visibility")
 def set_product_review_visibility(review_id: str, body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Reports", "edit")
     """Toggle a product review's visibility in the app."""
     try:
         visible = bool(body.get("visible", True))
@@ -3732,6 +3862,7 @@ def set_product_review_visibility(review_id: str, body: dict, a=Depends(get_curr
 
 @router.delete("/product-reviews/{review_id}")
 def delete_product_review(review_id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Reports", "delete")
     """Admin: delete a product review by ID."""
     try:
         db.product_reviews.delete_one({"_id": ObjectId(review_id)})
