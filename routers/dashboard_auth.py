@@ -1,18 +1,25 @@
 # routers/dashboard_auth.py
-# OffrO Admin Dashboard — Role-Based Access Control (RBAC)
-# Phase 1 + 2: Collections, Auth, Security Helpers, CRUD endpoints
+# OffrO Admin Dashboard — Role-Based Access Control (RBAC) + 2FA OTP
+# Phase 1 + 2 + 3: Collections, Auth, Security Helpers, CRUD endpoints, 2FA
 #
 # Uses stdlib hashlib (pbkdf2_hmac) for PIN hashing — NO external deps needed.
 # Mount in server.py: from routers import dashboard_auth
 #                     app.include_router(dashboard_auth.router, prefix="/admin")
 
-import os, secrets, hashlib
+import os, secrets, hashlib, json
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from bson import ObjectId
 from database import db
+
+# ── WhatsApp service for OTP delivery ──
+try:
+    from services.whatsapp import send_whatsapp_message
+    _WA_AVAILABLE = True
+except Exception:
+    _WA_AVAILABLE = False
 
 router = APIRouter(prefix="/auth", tags=["Dashboard RBAC & Auth"])
 
@@ -22,11 +29,19 @@ router = APIRouter(prefix="/auth", tags=["Dashboard RBAC & Auth"])
 
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
-INACTIVITY_TIMEOUT_MINUTES = 15
+INACTIVITY_TIMEOUT_MINUTES = 30          # ← was 15, now 30 per 2FA spec
 SESSION_MAX_HOURS = 8
 PBKDF2_ITERATIONS = 100_000
 
-# All modules that support permissions — must match RBAC_MODULES in admin_dashboard.html
+# ── 2FA / OTP settings ──
+OTP_LENGTH = 4                           # 4-digit numeric OTP
+OTP_EXPIRY_MINUTES = 5                   # OTP valid for 5 minutes
+OTP_MAX_ATTEMPTS = 5                      # Max wrong OTP tries before requiring new one
+OTP_RESEND_SECONDS = 30                   # Resend cooldown
+TRUSTED_DEVICE_DAYS = 30                 # Trust this device for 30 days
+TRUSTED_DEVICE_COOKIE = "offro_trusted"   # Cookie name for trusted device token
+
+# All modules that support permissions
 ALL_MODULES = [
     "Accounts", "Stores", "Products", "Banners", "Admin Banners", "Popup Campaigns",
     "Payments", "Gift Vouchers", "Notifications", "Categories", "Pricing & GST",
@@ -34,27 +49,165 @@ ALL_MODULES = [
     "Social Media", "Live Chat", "Default Images", "User Management"
 ]
 
-# All permission actions per module
 ALL_ACTIONS = ["view", "add", "edit", "delete", "approve", "export"]
 
 # ═══════════════════════════════════════════════════════════════
-# PIN HASHING (stdlib only — no passlib/bcrypt needed)
+# PIN HASHING (stdlib only)
 # ═══════════════════════════════════════════════════════════════
 
 def hash_pin(pin: str) -> str:
-    """Hash a 4 or 6 digit PIN using PBKDF2-HMAC-SHA256. Returns 'salt$hash'."""
     salt = secrets.token_hex(16)
     h = hashlib.pbkdf2_hmac("sha256", pin.encode(), bytes.fromhex(salt), PBKDF2_ITERATIONS)
     return salt + "$" + h.hex()
 
 def verify_pin(plain_pin: str, stored: str) -> bool:
-    """Verify a PIN against stored 'salt$hash' string."""
     try:
         salt_str, hash_str = stored.split("$", 1)
         h = hashlib.pbkdf2_hmac("sha256", plain_pin.encode(), bytes.fromhex(salt_str), PBKDF2_ITERATIONS)
         return secrets.compare_digest(h.hex(), hash_str)
     except Exception:
         return False
+
+# ═══════════════════════════════════════════════════════════════
+# OTP HASHING (stdlib only — never store plain OTP)
+# ═══════════════════════════════════════════════════════════════
+
+def _hash_otp(otp: str) -> str:
+    """Hash a 4-digit OTP using PBKDF2. Never store plain OTP."""
+    salt = secrets.token_hex(8)
+    h = hashlib.pbkdf2_hmac("sha256", otp.encode(), bytes.fromhex(salt), PBKDF2_ITERATIONS)
+    return salt + "$" + h.hex()
+
+def _verify_otp(plain_otp: str, stored: str) -> bool:
+    """Verify OTP against stored hash."""
+    try:
+        salt_str, hash_str = stored.split("$", 1)
+        h = hashlib.pbkdf2_hmac("sha256", plain_otp.encode(), bytes.fromhex(salt_str), PBKDF2_ITERATIONS)
+        return secrets.compare_digest(h.hex(), hash_str)
+    except Exception:
+        return False
+
+def _generate_otp() -> str:
+    """Generate a cryptographically secure 4-digit OTP."""
+    return str(secrets.randbelow(9000) + 1000)
+
+# ═══════════════════════════════════════════════════════════════
+# OTP DELIVERY — modular (WhatsApp first, SMS gateway pluggable)
+# ═══════════════════════════════════════════════════════════════
+
+def _send_otp_to_mobile(mobile: str, otp: str) -> dict:
+    """
+    Send OTP to the given mobile number.
+    Priority:
+      1. External SMS gateway (if SMS_API_URL + SMS_API_KEY configured)
+      2. WhatsApp message (if WHATSAPP configured — already in use)
+      3. Console log (dev fallback)
+    Returns {"ok": bool, "method": str, "error": str?}
+    """
+    phone = mobile.replace("+", "").replace(" ", "").replace("-", "")
+    if not phone.startswith("91") and len(phone) == 10:
+        phone = "91" + phone
+
+    msg = "Your OffrO Admin verification code is " + otp + ". Valid for 5 minutes. Do not share this code with anyone."
+
+    # ── 1. External SMS gateway (pluggable — MSG91 / Twilio / Fast2SMS / etc.) ──
+    sms_api_url = os.getenv("SMS_API_URL", "")
+    sms_api_key = os.getenv("SMS_API_KEY", "")
+    sms_sender = os.getenv("SMS_SENDER_ID", "OFFROO")
+
+    if sms_api_url and sms_api_key:
+        try:
+            import requests as _req
+            payload = {
+                "mobile": phone,
+                "message": msg,
+                "sender": sms_sender,
+                "otp": otp,
+            }
+            headers = {"Authorization": "Bearer " + sms_api_key, "Content-Type": "application/json"}
+            r = _req.post(sms_api_url, json=payload, headers=headers, timeout=10)
+            if r.status_code == 200:
+                return {"ok": True, "method": "sms"}
+            return {"ok": False, "method": "sms", "error": "HTTP " + str(r.status_code)}
+        except Exception as e:
+            print("[2FA] SMS gateway error: " + str(e))
+            # Fall through to WhatsApp
+
+    # ── 2. WhatsApp message (already configured in production) ──
+    if _WA_AVAILABLE:
+        try:
+            result = send_whatsapp_message(phone, msg)
+            if result.get("ok"):
+                return {"ok": True, "method": "whatsapp"}
+            print("[2FA] WhatsApp send failed: " + str(result.get("error", "")))
+        except Exception as e:
+            print("[2FA] WhatsApp exception: " + str(e))
+
+    # ── 3. Dev fallback — log to console ──
+    print("[2FA] DEV MODE — OTP for " + mobile + ": " + otp)
+    return {"ok": True, "method": "dev_console"}
+
+# ═══════════════════════════════════════════════════════════════
+# TRUSTED DEVICE MANAGEMENT
+# ═══════════════════════════════════════════════════════════════
+
+def _create_trusted_device(user_id, mobile: str, request: Request) -> str:
+    """Create a trusted device record and return the token."""
+    token = secrets.token_urlsafe(48)
+    ip = request.client.host if request.client else "unknown"
+    ua = request.headers.get("user-agent", "unknown") if request else "unknown"
+
+    doc = {
+        "token": token,
+        "user_id": user_id,
+        "mobile": mobile,
+        "ip_address": ip,
+        "user_agent": ua,
+        "created_at": datetime.utcnow(),
+        "expires_at": datetime.utcnow() + timedelta(days=TRUSTED_DEVICE_DAYS),
+        "last_used_at": datetime.utcnow(),
+    }
+    db.trusted_devices.insert_one(doc)
+    return token
+
+def _verify_trusted_device(request: Request, user_id) -> Optional[str]:
+    """
+    Check if the request has a valid trusted device cookie.
+    Returns the device token if valid, None otherwise.
+    """
+    token = request.cookies.get(TRUSTED_DEVICE_COOKIE)
+    if not token:
+        return None
+
+    device = db.trusted_devices.find_one({
+        "token": token,
+        "user_id": user_id,
+        "expires_at": {"$gt": datetime.utcnow()}
+    })
+    if not device:
+        return None
+
+    # Update last used
+    db.trusted_devices.update_one(
+        {"_id": device["_id"]},
+        {"$set": {"last_used_at": datetime.utcnow()}}
+    )
+    return token
+
+def _set_trusted_cookie(response: Response, token: str):
+    """Set the trusted device cookie with 30-day expiry, HttpOnly + SameSite."""
+    response.set_cookie(
+        key=TRUSTED_DEVICE_COOKIE,
+        value=token,
+        httponly=True,
+        samesite="Lax",
+        secure=False,   # Set True in production HTTPS
+        max_age=86400 * TRUSTED_DEVICE_DAYS   # 30 days
+    )
+
+def _clear_trusted_cookie(response: Response):
+    """Clear the trusted device cookie."""
+    response.delete_cookie(TRUSTED_DEVICE_COOKIE, samesite="Lax")
 
 # ═══════════════════════════════════════════════════════════════
 # ACTIVITY LOG HELPER
@@ -73,7 +226,6 @@ def log_activity(
     before_value: dict = None,
     after_value: dict = None
 ):
-    """Write an audit log entry to activity_logs collection."""
     ip = ""
     try:
         ip = request.client.host if request.client else "127.0.0.1"
@@ -98,11 +250,10 @@ def log_activity(
     }
     try:
         db.activity_logs.insert_one(doc)
-        # Auto-purge logs older than 15 days (runs inline — cheap delete, rarely hits)
         cutoff = datetime.utcnow() - timedelta(days=15)
         db.activity_logs.delete_many({"timestamp": {"$lt": cutoff}})
     except Exception as e:
-        print(f"[RBAC] log_activity error: {e}")
+        print("[RBAC] log_activity error: " + str(e))
 
 # ═══════════════════════════════════════════════════════════════
 # AUTH DEPENDENCIES
@@ -122,11 +273,10 @@ async def get_current_dashboard_user(request: Request) -> dict:
 
     user = db.dashboard_users.find_one({"token": token})
 
-    # ── Legacy fallback: old /admin/login token → treat as Super Admin ──
+    # ── Legacy fallback ──
     if not user:
         legacy = db.admins.find_one({"token": token})
         if legacy:
-            # Resolve the Super Admin role
             super_role = db.dashboard_roles.find_one({"role_name": "Super Admin"}) or {}
             return {
                 "_id": legacy["_id"],
@@ -151,7 +301,7 @@ async def get_current_dashboard_user(request: Request) -> dict:
     if user.get("status") in ("disabled", "suspended"):
         raise HTTPException(status_code=403, detail="Account is disabled or suspended")
 
-    # Inactivity timeout check
+    # Inactivity timeout check (30 minutes per 2FA spec)
     last_active = user.get("last_active_at") or user.get("created_at") or datetime.utcnow()
     if datetime.utcnow() - last_active > timedelta(minutes=INACTIVITY_TIMEOUT_MINUTES):
         db.dashboard_users.update_one({"_id": user["_id"]}, {"$set": {"token": None}})
@@ -166,7 +316,6 @@ async def get_current_dashboard_user(request: Request) -> dict:
     except Exception:
         pass
 
-    # Resolve role + permissions
     role = db.dashboard_roles.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
     if not role:
         role = {"role_name": "Unknown", "permissions": {}}
@@ -175,10 +324,6 @@ async def get_current_dashboard_user(request: Request) -> dict:
 
 
 def require_permission(module: str, action: str):
-    """
-    FastAPI dependency generator — checks if the current user has
-    the specified permission for a module. Super Admin bypasses all checks.
-    """
     def dependency(user: dict = Depends(get_current_dashboard_user)) -> dict:
         role_name = user.get("role", {}).get("role_name", "")
         if role_name == "Super Admin":
@@ -196,10 +341,6 @@ def require_permission(module: str, action: str):
 
 
 def get_assigned_cities_filter(user: dict = Depends(get_current_dashboard_user)) -> dict:
-    """
-    Returns a MongoDB query fragment restricting data to the user's assigned cities.
-    Super Admin or users with ["*"] get unrestricted access.
-    """
     assigned = user.get("assigned_cities", [])
     role_name = user.get("role", {}).get("role_name", "")
 
@@ -212,14 +353,11 @@ def get_assigned_cities_filter(user: dict = Depends(get_current_dashboard_user))
     return {"city": {"$in": assigned}}
 
 # ═══════════════════════════════════════════════════════════════
-# SEED FUNCTION — call once on startup
+# SEED FUNCTION
 # ═══════════════════════════════════════════════════════════════
 
 def seed_rbac():
-    """
-    Seed default roles and a Super Admin user if they don't exist.
-    Call this from server.py startup alongside existing seed_admin().
-    """
+    """Seed default roles and a Super Admin user if they don't exist."""
     # ── 1. Seed default roles ──
     if db.dashboard_roles.count_documents({}) == 0:
         super_admin_perms = {}
@@ -308,7 +446,7 @@ def seed_rbac():
             })
             print("[RBAC] Seeded Super Admin user — Mobile: " + default_mobile + " PIN: " + default_pin)
 
-    # ── 3. Create indexes if not exist ──
+    # ── 3. Create indexes ──
     try:
         db.dashboard_users.create_index("mobile", unique=True)
         db.dashboard_users.create_index("token", sparse=True)
@@ -316,20 +454,26 @@ def seed_rbac():
         db.activity_logs.create_index([("timestamp", -1)])
         db.activity_logs.create_index("user_id")
         db.activity_logs.create_index("module")
+        # 2FA collections
+        db.otp_store.create_index("mobile", expireAfterSeconds=OTP_EXPIRY_MINUTES * 60)
+        db.otp_store.create_index("created_at")
+        db.trusted_devices.create_index("token", unique=True)
+        db.trusted_devices.create_index("user_id")
+        db.trusted_devices.create_index("expires_at")
     except Exception as e:
         print("[RBAC] Index creation (may already exist): " + str(e))
 
 
 # ═══════════════════════════════════════════════════════════════
-# AUTH ENDPOINTS
+# 2FA AUTH ENDPOINTS
 # ═══════════════════════════════════════════════════════════════
 
 @router.post("/login")
 async def login(data: dict, request: Request, response: Response):
     """
-    Login with mobile number + PIN.
-    Sets HttpOnly cookie on success.
-    Returns user identity for frontend.
+    Step 1: Login with mobile + PIN.
+    - If trusted device cookie is valid → skip OTP, return session directly.
+    - Otherwise → generate OTP, send it, return otp_required: true.
     """
     mobile = str(data.get("mobile", "")).strip()
     pin = str(data.get("pin", "")).strip()
@@ -377,12 +521,162 @@ async def login(data: dict, request: Request, response: Response):
         else:
             raise HTTPException(status_code=401, detail="Invalid PIN. Account is now locked.")
 
-    # ── Success ──
-    token = secrets.token_urlsafe(32)
+    # ── PIN verified successfully ──
+
+    # Check trusted device → skip OTP
+    trusted_token = _verify_trusted_device(request, user["_id"])
+    if trusted_token:
+        # Trusted device — skip OTP, issue session directly
+        session_token = secrets.token_urlsafe(32)
+        db.dashboard_users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {
+                "token": session_token,
+                "login_attempts": 0,
+                "lockout_until": None,
+                "last_login_at": datetime.utcnow(),
+                "last_active_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }}
+        )
+
+        log_activity(request, user["_id"], user["full_name"], mobile, "Auth", "LOGIN_SUCCESS",
+                     record_name="Trusted device — OTP skipped")
+
+        role = db.dashboard_roles.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
+        role_name = role["role_name"] if role else "Unknown"
+
+        response.set_cookie(
+            key="admin_token",
+            value=session_token,
+            httponly=True,
+            samesite="Lax",
+            secure=False,
+            max_age=3600 * SESSION_MAX_HOURS
+        )
+
+        return {
+            "message": "Login successful (trusted device)",
+            "otp_required": False,
+            "user": {
+                "id": str(user["_id"]),
+                "full_name": user["full_name"],
+                "mobile": user["mobile"],
+                "designation": user.get("designation", ""),
+                "role": role_name
+            }
+        }
+
+    # ── Not a trusted device → generate OTP ──
+    otp = _generate_otp()
+    otp_hash = _hash_otp(otp)
+
+    # Store hashed OTP (replace any previous)
+    db.otp_store.delete_many({"mobile": mobile})
+    db.otp_store.insert_one({
+        "mobile": mobile,
+        "user_id": user["_id"],
+        "otp_hash": otp_hash,
+        "attempts": 0,
+        "created_at": datetime.utcnow(),
+        "expires_at": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
+        "resend_available_at": datetime.utcnow() + timedelta(seconds=OTP_RESEND_SECONDS),
+    })
+
+    # Send OTP
+    send_result = _send_otp_to_mobile(mobile, otp)
+    send_ok = send_result.get("ok", False)
+    send_method = send_result.get("method", "unknown")
+
+    log_activity(request, user["_id"], user["full_name"], mobile, "Auth", "OTP_SENT",
+                 record_name="Method: " + send_method)
+
+    if not send_ok:
+        # OTP couldn't be delivered — but we still stored it. Let user know.
+        return {
+            "otp_required": True,
+            "mobile": mobile,
+            "otp_expires_in": OTP_EXPIRY_MINUTES * 60,
+            "warning": "OTP could not be sent via " + send_method + ". Contact admin.",
+            "resend_available_in": OTP_RESEND_SECONDS
+        }
+
+    return {
+        "otp_required": True,
+        "mobile": mobile,
+        "otp_expires_in": OTP_EXPIRY_MINUTES * 60,
+        "otp_sent_via": send_method,
+        "resend_available_in": OTP_RESEND_SECONDS
+    }
+
+
+@router.post("/verify-otp")
+async def verify_otp(data: dict, request: Request, response: Response):
+    """
+    Step 2: Verify the 4-digit OTP.
+    - On success: set session cookie + optional trusted device cookie.
+    - On failure: track attempts, lock after 5 wrong tries.
+    """
+    mobile = str(data.get("mobile", "")).strip()
+    otp = str(data.get("otp", "")).strip()
+    trust_device = bool(data.get("trust_device", False))
+
+    if not mobile or not otp:
+        raise HTTPException(status_code=400, detail="Mobile and OTP are required")
+
+    if not (otp.isdigit() and len(otp) == OTP_LENGTH):
+        raise HTTPException(status_code=400, detail="OTP must be " + str(OTP_LENGTH) + " digits")
+
+    # Find the stored OTP
+    stored = db.otp_store.find_one({"mobile": mobile})
+    if not stored:
+        raise HTTPException(status_code=400, detail="No OTP found. Please request a new one.")
+
+    # Check expiry
+    if stored.get("expires_at", datetime.utcnow()) < datetime.utcnow():
+        db.otp_store.delete_one({"_id": stored["_id"]})
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new one.")
+
+    # Check max attempts
+    attempts = stored.get("attempts", 0)
+    if attempts >= OTP_MAX_ATTEMPTS:
+        db.otp_store.delete_one({"_id": stored["_id"]})
+        raise HTTPException(status_code=400, detail="Too many incorrect attempts. Please request a new OTP.")
+
+    # Verify OTP
+    if not _verify_otp(otp, stored["otp_hash"]):
+        new_attempts = attempts + 1
+        db.otp_store.update_one(
+            {"_id": stored["_id"]},
+            {"$set": {"attempts": new_attempts}}
+        )
+
+        user = db.dashboard_users.find_one({"mobile": mobile})
+        if user:
+            log_activity(request, user["_id"], user.get("full_name", ""), mobile,
+                         "Auth", "OTP_FAIL", record_name="Attempt " + str(new_attempts) + "/" + str(OTP_MAX_ATTEMPTS))
+
+        remaining = OTP_MAX_ATTEMPTS - new_attempts
+        if remaining > 0:
+            raise HTTPException(status_code=401,
+                detail="Invalid OTP. " + str(remaining) + " attempts remaining.")
+        else:
+            db.otp_store.delete_one({"_id": stored["_id"]})
+            raise HTTPException(status_code=401, detail="Too many incorrect attempts. Please request a new OTP.")
+
+    # ── OTP verified successfully ──
+    db.otp_store.delete_one({"_id": stored["_id"]})
+
+    user = db.dashboard_users.find_one({"mobile": mobile})
+    if not user:
+        raise HTTPException(status_code=401, detail="User account not found")
+
+    # Issue session token
+    session_token = secrets.token_urlsafe(32)
     db.dashboard_users.update_one(
         {"_id": user["_id"]},
         {"$set": {
-            "token": token,
+            "token": session_token,
             "login_attempts": 0,
             "lockout_until": None,
             "last_login_at": datetime.utcnow(),
@@ -391,52 +685,130 @@ async def login(data: dict, request: Request, response: Response):
         }}
     )
 
-    log_activity(request, user["_id"], user["full_name"], mobile, "Auth", "LOGIN_SUCCESS")
-
-    # Resolve role for response
-    role = db.dashboard_roles.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
-    role_name = role["role_name"] if role else "Unknown"
-
+    # Set session cookie
     response.set_cookie(
         key="admin_token",
-        value=token,
+        value=session_token,
         httponly=True,
         samesite="Lax",
-        secure=False,  # Set True in production HTTPS
+        secure=False,
         max_age=3600 * SESSION_MAX_HOURS
     )
 
+    # Set trusted device cookie if requested
+    if trust_device:
+        trusted_token = _create_trusted_device(user["_id"], mobile, request)
+        _set_trusted_cookie(response, trusted_token)
+        log_activity(request, user["_id"], user["full_name"], mobile, "Auth", "OTP_VERIFIED",
+                     record_name="Trusted device enabled (30 days)")
+    else:
+        log_activity(request, user["_id"], user["full_name"], mobile, "Auth", "OTP_VERIFIED")
+
+    role = db.dashboard_roles.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
+    role_name = role["role_name"] if role else "Unknown"
+
     return {
         "message": "Login successful",
+        "otp_required": False,
         "user": {
             "id": str(user["_id"]),
             "full_name": user["full_name"],
             "mobile": user["mobile"],
             "designation": user.get("designation", ""),
-            "role": role_name,
-            "assigned_cities": user.get("assigned_cities", [])
+            "role": role_name
         }
     }
 
 
+@router.post("/resend-otp")
+async def resend_otp(data: dict, request: Request, response: Response):
+    """
+    Resend OTP — rate-limited to 30 seconds between resends.
+    Generates a fresh OTP and updates the stored hash.
+    """
+    mobile = str(data.get("mobile", "")).strip()
+
+    if not mobile:
+        raise HTTPException(status_code=400, detail="Mobile number is required")
+
+    stored = db.otp_store.find_one({"mobile": mobile})
+    if not stored:
+        raise HTTPException(status_code=400, detail="No pending OTP. Please login again.")
+
+    # Check resend cooldown
+    resend_at = stored.get("resend_available_at", datetime.utcnow())
+    if resend_at > datetime.utcnow():
+        wait_seconds = int((resend_at - datetime.utcnow()).total_seconds()) + 1
+        raise HTTPException(status_code=429, detail="Please wait " + str(wait_seconds) + " seconds before resending.")
+
+    # Generate new OTP
+    otp = _generate_otp()
+    otp_hash = _hash_otp(otp)
+
+    db.otp_store.update_one(
+        {"_id": stored["_id"]},
+        {"$set": {
+            "otp_hash": otp_hash,
+            "attempts": 0,
+            "created_at": datetime.utcnow(),
+            "expires_at": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
+            "resend_available_at": datetime.utcnow() + timedelta(seconds=OTP_RESEND_SECONDS),
+        }}
+    )
+
+    send_result = _send_otp_to_mobile(mobile, otp)
+    send_method = send_result.get("method", "unknown")
+
+    user = db.dashboard_users.find_one({"mobile": mobile})
+    if user:
+        log_activity(request, user["_id"], user.get("full_name", ""), mobile,
+                     "Auth", "OTP_RESENT", record_name="Method: " + send_method)
+
+    return {
+        "message": "OTP resent",
+        "otp_expires_in": OTP_EXPIRY_MINUTES * 60,
+        "otp_sent_via": send_method,
+        "resend_available_in": OTP_RESEND_SECONDS
+    }
+
+
 @router.post("/logout")
-async def logout(request: Request):
-    """Clear the session token and cookie."""
-    token = request.cookies.get("admin_token")
+async def logout(request: Request, response: Response, data: dict = None):
+    """
+    Logout — clears session token and cookie.
+    Trusted device cookie is preserved unless keep_trusted=false is sent.
+    """
+    token = request.cookies.get("admin_token") or \
+            (data.get("token", "") if data else "") or \
+            request.headers.get("Authorization", "").replace("Bearer ", "")
+
     if token:
         user = db.dashboard_users.find_one({"token": token})
         if user:
             db.dashboard_users.update_one({"_id": user["_id"]}, {"$set": {"token": None}})
-            log_activity(request, user["_id"], user["full_name"], user["mobile"], "Auth", "LOGOUT")
+            log_activity(request, user["_id"], user.get("full_name", ""), user.get("mobile", ""),
+                         "Auth", "LOGOUT")
 
-    res = JSONResponse({"message": "Logged out"})
-    res.delete_cookie("admin_token")
-    return res
+    # Clear session cookie
+    response.delete_cookie("admin_token", samesite="Lax")
+
+    # Check if we should also clear trusted device
+    keep_trusted = True
+    if data and data.get("keep_trusted") is False:
+        keep_trusted = False
+
+    if not keep_trusted:
+        trusted_token = request.cookies.get(TRUSTED_DEVICE_COOKIE)
+        if trusted_token:
+            db.trusted_devices.delete_one({"token": trusted_token})
+        _clear_trusted_cookie(response)
+
+    return {"message": "Logged out successfully"}
 
 
 @router.get("/me")
-async def get_me(user: dict = Depends(get_current_dashboard_user)):
-    """Return current user identity, role, permissions, and assigned cities."""
+async def get_current_user_info(user: dict = Depends(get_current_dashboard_user)):
+    """Get current authenticated user's full profile + permissions."""
     role = user.get("role", {})
     return {
         "id": str(user["_id"]),
@@ -452,11 +824,78 @@ async def get_me(user: dict = Depends(get_current_dashboard_user)):
 
 
 # ═══════════════════════════════════════════════════════════════
+# TRUSTED DEVICES MANAGEMENT (for future security dashboard)
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/trusted-devices")
+async def list_trusted_devices(
+    request: Request,
+    user: dict = Depends(get_current_dashboard_user)
+):
+    """List all trusted devices for the current user."""
+    devices = list(db.trusted_devices.find({
+        "user_id": user["_id"],
+        "expires_at": {"$gt": datetime.utcnow()}
+    }).sort("created_at", -1))
+
+    return [{
+        "id": str(d["_id"]),
+        "ip_address": d.get("ip_address", ""),
+        "user_agent": d.get("user_agent", ""),
+        "created_at": d.get("created_at").isoformat() if d.get("created_at") else None,
+        "expires_at": d.get("expires_at").isoformat() if d.get("expires_at") else None,
+        "last_used_at": d.get("last_used_at").isoformat() if d.get("last_used_at") else None,
+    } for d in devices]
+
+
+@router.delete("/trusted-devices/{device_id}")
+async def revoke_trusted_device(
+    device_id: str,
+    request: Request,
+    user: dict = Depends(get_current_dashboard_user)
+):
+    """Revoke a trusted device by its ID."""
+    if not ObjectId.is_valid(device_id):
+        raise HTTPException(status_code=400, detail="Invalid device ID")
+
+    device = db.trusted_devices.find_one({"_id": ObjectId(device_id), "user_id": user["_id"]})
+    if not device:
+        raise HTTPException(status_code=404, detail="Trusted device not found")
+
+    db.trusted_devices.delete_one({"_id": ObjectId(device_id)})
+
+    log_activity(
+        request, user["_id"], user["full_name"], user["mobile"],
+        "Auth", "REVOKE_TRUSTED_DEVICE",
+        record_id=device_id,
+        record_name=device.get("user_agent", "")[:50]
+    )
+
+    return {"message": "Trusted device revoked"}
+
+
+@router.delete("/trusted-devices")
+async def revoke_all_trusted_devices(
+    request: Request,
+    user: dict = Depends(get_current_dashboard_user)
+):
+    """Revoke all trusted devices for the current user."""
+    result = db.trusted_devices.delete_many({"user_id": user["_id"]})
+
+    log_activity(
+        request, user["_id"], user["full_name"], user["mobile"],
+        "Auth", "REVOKE_ALL_TRUSTED_DEVICES",
+        record_name=str(result.deleted_count) + " devices"
+    )
+
+    return {"message": "Revoked " + str(result.deleted_count) + " trusted device(s)"}
+
+
+# ═══════════════════════════════════════════════════════════════
 # DASHBOARD USERS CRUD
 # ═══════════════════════════════════════════════════════════════
 
 def _serialize_user(u: dict) -> dict:
-    """Convert a dashboard user doc to a JSON-safe dict."""
     return {
         "id": str(u["_id"]),
         "full_name": u.get("full_name", ""),
@@ -465,7 +904,7 @@ def _serialize_user(u: dict) -> dict:
         "designation": u.get("designation", ""),
         "profile_photo_url": u.get("profile_photo_url"),
         "role_id": str(u["role_id"]) if u.get("role_id") else None,
-        "role_name": u.get("role_name", "Unassigned"),   # ← included for dashboard display
+        "role_name": u.get("role_name", "Unassigned"),
         "status": u.get("status", "active"),
         "assigned_cities": u.get("assigned_cities", []),
         "last_login_at": u.get("last_login_at").isoformat() if u.get("last_login_at") else None,
@@ -478,7 +917,6 @@ async def list_users(
     request: Request,
     user: dict = Depends(require_permission("User Management", "view"))
 ):
-    """List all dashboard users."""
     users = list(db.dashboard_users.find({}, {"pin": 0}).sort("created_at", -1))
     for u in users:
         role = db.dashboard_roles.find_one({"_id": u["role_id"]}) if u.get("role_id") else None
@@ -492,7 +930,6 @@ async def create_user(
     request: Request,
     user: dict = Depends(require_permission("User Management", "add"))
 ):
-    """Create a new dashboard user. Requires Users:add permission."""
     full_name = str(data.get("full_name", "")).strip()
     mobile = str(data.get("mobile", "")).strip()
     pin = str(data.get("pin", "")).strip()
@@ -554,7 +991,6 @@ async def update_user(
     request: Request,
     user: dict = Depends(require_permission("User Management", "edit"))
 ):
-    """Update a dashboard user's profile, role, status, or cities."""
     if not ObjectId.is_valid(user_id):
         raise HTTPException(status_code=400, detail="Invalid user ID")
 
@@ -567,7 +1003,6 @@ async def update_user(
         if field in data:
             updates[field] = data[field]
 
-    # Mobile number update — check uniqueness against other users
     if "mobile" in data and str(data["mobile"]).strip():
         new_mobile = str(data["mobile"]).strip()
         if not (new_mobile.isdigit() and len(new_mobile) == 10):
@@ -582,7 +1017,6 @@ async def update_user(
             raise HTTPException(status_code=400, detail="Invalid role_id")
         updates["role_id"] = ObjectId(data["role_id"])
 
-    # Optional PIN change during edit
     if "pin" in data and str(data.get("pin", "")).strip():
         new_pin = str(data["pin"]).strip()
         if not (new_pin.isdigit() and len(new_pin) in (4, 6)):
@@ -626,7 +1060,6 @@ async def reset_pin(
     request: Request,
     user: dict = Depends(require_permission("User Management", "edit"))
 ):
-    """Reset a user's PIN. Super Admin only in practice."""
     if not ObjectId.is_valid(user_id):
         raise HTTPException(status_code=400, detail="Invalid user ID")
 
@@ -660,7 +1093,6 @@ async def delete_user(
     request: Request,
     user: dict = Depends(require_permission("User Management", "delete"))
 ):
-    """Permanently delete a dashboard user."""
     if not ObjectId.is_valid(user_id):
         raise HTTPException(status_code=400, detail="Invalid user ID")
 
@@ -668,7 +1100,6 @@ async def delete_user(
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Prevent deleting the last Super Admin
     super_role = db.dashboard_roles.find_one({"role_name": "Super Admin"})
     if super_role and existing.get("role_id") == super_role["_id"]:
         super_admin_count = db.dashboard_users.count_documents({
@@ -676,6 +1107,9 @@ async def delete_user(
         })
         if super_admin_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot delete the last Super Admin")
+
+    # Also revoke all trusted devices for this user
+    db.trusted_devices.delete_many({"user_id": ObjectId(user_id)})
 
     db.dashboard_users.delete_one({"_id": ObjectId(user_id)})
 
@@ -708,7 +1142,6 @@ def _serialize_role(r: dict) -> dict:
 async def list_roles(
     user: dict = Depends(require_permission("User Management", "view"))
 ):
-    """List all roles with their permission grids."""
     roles = list(db.dashboard_roles.find().sort("created_at", 1))
     return [_serialize_role(r) for r in roles]
 
@@ -719,7 +1152,6 @@ async def create_role(
     request: Request,
     user: dict = Depends(require_permission("User Management", "edit"))
 ):
-    """Create a new custom role with a permission grid."""
     role_name = str(data.get("role_name", "")).strip()
     description = str(data.get("description", "")).strip()
     permissions = data.get("permissions", {})
@@ -766,7 +1198,6 @@ async def update_role(
     request: Request,
     user: dict = Depends(require_permission("User Management", "edit"))
 ):
-    """Update a role's name, description, or permission grid."""
     if not ObjectId.is_valid(role_id):
         raise HTTPException(status_code=400, detail="Invalid role ID")
 
@@ -825,7 +1256,6 @@ async def delete_role(
     request: Request,
     user: dict = Depends(require_permission("User Management", "edit"))
 ):
-    """Delete a custom role. Cannot delete system roles or roles assigned to active users."""
     if not ObjectId.is_valid(role_id):
         raise HTTPException(status_code=400, detail="Invalid role ID")
 
@@ -872,23 +1302,13 @@ async def list_activity_logs(
     date_to: str = "",
     user: dict = Depends(get_current_dashboard_user)
 ):
-    """
-    Get paginated activity logs with optional filters.
-    Accessible to ALL authenticated dashboard users.
-    Non-Super-Admin users see only logs for their assigned cities.
-    Returns most recent first.
-    """
     query = {}
 
-    # City scope: non-Super-Admin users only see their assigned city logs
     role_name = user.get("role", {}).get("role_name", "")
     assigned_cities = user.get("assigned_cities", [])
     if role_name != "Super Admin" and "*" not in assigned_cities:
         if assigned_cities:
-            # city filter on 'city' field in log
             query["city"] = {"$in": assigned_cities}
-        # If no cities assigned, fall through — they'll see their own logs via user filter below
-
 
     if user_name:
         query["user_name"] = {"$regex": user_name, "$options": "i"}
@@ -933,12 +1353,11 @@ async def list_activity_logs(
 
 
 # ═══════════════════════════════════════════════════════════════
-# HELPER: Get all available modules (for frontend permission matrix)
+# HELPER: Get all available modules
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/modules")
 async def list_modules(
     user: dict = Depends(get_current_dashboard_user)
 ):
-    """Return all module names and action types for the permission matrix UI."""
     return {"modules": ALL_MODULES, "actions": ALL_ACTIONS}

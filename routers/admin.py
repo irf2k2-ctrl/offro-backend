@@ -239,9 +239,25 @@ def admin_login(data: dict):
     return res
 
 @router.post("/logout")
-def admin_logout():
+def admin_logout(request: Request):
+    # Clear session token from dashboard_users if RBAC user
+    token = request.cookies.get("admin_token", "")
+    if token:
+        try:
+            db.dashboard_users.update_one({"token": token}, {"$set": {"token": None}})
+        except Exception:
+            pass
+        try:
+            user = db.dashboard_users.find_one({"token": token})
+            if user:
+                from routers.dashboard_auth import log_activity
+                log_activity(request, user["_id"], user.get("full_name", ""), user.get("mobile", ""),
+                             "Auth", "LOGOUT")
+        except Exception:
+            pass
     res = JSONResponse({"message": "Logged out"})
-    res.delete_cookie("admin_token")
+    res.delete_cookie("admin_token", samesite="Lax")
+    # Trusted device cookie is preserved — user stays trusted on this device
     return res
 
 # ===================== CATEGORIES =====================

@@ -8,11 +8,11 @@
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
 <style>
 body {
-    margin:0; height:100vh; display:flex;
+    margin:0; min-height:100vh; display:flex;
     justify-content:center; align-items:center;
     font-family:'Segoe UI', sans-serif;
     background: linear-gradient(135deg, #1a3a32, #3E5F55, #A9CDBA);
-    overflow:hidden;
+    overflow-y:auto; overflow-x:hidden;
 }
 .bg-logo {
     position:absolute; width:420px; top:38%; left:50%;
@@ -54,6 +54,44 @@ body {
     background:none; border:none; color:#6b8c7e; cursor:pointer; font-size:16px;
 }
 .hint { color:#6b8c7e; font-size:11px; margin-top:6px; }
+
+/* ── OTP Screen ── */
+.otp-screen { display:none; }
+.otp-icon {
+    width:64px; height:64px; border-radius:50%;
+    background:#CDEBD6; color:#3E5F55;
+    display:flex; align-items:center; justify-content:center;
+    font-size:28px; margin:0 auto 16px;
+}
+.otp-inputs { display:flex; gap:10px; justify-content:center; margin:20px 0; }
+.otp-box {
+    width:52px; height:60px; text-align:center;
+    font-size:24px; font-weight:700; color:#3E5F55;
+    border:2px solid #d4e8de; border-radius:12px;
+    background:#fff; outline:none;
+    transition:border-color 0.2s;
+}
+.otp-box:focus { border-color:#3E5F55; box-shadow:0 0 0 3px rgba(62,95,85,0.12); }
+.otp-box.filled { border-color:#3E5F55; background:#f0faf4; }
+.otp-info { color:#6b8c7e; font-size:13px; margin-bottom:16px; }
+.otp-info strong { color:#3E5F55; }
+.resend-btn {
+    background:none; border:none; color:#3E5F55;
+    font-size:13px; font-weight:600; cursor:pointer;
+    padding:8px; text-decoration:underline;
+}
+.resend-btn:disabled { color:#6b8c7e; opacity:0.6; cursor:not-allowed; text-decoration:none; }
+.trust-check {
+    display:flex; align-items:center; gap:8px; justify-content:center;
+    margin:16px 0; font-size:13px; color:#6b8c7e;
+}
+.trust-check input { width:18px; height:18px; accent-color:#3E5F55; cursor:pointer; }
+.back-btn {
+    background:none; border:none; color:#6b8c7e;
+    font-size:13px; cursor:pointer; margin-top:12px;
+}
+.back-btn:hover { color:#3E5F55; }
+.otp-timer { font-size:12px; color:#6b8c7e; margin-top:8px; }
 </style>
 </head>
 <body>
@@ -65,7 +103,8 @@ body {
   <text x="50" y="51" text-anchor="middle" font-size="20" font-weight="900" fill="white" font-family="Arial">%</text>
 </svg>
 
-<div class="card">
+<!-- ═══ Step 1: Login (Mobile + PIN) ═══ -->
+<div class="card" id="loginCard">
     <div class="logo-wrap">
         <svg viewBox="0 0 100 130" fill="none" xmlns="http://www.w3.org/2000/svg">
           <ellipse cx="50" cy="45" rx="34" ry="34" fill="#3E5F55"/>
@@ -96,7 +135,64 @@ body {
     <p id="msg" class="mt-3 mb-0"></p>
 </div>
 
+<!-- ═══ Step 2: OTP Verification ═══ -->
+<div class="card otp-screen" id="otpCard">
+    <div class="logo-wrap">
+        <svg viewBox="0 0 100 130" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <ellipse cx="50" cy="45" rx="34" ry="34" fill="#3E5F55"/>
+          <path d="M50 10C30.1 10 14 26.1 14 46c0 26.5 36 74 36 74s36-47.5 36-74C86 26.1 69.9 10 50 10z" fill="#3E5F55"/>
+          <circle cx="50" cy="44" r="18" fill="white" opacity="0.25"/>
+          <text x="50" y="51" text-anchor="middle" font-size="20" font-weight="900" fill="white" font-family="Arial">%</text>
+        </svg>
+        <div class="logo-text">Offr<span style="color:#A9CDBA;">O</span></div>
+    </div>
+    <div class="logo-sub">Verify Your Identity</div>
+
+    <div class="otp-icon">
+        <i class="fas fa-shield-alt"></i>
+    </div>
+    <p class="otp-info">
+        A <strong>4-digit OTP</strong> has been sent to<br>
+        <strong id="otpMobileDisplay">your mobile number</strong><br>
+        via WhatsApp / SMS
+    </p>
+
+    <div class="otp-inputs" id="otpInputs">
+        <input type="text" class="otp-box" maxlength="1" inputmode="numeric" data-index="0" oninput="onOtpInput(this)" onkeydown="onOtpKeydown(event,this)">
+        <input type="text" class="otp-box" maxlength="1" inputmode="numeric" data-index="1" oninput="onOtpInput(this)" onkeydown="onOtpKeydown(event,this)">
+        <input type="text" class="otp-box" maxlength="1" inputmode="numeric" data-index="2" oninput="onOtpInput(this)" onkeydown="onOtpKeydown(event,this)">
+        <input type="text" class="otp-box" maxlength="1" inputmode="numeric" data-index="3" oninput="onOtpInput(this)" onkeydown="onOtpKeydown(event,this)">
+    </div>
+
+    <div class="trust-check">
+        <input type="checkbox" id="trustDevice">
+        <label for="trustDevice" style="cursor:pointer;margin:0;">Trust this device for 30 days</label>
+    </div>
+
+    <button class="btn-main" id="verifyBtn" onclick="verifyOtp()">
+        <i class="fas fa-check-circle me-1"></i> Verify & Login
+    </button>
+
+    <p id="otpMsg" class="mt-3 mb-0"></p>
+
+    <div style="margin-top:12px;display:flex;flex-direction:column;align-items:center;gap:6px;">
+        <button class="resend-btn" id="resendBtn" onclick="resendOtp()" disabled>
+            <i class="fas fa-redo me-1"></i> Resend OTP <span id="resendTimer"></span>
+        </button>
+        <button class="back-btn" onclick="backToLogin()">
+            <i class="fas fa-arrow-left me-1"></i> Back to Login
+        </button>
+    </div>
+</div>
+
 <script>
+// ═══ State ═══
+let _loginMobile = "";
+let _loginPin = "";
+let _resendCountdown = 0;
+let _resendInterval = null;
+
+// ═══ Step 1: Login ═══
 async function login() {
     let mobile = document.getElementById("mobile").value.trim();
     let pin = document.getElementById("pin").value.trim();
@@ -107,13 +203,17 @@ async function login() {
         msgEl.innerText = "Please enter mobile number and PIN";
         return;
     }
+    if (!/^\d{10}$/.test(mobile)) {
+        msgEl.innerText = "Mobile number must be exactly 10 digits";
+        return;
+    }
     if (!/^\d{4}$|^\d{6}$/.test(pin)) {
         msgEl.innerText = "PIN must be 4 or 6 digits";
         return;
     }
 
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Signing in...';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Verifying...';
     msgEl.innerText = "";
 
     try {
@@ -132,8 +232,37 @@ async function login() {
             return;
         }
 
-        btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' + (data.user ? data.user.full_name : 'Admin') + '!';
-        setTimeout(() => { window.location.href = "/admin/dashboard"; }, 800);
+        // ── Trusted device — OTP skipped, go straight to dashboard ──
+        if (!data.otp_required) {
+            btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' + (data.user ? data.user.full_name : 'Admin') + '!';
+            setTimeout(() => { window.location.href = "/admin/dashboard"; }, 600);
+            return;
+        }
+
+        // ── OTP required — show OTP screen ──
+        _loginMobile = mobile;
+        _loginPin = pin;
+
+        document.getElementById("otpMobileDisplay").innerText = "+91 " + mobile;
+        if (data.otp_sent_via) {
+            let viaText = data.otp_sent_via === "whatsapp" ? "WhatsApp" :
+                          data.otp_sent_via === "sms" ? "SMS" :
+                          data.otp_sent_via === "dev_console" ? "(Dev Mode — check server logs)" : data.otp_sent_via;
+            document.getElementById("otpMobileDisplay").innerHTML = "+91 " + mobile + " <br><small style='color:#6b8c7e;font-size:11px;'>Sent via " + viaText + "</small>";
+        }
+        if (data.warning) {
+            document.getElementById("otpMsg").innerText = data.warning;
+            document.getElementById("otpMsg").style.color = "#e67e22";
+        }
+
+        showOtpScreen();
+
+        // Start resend countdown
+        let resendIn = data.resend_available_in || 30;
+        startResendCountdown(resendIn);
+
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sign-in-alt me-1"></i> Login to Dashboard';
     } catch (err) {
         msgEl.innerText = "Server error. Please try again.";
         btn.disabled = false;
@@ -141,6 +270,186 @@ async function login() {
     }
 }
 
+// ═══ Step 2: OTP Verification ═══
+function showOtpScreen() {
+    document.getElementById("loginCard").style.display = "none";
+    document.getElementById("otpCard").style.display = "block";
+    // Focus first OTP box
+    setTimeout(() => {
+        let first = document.querySelector(".otp-box[data-index='0']");
+        if (first) first.focus();
+    }, 100);
+}
+
+function backToLogin() {
+    document.getElementById("otpCard").style.display = "none";
+    document.getElementById("loginCard").style.display = "block";
+    // Clear OTP boxes
+    document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
+    document.getElementById("otpMsg").innerText = "";
+    if (_resendInterval) { clearInterval(_resendInterval); _resendInterval = null; }
+}
+
+function onOtpInput(el) {
+    el.value = el.value.replace(/[^0-9]/g, "");
+    if (el.value) {
+        el.classList.add("filled");
+        // Auto-advance to next
+        let idx = parseInt(el.dataset.index);
+        let next = document.querySelector(".otp-box[data-index='" + (idx + 1) + "']");
+        if (next) next.focus();
+        // Auto-submit when all 4 filled
+        if (idx === 3) {
+            let allFilled = true;
+            document.querySelectorAll(".otp-box").forEach(b => {
+                if (!b.value) allFilled = false;
+            });
+            if (allFilled) verifyOtp();
+        }
+    } else {
+        el.classList.remove("filled");
+    }
+}
+
+function onOtpKeydown(e, el) {
+    let idx = parseInt(el.dataset.index);
+    if (e.key === "Backspace" && !el.value && idx > 0) {
+        // Move to previous on backspace if current is empty
+        let prev = document.querySelector(".otp-box[data-index='" + (idx - 1) + "']");
+        if (prev) { prev.focus(); prev.value = ""; prev.classList.remove("filled"); }
+    }
+    if (e.key === "ArrowLeft" && idx > 0) {
+        let prev = document.querySelector(".otp-box[data-index='" + (idx - 1) + "']");
+        if (prev) prev.focus();
+    }
+    if (e.key === "ArrowRight") {
+        let next = document.querySelector(".otp-box[data-index='" + (idx + 1) + "']");
+        if (next) next.focus();
+    }
+    if (e.key === "Enter") {
+        e.preventDefault();
+        verifyOtp();
+    }
+}
+
+function getOtpValue() {
+    let otp = "";
+    document.querySelectorAll(".otp-box").forEach(b => { otp += b.value; });
+    return otp;
+}
+
+async function verifyOtp() {
+    let otp = getOtpValue();
+    let msgEl = document.getElementById("otpMsg");
+    let btn = document.getElementById("verifyBtn");
+
+    if (otp.length !== 4) {
+        msgEl.innerText = "Please enter all 4 digits";
+        msgEl.style.color = "#c0392b";
+        return;
+    }
+
+    let trustDevice = document.getElementById("trustDevice").checked;
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Verifying...';
+    msgEl.innerText = "";
+
+    try {
+        let res = await fetch("/admin/auth/verify-otp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mobile: _loginMobile, otp, trust_device: trustDevice }),
+            credentials: "include"
+        });
+        let data = await res.json();
+
+        if (!res.ok) {
+            msgEl.innerText = data.detail || "Verification failed";
+            msgEl.style.color = "#c0392b";
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
+            // Clear OTP boxes on error
+            document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
+            let first = document.querySelector(".otp-box[data-index='0']");
+            if (first) first.focus();
+            return;
+        }
+
+        // ── Success ──
+        btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' + (data.user ? data.user.full_name : 'Admin') + '!';
+        setTimeout(() => { window.location.href = "/admin/dashboard"; }, 600);
+    } catch (err) {
+        msgEl.innerText = "Server error. Please try again.";
+        msgEl.style.color = "#c0392b";
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
+    }
+}
+
+// ═══ Resend OTP ═══
+async function resendOtp() {
+    let msgEl = document.getElementById("otpMsg");
+    let btn = document.getElementById("resendBtn");
+
+    btn.disabled = true;
+
+    try {
+        let res = await fetch("/admin/auth/resend-otp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mobile: _loginMobile }),
+            credentials: "include"
+        });
+        let data = await res.json();
+
+        if (!res.ok) {
+            msgEl.innerText = data.detail || "Resend failed";
+            msgEl.style.color = "#c0392b";
+            btn.disabled = false;
+            return;
+        }
+
+        // Clear OTP boxes
+        document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
+        let first = document.querySelector(".otp-box[data-index='0']");
+        if (first) first.focus();
+
+        msgEl.innerText = "New OTP sent successfully";
+        msgEl.style.color = "#3E5F55";
+        setTimeout(() => { msgEl.innerText = ""; }, 3000);
+
+        // Start countdown
+        startResendCountdown(data.resend_available_in || 30);
+    } catch (err) {
+        msgEl.innerText = "Server error. Please try again.";
+        msgEl.style.color = "#c0392b";
+        btn.disabled = false;
+    }
+}
+
+function startResendCountdown(seconds) {
+    _resendCountdown = seconds;
+    let btn = document.getElementById("resendBtn");
+    let timerEl = document.getElementById("resendTimer");
+    btn.disabled = true;
+
+    if (_resendInterval) clearInterval(_resendInterval);
+
+    _resendInterval = setInterval(() => {
+        if (_resendCountdown > 0) {
+            timerEl.innerText = "(" + _resendCountdown + "s)";
+            _resendCountdown--;
+        } else {
+            clearInterval(_resendInterval);
+            _resendInterval = null;
+            timerEl.innerText = "";
+            btn.disabled = false;
+        }
+    }, 1000);
+}
+
+// ═══ Helpers ═══
 function togglePin() {
     let inp = document.getElementById("pin");
     let icon = document.getElementById("eyeIcon");
@@ -153,7 +462,14 @@ function togglePin() {
     }
 }
 
-document.addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+document.addEventListener("keydown", e => {
+    // Enter on login screen
+    let loginCard = document.getElementById("loginCard");
+    if (e.key === "Enter" && loginCard.style.display !== "none") {
+        login();
+    }
+});
+
 document.getElementById("mobile").focus();
 </script>
 
