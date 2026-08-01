@@ -161,6 +161,20 @@ def send_otp(phone: str) -> dict:
 
     # ── HTTP call ─────────────────────────────────────────────────────────────
     try:
+        # Invalidate any existing MSG91 OTP session for this number first.
+        # Without this, MSG91 deduplicates the request and returns success
+        # without actually sending a new SMS (silent deduplication).
+        try:
+            retry_url = MSG91_URL + "/retryotp"
+            httpx.get(
+                retry_url,
+                params={"authkey": MSG91_AUTH_KEY, "mobile": e164, "retrytype": "text"},
+                timeout=5.0,
+            )
+            print(f"[MSG91] ↺  retryotp called for {e164}")
+        except Exception as _re:
+            print(f"[MSG91] ↺  retryotp skipped ({type(_re).__name__})")
+
         resp = httpx.post(
             MSG91_URL,
             json=payload,
@@ -183,8 +197,8 @@ def send_otp(phone: str) -> dict:
         msg_type = data.get("type", "")
         msg_msg  = data.get("message", data.get("msg", ""))
 
-        if resp.status_code == 200 and msg_type == "success":
-            print(f"[MSG91] ✅ OTP sent successfully to {e164}")
+        if msg_type == "success" and "request_id" in data:
+            print(f"[MSG91] ✅ OTP sent successfully to {e164} (HTTP {resp.status_code})")
             return {"ok": True}
 
         # Error path — log everything
