@@ -14,174 +14,16 @@ from fastapi.responses import JSONResponse
 from bson import ObjectId
 from database import db
 
-# ── MSG91 SMS — same gateway as user app OTP ──
+# ═══════════════════════════════════════════════════════════════
+# OTP — imported from otp_service.py (same as user app)
+# ═══════════════════════════════════════════════════════════════
 try:
-    import httpx as _httpx
-    _HTTPX_AVAILABLE = True
-except ImportError:
-    _HTTPX_AVAILABLE = False
-    import requests as _requests  # fallback — already in requirements.txt
-
-router = APIRouter(prefix="/auth", tags=["Dashboard RBAC & Auth"])
-
-# ═══════════════════════════════════════════════════════════════
-# CONFIGURATION
-# ═══════════════════════════════════════════════════════════════
-
-MAX_LOGIN_ATTEMPTS = 5
-LOCKOUT_MINUTES = 15
-INACTIVITY_TIMEOUT_MINUTES = 30          # ← was 15, now 30 per 2FA spec
-SESSION_MAX_HOURS = 8
-PBKDF2_ITERATIONS = 100_000
-
-# ── 2FA / OTP settings ──
-OTP_LENGTH = 4                           # 4-digit numeric OTP
-OTP_EXPIRY_MINUTES = 5                   # OTP valid for 5 minutes
-OTP_MAX_ATTEMPTS = 5                      # Max wrong OTP tries before requiring new one
-OTP_RESEND_SECONDS = 30                   # Resend cooldown
-TRUSTED_DEVICE_DAYS = 30                 # Trust this device for 30 days
-TRUSTED_DEVICE_COOKIE = "offro_trusted"   # Cookie name for trusted device token
-
-# All modules that support permissions
-ALL_MODULES = [
-    "Accounts", "Stores", "Products", "Banners", "Admin Banners", "Popup Campaigns",
-    "Payments", "Gift Vouchers", "Notifications", "Categories", "Pricing & GST",
-    "Reviews", "Discounts", "Terms & Conditions", "Policies",
-    "Social Media", "Live Chat", "Default Images", "User Management"
-]
-
-ALL_ACTIONS = ["view", "add", "edit", "delete", "approve", "export"]
-
-# ═══════════════════════════════════════════════════════════════
-# PIN HASHING (stdlib only)
-# ═══════════════════════════════════════════════════════════════
-
-def hash_pin(pin: str) -> str:
-    salt = secrets.token_hex(16)
-    h = hashlib.pbkdf2_hmac("sha256", pin.encode(), bytes.fromhex(salt), PBKDF2_ITERATIONS)
-    return salt + "$" + h.hex()
-
-def verify_pin(plain_pin: str, stored: str) -> bool:
-    try:
-        salt_str, hash_str = stored.split("$", 1)
-        h = hashlib.pbkdf2_hmac("sha256", plain_pin.encode(), bytes.fromhex(salt_str), PBKDF2_ITERATIONS)
-        return secrets.compare_digest(h.hex(), hash_str)
-    except Exception:
-        return False
-
-# ═══════════════════════════════════════════════════════════════
-# OTP HASHING (stdlib only — never store plain OTP)
-# ═══════════════════════════════════════════════════════════════
-
-def _hash_otp(otp: str) -> str:
-    """Hash a 4-digit OTP using PBKDF2. Never store plain OTP."""
-    salt = secrets.token_hex(8)
-    h = hashlib.pbkdf2_hmac("sha256", otp.encode(), bytes.fromhex(salt), PBKDF2_ITERATIONS)
-    return salt + "$" + h.hex()
-
-def _verify_otp(plain_otp: str, stored: str) -> bool:
-    """Verify OTP against stored hash."""
-    try:
-        salt_str, hash_str = stored.split("$", 1)
-        h = hashlib.pbkdf2_hmac("sha256", plain_otp.encode(), bytes.fromhex(salt_str), PBKDF2_ITERATIONS)
-        return secrets.compare_digest(h.hex(), hash_str)
-    except Exception:
-        return False
-
-def _generate_otp() -> str:
-    """Generate a cryptographically secure 4-digit OTP."""
-    return str(secrets.randbelow(9000) + 1000)
-
-# ═══════════════════════════════════════════════════════════════
-# OTP DELIVERY — MSG91 Flow API (transactional SMS, no widget)
-# ═══════════════════════════════════════════════════════════════
-
-# MSG91 config — same env vars as rest of app
-_MSG91_AUTH_KEY    = os.getenv("MSG91_AUTH_KEY", "").strip()
-_MSG91_TEMPLATE_ID = os.getenv("MSG91_TEMPLATE_ID", "").strip()
-_MSG91_SENDER_ID   = os.getenv("MSG91_SENDER_ID", "OFFROO").strip()
-# Flow API — independent of OTP Widget, no cross-session rate limiting
-_MSG91_FLOW_URL    = "https://api.msg91.com/api/v5/flow/"
-
-# Log MSG91 config on import
-print("[2FA] ═══════════════════════════════════════")
-print("[2FA] MSG91_AUTH_KEY    : " + ("SET (" + str(len(_MSG91_AUTH_KEY)) + " chars)" if _MSG91_AUTH_KEY else "❌ NOT SET — OTPs will be dev-console only"))
-print("[2FA] MSG91_TEMPLATE_ID : " + (_MSG91_TEMPLATE_ID if _MSG91_TEMPLATE_ID else "❌ NOT SET"))
-print("[2FA] MSG91_SENDER_ID   : " + _MSG91_SENDER_ID)
-print("[2FA] Mode              : " + ("🟢 LIVE (MSG91 Flow SMS)" if _MSG91_AUTH_KEY and _MSG91_TEMPLATE_ID else "🟡 DEV (check server logs for OTP)"))
-print("[2FA] ═══════════════════════════════════════")
-
-
-def _send_otp_to_mobile(mobile: str, otp: str) -> dict:
-    """
-    Send admin 2FA OTP via MSG91 SMS — same gateway as user app.
-    Falls back to console log in dev mode (if MSG91 keys not set).
-    Returns {"ok": bool, "method": str, "error": str?}
-    """
-    # Normalise to E.164 for MSG91 (91XXXXXXXXXX)
-    phone = mobile.replace("+", "").replace(" ", "").replace("-", "")
-    if not phone.startswith("91") and len(phone) == 10:
-        phone = "91" + phone
-
-    print("[2FA] ── _send_otp_to_mobile ────────────────")
-    print("[2FA] target: " + phone + " | otp_len: " + str(len(otp)))
-
-    # ── Dev mode (no MSG91 keys) ──
-    if not _MSG91_AUTH_KEY or not _MSG91_TEMPLATE_ID:
-        print("[2FA] 🟡 DEV MODE — MSG91 keys not set. OTP=" + otp + " for " + mobile)
-        return {"ok": True, "method": "dev_console"}
-
-    # ── MSG91 Flow API — transactional SMS, bypasses OTP widget rate-limiting ──
-    # Uses /api/v5/flow/ with authkey in header — completely separate from OTP widget
-    safe_key = _MSG91_AUTH_KEY[:6] + "..." + _MSG91_AUTH_KEY[-4:] if len(_MSG91_AUTH_KEY) > 10 else "***"
-    print("[2FA] Using MSG91 Flow API (not widget) | template=" + _MSG91_TEMPLATE_ID + " | mobile=" + phone + " | authkey=" + safe_key)
-
-    # Flow API payload — OTP variable must match your template's variable name (##otp##)
-    payload = {
-        "template_id": _MSG91_TEMPLATE_ID,
-        "short_url":   "0",
-        "mobiles":     phone,
-        "VAR1":        otp,
-        "otp":         otp,
-    }
-    headers = {
-        "authkey":      _MSG91_AUTH_KEY,
-        "Content-Type": "application/JSON",
-        "accept":       "application/json",
-    }
-
-    try:
-        if _HTTPX_AVAILABLE:
-            resp = _httpx.post(_MSG91_FLOW_URL, json=payload, headers=headers, timeout=15.0)
-        else:
-            resp = _requests.post(_MSG91_FLOW_URL, json=payload, headers=headers, timeout=15)
-
-        print("[2FA] MSG91 Flow HTTP status : " + str(resp.status_code))
-        print("[2FA] MSG91 Flow response    : " + resp.text)
-
-        try:
-            data = resp.json()
-        except Exception:
-            return {"ok": False, "method": "sms", "error": "MSG91 non-JSON: " + resp.text[:100]}
-
-        msg_type = str(data.get("type", "")).lower()
-        msg_msg  = data.get("message", data.get("msg", ""))
-
-        if resp.status_code == 200 and msg_type == "success":
-            print("[2FA] ✅ OTP sent via MSG91 Flow to " + phone)
-            return {"ok": True, "method": "sms"}
-
-        # Some MSG91 responses use different success signals
-        if resp.status_code == 200 and "request_id" in data:
-            print("[2FA] ✅ OTP sent via MSG91 Flow to " + phone + " (request_id=" + str(data.get("request_id","")) + ")")
-            return {"ok": True, "method": "sms"}
-
-        print("[2FA] ❌ MSG91 Flow FAILED — type='" + str(msg_type) + "' msg='" + str(msg_msg) + "' full=" + str(data))
-        return {"ok": False, "method": "sms", "error": "MSG91: " + str(msg_msg or msg_type or "Unknown")}
-
-    except Exception as e:
-        print("[2FA] ❌ MSG91 Flow exception: " + str(type(e).__name__) + ": " + str(e))
-        return {"ok": False, "method": "sms", "error": "SMS delivery failed: " + str(e)}
+    from routers.otp_service import send_otp as _svc_send_otp, verify_otp as _svc_verify_otp
+    _OTP_SERVICE_OK = True
+    print("[2FA] ✅ otp_service imported — using same MSG91 path as user app")
+except Exception as _e:
+    _OTP_SERVICE_OK = False
+    print("[2FA] ❌ otp_service import failed: " + str(_e))
 
 # ═══════════════════════════════════════════════════════════════
 # TRUSTED DEVICE MANAGEMENT
@@ -491,8 +333,6 @@ def seed_rbac():
         db.activity_logs.create_index("user_id")
         db.activity_logs.create_index("module")
         # 2FA collections
-        db.otp_store.create_index("mobile", expireAfterSeconds=OTP_EXPIRY_MINUTES * 60)
-        db.otp_store.create_index("created_at")
         db.trusted_devices.create_index("token", unique=True)
         db.trusted_devices.create_index("user_id")
         db.trusted_devices.create_index("expires_at")
@@ -603,37 +443,19 @@ async def login(data: dict, request: Request, response: Response):
             }
         }
 
-    # ── Not a trusted device → generate OTP ──
-    otp = _generate_otp()
-    otp_hash = _hash_otp(otp)
-
-    # Store hashed OTP (replace any previous)
-    db.otp_store.delete_many({"mobile": mobile})
-    db.otp_store.insert_one({
-        "mobile": mobile,
-        "user_id": user["_id"],
-        "otp_hash": otp_hash,
-        "attempts": 0,
-        "created_at": datetime.utcnow(),
-        "expires_at": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
-        "resend_available_at": datetime.utcnow() + timedelta(seconds=OTP_RESEND_SECONDS),
-    })
-
-    # Send OTP
-    send_result = _send_otp_to_mobile(mobile, otp)
+    # ── Not a trusted device → send OTP via otp_service (same as user app) ──
+    send_result = _svc_send_otp(mobile)
     send_ok = send_result.get("ok", False)
-    send_method = send_result.get("method", "unknown")
 
     log_activity(request, user["_id"], user["full_name"], mobile, "Auth", "OTP_SENT",
-                 record_name="Method: " + send_method)
+                 record_name="via MSG91 (otp_service)")
 
     if not send_ok:
-        # OTP couldn't be delivered — but we still stored it. Let user know.
         return {
             "otp_required": True,
             "mobile": mobile,
             "otp_expires_in": OTP_EXPIRY_MINUTES * 60,
-            "warning": "OTP could not be sent via " + send_method + ". Contact admin.",
+            "warning": send_result.get("error", "OTP could not be sent. Contact admin."),
             "resend_available_in": OTP_RESEND_SECONDS
         }
 
@@ -641,7 +463,6 @@ async def login(data: dict, request: Request, response: Response):
         "otp_required": True,
         "mobile": mobile,
         "otp_expires_in": OTP_EXPIRY_MINUTES * 60,
-        "otp_sent_via": send_method,
         "resend_available_in": OTP_RESEND_SECONDS
     }
 
@@ -663,45 +484,17 @@ async def verify_otp(data: dict, request: Request, response: Response):
     if not (otp.isdigit() and len(otp) == OTP_LENGTH):
         raise HTTPException(status_code=400, detail="OTP must be " + str(OTP_LENGTH) + " digits")
 
-    # Find the stored OTP
-    stored = db.otp_store.find_one({"mobile": mobile})
-    if not stored:
-        raise HTTPException(status_code=400, detail="No OTP found. Please request a new one.")
-
-    # Check expiry
-    if stored.get("expires_at", datetime.utcnow()) < datetime.utcnow():
-        db.otp_store.delete_one({"_id": stored["_id"]})
-        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new one.")
-
-    # Check max attempts
-    attempts = stored.get("attempts", 0)
-    if attempts >= OTP_MAX_ATTEMPTS:
-        db.otp_store.delete_one({"_id": stored["_id"]})
-        raise HTTPException(status_code=400, detail="Too many incorrect attempts. Please request a new OTP.")
-
-    # Verify OTP
-    if not _verify_otp(otp, stored["otp_hash"]):
-        new_attempts = attempts + 1
-        db.otp_store.update_one(
-            {"_id": stored["_id"]},
-            {"$set": {"attempts": new_attempts}}
-        )
-
+    # Verify OTP via otp_service (same as user app)
+    result = _svc_verify_otp(mobile, otp)
+    if not result.get("ok"):
+        is_locked = result.get("locked", False)
         user = db.dashboard_users.find_one({"mobile": mobile})
         if user:
             log_activity(request, user["_id"], user.get("full_name", ""), mobile,
-                         "Auth", "OTP_FAIL", record_name="Attempt " + str(new_attempts) + "/" + str(OTP_MAX_ATTEMPTS))
-
-        remaining = OTP_MAX_ATTEMPTS - new_attempts
-        if remaining > 0:
-            raise HTTPException(status_code=401,
-                detail="Invalid OTP. " + str(remaining) + " attempts remaining.")
-        else:
-            db.otp_store.delete_one({"_id": stored["_id"]})
-            raise HTTPException(status_code=401, detail="Too many incorrect attempts. Please request a new OTP.")
-
-    # ── OTP verified successfully ──
-    db.otp_store.delete_one({"_id": stored["_id"]})
+                         "Auth", "OTP_FAIL", record_name=result.get("error", "Wrong OTP"))
+        if is_locked:
+            raise HTTPException(status_code=401, detail=result.get("error", "Too many incorrect attempts. Please request a new OTP."))
+        raise HTTPException(status_code=401, detail=result.get("error", "Invalid OTP."))
 
     user = db.dashboard_users.find_one({"mobile": mobile})
     if not user:
@@ -767,43 +560,19 @@ async def resend_otp(data: dict, request: Request, response: Response):
     if not mobile:
         raise HTTPException(status_code=400, detail="Mobile number is required")
 
-    stored = db.otp_store.find_one({"mobile": mobile})
-    if not stored:
-        raise HTTPException(status_code=400, detail="No pending OTP. Please login again.")
-
-    # Check resend cooldown
-    resend_at = stored.get("resend_available_at", datetime.utcnow())
-    if resend_at > datetime.utcnow():
-        wait_seconds = int((resend_at - datetime.utcnow()).total_seconds()) + 1
-        raise HTTPException(status_code=429, detail="Please wait " + str(wait_seconds) + " seconds before resending.")
-
-    # Generate new OTP
-    otp = _generate_otp()
-    otp_hash = _hash_otp(otp)
-
-    db.otp_store.update_one(
-        {"_id": stored["_id"]},
-        {"$set": {
-            "otp_hash": otp_hash,
-            "attempts": 0,
-            "created_at": datetime.utcnow(),
-            "expires_at": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
-            "resend_available_at": datetime.utcnow() + timedelta(seconds=OTP_RESEND_SECONDS),
-        }}
-    )
-
-    send_result = _send_otp_to_mobile(mobile, otp)
-    send_method = send_result.get("method", "unknown")
+    # Resend OTP via otp_service (handles its own rate limiting)
+    result = _svc_send_otp(mobile)
+    if not result.get("ok"):
+        raise HTTPException(status_code=429, detail=result.get("error", "Could not resend OTP. Please wait."))
 
     user = db.dashboard_users.find_one({"mobile": mobile})
     if user:
         log_activity(request, user["_id"], user.get("full_name", ""), mobile,
-                     "Auth", "OTP_RESENT", record_name="Method: " + send_method)
+                     "Auth", "OTP_RESENT", record_name="via MSG91 (otp_service)")
 
     return {
         "message": "OTP resent",
         "otp_expires_in": OTP_EXPIRY_MINUTES * 60,
-        "otp_sent_via": send_method,
         "resend_available_in": OTP_RESEND_SECONDS
     }
 
