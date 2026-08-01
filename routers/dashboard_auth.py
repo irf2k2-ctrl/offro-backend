@@ -14,6 +14,53 @@ from fastapi.responses import JSONResponse
 from bson import ObjectId
 from database import db
 
+router = APIRouter(prefix="/auth", tags=["Dashboard RBAC & Auth"])
+
+# ═══════════════════════════════════════════════════════════════
+# CONFIGURATION
+# ═══════════════════════════════════════════════════════════════
+
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
+INACTIVITY_TIMEOUT_MINUTES = 30
+SESSION_MAX_HOURS = 8
+PBKDF2_ITERATIONS = 100_000
+
+# ── 2FA / OTP settings ──
+OTP_LENGTH = 4
+OTP_EXPIRY_MINUTES = 5
+OTP_MAX_ATTEMPTS = 5
+OTP_RESEND_SECONDS = 30
+TRUSTED_DEVICE_DAYS = 30
+TRUSTED_DEVICE_COOKIE = "offro_trusted"
+
+ALL_MODULES = [
+    "Accounts", "Stores", "Products", "Banners", "Admin Banners", "Popup Campaigns",
+    "Payments", "Gift Vouchers", "Notifications", "Categories", "Pricing & GST",
+    "Reviews", "Discounts", "Terms & Conditions", "Policies",
+    "Social Media", "Live Chat", "Default Images", "User Management"
+]
+
+ALL_ACTIONS = ["view", "add", "edit", "delete", "approve", "export"]
+
+# ═══════════════════════════════════════════════════════════════
+# PIN HASHING (stdlib only)
+# ═══════════════════════════════════════════════════════════════
+
+def hash_pin(pin: str) -> str:
+    salt = secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", pin.encode(), bytes.fromhex(salt), PBKDF2_ITERATIONS)
+    return salt + "$" + h.hex()
+
+def verify_pin(plain_pin: str, stored: str) -> bool:
+    try:
+        salt_str, hash_str = stored.split("$", 1)
+        h = hashlib.pbkdf2_hmac("sha256", plain_pin.encode(), bytes.fromhex(salt_str), PBKDF2_ITERATIONS)
+        return secrets.compare_digest(h.hex(), hash_str)
+    except Exception:
+        return False
+
+
 # ═══════════════════════════════════════════════════════════════
 # OTP — imported from otp_service.py (same as user app)
 # ═══════════════════════════════════════════════════════════════
