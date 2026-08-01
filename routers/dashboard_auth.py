@@ -14,12 +14,13 @@ from fastapi.responses import JSONResponse
 from bson import ObjectId
 from database import db
 
-# ── WhatsApp service for OTP delivery ──
+# ── MSG91 SMS — same gateway as user app OTP ──
 try:
-    from services.whatsapp import send_whatsapp_message
-    _WA_AVAILABLE = True
-except Exception:
-    _WA_AVAILABLE = False
+    import httpx as _httpx
+    _HTTPX_AVAILABLE = True
+except ImportError:
+    _HTTPX_AVAILABLE = False
+    import requests as _requests  # fallback — already in requirements.txt
 
 router = APIRouter(prefix="/auth", tags=["Dashboard RBAC & Auth"])
 
@@ -92,60 +93,84 @@ def _generate_otp() -> str:
     return str(secrets.randbelow(9000) + 1000)
 
 # ═══════════════════════════════════════════════════════════════
-# OTP DELIVERY — modular (WhatsApp first, SMS gateway pluggable)
+# OTP DELIVERY — MSG91 SMS (same gateway as user app)
 # ═══════════════════════════════════════════════════════════════
+
+# MSG91 config — same env vars as otp_service.py
+_MSG91_AUTH_KEY    = os.getenv("MSG91_AUTH_KEY", "").strip()
+_MSG91_TEMPLATE_ID = os.getenv("MSG91_TEMPLATE_ID", "").strip()
+_MSG91_SENDER_ID   = os.getenv("MSG91_SENDER_ID", "OFFROO").strip()
+_MSG91_URL         = "https://control.msg91.com/api/v5/otp"
+
+# Log MSG91 config on import
+print("[2FA] ═══════════════════════════════════════")
+print("[2FA] MSG91_AUTH_KEY    : " + ("SET (" + str(len(_MSG91_AUTH_KEY)) + " chars)" if _MSG91_AUTH_KEY else "❌ NOT SET — OTPs will be dev-console only"))
+print("[2FA] MSG91_TEMPLATE_ID : " + (_MSG91_TEMPLATE_ID if _MSG91_TEMPLATE_ID else "❌ NOT SET"))
+print("[2FA] MSG91_SENDER_ID   : " + _MSG91_SENDER_ID)
+print("[2FA] Mode              : " + ("🟢 LIVE (MSG91 SMS)" if _MSG91_AUTH_KEY and _MSG91_TEMPLATE_ID else "🟡 DEV (check server logs for OTP)"))
+print("[2FA] ═══════════════════════════════════════")
+
 
 def _send_otp_to_mobile(mobile: str, otp: str) -> dict:
     """
-    Send OTP to the given mobile number.
-    Priority:
-      1. External SMS gateway (if SMS_API_URL + SMS_API_KEY configured)
-      2. WhatsApp message (if WHATSAPP configured — already in use)
-      3. Console log (dev fallback)
+    Send admin 2FA OTP via MSG91 SMS — same gateway as user app.
+    Falls back to console log in dev mode (if MSG91 keys not set).
     Returns {"ok": bool, "method": str, "error": str?}
     """
+    # Normalise to E.164 for MSG91 (91XXXXXXXXXX)
     phone = mobile.replace("+", "").replace(" ", "").replace("-", "")
     if not phone.startswith("91") and len(phone) == 10:
         phone = "91" + phone
 
-    msg = "Your OffrO Admin verification code is " + otp + ". Valid for 5 minutes. Do not share this code with anyone."
+    print("[2FA] ── _send_otp_to_mobile ────────────────")
+    print("[2FA] target: " + phone + " | otp_len: " + str(len(otp)))
 
-    # ── 1. External SMS gateway (pluggable — MSG91 / Twilio / Fast2SMS / etc.) ──
-    sms_api_url = os.getenv("SMS_API_URL", "")
-    sms_api_key = os.getenv("SMS_API_KEY", "")
-    sms_sender = os.getenv("SMS_SENDER_ID", "OFFROO")
+    # ── Dev mode (no MSG91 keys) ──
+    if not _MSG91_AUTH_KEY or not _MSG91_TEMPLATE_ID:
+        print("[2FA] 🟡 DEV MODE — MSG91 keys not set. OTP=" + otp + " for " + mobile)
+        return {"ok": True, "method": "dev_console"}
 
-    if sms_api_url and sms_api_key:
+    # ── MSG91 SMS (same payload as otp_service.py) ──
+    payload = {
+        "template_id": _MSG91_TEMPLATE_ID,
+        "mobile":      phone,
+        "authkey":     _MSG91_AUTH_KEY,
+        "otp":         otp,
+        "otp_expiry":  OTP_EXPIRY_MINUTES,
+        "sender":      _MSG91_SENDER_ID,
+    }
+    safe_key = _MSG91_AUTH_KEY[:6] + "..." + _MSG91_AUTH_KEY[-4:] if len(_MSG91_AUTH_KEY) > 10 else "***"
+    print("[2FA] MSG91 payload: template_id=" + _MSG91_TEMPLATE_ID + " | mobile=" + phone + " | sender=" + _MSG91_SENDER_ID + " | authkey=" + safe_key)
+
+    try:
+        if _HTTPX_AVAILABLE:
+            resp = _httpx.post(_MSG91_URL, json=payload,
+                               headers={"Content-Type": "application/json"}, timeout=15.0)
+        else:
+            resp = _requests.post(_MSG91_URL, json=payload,
+                                  headers={"Content-Type": "application/json"}, timeout=15)
+
+        print("[2FA] MSG91 HTTP status : " + str(resp.status_code))
+        print("[2FA] MSG91 response    : " + resp.text)
+
         try:
-            import requests as _req
-            payload = {
-                "mobile": phone,
-                "message": msg,
-                "sender": sms_sender,
-                "otp": otp,
-            }
-            headers = {"Authorization": "Bearer " + sms_api_key, "Content-Type": "application/json"}
-            r = _req.post(sms_api_url, json=payload, headers=headers, timeout=10)
-            if r.status_code == 200:
-                return {"ok": True, "method": "sms"}
-            return {"ok": False, "method": "sms", "error": "HTTP " + str(r.status_code)}
-        except Exception as e:
-            print("[2FA] SMS gateway error: " + str(e))
-            # Fall through to WhatsApp
+            data = resp.json()
+        except Exception:
+            return {"ok": False, "method": "sms", "error": "MSG91 non-JSON response: " + resp.text[:100]}
 
-    # ── 2. WhatsApp message (already configured in production) ──
-    if _WA_AVAILABLE:
-        try:
-            result = send_whatsapp_message(phone, msg)
-            if result.get("ok"):
-                return {"ok": True, "method": "whatsapp"}
-            print("[2FA] WhatsApp send failed: " + str(result.get("error", "")))
-        except Exception as e:
-            print("[2FA] WhatsApp exception: " + str(e))
+        msg_type = data.get("type", "")
+        msg_msg  = data.get("message", data.get("msg", ""))
 
-    # ── 3. Dev fallback — log to console ──
-    print("[2FA] DEV MODE — OTP for " + mobile + ": " + otp)
-    return {"ok": True, "method": "dev_console"}
+        if resp.status_code == 200 and msg_type == "success":
+            print("[2FA] ✅ OTP SMS sent via MSG91 to " + phone)
+            return {"ok": True, "method": "sms"}
+
+        print("[2FA] ❌ MSG91 FAILED — type='" + str(msg_type) + "' message='" + str(msg_msg) + "'")
+        return {"ok": False, "method": "sms", "error": "MSG91: " + str(msg_msg or msg_type or "Unknown")}
+
+    except Exception as e:
+        print("[2FA] ❌ MSG91 exception: " + str(type(e).__name__) + ": " + str(e))
+        return {"ok": False, "method": "sms", "error": "SMS delivery failed: " + str(e)}
 
 # ═══════════════════════════════════════════════════════════════
 # TRUSTED DEVICE MANAGEMENT
