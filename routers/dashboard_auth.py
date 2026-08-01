@@ -93,21 +93,22 @@ def _generate_otp() -> str:
     return str(secrets.randbelow(9000) + 1000)
 
 # ═══════════════════════════════════════════════════════════════
-# OTP DELIVERY — MSG91 SMS (same gateway as user app)
+# OTP DELIVERY — MSG91 Flow API (transactional SMS, no widget)
 # ═══════════════════════════════════════════════════════════════
 
-# MSG91 config — same env vars as otp_service.py
+# MSG91 config — same env vars as rest of app
 _MSG91_AUTH_KEY    = os.getenv("MSG91_AUTH_KEY", "").strip()
 _MSG91_TEMPLATE_ID = os.getenv("MSG91_TEMPLATE_ID", "").strip()
 _MSG91_SENDER_ID   = os.getenv("MSG91_SENDER_ID", "OFFROO").strip()
-_MSG91_URL         = "https://control.msg91.com/api/v5/otp"
+# Flow API — independent of OTP Widget, no cross-session rate limiting
+_MSG91_FLOW_URL    = "https://api.msg91.com/api/v5/flow/"
 
 # Log MSG91 config on import
 print("[2FA] ═══════════════════════════════════════")
 print("[2FA] MSG91_AUTH_KEY    : " + ("SET (" + str(len(_MSG91_AUTH_KEY)) + " chars)" if _MSG91_AUTH_KEY else "❌ NOT SET — OTPs will be dev-console only"))
 print("[2FA] MSG91_TEMPLATE_ID : " + (_MSG91_TEMPLATE_ID if _MSG91_TEMPLATE_ID else "❌ NOT SET"))
 print("[2FA] MSG91_SENDER_ID   : " + _MSG91_SENDER_ID)
-print("[2FA] Mode              : " + ("🟢 LIVE (MSG91 SMS)" if _MSG91_AUTH_KEY and _MSG91_TEMPLATE_ID else "🟡 DEV (check server logs for OTP)"))
+print("[2FA] Mode              : " + ("🟢 LIVE (MSG91 Flow SMS)" if _MSG91_AUTH_KEY and _MSG91_TEMPLATE_ID else "🟡 DEV (check server logs for OTP)"))
 print("[2FA] ═══════════════════════════════════════")
 
 
@@ -130,46 +131,56 @@ def _send_otp_to_mobile(mobile: str, otp: str) -> dict:
         print("[2FA] 🟡 DEV MODE — MSG91 keys not set. OTP=" + otp + " for " + mobile)
         return {"ok": True, "method": "dev_console"}
 
-    # ── MSG91 SMS (same payload as otp_service.py) ──
+    # ── MSG91 Flow API — transactional SMS, bypasses OTP widget rate-limiting ──
+    # Uses /api/v5/flow/ with authkey in header — completely separate from OTP widget
+    safe_key = _MSG91_AUTH_KEY[:6] + "..." + _MSG91_AUTH_KEY[-4:] if len(_MSG91_AUTH_KEY) > 10 else "***"
+    print("[2FA] Using MSG91 Flow API (not widget) | template=" + _MSG91_TEMPLATE_ID + " | mobile=" + phone + " | authkey=" + safe_key)
+
+    # Flow API payload — OTP variable must match your template's variable name (##otp##)
     payload = {
         "template_id": _MSG91_TEMPLATE_ID,
-        "mobile":      phone,
-        "authkey":     _MSG91_AUTH_KEY,
+        "short_url":   "0",
+        "mobiles":     phone,
+        "VAR1":        otp,
         "otp":         otp,
-        "otp_expiry":  OTP_EXPIRY_MINUTES,
-        "sender":      _MSG91_SENDER_ID,
     }
-    safe_key = _MSG91_AUTH_KEY[:6] + "..." + _MSG91_AUTH_KEY[-4:] if len(_MSG91_AUTH_KEY) > 10 else "***"
-    print("[2FA] MSG91 payload: template_id=" + _MSG91_TEMPLATE_ID + " | mobile=" + phone + " | sender=" + _MSG91_SENDER_ID + " | authkey=" + safe_key)
+    headers = {
+        "authkey":      _MSG91_AUTH_KEY,
+        "Content-Type": "application/JSON",
+        "accept":       "application/json",
+    }
 
     try:
         if _HTTPX_AVAILABLE:
-            resp = _httpx.post(_MSG91_URL, json=payload,
-                               headers={"Content-Type": "application/json"}, timeout=15.0)
+            resp = _httpx.post(_MSG91_FLOW_URL, json=payload, headers=headers, timeout=15.0)
         else:
-            resp = _requests.post(_MSG91_URL, json=payload,
-                                  headers={"Content-Type": "application/json"}, timeout=15)
+            resp = _requests.post(_MSG91_FLOW_URL, json=payload, headers=headers, timeout=15)
 
-        print("[2FA] MSG91 HTTP status : " + str(resp.status_code))
-        print("[2FA] MSG91 response    : " + resp.text)
+        print("[2FA] MSG91 Flow HTTP status : " + str(resp.status_code))
+        print("[2FA] MSG91 Flow response    : " + resp.text)
 
         try:
             data = resp.json()
         except Exception:
-            return {"ok": False, "method": "sms", "error": "MSG91 non-JSON response: " + resp.text[:100]}
+            return {"ok": False, "method": "sms", "error": "MSG91 non-JSON: " + resp.text[:100]}
 
-        msg_type = data.get("type", "")
+        msg_type = str(data.get("type", "")).lower()
         msg_msg  = data.get("message", data.get("msg", ""))
 
         if resp.status_code == 200 and msg_type == "success":
-            print("[2FA] ✅ OTP SMS sent via MSG91 to " + phone)
+            print("[2FA] ✅ OTP sent via MSG91 Flow to " + phone)
             return {"ok": True, "method": "sms"}
 
-        print("[2FA] ❌ MSG91 FAILED — type='" + str(msg_type) + "' message='" + str(msg_msg) + "'")
+        # Some MSG91 responses use different success signals
+        if resp.status_code == 200 and "request_id" in data:
+            print("[2FA] ✅ OTP sent via MSG91 Flow to " + phone + " (request_id=" + str(data.get("request_id","")) + ")")
+            return {"ok": True, "method": "sms"}
+
+        print("[2FA] ❌ MSG91 Flow FAILED — type='" + str(msg_type) + "' msg='" + str(msg_msg) + "' full=" + str(data))
         return {"ok": False, "method": "sms", "error": "MSG91: " + str(msg_msg or msg_type or "Unknown")}
 
     except Exception as e:
-        print("[2FA] ❌ MSG91 exception: " + str(type(e).__name__) + ": " + str(e))
+        print("[2FA] ❌ MSG91 Flow exception: " + str(type(e).__name__) + ": " + str(e))
         return {"ok": False, "method": "sms", "error": "SMS delivery failed: " + str(e)}
 
 # ═══════════════════════════════════════════════════════════════
