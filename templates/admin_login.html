@@ -153,8 +153,7 @@ body {
     </div>
     <p class="otp-info">
         A <strong>4-digit OTP</strong> has been sent to<br>
-        <strong id="otpMobileDisplay">your mobile number</strong><br>
-        via WhatsApp / SMS
+        <strong id="otpMobileDisplay">your mobile number</strong>
     </p>
 
     <div class="otp-inputs" id="otpInputs">
@@ -244,12 +243,8 @@ async function login() {
         _loginPin = pin;
 
         document.getElementById("otpMobileDisplay").innerText = "+91 " + mobile;
-        if (data.otp_sent_via) {
-            let viaText = data.otp_sent_via === "whatsapp" ? "WhatsApp" :
-                          data.otp_sent_via === "sms" ? "SMS" :
-                          data.otp_sent_via === "dev_console" ? "(Dev Mode — check server logs)" : data.otp_sent_via;
-            document.getElementById("otpMobileDisplay").innerHTML = "+91 " + mobile + " <br><small style='color:#6b8c7e;font-size:11px;'>Sent via " + viaText + "</small>";
-        }
+        // OTP sent — just show mobile number, no delivery method text
+        document.getElementById("otpMobileDisplay").innerText = "+91 " + mobile;
         if (data.warning) {
             document.getElementById("otpMsg").innerText = data.warning;
             document.getElementById("otpMsg").style.color = "#e67e22";
