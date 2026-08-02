@@ -69,7 +69,7 @@ import requests as _std_requests
 _2FA_MSG91_AUTH_KEY    = os.getenv("MSG91_AUTH_KEY", "").strip()
 _2FA_MSG91_TEMPLATE_ID = os.getenv("MSG91_TEMPLATE_ID", "").strip()
 _2FA_MSG91_SENDER_ID   = os.getenv("MSG91_SENDER_ID", "OFFROO").strip()
-_2FA_MSG91_FLOW_URL    = "https://api.msg91.com/api/v5/flow/"
+# Flow API removed — using OTP Widget API (same as user app)
 
 print("[2FA] ═══════════════════════════════════════")
 print("[2FA] MSG91_AUTH_KEY    : " + ("SET (" + str(len(_2FA_MSG91_AUTH_KEY)) + " chars)" if _2FA_MSG91_AUTH_KEY else "❌ NOT SET"))
@@ -99,82 +99,81 @@ def _2fa_verify_otp(plain_otp: str, stored: str) -> bool:
 
 
 def _2fa_send_sms(mobile: str, otp: str) -> dict:
+    """
+    Send admin 2FA OTP via MSG91 OTP Widget API.
+    Uses the EXACT same API, payload format and auth method as otp_service.py
+    (which successfully sends OTPs for the user app).
+    authkey in BODY (not header), URL = control.msg91.com/api/v5/otp
+    """
     phone = mobile.replace("+", "").replace(" ", "").replace("-", "")
     if not phone.startswith("91") and len(phone) == 10:
         phone = "91" + phone
 
-    print("[2FA] ── _2fa_send_sms ────────────────")
-    print("[2FA] target: " + phone + " | otp: " + otp)
+    print("[2FA] ── _2fa_send_sms ────────────────────────")
+    print("[2FA] mobile input : " + mobile)
+    print("[2FA] phone (e164) : " + phone)
 
     if not _2FA_MSG91_AUTH_KEY or not _2FA_MSG91_TEMPLATE_ID:
         print("[2FA] 🟡 DEV MODE — MSG91 keys not set. OTP=" + otp + " for " + mobile)
-        return {"ok": True, "error": "DEV MODE — OTP in logs: " + otp}
+        return {"ok": True, "error": "DEV MODE — OTP printed in Railway logs"}
 
+    # ── Exact same payload format as otp_service.py (which works) ──
+    MSG91_OTP_URL = "https://control.msg91.com/api/v5/otp"
     payload = {
         "template_id": _2FA_MSG91_TEMPLATE_ID,
-        "short_url":   "0",
-        "mobiles":     phone,
+        "mobile":      phone,
+        "authkey":     _2FA_MSG91_AUTH_KEY,
         "otp":         otp,
-        "VAR1":        otp,
+        "otp_expiry":  OTP_EXPIRY_MINUTES,
+        "sender":      _2FA_MSG91_SENDER_ID,
     }
-    headers = {
-        "authkey":      _2FA_MSG91_AUTH_KEY,
-        "Content-Type": "application/json",
-        "accept":       "application/json",
-    }
-
     safe_key = _2FA_MSG91_AUTH_KEY[:6] + "..." + _2FA_MSG91_AUTH_KEY[-4:] if len(_2FA_MSG91_AUTH_KEY) > 10 else "***"
-    print("[2FA] Flow API URL: " + _2FA_MSG91_FLOW_URL)
-    print("[2FA] Flow payload: template=" + _2FA_MSG91_TEMPLATE_ID + " | mobile=" + phone + " | authkey=" + safe_key)
+    print("[2FA] URL     : " + MSG91_OTP_URL)
+    print("[2FA] payload : template=" + _2FA_MSG91_TEMPLATE_ID + " | mobile=" + phone + " | sender=" + _2FA_MSG91_SENDER_ID + " | authkey=" + safe_key)
 
     try:
-        resp = _std_requests.post(_2FA_MSG91_FLOW_URL, json=payload, headers=headers, timeout=15)
-        print("[2FA] Flow HTTP status : " + str(resp.status_code))
-        print("[2FA] Flow response    : " + resp.text[:500])
+        # Force a fresh MSG91 session (prevents silent deduplication)
+        try:
+            retry_resp = _std_requests.get(
+                MSG91_OTP_URL + "/retryotp",
+                params={"authkey": _2FA_MSG91_AUTH_KEY, "mobile": phone, "retrytype": "text"},
+                timeout=5
+            )
+            print("[2FA] retryotp → " + str(retry_resp.status_code) + " " + retry_resp.text[:100])
+        except Exception as _re:
+            print("[2FA] retryotp skipped (" + type(_re).__name__ + ")")
+
+        resp = _std_requests.post(
+            MSG91_OTP_URL,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=15
+        )
+        print("[2FA] HTTP status  : " + str(resp.status_code))
+        print("[2FA] Response body: " + resp.text[:500])
 
         try:
             data = resp.json()
         except Exception:
-            return {"ok": False, "error": "MSG91 non-JSON: " + resp.text[:100]}
+            print("[2FA] ❌ Non-JSON response from MSG91")
+            return {"ok": False, "error": "MSG91 returned non-JSON: " + resp.text[:100]}
 
         msg_type = str(data.get("type", "")).lower()
+        msg_msg  = str(data.get("message", data.get("msg", "")))
+        print("[2FA] Parsed: type=" + msg_type + " | message=" + msg_msg)
 
-        if msg_type == "success" or "request_id" in data:
-            print("[2FA] ✅ OTP sent via MSG91 Flow to " + phone)
+        if msg_type == "success" and "request_id" in data:
+            print("[2FA] ✅ OTP sent successfully to " + phone)
             return {"ok": True}
 
-        # Flow API failed — try OTP Widget API as fallback
-        print("[2FA] ⚠ Flow API did not return success — trying Widget API fallback...")
-        otp_payload = {
-            "template_id": _2FA_MSG91_TEMPLATE_ID,
-            "mobile":      phone,
-            "authkey":     _2FA_MSG91_AUTH_KEY,
-            "otp":         otp,
-            "otp_expiry":  OTP_EXPIRY_MINUTES,
-            "sender":      _2FA_MSG91_SENDER_ID,
-        }
-        resp2 = _std_requests.post(
-            "https://control.msg91.com/api/v5/otp",
-            json=otp_payload,
-            headers={"Content-Type": "application/json"},
-            timeout=15
-        )
-        print("[2FA] Widget HTTP status : " + str(resp2.status_code))
-        print("[2FA] Widget response    : " + resp2.text[:500])
-
-        try:
-            data2 = resp2.json()
-            if str(data2.get("type", "")).lower() == "success" or "request_id" in data2:
-                print("[2FA] ✅ OTP sent via Widget (fallback) to " + phone)
-                return {"ok": True}
-            return {"ok": False, "error": "MSG91: " + str(data2.get("message", data2.get("type", "Unknown")))}
-        except Exception:
-            return {"ok": False, "error": "MSG91 Widget non-JSON: " + resp2.text[:100]}
+        # Failed
+        print("[2FA] ❌ MSG91 error: type=" + msg_type + " | message=" + msg_msg)
+        return {"ok": False, "error": "MSG91: " + (msg_msg or msg_type or "Unknown error")}
 
     except Exception as e:
-        print("[2FA] ❌ MSG91 exception: " + str(type(e).__name__) + ": " + str(e))
+        print("[2FA] ❌ Exception: " + type(e).__name__ + ": " + str(e))
         return {"ok": False, "error": "SMS delivery failed: " + str(e)}
-    print("[2FA] ❌ otp_service import failed: " + str(_e))
+
 
 # ═══════════════════════════════════════════════════════════════
 # TRUSTED DEVICE MANAGEMENT
