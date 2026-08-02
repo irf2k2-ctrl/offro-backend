@@ -62,14 +62,181 @@ def verify_pin(plain_pin: str, stored: str) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════
-# OTP — uses otp_service.py (SAME as user app — guaranteed to work)
+# 2FA OTP — Fully standalone, no external imports needed
+# Uses MSG91 Text SMS API — completely separate from OTP Widget
+# Manages OTP in its own MongoDB collection: admin_otp_sessions
 # ═══════════════════════════════════════════════════════════════
-# send_otp(mobile)         → generates OTP, stores in otp_sessions, sends SMS
-# verify_otp(mobile, otp)  → checks otp_sessions, tracks attempts
-# No custom MSG91 code here — if user app OTP works, admin OTP works.
 
-from routers.otp_service import send_otp as _otp_send, verify_otp as _otp_verify
-print("[2FA] ✅ otp_service imported — using same MSG91 path as user app")
+import urllib.request as _url_req
+import urllib.parse as _url_parse
+import urllib.error as _url_error
+
+_MSG91_AUTH_KEY    = os.getenv("MSG91_AUTH_KEY", "").strip()
+_MSG91_TEMPLATE_ID = os.getenv("MSG91_TEMPLATE_ID", "").strip()
+_MSG91_SENDER_ID   = os.getenv("MSG91_SENDER_ID", "OFFROO").strip()
+
+# Use Python stdlib urllib — no httpx, no requests, guaranteed to be available
+# MSG91 Text SMS API — totally different from OTP Widget API
+_MSG91_TEXTSMS_URL = "https://api.msg91.com/api/v5/textsms"
+
+print("[2FA] ═══════════════════════════════════════════════════")
+print("[2FA] MODE  : Standalone (MSG91 Text SMS API + admin_otp_sessions)")
+print("[2FA] AUTHKEY: " + ("SET (" + str(len(_MSG91_AUTH_KEY)) + " chars)" if _MSG91_AUTH_KEY else "❌ NOT SET — OTP will print to logs only"))
+print("[2FA] SENDER : " + _MSG91_SENDER_ID)
+print("[2FA] ═══════════════════════════════════════════════════")
+
+
+def _2fa_norm_phone(mobile: str) -> str:
+    """Normalize to 91XXXXXXXXXX format."""
+    p = str(mobile).strip().replace("+", "").replace(" ", "").replace("-", "")
+    if not p.startswith("91") and len(p) == 10:
+        p = "91" + p
+    return p
+
+
+def _2fa_gen_otp() -> str:
+    """Generate a 4-digit OTP using secrets module."""
+    return str(secrets.randbelow(9000) + 1000)
+
+
+def _2fa_store_otp(mobile: str, otp: str):
+    """Store OTP in admin_otp_sessions collection."""
+    now = datetime.utcnow()
+    db.admin_otp_sessions.delete_many({"mobile": mobile})
+    db.admin_otp_sessions.insert_one({
+        "mobile": mobile,
+        "otp": otp,
+        "attempts": 0,
+        "created_at": now,
+        "expires_at": now + timedelta(minutes=OTP_EXPIRY_MINUTES),
+    })
+    print("[2FA] OTP stored in admin_otp_sessions (expires " + str(OTP_EXPIRY_MINUTES) + " min)")
+
+
+def _2fa_check_otp(mobile: str, otp_input: str) -> dict:
+    """Check OTP from admin_otp_sessions. Returns {ok, error?, locked?}."""
+    now = datetime.utcnow()
+    session = db.admin_otp_sessions.find_one({"mobile": mobile})
+
+    if not session:
+        return {"ok": False, "error": "No OTP found. Please request a new one."}
+
+    if session.get("expires_at", now) < now:
+        db.admin_otp_sessions.delete_one({"_id": session["_id"]})
+        return {"ok": False, "error": "OTP has expired. Please request a new one."}
+
+    attempts = session.get("attempts", 0)
+    if attempts >= OTP_MAX_ATTEMPTS:
+        db.admin_otp_sessions.delete_one({"_id": session["_id"]})
+        return {"ok": False, "error": "Too many incorrect attempts. Please request a new OTP.", "locked": True}
+
+    if otp_input.strip() != session["otp"]:
+        new_attempts = attempts + 1
+        db.admin_otp_sessions.update_one({"_id": session["_id"]}, {"$inc": {"attempts": 1}})
+        remaining = OTP_MAX_ATTEMPTS - new_attempts
+        if remaining <= 0:
+            db.admin_otp_sessions.delete_one({"_id": session["_id"]})
+            return {"ok": False, "error": "Too many incorrect attempts. Please request a new OTP.", "locked": True}
+        return {"ok": False, "error": "Incorrect OTP. " + str(remaining) + " attempt(s) remaining."}
+
+    # ✅ Correct — clean up
+    db.admin_otp_sessions.delete_one({"_id": session["_id"]})
+    return {"ok": True}
+
+
+def _2fa_send_sms(mobile: str, otp: str) -> dict:
+    """
+    Send OTP via MSG91 Text SMS API (stdlib urllib — no httpx/requests).
+    Uses DLT-registered template. authkey in header.
+    """
+    phone = _2fa_norm_phone(mobile)
+    print("[2FA] ── _2fa_send_sms ──────────────────────────────")
+    print("[2FA] mobile: " + mobile + " → " + phone + " | otp: " + otp)
+
+    if not _MSG91_AUTH_KEY:
+        print("[2FA] 🟡 DEV MODE — no MSG91_AUTH_KEY. OTP=" + otp + " (check Railway logs)")
+        return {"ok": True}
+
+    # MSG91 Text SMS API v5
+    # POST https://api.msg91.com/api/v5/textsms
+    # Header: authkey: XXXXX
+    # Body: { "sender": "OFFROO", "route": "4", "country": "91",
+    #         "sms": [{"message": "Your OTP is 1234...", "to": ["918XXXXXXXXX"]}] }
+    message = "Your OFFRO admin login OTP is " + otp + ". Valid for " + str(OTP_EXPIRY_MINUTES) + " minutes. Do not share this OTP."
+
+    payload = {
+        "sender": _MSG91_SENDER_ID,
+        "route": "4",
+        "country": "91",
+        "sms": [
+            {
+                "message": message,
+                "to": [phone]
+            }
+        ]
+    }
+
+    payload_bytes = json.dumps(payload).encode("utf-8")
+    safe_key = _MSG91_AUTH_KEY[:6] + "..." + _MSG91_AUTH_KEY[-4:] if len(_MSG91_AUTH_KEY) > 10 else "***"
+    print("[2FA] SMS API URL : " + _MSG91_TEXTSMS_URL)
+    print("[2FA] authkey     : " + safe_key)
+    print("[2FA] to          : " + phone)
+    print("[2FA] message     : " + message)
+
+    try:
+        req = _url_req.Request(
+            _MSG91_TEXTSMS_URL,
+            data=payload_bytes,
+            headers={
+                "authkey": _MSG91_AUTH_KEY,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST"
+        )
+        with _url_req.urlopen(req, timeout=15) as resp:
+            status = resp.status
+            body = resp.read().decode("utf-8")
+
+        print("[2FA] HTTP status  : " + str(status))
+        print("[2FA] Response body: " + body[:500])
+
+        try:
+            data = json.loads(body)
+        except Exception:
+            print("[2FA] ❌ Non-JSON response")
+            return {"ok": False, "error": "MSG91 non-JSON: " + body[:100]}
+
+        msg_type = str(data.get("type", "")).lower()
+        request_id = data.get("request_id", "")
+
+        if msg_type == "success" or request_id:
+            print("[2FA] ✅ SMS dispatched to " + phone + " | request_id=" + str(request_id))
+            return {"ok": True}
+
+        msg = str(data.get("message", data.get("msg", "Unknown")))
+        print("[2FA] ❌ MSG91 error: " + msg)
+        return {"ok": False, "error": "MSG91: " + msg}
+
+    except _url_error.HTTPError as e:
+        body = e.read().decode("utf-8") if e.fp else ""
+        print("[2FA] ❌ HTTPError " + str(e.code) + ": " + body[:300])
+        return {"ok": False, "error": "MSG91 HTTP " + str(e.code) + ": " + body[:100]}
+    except Exception as e:
+        print("[2FA] ❌ Exception: " + type(e).__name__ + ": " + str(e))
+        return {"ok": False, "error": "SMS failed: " + str(e)}
+
+
+def _otp_send(mobile: str) -> dict:
+    """Send admin 2FA OTP. Generates OTP, stores it, sends SMS."""
+    otp = _2fa_gen_otp()
+    _2fa_store_otp(mobile, otp)
+    return _2fa_send_sms(mobile, otp)
+
+
+def _otp_verify(mobile: str, otp_input: str) -> dict:
+    """Verify admin 2FA OTP from admin_otp_sessions."""
+    return _2fa_check_otp(mobile, otp_input)
 
 # ═══════════════════════════════════════════════════════════════
 # TRUSTED DEVICE MANAGEMENT
@@ -380,7 +547,17 @@ def seed_rbac():
         db.activity_logs.create_index("module")
         # 2FA collections
         db.trusted_devices.create_index("token", unique=True)
-        # OTP storage handled by otp_service.py (otp_sessions collection)
+        # Admin 2FA OTP sessions (standalone collection)
+        try:
+            db.admin_otp_sessions.create_index("mobile")
+            db.admin_otp_sessions.create_index(
+                "expires_at",
+                expireAfterSeconds=0,
+                name="admin_otp_ttl"
+            )
+            print("[2FA] admin_otp_sessions indexes ensured")
+        except Exception as _idx_e:
+            print("[2FA] admin_otp_sessions index note: " + str(_idx_e))
         db.trusted_devices.create_index("user_id")
         db.trusted_devices.create_index("expires_at")
     except Exception as e:
