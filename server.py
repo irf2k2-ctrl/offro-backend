@@ -30,10 +30,10 @@ app.include_router(webhook.router)          # WhatsApp Cloud API webhook — no 
 app.include_router(wa_chat.router, prefix="/admin")  # WhatsApp Live Chat admin API
 app.include_router(dashboard_auth.router, prefix="/admin")  # RBAC dashboard auth — /admin/auth/*
 
-# ── Root redirect → admin dashboard ──
+# ── Root redirect → admin login (dashboard route itself re-checks the session) ──
 @app.get("/", include_in_schema=False)
 async def root_redirect():
-    return RedirectResponse(url="/admin/dashboard", status_code=307)
+    return RedirectResponse(url="/admin", status_code=307)
 
 
 
@@ -304,6 +304,16 @@ def serve_admin_login(request: Request):
 
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 def serve_admin_dashboard(request: Request):
+    # ── Server-side auth gate ──
+    # Visiting this URL directly (bookmark, typed domain, stale tab) with no valid
+    # session must NOT render the dashboard shell — redirect to the login page.
+    token = request.cookies.get("admin_token") or \
+            request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not token:
+        return RedirectResponse(url="/admin", status_code=307)
+    session_user = db.dashboard_users.find_one({"token": token}) or db.admins.find_one({"token": token})
+    if not session_user:
+        return RedirectResponse(url="/admin", status_code=307)
     try:
         response = templates.TemplateResponse("admin_dashboard.html", {"request": request})
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"

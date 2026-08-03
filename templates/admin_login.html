@@ -24,8 +24,8 @@ body {
     box-shadow:0 24px 60px rgba(0,0,0,0.3); z-index:2;
     text-align:center;
 }
-.logo-wrap { display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:8px; }
-.logo-wrap svg { width:56px; height:56px; }
+.logo-wrap { display:flex; align-items:center; justify-content:center; margin-bottom:8px; }
+.logo-wrap img { height:52px; width:auto; }
 .logo-text { font-size:22px; font-weight:800; color:#3E5F55; }
 .logo-sub { color:#6b8c7e; font-size:13px; margin-bottom:28px; }
 .badge-admin {
@@ -97,22 +97,12 @@ body {
 <body>
 
 <!-- Watermark -->
-<svg class="bg-logo" viewBox="0 0 100 130" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M50 10C30.1 10 14 26.1 14 46c0 26.5 36 74 36 74s36-47.5 36-74C86 26.1 69.9 10 50 10z" fill="white"/>
-  <circle cx="50" cy="44" r="18" fill="none" stroke="white" stroke-width="2"/>
-  <text x="50" y="51" text-anchor="middle" font-size="20" font-weight="900" fill="white" font-family="Arial">%</text>
-</svg>
+<img class="bg-logo" src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/c3597b9f9_offro_new_logo.png" alt="" style="width:420px;height:auto;">
 
 <!-- ═══ Step 1: Login (Mobile + PIN) ═══ -->
 <div class="card" id="loginCard">
     <div class="logo-wrap">
-        <svg viewBox="0 0 100 130" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <ellipse cx="50" cy="45" rx="34" ry="34" fill="#3E5F55"/>
-          <path d="M50 10C30.1 10 14 26.1 14 46c0 26.5 36 74 36 74s36-47.5 36-74C86 26.1 69.9 10 50 10z" fill="#3E5F55"/>
-          <circle cx="50" cy="44" r="18" fill="white" opacity="0.25"/>
-          <text x="50" y="51" text-anchor="middle" font-size="20" font-weight="900" fill="white" font-family="Arial">%</text>
-        </svg>
-        <div class="logo-text">Offr<span style="color:#A9CDBA;">O</span></div>
+        <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/c3597b9f9_offro_new_logo.png" alt="OffrO">
     </div>
     <div class="logo-sub">Administration Portal</div>
     <div class="badge-admin">🔒 Restricted Access</div>
@@ -138,15 +128,9 @@ body {
 <!-- ═══ Step 2: OTP Verification ═══ -->
 <div class="card otp-screen" id="otpCard">
     <div class="logo-wrap">
-        <svg viewBox="0 0 100 130" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <ellipse cx="50" cy="45" rx="34" ry="34" fill="#3E5F55"/>
-          <path d="M50 10C30.1 10 14 26.1 14 46c0 26.5 36 74 36 74s36-47.5 36-74C86 26.1 69.9 10 50 10z" fill="#3E5F55"/>
-          <circle cx="50" cy="44" r="18" fill="white" opacity="0.25"/>
-          <text x="50" y="51" text-anchor="middle" font-size="20" font-weight="900" fill="white" font-family="Arial">%</text>
-        </svg>
-        <div class="logo-text">Offr<span style="color:#A9CDBA;">O</span></div>
+        <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/c3597b9f9_offro_new_logo.png" alt="OffrO">
     </div>
-    <div class="logo-sub">Verify Your Identity</div>
+    <div class="logo-sub">Verify your identity with 2FA</div>
 
     <div class="otp-icon">
         <i class="fas fa-shield-alt"></i>

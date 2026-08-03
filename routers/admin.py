@@ -2407,8 +2407,13 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             "source":          source_col,
         }
 
-    # ── 1. All merchant_banners (pending, rejected, removed) ──
+    # ── 1. merchant_banners — ONLY pending/rejected/removed ──
+    # Once approved, the SAME banner already exists in promo_sliders (loop #2 below).
+    # Skip approved ones here to prevent showing the banner twice ("duplicate" bug).
     for b in db.merchant_banners.find().sort("created_at", -1):
+        _st = b.get("approval_status", b.get("status", "pending_approval"))
+        if _st == "approved" and not b.get("deleted_by_admin"):
+            continue
         row = _enrich_and_build(b, "merchant_banners")
         if row:
             result.append(row)
