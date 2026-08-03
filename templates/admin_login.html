@@ -215,10 +215,15 @@ async function msg91SendOTP(mobile) {
 }
 
 async function msg91RetryOTP(mobile) {
+    const phone = mobile.startsWith("91") ? mobile : "91" + mobile;
+    // Include widgetId + tokenAuth + identifier ALONGSIDE reqId — all are required together
     const resp = await fetch(MSG91_WIDGET_BASE + '/retryOtp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reqId: _msg91ReqId, retryChannel: 'text' })
+        body: JSON.stringify({
+            widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH,
+            identifier: phone, reqId: _msg91ReqId, retryChannel: 'text'
+        })
     });
     const data = await resp.json();
     // retryOtp may issue a fresh reqId — update it
@@ -230,10 +235,15 @@ async function msg91RetryOTP(mobile) {
 }
 
 async function msg91VerifyOTP(mobile, otp) {
+    const phone = mobile.startsWith("91") ? mobile : "91" + mobile;
+    // Include widgetId + tokenAuth + identifier ALONGSIDE reqId — all are required together
     const resp = await fetch(MSG91_WIDGET_BASE + '/verifyOtp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reqId: _msg91ReqId, otp: otp })
+        body: JSON.stringify({
+            widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH,
+            identifier: phone, reqId: _msg91ReqId, otp: otp
+        })
     });
     return await resp.json();
 }
