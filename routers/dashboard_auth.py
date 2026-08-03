@@ -672,19 +672,26 @@ async def verify_otp(data: dict, request: Request, response: Response):
     if not (otp.isdigit() and len(otp) == OTP_LENGTH):
         raise HTTPException(status_code=400, detail="OTP must be " + str(OTP_LENGTH) + " digits")
 
-    # Verify OTP via otp_service (SAME as user app — uses otp_sessions collection)
-    print("[2FA] Calling otp_service.verify_otp for mobile: " + mobile)
-    result = _otp_verify(mobile, otp)
+    # ── OTP verification ──
+    # msg91_verified=True: MSG91 Widget already verified on client side (same as Flutter)
+    # Fallback: check admin_otp_sessions for backend-generated OTPs
+    msg91_verified = bool(data.get("msg91_verified", False))
 
-    if not result.get("ok"):
-        user = db.dashboard_users.find_one({"mobile": mobile})
-        if user:
-            log_activity(request, user["_id"], user.get("full_name", ""), mobile,
-                         "Auth", "OTP_FAIL", record_name=result.get("error", "Wrong OTP"))
-        is_locked = result.get("locked", False)
-        if is_locked:
-            raise HTTPException(status_code=401, detail=result.get("error", "Too many attempts. Request a new OTP."))
-        raise HTTPException(status_code=401, detail=result.get("error", "Invalid OTP."))
+    if msg91_verified:
+        # MSG91 Widget verified OTP on client — trust it (same pattern as Flutter app)
+        print("[2FA] ✅ MSG91 Widget verified OTP for " + mobile + " (client-side, same as Flutter)")
+    else:
+        # Fallback: verify against admin_otp_sessions
+        result = _otp_verify(mobile, otp)
+        if not result.get("ok"):
+            user = db.dashboard_users.find_one({"mobile": mobile})
+            if user:
+                log_activity(request, user["_id"], user.get("full_name", ""), mobile,
+                             "Auth", "OTP_FAIL", record_name=result.get("error", "Wrong OTP"))
+            is_locked = result.get("locked", False)
+            if is_locked:
+                raise HTTPException(status_code=401, detail=result.get("error", "Too many attempts. Request a new OTP."))
+            raise HTTPException(status_code=401, detail=result.get("error", "Invalid OTP."))
 
     # ── OTP verified ──
 

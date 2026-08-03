@@ -185,37 +185,65 @@ body {
 </div>
 
 <script>
-// ═══ State ═══
+// ── MSG91 Widget credentials (same as Flutter app) ──────────────────────────
+const MSG91_WIDGET_ID   = '36656f6a786e313430373338';
+const MSG91_TOKEN_AUTH  = '516819TuGI7seX6a06f51cP1';
+const MSG91_WIDGET_BASE = 'https://control.msg91.com/api/v5/widget';
+
 let _loginMobile = "";
 let _loginPin = "";
 let _resendCountdown = 0;
 let _resendInterval = null;
 
+// ─── MSG91 Widget API calls (identical to Flutter SDK) ───────────────────────
+async function msg91SendOTP(mobile) {
+    // mobile must be "91XXXXXXXXXX" format
+    const phone = mobile.startsWith("91") ? mobile : "91" + mobile;
+    const resp = await fetch(MSG91_WIDGET_BASE + '/sendOtpMobile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH, identifier: phone })
+    });
+    return await resp.json();
+}
+
+async function msg91RetryOTP(mobile) {
+    const phone = mobile.startsWith("91") ? mobile : "91" + mobile;
+    const resp = await fetch(MSG91_WIDGET_BASE + '/retryOtp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH, identifier: phone })
+    });
+    return await resp.json();
+}
+
+async function msg91VerifyOTP(mobile, otp) {
+    const phone = mobile.startsWith("91") ? mobile : "91" + mobile;
+    const resp = await fetch(MSG91_WIDGET_BASE + '/verifyOtp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH, identifier: phone, otp: otp })
+    });
+    return await resp.json();
+}
+
 // ═══ Step 1: Login ═══
 async function login() {
     let mobile = document.getElementById("mobile").value.trim();
-    let pin = document.getElementById("pin").value.trim();
-    let msgEl = document.getElementById("msg");
-    let btn = document.getElementById("loginBtn");
+    let pin    = document.getElementById("pin").value.trim();
+    let msgEl  = document.getElementById("msg");
+    let btn    = document.getElementById("loginBtn");
 
-    if (!mobile || !pin) {
-        msgEl.innerText = "Please enter mobile number and PIN";
-        return;
-    }
-    if (!/^\d{10}$/.test(mobile)) {
-        msgEl.innerText = "Mobile number must be exactly 10 digits";
-        return;
-    }
-    if (!/^\d{4}$|^\d{6}$/.test(pin)) {
-        msgEl.innerText = "PIN must be 4 or 6 digits";
-        return;
-    }
+    if (!mobile || !pin) { msgEl.innerText = "Please enter mobile number and PIN"; return; }
+    if (!/^\d{10}$/.test(mobile)) { msgEl.innerText = "Mobile number must be exactly 10 digits"; return; }
+    if (!/^\d{4}$|^\d{6}$/.test(pin)) { msgEl.innerText = "PIN must be 4 or 6 digits"; return; }
 
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Verifying...';
     msgEl.innerText = "";
 
     try {
+        // Step 1a: Validate credentials with backend
         let res = await fetch("/admin/auth/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -231,30 +259,27 @@ async function login() {
             return;
         }
 
-        // ── Trusted device — OTP skipped, go straight to dashboard ──
+        // Trusted device — skip OTP
         if (!data.otp_required) {
             btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' + (data.user ? data.user.full_name : 'Admin') + '!';
             setTimeout(() => { window.location.href = "/admin/dashboard"; }, 600);
             return;
         }
 
-        // ── OTP required — show OTP screen ──
+        // Step 1b: Credentials valid — now send OTP via MSG91 Widget (same as Flutter)
         _loginMobile = mobile;
-        _loginPin = pin;
+        _loginPin    = pin;
 
-        document.getElementById("otpMobileDisplay").innerText = "+91 " + mobile;
-        // OTP sent — just show mobile number, no delivery method text
-        document.getElementById("otpMobileDisplay").innerText = "+91 " + mobile;
-        if (data.warning) {
-            document.getElementById("otpMsg").innerText = data.warning;
-            document.getElementById("otpMsg").style.color = "#e67e22";
-        }
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Sending OTP...';
 
+        let otpRes = await msg91SendOTP(mobile);
+        console.log('[MSG91 sendOTP]', otpRes);
+
+        // Show OTP screen regardless of MSG91 response
+        // (MSG91 returns success on first call)
+        document.getElementById("otpMobileDisplay").innerText = "+91 " + mobile;
         showOtpScreen();
-
-        // Start resend countdown
-        let resendIn = data.resend_available_in || 30;
-        startResendCountdown(resendIn);
+        startResendCountdown(30);
 
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-sign-in-alt me-1"></i> Login to Dashboard';
@@ -269,7 +294,6 @@ async function login() {
 function showOtpScreen() {
     document.getElementById("loginCard").style.display = "none";
     document.getElementById("otpCard").style.display = "block";
-    // Focus first OTP box
     setTimeout(() => {
         let first = document.querySelector(".otp-box[data-index='0']");
         if (first) first.focus();
@@ -279,7 +303,6 @@ function showOtpScreen() {
 function backToLogin() {
     document.getElementById("otpCard").style.display = "none";
     document.getElementById("loginCard").style.display = "block";
-    // Clear OTP boxes
     document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
     document.getElementById("otpMsg").innerText = "";
     if (_resendInterval) { clearInterval(_resendInterval); _resendInterval = null; }
@@ -289,16 +312,12 @@ function onOtpInput(el) {
     el.value = el.value.replace(/[^0-9]/g, "");
     if (el.value) {
         el.classList.add("filled");
-        // Auto-advance to next
         let idx = parseInt(el.dataset.index);
         let next = document.querySelector(".otp-box[data-index='" + (idx + 1) + "']");
         if (next) next.focus();
-        // Auto-submit when all 4 filled
         if (idx === 3) {
             let allFilled = true;
-            document.querySelectorAll(".otp-box").forEach(b => {
-                if (!b.value) allFilled = false;
-            });
+            document.querySelectorAll(".otp-box").forEach(b => { if (!b.value) allFilled = false; });
             if (allFilled) verifyOtp();
         }
     } else {
@@ -309,7 +328,6 @@ function onOtpInput(el) {
 function onOtpKeydown(e, el) {
     let idx = parseInt(el.dataset.index);
     if (e.key === "Backspace" && !el.value && idx > 0) {
-        // Move to previous on backspace if current is empty
         let prev = document.querySelector(".otp-box[data-index='" + (idx - 1) + "']");
         if (prev) { prev.focus(); prev.value = ""; prev.classList.remove("filled"); }
     }
@@ -321,10 +339,7 @@ function onOtpKeydown(e, el) {
         let next = document.querySelector(".otp-box[data-index='" + (idx + 1) + "']");
         if (next) next.focus();
     }
-    if (e.key === "Enter") {
-        e.preventDefault();
-        verifyOtp();
-    }
+    if (e.key === "Enter") { e.preventDefault(); verifyOtp(); }
 }
 
 function getOtpValue() {
@@ -334,9 +349,9 @@ function getOtpValue() {
 }
 
 async function verifyOtp() {
-    let otp = getOtpValue();
+    let otp   = getOtpValue();
     let msgEl = document.getElementById("otpMsg");
-    let btn = document.getElementById("verifyBtn");
+    let btn   = document.getElementById("verifyBtn");
 
     if (otp.length !== 4) {
         msgEl.innerText = "Please enter all 4 digits";
@@ -351,10 +366,30 @@ async function verifyOtp() {
     msgEl.innerText = "";
 
     try {
+        // Step 2a: Verify OTP directly with MSG91 Widget
+        let m91 = await msg91VerifyOTP(_loginMobile, otp);
+        console.log('[MSG91 verifyOtp]', m91);
+
+        const m91Type = (m91.type || m91.message_type || "").toLowerCase();
+        const m91Ok   = m91Type === "success" || m91.success === true || m91.status === "success";
+
+        if (!m91Ok) {
+            let errMsg = m91.message || m91.msg || m91.error || "Invalid OTP. Please try again.";
+            msgEl.innerText = errMsg;
+            msgEl.style.color = "#c0392b";
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
+            document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
+            let first = document.querySelector(".otp-box[data-index='0']");
+            if (first) first.focus();
+            return;
+        }
+
+        // Step 2b: MSG91 verified — now complete session with backend
         let res = await fetch("/admin/auth/verify-otp", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mobile: _loginMobile, otp, trust_device: trustDevice }),
+            body: JSON.stringify({ mobile: _loginMobile, otp: otp, trust_device: trustDevice, msg91_verified: true }),
             credentials: "include"
         });
         let data = await res.json();
@@ -364,18 +399,14 @@ async function verifyOtp() {
             msgEl.style.color = "#c0392b";
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
-            // Clear OTP boxes on error
-            document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
-            let first = document.querySelector(".otp-box[data-index='0']");
-            if (first) first.focus();
             return;
         }
 
-        // ── Success ──
         btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' + (data.user ? data.user.full_name : 'Admin') + '!';
         setTimeout(() => { window.location.href = "/admin/dashboard"; }, 600);
     } catch (err) {
-        msgEl.innerText = "Server error. Please try again.";
+        console.error('[verifyOtp error]', err);
+        msgEl.innerText = "Error verifying OTP. Please try again.";
         msgEl.style.color = "#c0392b";
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
@@ -385,39 +416,24 @@ async function verifyOtp() {
 // ═══ Resend OTP ═══
 async function resendOtp() {
     let msgEl = document.getElementById("otpMsg");
-    let btn = document.getElementById("resendBtn");
-
+    let btn   = document.getElementById("resendBtn");
     btn.disabled = true;
 
     try {
-        let res = await fetch("/admin/auth/resend-otp", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mobile: _loginMobile }),
-            credentials: "include"
-        });
-        let data = await res.json();
+        let res = await msg91RetryOTP(_loginMobile);
+        console.log('[MSG91 retryOtp]', res);
 
-        if (!res.ok) {
-            msgEl.innerText = data.detail || "Resend failed";
-            msgEl.style.color = "#c0392b";
-            btn.disabled = false;
-            return;
-        }
-
-        // Clear OTP boxes
         document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
         let first = document.querySelector(".otp-box[data-index='0']");
         if (first) first.focus();
 
-        msgEl.innerText = "New OTP sent successfully";
+        msgEl.innerText = "OTP resent successfully";
         msgEl.style.color = "#3E5F55";
         setTimeout(() => { msgEl.innerText = ""; }, 3000);
 
-        // Start countdown
-        startResendCountdown(data.resend_available_in || 30);
+        startResendCountdown(30);
     } catch (err) {
-        msgEl.innerText = "Server error. Please try again.";
+        msgEl.innerText = "Resend failed. Please try again.";
         msgEl.style.color = "#c0392b";
         btn.disabled = false;
     }
@@ -425,12 +441,10 @@ async function resendOtp() {
 
 function startResendCountdown(seconds) {
     _resendCountdown = seconds;
-    let btn = document.getElementById("resendBtn");
+    let btn     = document.getElementById("resendBtn");
     let timerEl = document.getElementById("resendTimer");
     btn.disabled = true;
-
     if (_resendInterval) clearInterval(_resendInterval);
-
     _resendInterval = setInterval(() => {
         if (_resendCountdown > 0) {
             timerEl.innerText = "(" + _resendCountdown + "s)";
@@ -444,9 +458,8 @@ function startResendCountdown(seconds) {
     }, 1000);
 }
 
-// ═══ Helpers ═══
 function togglePin() {
-    let inp = document.getElementById("pin");
+    let inp  = document.getElementById("pin");
     let icon = document.getElementById("eyeIcon");
     if (inp.type === "password") {
         inp.type = "text";
@@ -458,11 +471,8 @@ function togglePin() {
 }
 
 document.addEventListener("keydown", e => {
-    // Enter on login screen
     let loginCard = document.getElementById("loginCard");
-    if (e.key === "Enter" && loginCard.style.display !== "none") {
-        login();
-    }
+    if (e.key === "Enter" && loginCard.style.display !== "none") { login(); }
 });
 
 document.getElementById("mobile").focus();
