@@ -194,6 +194,7 @@ let _loginMobile = "";
 let _loginPin = "";
 let _resendCountdown = 0;
 let _resendInterval = null;
+let _msg91ReqId = "";   // ★ MSG91 widget returns this from sendOtpMobile — REQUIRED for verifyOtp/retryOtp
 
 // ─── MSG91 Widget API calls (identical to Flutter SDK) ───────────────────────
 async function msg91SendOTP(mobile) {
@@ -204,25 +205,35 @@ async function msg91SendOTP(mobile) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH, identifier: phone })
     });
-    return await resp.json();
+    const data = await resp.json();
+    // MSG91 returns the reqId in the "message" field on success — store it for verify/retry
+    if (data && (data.type === "success" || data.message)) {
+        _msg91ReqId = data.message || data.reqId || "";
+    }
+    console.log('[MSG91 sendOtpMobile] reqId captured:', _msg91ReqId);
+    return data;
 }
 
 async function msg91RetryOTP(mobile) {
-    const phone = mobile.startsWith("91") ? mobile : "91" + mobile;
     const resp = await fetch(MSG91_WIDGET_BASE + '/retryOtp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH, identifier: phone })
+        body: JSON.stringify({ reqId: _msg91ReqId, retryChannel: 'text' })
     });
-    return await resp.json();
+    const data = await resp.json();
+    // retryOtp may issue a fresh reqId — update it
+    if (data && data.message) {
+        _msg91ReqId = data.message || _msg91ReqId;
+    }
+    console.log('[MSG91 retryOtp] reqId now:', _msg91ReqId);
+    return data;
 }
 
 async function msg91VerifyOTP(mobile, otp) {
-    const phone = mobile.startsWith("91") ? mobile : "91" + mobile;
     const resp = await fetch(MSG91_WIDGET_BASE + '/verifyOtp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH, identifier: phone, otp: otp })
+        body: JSON.stringify({ reqId: _msg91ReqId, otp: otp })
     });
     return await resp.json();
 }
