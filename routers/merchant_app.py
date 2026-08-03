@@ -933,6 +933,32 @@ def _pricing_doc():
     return db.pricing.find_one({}) or {}
 
 # ── GET /merchant/banners  ──────────────────────────────────────────────────
+def _banner_parse_any_date(val):
+    """PERMANENT FIX: robustly parse a banner end_date that may be stored as
+    ISO ('2026-08-02' / '2026-08-02T00:00:00') OR as '%d %b %Y' (e.g. '02 Aug 2026').
+    Returns a naive datetime or None. Never raises."""
+    from datetime import datetime as _ddt
+    if val is None:
+        return None
+    if hasattr(val, 'strftime'):
+        return val
+    s = str(val).strip()
+    if not s:
+        return None
+    try:
+        return _ddt.fromisoformat(s.replace("Z", "")[:19])
+    except Exception:
+        pass
+    try:
+        return _ddt.strptime(s[:11].strip(), "%d %b %Y")
+    except Exception:
+        pass
+    try:
+        return _ddt.strptime(s[:10].strip(), "%Y-%m-%d")
+    except Exception:
+        pass
+    return None
+
 @router.get("/banners")
 def get_my_banners(m=Depends(get_merchant)):
     from datetime import datetime as dt
@@ -940,7 +966,7 @@ def get_my_banners(m=Depends(get_merchant)):
     merchant_phone = str(m.get("phone", ""))
     # Also check legacy merchant_id field stored in accounts
     legacy_mid     = str(m.get("merchant_id", ""))
-    today          = dt.utcnow().strftime("%Y-%m-%d")
+    today_dt       = dt.utcnow()
 
     result = []
 
@@ -960,8 +986,14 @@ def get_my_banners(m=Depends(get_merchant)):
             {"merchant_phone": merchant_phone},
         ]} if merchant_phone else {"merchant_id": {"$in": id_candidates}}
         for b in db.merchant_banners.find(mb_query).sort("created_at", -1):
-            end_date   = str(b.get("end_date", ""))[:10]
-            is_expired = bool(end_date and end_date < today)
+            _end_dt    = _banner_parse_any_date(b.get("end_date", ""))
+            is_expired = bool(_end_dt and _end_dt < today_dt)
+            # PERMANENT FIX: an expired banner is expired regardless of its
+            # stored status/approval_status — override so the client (any
+            # app version) always displays the correct badge without having
+            # to re-derive expiry itself.
+            _status          = "expired" if is_expired else b.get("status", "pending")
+            _approval_status = "expired" if is_expired else b.get("approval_status", "pending")
             result.append({
                 "_id":             str(b["_id"]),
                 "title":           b.get("title", ""),
@@ -970,8 +1002,8 @@ def get_my_banners(m=Depends(get_merchant)):
                 "from_date":       b.get("from_date", ""),
                 "end_date":        b.get("end_date", ""),
                 "amount":          b.get("total", 0),
-                "status":          b.get("status", "pending"),
-                "approval_status": b.get("approval_status", "pending"),
+                "status":          _status,
+                "approval_status": _approval_status,
                 "created_at":      _safe_str_date(b.get("created_at", "")),
                 "source":          "merchant",
                 "is_expired":      is_expired,
@@ -991,8 +1023,8 @@ def get_my_banners(m=Depends(get_merchant)):
                 s_phone_10 = re.sub(r'\D', '', str(s.get("merchant_phone", "")))[-10:]
                 if s_phone_10 != phone_10:
                     continue
-                end_date   = str(s.get("end_date", s.get("expires_at", "")))[:10]
-                is_expired = bool(end_date and end_date < today)
+                _end_dt    = _banner_parse_any_date(s.get("end_date") or s.get("expires_at"))
+                is_expired = bool(_end_dt and _end_dt < today_dt)
                 result.append({
                     "_id":             str(s["_id"]),
                     "title":           s.get("title", ""),
