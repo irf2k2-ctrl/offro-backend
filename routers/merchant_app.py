@@ -1284,6 +1284,16 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     if not order:
         raise HTTPException(404, "Order not found")
 
+    # IDEMPOTENCY GUARD: if already submitted → return existing data, never insert twice.
+    # (Mirrors the guard in verify_banner_payment below — prevents double-tap / retry
+    # from creating a second merchant_banners document for the same order, which showed
+    # up in the admin dashboard as a "duplicate" banner: one pending, one approved.)
+    if order.get("status") in ("submitted", "paid"):
+        existing_banner_id = order.get("banner_id", "")
+        existing_banner = db.merchant_banners.find_one({"_id": ObjectId(existing_banner_id)}) if existing_banner_id else None
+        existing_inv_no = (existing_banner or {}).get("invoice_no", "")
+        return {"message": "Banner already activated.", "banner_id": existing_banner_id, "invoice_no": existing_inv_no}
+
     # Mark discount code used if applied
     disc_code = order.get("discount_code")
     if disc_code:

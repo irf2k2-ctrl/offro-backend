@@ -2407,20 +2407,42 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             "source":          source_col,
         }
 
-    # ── 1. merchant_banners — ONLY pending/rejected/removed ──
-    # Once approved, the SAME banner already exists in promo_sliders (loop #2 below).
-    # Skip approved ones here to prevent showing the banner twice ("duplicate" bug).
+    # ── 1. promo_sliders — approved merchant banners (have source_banner_id) ──
+    # Build this FIRST so we can also dedupe stray "pending" merchant_banners docs
+    # below that are content-duplicates of an already-approved banner (e.g. from a
+    # double-tap on "Activate Free Banner" creating 2 separate documents for the
+    # same submission — one got approved, the other stayed pending forever).
+    _approved_signatures = set()
+    for s in db.promo_sliders.find({"source_banner_id": {"$exists": True, "$ne": ""}}).sort("created_at", -1):
+        row = _enrich_and_build(s, "promo_sliders", override_status="approved")
+        if row:
+            result.append(row)
+            _approved_signatures.add((
+                str(s.get("merchant_id", "")).strip(),
+                str(s.get("title", "")).strip().lower(),
+                str(s.get("store_id", "")).strip(),
+                str(s.get("from_date", "")).strip(),
+                str(s.get("end_date", "")).strip(),
+            ))
+
+    # ── 2. merchant_banners — ONLY pending/rejected/removed ──
+    # Once approved, the SAME banner already exists in promo_sliders (loop #1 above).
+    # Skip approved ones here, AND skip stray pending duplicates that share the exact
+    # same merchant/title/store/dates as an already-approved banner ("duplicate" bug).
     for b in db.merchant_banners.find().sort("created_at", -1):
         _st = b.get("approval_status", b.get("status", "pending_approval"))
         if _st == "approved" and not b.get("deleted_by_admin"):
             continue
+        _sig = (
+            str(b.get("merchant_id", "")).strip(),
+            str(b.get("title", "")).strip().lower(),
+            str(b.get("store_id", "")).strip(),
+            str(b.get("from_date", "")).strip(),
+            str(b.get("end_date", "")).strip(),
+        )
+        if _sig in _approved_signatures and not b.get("deleted_by_admin"):
+            continue
         row = _enrich_and_build(b, "merchant_banners")
-        if row:
-            result.append(row)
-
-    # ── 2. promo_sliders — approved merchant banners (have source_banner_id) ──
-    for s in db.promo_sliders.find({"source_banner_id": {"$exists": True, "$ne": ""}}).sort("created_at", -1):
-        row = _enrich_and_build(s, "promo_sliders", override_status="approved")
         if row:
             result.append(row)
 
