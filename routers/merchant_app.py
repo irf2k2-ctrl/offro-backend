@@ -875,6 +875,62 @@ def create_deal(data: dict, m=Depends(get_merchant)):
     db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {"discount_percent": deal["discount"]}})
     return {"message": "Deal added", "deal_id": str(result.inserted_id)}
 
+@router.put("/deals/{deal_id}")
+def update_deal(deal_id: str, data: dict, m=Depends(get_merchant)):
+    """Edit an existing deal. Validates end_date against store subscription_end."""
+    merchant_id = _mid(m)
+    existing = db.deals.find_one({"_id": ObjectId(deal_id), "merchant_id": merchant_id})
+    if not existing:
+        raise HTTPException(404, "Deal not found or not yours")
+
+    store_id = data.get("store_id", existing.get("store_id", ""))
+    store = db.stores.find_one({"_id": ObjectId(store_id), "merchant_id": merchant_id})
+    if not store:
+        raise HTTPException(403, "Store not found or not yours")
+
+    # Validate end_date doesn't exceed store subscription_end
+    end_date = data.get("end_date", "")
+    if end_date:
+        sub_end = store.get("subscription_end")
+        if sub_end:
+            # Parse sub_end (datetime or string)
+            sub_end_dt = None
+            if isinstance(sub_end, datetime):
+                sub_end_dt = sub_end
+            else:
+                sub_end_str = str(sub_end).strip()
+                for fmt in ("%Y-%m-%d", "%d %b %Y", "%d-%m-%Y"):
+                    try:
+                        sub_end_dt = datetime.strptime(sub_end_str, fmt)
+                        break
+                    except Exception:
+                        pass
+            # Parse end_date
+            end_dt = None
+            for fmt in ("%Y-%m-%d", "%d %b %Y", "%d-%m-%Y"):
+                try:
+                    end_dt = datetime.strptime(end_date, fmt)
+                    break
+                except Exception:
+                    pass
+            if sub_end_dt and end_dt and end_dt > sub_end_dt:
+                raise HTTPException(400, "Deal end date cannot exceed store subscription end date (" + sub_end_dt.strftime("%d %b %Y") + ")")
+
+    update_fields = {
+        "title":       data.get("title", existing.get("title", "")),
+        "discount":    data.get("discount", existing.get("discount", 0)),
+        "category":    data.get("category", existing.get("category", "")),
+        "description": data.get("description", existing.get("description", "")),
+        "start_date":  data.get("start_date", existing.get("start_date", "")),
+        "end_date":    end_date or existing.get("end_date", ""),
+        "store_id":     store_id,
+    }
+    db.deals.update_one({"_id": ObjectId(deal_id)}, {"$set": update_fields})
+    # Update store discount_percent for user app display
+    db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {"discount_percent": update_fields["discount"]}})
+    return {"message": "Deal updated"}
+
+
 @router.delete("/deals/{deal_id}")
 def delete_deal(deal_id: str, m=Depends(get_merchant)):
     merchant_id = _mid(m)
