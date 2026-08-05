@@ -324,14 +324,34 @@ def merchant_me(m=Depends(get_merchant)):
 def my_stores(m=Depends(get_merchant)):
     mid = _mid(m)
     result = []
+    _now = datetime.utcnow()
     for s in db.stores.find({"merchant_id": mid}):
         sub_end = s.get("subscription_end")
         sub_end_str = ""
+        sub_end_dt = None
         if sub_end:
             if isinstance(sub_end, datetime):
+                sub_end_dt = sub_end
                 sub_end_str = sub_end.strftime("%d %b %Y")
             else:
                 sub_end_str = str(sub_end)
+                try:
+                    sub_end_dt = datetime.fromisoformat(str(sub_end).replace("Z", ""))
+                except Exception:
+                    sub_end_dt = None
+        # EFFECTIVE STATUS: the stored "status" flag is only ever flipped to
+        # "active" once by admin approval and never revisited afterwards, so a
+        # store whose subscription has since lapsed kept showing "Active"
+        # forever here (admin dashboard computes this live from the date, this
+        # endpoint didn't). Override the displayed status to "expired" once
+        # subscription_end has passed — end-of-day grace, same rule the admin
+        # dashboard uses — without touching the underlying stored field.
+        raw_status = s.get("status", "draft")
+        eff_status = raw_status
+        if raw_status == "active" and sub_end_dt is not None:
+            _eod = sub_end_dt.replace(hour=23, minute=59, second=59, microsecond=0)
+            if _eod < _now:
+                eff_status = "expired"
         # Count active deals for this store
         sid = str(s["_id"])
         deal_count = db.deals.count_documents({"store_id": sid, "status": "active"})             if "deals" in db.list_collection_names() else 0
@@ -348,7 +368,7 @@ def my_stores(m=Depends(get_merchant)):
             "area":            s.get("area", ""),
             "address":         s.get("address", ""),
             "phone":           s.get("phone", ""),
-            "status":          s.get("status", "draft"),
+            "status":          eff_status,
             "subscription_end": sub_end_str,
             "subscription_plan": s.get("subscription_plan", ""),
             "visit_points":    s.get("points_per_scan", 10),
@@ -372,11 +392,14 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "merchant_name": m.get("name"),
         "store_name":    store_name,
         "category":      data.get("category", ""),
+        "state":         data.get("state", ""),
         "city":          data.get("city") or m.get("city", ""),
         "area":          data.get("area") or m.get("area", ""),
         "address":       data.get("address", ""),
         "phone":         data.get("phone") or m.get("phone", ""),
         "about":         data.get("about", ""),
+        "open_time":     data.get("open_time", ""),
+        "close_time":    data.get("close_time", ""),
         "status":        "draft",
         "points_per_scan": 0,
         "lat":  data.get("lat", ""),   "lng": data.get("lng", ""),
@@ -400,6 +423,14 @@ def get_merchant_store(sid: str, m=Depends(get_merchant)):
     if not store: raise HTTPException(404, "Store not found")
     sub_end = store.get("subscription_end")
     sub_end_str = sub_end.strftime("%d %b %Y") if isinstance(sub_end, datetime) else (str(sub_end) if sub_end else "")
+    # EFFECTIVE STATUS — same lapsed-subscription check as my_stores() so the
+    # Edit screen and My Stores list never disagree on Active vs Expired.
+    _raw_status = store.get("status", "draft")
+    _eff_status = _raw_status
+    if _raw_status == "active" and isinstance(sub_end, datetime):
+        _eod = sub_end.replace(hour=23, minute=59, second=59, microsecond=0)
+        if _eod < datetime.utcnow():
+            _eff_status = "expired"
     deal_count = db.deals.count_documents({"store_id": sid, "status": "active"}) \
         if "deals" in db.list_collection_names() else 0
     paid_sub = db.subscriptions.find_one({"store_id": sid, "status": {"$in": ["paid", "active"]}})
@@ -414,7 +445,7 @@ def get_merchant_store(sid: str, m=Depends(get_merchant)):
         "phone":            store.get("phone", ""),
         "lat":              store.get("lat", ""),
         "lng":              store.get("lng", ""),
-        "status":           store.get("status", "draft"),
+        "status":           _eff_status,
         "subscription_end": sub_end_str,
         "subscription_plan": store.get("subscription_plan", ""),
         "visit_points":     store.get("points_per_scan", 10),
@@ -423,6 +454,8 @@ def get_merchant_store(sid: str, m=Depends(get_merchant)):
         "image":            store.get("image") or "",
         "image2":           store.get("image2") or "",
         "about":            store.get("about") or "",
+        "open_time":        store.get("open_time", ""),
+        "close_time":       store.get("close_time", ""),
         "deal_count":       deal_count,
         "has_paid_sub":     paid_sub is not None,
     }
@@ -442,7 +475,7 @@ def reset_store_qr(sid: str, m=Depends(get_merchant)):
 def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": _mid(m)})
     if not store: raise HTTPException(404, "Store not found")
-    upd = {f: data[f] for f in ["store_name","category","city","area","address","phone","lat","lng","about"] if data.get(f) is not None}
+    upd = {f: data[f] for f in ["store_name","category","state","city","area","address","phone","lat","lng","about","open_time","close_time"] if data.get(f) is not None}
     if data.get("image"): upd["image"] = data["image"]
     if data.get("image2") is not None: upd["image2"] = data["image2"]  # image2 save support
     if upd: db.stores.update_one({"_id": ObjectId(sid)}, {"$set": upd})

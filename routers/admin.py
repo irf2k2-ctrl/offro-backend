@@ -2412,6 +2412,13 @@ def list_merchant_banners(a=Depends(get_current_admin)):
     # below that are content-duplicates of an already-approved banner (e.g. from a
     # double-tap on "Activate Free Banner" creating 2 separate documents for the
     # same submission — one got approved, the other stayed pending forever).
+    # NOTE: signature intentionally EXCLUDES from_date/end_date. Duplicate
+    # submissions (double-tap race condition) always share the same
+    # merchant+title+store, but from_date/end_date can differ trivially in
+    # stored format (datetime vs string vs slightly different serialization),
+    # which made the old exact-match signature silently fail to catch real
+    # duplicates — that's why "stray" pending banners kept reappearing even
+    # after the approved twin existed.
     _approved_signatures = set()
     for s in db.promo_sliders.find({"source_banner_id": {"$exists": True, "$ne": ""}}).sort("created_at", -1):
         row = _enrich_and_build(s, "promo_sliders", override_status="approved")
@@ -2421,14 +2428,12 @@ def list_merchant_banners(a=Depends(get_current_admin)):
                 str(s.get("merchant_id", "")).strip(),
                 str(s.get("title", "")).strip().lower(),
                 str(s.get("store_id", "")).strip(),
-                str(s.get("from_date", "")).strip(),
-                str(s.get("end_date", "")).strip(),
             ))
 
     # ── 2. merchant_banners — ONLY pending/rejected/removed ──
     # Once approved, the SAME banner already exists in promo_sliders (loop #1 above).
-    # Skip approved ones here, AND skip stray pending duplicates that share the exact
-    # same merchant/title/store/dates as an already-approved banner ("duplicate" bug).
+    # Skip approved ones here, AND skip stray pending duplicates that share the
+    # same merchant/title/store as an already-approved banner ("duplicate" bug).
     for b in db.merchant_banners.find().sort("created_at", -1):
         _st = b.get("approval_status", b.get("status", "pending_approval"))
         if _st == "approved" and not b.get("deleted_by_admin"):
@@ -2437,8 +2442,6 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             str(b.get("merchant_id", "")).strip(),
             str(b.get("title", "")).strip().lower(),
             str(b.get("store_id", "")).strip(),
-            str(b.get("from_date", "")).strip(),
-            str(b.get("end_date", "")).strip(),
         )
         if _sig in _approved_signatures and not b.get("deleted_by_admin"):
             continue
@@ -2456,43 +2459,64 @@ def list_merchant_banners(a=Depends(get_current_admin)):
 @router.post("/merchant-banners/cleanup-duplicates")
 def cleanup_duplicate_merchant_banners(a=Depends(get_current_admin)):
     """
-    Hard-deletes stray merchant_banners docs that are content-duplicates of an
-    already-approved banner (same merchant + title + store + from_date + end_date).
-    Fixes old duplicates created before the race-condition fix.
+    Hard-deletes stray merchant_banners docs that are content-duplicates of one
+    another (same merchant + title + store) — from a double-tap submission race
+    condition that used to create 2 separate documents for the same banner.
+
+    REWRITTEN: previously this matched against promo_sliders using an EXACT
+    signature that included from_date/end_date. Those date fields can differ
+    trivially in stored format between the two duplicate docs (or between a doc
+    and its promo_slider mirror), so the exact match silently missed real
+    duplicates — that's why "Cleanup Duplicates" kept reporting "No duplicates
+    found" even when the table clearly showed 2 rows for the same banner.
+
+    NEW APPROACH: group ALL non-deleted merchant_banners docs by
+    (merchant_id, title, store_id) alone. Within any group with more than one
+    document, keep exactly ONE "best" doc (approved > paid > pending/rejected,
+    then oldest wins as a tie-break) and hard-delete the rest — including
+    cleaning up any promo_slider / banner_orders references those losers had.
+    This also fixes the "deleting one row wipes both" report: once true
+    duplicates are merged down to a single canonical doc, there is nothing
+    left to accidentally co-delete.
     """
     _check_perm(a, "Banners", "approve")
 
-    approved_signatures = set()
-    for s in db.promo_sliders.find({"source_banner_id": {"$exists": True, "$ne": ""}}):
-        approved_signatures.add((
-            str(s.get("merchant_id", "")).strip(),
-            str(s.get("title", "")).strip().lower(),
-            str(s.get("store_id", "")).strip(),
-            str(s.get("from_date", "")).strip(),
-            str(s.get("end_date", "")).strip(),
-        ))
-
-    cleaned = 0
-    cleaned_ids = []
+    groups = {}
     for b in db.merchant_banners.find({"deleted_by_admin": {"$ne": True}}):
-        _st = b.get("approval_status", b.get("status", "pending_approval"))
-        if _st == "approved":
-            continue
-        _sig = (
+        key = (
             str(b.get("merchant_id", "")).strip(),
             str(b.get("title", "")).strip().lower(),
             str(b.get("store_id", "")).strip(),
-            str(b.get("from_date", "")).strip(),
-            str(b.get("end_date", "")).strip(),
         )
-        if _sig in approved_signatures:
-            db.merchant_banners.delete_one({"_id": b["_id"]})
+        groups.setdefault(key, []).append(b)
+
+    def _rank(doc):
+        st = doc.get("approval_status", doc.get("status", "pending_approval"))
+        order = {"approved": 0, "paid": 1}.get(st, 2)
+        created = doc.get("created_at")
+        created_key = created.isoformat() if isinstance(created, datetime) else str(created or "")
+        return (order, created_key)
+
+    cleaned = 0
+    cleaned_ids = []
+    for key, docs in groups.items():
+        if len(docs) < 2 or not key[0] or not key[1]:
+            continue
+        docs_sorted = sorted(docs, key=_rank)
+        keeper = docs_sorted[0]
+        for dup in docs_sorted[1:]:
+            dup_id_str = str(dup["_id"])
+            db.merchant_banners.delete_one({"_id": dup["_id"]})
+            # A duplicate should never have its own promo_slider (only the
+            # keeper should be approved+published), but clean up defensively
+            # in case both were mistakenly approved independently.
+            db.promo_sliders.delete_many({"source_banner_id": dup_id_str})
             db.banner_orders.update_many(
-                {"banner_id": str(b["_id"])},
-                {"$set": {"banner_id": "", "duplicate_cleanup_at": datetime.utcnow()}}
+                {"banner_id": dup_id_str},
+                {"$set": {"banner_id": str(keeper["_id"]), "duplicate_cleanup_at": datetime.utcnow()}}
             )
             cleaned += 1
-            cleaned_ids.append(str(b["_id"]))
+            cleaned_ids.append(dup_id_str)
 
     return {"ok": True, "cleaned": cleaned, "cleaned_ids": cleaned_ids,
             "message": f"Removed {cleaned} stray duplicate banner(s)." if cleaned else "No duplicates found."}
