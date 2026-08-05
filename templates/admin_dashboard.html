@@ -543,6 +543,7 @@ td[style*="sticky"]{background:#fff;}
     <div style="display:flex;gap:8px;align-items:center">
       <button class="btn-add-compact" onclick="openSliderModal()"><i class="fas fa-plus" style="font-size:10px"></i> Add Banner</button>
       <button class="btn-p" style="background:var(--accent);color:var(--text);font-size:12px;padding:6px 12px" onclick="resyncBannerDurations()" title="Re-sync duration &amp; phone for all approved merchant banners"><i class="fas fa-sync-alt me-1"></i> Sync Durations</button>
+      <button class="btn-p" style="background:#c0392b;color:#fff;font-size:12px;padding:6px 12px" onclick="cleanupDuplicateBanners()" title="Remove stray pending banners that duplicate an already-approved one"><i class="fas fa-broom me-1"></i> Cleanup Duplicates</button>
     </div>
   </div>
 
@@ -5945,6 +5946,24 @@ async function loadMerchantBanners() {
 }
 
 
+async function cleanupDuplicateBanners() {
+  const btn = event?.target;
+  if (btn) { btn.disabled=true; btn.textContent='Cleaning...'; }
+  try {
+    const r = await fetch('/admin/merchant-banners/cleanup-duplicates', {method:'POST', credentials:'include'});
+    const d = await r.json();
+    if (r.ok) {
+      showToast(`✅ ${d.message}`, 'success');
+      loadSliders();
+    } else {
+      showToast('❌ Cleanup failed: ' + (d.detail || 'unknown error'), 'danger');
+    }
+  } catch(e) {
+    showToast('❌ Network error: ' + e.message, 'danger');
+  } finally {
+    if (btn) { btn.disabled=false; btn.innerHTML='<i class="fas fa-broom me-1"></i> Cleanup Duplicates'; }
+  }
+}
 async function resyncBannerDurations() {
   const btn = event?.target;
   if (btn) { btn.disabled=true; btn.textContent='Syncing...'; }
