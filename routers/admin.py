@@ -2453,6 +2453,51 @@ def list_merchant_banners(a=Depends(get_current_admin)):
 
 
 
+@router.post("/merchant-banners/cleanup-duplicates")
+def cleanup_duplicate_merchant_banners(a=Depends(get_current_admin)):
+    """
+    Hard-deletes stray merchant_banners docs that are content-duplicates of an
+    already-approved banner (same merchant + title + store + from_date + end_date).
+    Fixes old duplicates created before the race-condition fix.
+    """
+    _check_perm(a, "Banners", "approve")
+
+    approved_signatures = set()
+    for s in db.promo_sliders.find({"source_banner_id": {"$exists": True, "$ne": ""}}):
+        approved_signatures.add((
+            str(s.get("merchant_id", "")).strip(),
+            str(s.get("title", "")).strip().lower(),
+            str(s.get("store_id", "")).strip(),
+            str(s.get("from_date", "")).strip(),
+            str(s.get("end_date", "")).strip(),
+        ))
+
+    cleaned = 0
+    cleaned_ids = []
+    for b in db.merchant_banners.find({"deleted_by_admin": {"$ne": True}}):
+        _st = b.get("approval_status", b.get("status", "pending_approval"))
+        if _st == "approved":
+            continue
+        _sig = (
+            str(b.get("merchant_id", "")).strip(),
+            str(b.get("title", "")).strip().lower(),
+            str(b.get("store_id", "")).strip(),
+            str(b.get("from_date", "")).strip(),
+            str(b.get("end_date", "")).strip(),
+        )
+        if _sig in approved_signatures:
+            db.merchant_banners.delete_one({"_id": b["_id"]})
+            db.banner_orders.update_many(
+                {"banner_id": str(b["_id"])},
+                {"$set": {"banner_id": "", "duplicate_cleanup_at": datetime.utcnow()}}
+            )
+            cleaned += 1
+            cleaned_ids.append(str(b["_id"]))
+
+    return {"ok": True, "cleaned": cleaned, "cleaned_ids": cleaned_ids,
+            "message": f"Removed {cleaned} stray duplicate banner(s)." if cleaned else "No duplicates found."}
+
+
 @router.put("/merchant-banners/{bid}/approve")
 def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "approve")

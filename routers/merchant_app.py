@@ -354,8 +354,10 @@ def my_stores(m=Depends(get_merchant)):
             "visit_points":    s.get("points_per_scan", 10),
             "is_new_in_town":  s.get("is_new_in_town", False),
             "qr_code":         s.get("qr_code", ""),
-            "image":           s.get("image") or "",
-            "image2":          s.get("image2") or "",
+            "image":           s.get("image") or s.get("image_url") or "",
+            "image2":          s.get("image2") or s.get("image2_url") or "",
+            "open_time":       s.get("open_time", ""),
+            "close_time":      s.get("close_time", ""),
             "deal_count":      deal_count,
             "has_paid_sub":    has_paid_sub,
         })
