@@ -451,8 +451,8 @@ def get_merchant_store(sid: str, m=Depends(get_merchant)):
         "visit_points":     store.get("points_per_scan", 10),
         "is_new_in_town":   store.get("is_new_in_town", False),
         "qr_code":          store.get("qr_code", ""),
-        "image":            store.get("image") or "",
-        "image2":           store.get("image2") or "",
+        "image":            store.get("image") or store.get("image_url") or "",
+        "image2":           store.get("image2") or store.get("image2_url") or "",
         "about":            store.get("about") or "",
         "open_time":        store.get("open_time", ""),
         "close_time":       store.get("close_time", ""),
@@ -476,8 +476,28 @@ def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": _mid(m)})
     if not store: raise HTTPException(404, "Store not found")
     upd = {f: data[f] for f in ["store_name","category","state","city","area","address","phone","lat","lng","about","open_time","close_time"] if data.get(f) is not None}
-    if data.get("image"): upd["image"] = data["image"]
-    if data.get("image2") is not None: upd["image2"] = data["image2"]  # image2 save support
+    # FIX (blank Edit screen root cause): create_merchant_store() uploads to
+    # Cloudinary and stores the CDN URL under image_url/image2_url, clearing
+    # the raw "image"/"image2" fields. This update endpoint previously just
+    # dumped whatever the client sent straight into "image"/"image2" without
+    # uploading — so a NEW picked photo (base64) got saved as raw base64 in
+    # "image" instead of going through Cloudinary, AND if the Flutter client
+    # ever echoed back the existing image_url as "image" (a URL, not base64),
+    # that URL got stored in the raw "image" field too — which the my_stores()
+    # list endpoint then serves as-is via `image_url or image`, and the Edit
+    # screen's base64Decode() call on that URL string threw a FormatException
+    # → blank screen. Only accept genuinely NEW base64 uploads here, upload
+    # them to Cloudinary exactly like store creation, and ignore anything
+    # that's already a URL (nothing changed, keep the existing CDN image).
+    new_image = data.get("image")
+    if new_image and isinstance(new_image, str) and new_image.startswith("data:"):
+        upd["image_url"]   = _cloudinary_upload(new_image, folder="offro/stores")
+        upd["image_thumb"] = _make_thumb_url(upd["image_url"])
+        upd["image"]       = None  # clear raw base64, mirror create_merchant_store
+    new_image2 = data.get("image2")
+    if new_image2 and isinstance(new_image2, str) and new_image2.startswith("data:"):
+        upd["image2_url"] = _cloudinary_upload(new_image2, folder="offro/stores")
+        upd["image2"]     = None
     if upd: db.stores.update_one({"_id": ObjectId(sid)}, {"$set": upd})
     return {"message": "Store updated"}
 
