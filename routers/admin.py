@@ -836,6 +836,70 @@ def process_account_deletion(account_id: str, data: dict, a=Depends(get_current_
         raise HTTPException(400, "Account does not have a pending deletion request")
 
     if action == "approve":
+        now_iso = datetime.utcnow().isoformat()
+        orig_phone = acct.get("phone", "")
+        # ── Resolve the merchant identity linked to stores/products/banners.
+        # After the accounts migration, stores/vouchers/banners were written with
+        # merchant_id = acct["merchant_id"] (legacy merchants._id) if present,
+        # else acct["_id"] itself for post-migration merchants. Mirrors _mid() in merchant_app.py.
+        mid = acct.get("merchant_id") or str(oid)
+
+        # ══ CASCADE: mark this merchant's stores, products & banners as deleted ══
+        # This immediately hides them from every customer-facing query in public.py,
+        # which filters stores by status=="active" and products by
+        # status=="approved"/approval_status=="approved".
+        try:
+            db.stores.update_many(
+                {"merchant_id": mid},
+                {"$set": {"status": "deleted", "is_deleted": True, "deleted_at": now_iso}})
+        except Exception:
+            pass
+        try:
+            db.gift_vouchers.update_many(
+                {"merchant_id": mid},
+                {"$set": {"status": "deleted", "approval_status": "deleted", "is_deleted": True, "deleted_at": now_iso}})
+        except Exception:
+            pass
+        try:
+            db.merchant_vouchers.update_many(
+                {"merchant_id": mid},
+                {"$set": {"status": "deleted", "approval_status": "deleted", "is_deleted": True, "deleted_at": now_iso}})
+        except Exception:
+            pass
+        try:
+            banner_ids = [b["_id"] for b in db.merchant_banners.find({"merchant_id": mid}, {"_id": 1})]
+            db.merchant_banners.update_many(
+                {"merchant_id": mid},
+                {"$set": {"is_active": False, "status": "deleted", "deleted_at": now_iso}})
+            if banner_ids:
+                bid_strs = [str(b) for b in banner_ids]
+                db.promo_sliders.update_many(
+                    {"source_banner_id": {"$in": bid_strs + banner_ids}},
+                    {"$set": {"is_active": False}})
+        except Exception:
+            pass
+
+        # ══ Close the re-registration loophole: blank the legacy db.merchants doc too ══
+        # (account_login() falls back to db.merchants.find_one({"phone": ...}) for
+        # pre-migration merchants — if we don't blank it, re-registering with the
+        # same phone could resurrect the old merchant identity and its old store links.)
+        try:
+            if acct.get("merchant_id"):
+                db.merchants.update_one(
+                    {"_id": ObjectId(acct["merchant_id"])},
+                    {"$set": {"status": "deleted", "phone": "", "token": None, "deleted_at": now_iso}})
+        except Exception:
+            pass
+        if orig_phone:
+            try:
+                from routers.users import _phone_variants as _pv
+                variants = _pv(orig_phone)
+                db.merchants.update_many(
+                    {"phone": {"$in": variants}},
+                    {"$set": {"status": "deleted", "phone": "", "token": None, "deleted_at": now_iso}})
+            except Exception:
+                pass
+
         # Permanently purge: mark as deleted (keep record for audit, blank PII)
         db.accounts.update_one({"_id": oid}, {"$set": {
             "status":        "deleted",
@@ -846,13 +910,13 @@ def process_account_deletion(account_id: str, data: dict, a=Depends(get_current_
             "visit_points":  0,
             "pool_points":   0,
             "token":         None,
-            "deleted_at":    datetime.utcnow().isoformat(),
+            "deleted_at":    now_iso,
         }})
         # Sync to legacy users
         try:
             db.users.update_one({"_id": oid}, {"$set": {
                 "status": "deleted", "name": "", "phone": "", "token": None,
-                "deleted_at": datetime.utcnow().isoformat(),
+                "deleted_at": now_iso,
             }})
         except Exception:
             pass

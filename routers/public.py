@@ -144,6 +144,9 @@ def get_store(store_id: str):
         raise _HTTPEx(status_code=400, detail="Invalid store_id")
     if not store:
         raise _HTTPEx(status_code=404, detail="Store not found")
+    # Merchant account was deleted — hide as if it never existed (deep-link/bookmark protection)
+    if store.get("status") == "deleted" or store.get("is_deleted"):
+        raise _HTTPEx(status_code=404, detail="Store not found")
 
     cols = db.list_collection_names()
 
