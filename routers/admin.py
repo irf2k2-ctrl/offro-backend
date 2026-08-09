@@ -815,6 +815,95 @@ def toggle_account_status(account_id: str, data: dict, a=Depends(get_current_adm
     return {"ok": True, "status": new_status}
 
 
+@router.post("/accounts/{account_id}/process-deletion")
+def process_account_deletion(account_id: str, data: dict, a=Depends(get_current_admin)):
+    """Admin action to process a user's account deletion request.
+    action='approve'  → permanently delete the account (purge all user data)
+    action='reject'   → restore the account to active status (user can log in again)
+    """
+    _check_perm(a, "Users", "delete")
+    from bson import ObjectId
+    action = data.get("action", "approve")
+    try:
+        oid = ObjectId(account_id)
+    except Exception:
+        raise HTTPException(400, "Invalid account ID")
+
+    acct = db.accounts.find_one({"_id": oid})
+    if not acct:
+        raise HTTPException(404, "Account not found")
+    if acct.get("status") != "delete_requested":
+        raise HTTPException(400, "Account does not have a pending deletion request")
+
+    if action == "approve":
+        # Permanently purge: mark as deleted (keep record for audit, blank PII)
+        db.accounts.update_one({"_id": oid}, {"$set": {
+            "status":        "deleted",
+            "name":          "",
+            "phone":         "",
+            "phone_variants": [],
+            "city":          "",
+            "visit_points":  0,
+            "pool_points":   0,
+            "token":         None,
+            "deleted_at":    datetime.utcnow().isoformat(),
+        }})
+        # Sync to legacy users
+        try:
+            db.users.update_one({"_id": oid}, {"$set": {
+                "status": "deleted", "name": "", "phone": "", "token": None,
+                "deleted_at": datetime.utcnow().isoformat(),
+            }})
+        except Exception:
+            pass
+        # Log activity
+        try:
+            db.activity_logs.insert_one({
+                "user_id":   str(a.get("_id", "")),
+                "user_name": a.get("full_name", ""),
+                "module":    "Users",
+                "action":    "delete",
+                "detail":    f"Approved deletion request for account {account_id}",
+                "timestamp":  datetime.utcnow(),
+            })
+        except Exception:
+            pass
+        print(f"[DELETE-APPROVE] Admin approved deletion of account {account_id}")
+        return {"ok": True, "message": "Account permanently deleted."}
+
+    elif action == "reject":
+        # Restore to active
+        db.accounts.update_one({"_id": oid}, {"$set": {
+            "status":              "active",
+            "delete_reason":       None,
+            "delete_feedback":     None,
+            "delete_requested_at": None,
+            "token":               None,  # force re-login
+        }})
+        try:
+            db.users.update_one({"_id": oid}, {"$set": {
+                "status": "active", "token": None,
+                "delete_reason": None, "delete_feedback": None,
+            }})
+        except Exception:
+            pass
+        try:
+            db.activity_logs.insert_one({
+                "user_id":   str(a.get("_id", "")),
+                "user_name": a.get("full_name", ""),
+                "module":    "Users",
+                "action":    "edit",
+                "detail":    f"Rejected deletion request, restored account {account_id}",
+                "timestamp":  datetime.utcnow(),
+            })
+        except Exception:
+            pass
+        print(f"[DELETE-REJECT] Admin rejected deletion request for account {account_id}")
+        return {"ok": True, "message": "Account restored to active. User can log in again."}
+
+    raise HTTPException(400, "Invalid action. Use 'approve' or 'reject'.")
+
+
 
 def _fmt_store_fast(s, sub_map, deal_map, merchants):
     """Format a store record for the admin list view."""

@@ -102,8 +102,37 @@ def register_user(data: dict):
     phone    = _normalise_phone(raw_phone)
     variants = _phone_variants(raw_phone)
 
-    # Block duplicate registration across all collections
-    if db.accounts.find_one({"phone": {"$in": variants}}):
+    # If an existing account on this phone requested/completed deletion, treat this
+    # as a brand-new account: wipe the old record's identity fields and reactivate it
+    # under the new name. This satisfies "signup again = new account" without losing
+    # the ability to reference the old row for support/audit purposes.
+    existing = db.accounts.find_one({"phone": {"$in": variants}})
+    if existing and existing.get("status") in ("delete_requested", "deleted"):
+        now = datetime.utcnow().isoformat()
+        fresh = {
+            "name":                name,
+            "phone":               phone,
+            "phone_variants":      variants,
+            "city":                city,
+            "roles":               ["user"],
+            "status":              "active",
+            "visit_points":        0,
+            "pool_points":         0,
+            "token":               None,
+            "updated_at":          now,
+            "recreated_at":        now,
+            "delete_reason":       None,
+            "delete_feedback":     None,
+            "delete_requested_at": None,
+        }
+        db.accounts.update_one({"_id": existing["_id"]}, {"$set": fresh})
+        db.users.update_one({"phone": {"$in": variants}}, {"$set": fresh}, upsert=True)
+        acct_id = str(existing["_id"])
+        print(f"[REGISTER] ✅ Re-registered as new account (was {existing.get('status')}): {phone} name={name} id={acct_id}")
+        return {"message": "Registered successfully", "account_id": acct_id}
+
+    # Block duplicate registration across all collections (still-active accounts only)
+    if existing:
         raise HTTPException(status_code=400, detail="Phone already registered. Please login.")
     if db.users.find_one({"phone": {"$in": variants}}):
         raise HTTPException(status_code=400, detail="Phone already registered. Please login.")
@@ -158,6 +187,43 @@ def get_profile(user=Depends(get_current_user)):
         "total_points":  user.get("visit_points", 0) + user.get("pool_points", 0),
         "profile_image": user.get("profile_image", ""),
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ACCOUNT DELETION REQUEST
+# ══════════════════════════════════════════════════════════════════════════════
+@router.post("/request-delete")
+def request_account_deletion(data: dict, user=Depends(get_current_user)):
+    """
+    Customer-initiated account deletion request (Apple/Play Store compliance).
+    Marks the account as 'delete_requested' — this immediately:
+      1. Logs the user out (token cleared)
+      2. Blocks future login attempts on this phone
+      3. Surfaces the account with status "Delete Request" on the admin Accounts dashboard
+    An admin must review and permanently purge the account (or reject the request)
+    from the dashboard. This two-step flow avoids irreversible data loss from
+    accidental/abusive requests while still honouring the user's request instantly
+    by blocking the account.
+    """
+    reason   = str(data.get("reason", "")).strip()
+    feedback = str(data.get("feedback", "")).strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Please select a reason")
+
+    now = datetime.utcnow().isoformat()
+    update = {
+        "status":               "delete_requested",
+        "delete_reason":        reason,
+        "delete_feedback":      feedback,
+        "delete_requested_at":  now,
+        "token":                None,   # force logout everywhere
+    }
+    db.accounts.update_one({"_id": user["_id"]}, {"$set": update})
+    # Keep legacy users collection in sync (rollback safety)
+    db.users.update_one({"_id": user["_id"]}, {"$set": update})
+
+    print(f"[DELETE-REQUEST] phone={user.get('phone')} reason={reason}")
+    return {"message": "Account deletion requested. You have been logged out."}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -220,6 +286,10 @@ def account_login(data: dict):
 
     if acct.get("status") == "blocked":
         raise HTTPException(status_code=403, detail="Account suspended. Contact support.")
+    if acct.get("status") == "delete_requested":
+        raise HTTPException(status_code=403, detail="This account has a pending deletion request and cannot be used to log in. Contact support if this was a mistake.")
+    if acct.get("status") == "deleted":
+        raise HTTPException(status_code=404, detail="Phone not registered. Please register first.")
 
     roles       = acct.get("roles", ["user"])
     is_merchant = "merchant" in roles

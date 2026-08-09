@@ -45,6 +45,8 @@ tr:hover td[style*="sticky"]{background:#f7faf8;}
 td[style*="sticky"]{background:#fff;}
 .badge-active{background:#d1f0e0;color:#1a6640;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
 .badge-inactive{background:#fde8e6;color:#b33a2d;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
+    .badge-delete-requested{background:#fff3cd;color:#856404;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;}
+    .badge-deleted{background:#e0e0e0;color:#666;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
 .badge-waiting{background:#E7D7C8;color:#8a5c2e;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
 .badge-new{background:#CDEBD6;color:#3E5F55;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid #A9CDBA;}
 .badge-deal-active{background:#CDEBD6;color:#3E5F55;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:500;}
@@ -6526,8 +6528,10 @@ function renderAccountsPage() {
         ${isM ? '🏪 Merchant' : '👤 User'}</span>`;
     }).join('');
     const pts   = (a.visit_pts || 0) + (a.pool_pts || 0);
-    const stBg  = a.status === 'active' ? '#1a6640' : '#c0392b';
-    const stLbl = a.status === 'active' ? 'Active' : 'Blocked';
+    let stBg, stLbl, stCls;
+    if (a.status === 'delete_requested') { stBg='#fff3cd'; stLbl='Delete Request'; stCls='badge-delete-requested'; }
+    else if (a.status === 'deleted') { stBg='#e0e0e0'; stLbl='Deleted'; stCls='badge-deleted'; }
+    else { stBg = a.status === 'active' ? '#1a6640' : '#c0392b'; stLbl = a.status === 'active' ? 'Active' : 'Blocked'; stCls=''; }
     const shortId = (a.account_id||'').slice(-6).toUpperCase();
     return `<tr>
       <td><strong>${escHtml(a.full_name||'—')}</strong></td>
@@ -6541,14 +6545,19 @@ function renderAccountsPage() {
       <td><span class="badge" style="background:#e8f5e9;color:var(--text);">${a.product_count||0}</span></td>
       <td><span class="badge" style="background:var(--beige);color:var(--text);">${a.banner_count||0}</span></td>
       <td style="font-size:12px;">${pts > 0 ? '⭐ '+pts : '—'}</td>
-      <td><span class="badge" style="background:${stBg};color:#fff;">${stLbl}</span></td>
+      <td><span class="${stCls}" style="background:${stBg};color:${a.status==='delete_requested'?'#856404':a.status==='deleted'?'#666':'#fff'};">${stLbl}</span></td>
       <td>
         <button class="btn-sm-p" onclick="openAccountDetail('${a.account_id}','${escHtml(a.full_name||'')}')">👁 View</button>
-        ${(!a.roles?.includes('merchant') && (a.store_count||0) > 0)
-          ? `<button class="btn-sm-p" style="background:var(--primary);font-size:10px;padding:3px 8px;margin-right:3px;" onclick="grantMerchantRole('${a.account_id}','${escHtml(a.full_name||'')}')">🏪 Merchant</button>`
-          : ''}
-        <button class="btn-sm-p" style="background:#c0392b;" onclick="toggleAccountStatus('${a.account_id}','${a.status}')">
-          ${a.status==='active'?'🚫 Block':'✅ Unblock'}</button>
+        ${a.status === 'delete_requested' ? `
+          <button class="btn-sm-p" style="background:#c0392b;font-size:10px;padding:3px 8px;margin-right:3px;" onclick="processDeletion('${a.account_id}','approve')">🗑 Approve Delete</button>
+          <button class="btn-sm-p" style="background:var(--primary);font-size:10px;padding:3px 8px;" onclick="processDeletion('${a.account_id}','reject')">↩ Reject</button>
+        ` : (a.status === 'deleted' ? '' :
+          `${(!a.roles?.includes('merchant') && (a.store_count||0) > 0)
+            ? `<button class="btn-sm-p" style="background:var(--primary);font-size:10px;padding:3px 8px;margin-right:3px;" onclick="grantMerchantRole('${a.account_id}','${escHtml(a.full_name||'')}')">🏪 Merchant</button>`
+            : ''}
+          <button class="btn-sm-p" style="background:#c0392b;" onclick="toggleAccountStatus('${a.account_id}','${a.status}')">
+            ${a.status==='active'?'🚫 Block':'✅ Unblock'}</button>`
+        )}
       </td>
     </tr>`;
   }).join('');
@@ -6557,6 +6566,29 @@ function renderAccountsPage() {
 }
 
 function goAcctPage(p) { _acctPage = p; renderAccountsPage(); }
+
+async function processDeletion(accountId, action) {
+  const verb = action === 'approve' ? 'permanently DELETE' : 'restore (reject deletion for)';
+  if (!confirm(`Are you sure you want to ${verb} this account?`)) return;
+  try {
+    const r = await fetch(`/admin/accounts/${accountId}/process-deletion`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({action})
+    });
+    if (r.status === 401 || r.status === 403) { window.location.href='/admin'; return; }
+    const d = await r.json();
+    if (r.ok) {
+      showToast(d.message || 'Done', 'success');
+      loadAccounts();
+    } else {
+      showToast(d.detail || 'Failed', 'error');
+    }
+  } catch(e) {
+    showToast('Network error', 'error');
+  }
+}
 
 function escHtml(s) {
   if (!s) return '';
