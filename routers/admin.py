@@ -902,7 +902,8 @@ def _do_process_account_deletion(account_id, action, acct, oid, a):
             if acct.get("merchant_id"):
                 db.merchants.update_one(
                     {"_id": ObjectId(acct["merchant_id"])},
-                    {"$set": {"status": "deleted", "phone": "", "token": None, "deleted_at": now_iso}})
+                    {"$set": {"status": "deleted", "token": None, "deleted_at": now_iso},
+                     "$unset": {"phone": ""}})
         except Exception:
             pass
         if orig_phone:
@@ -911,28 +912,34 @@ def _do_process_account_deletion(account_id, action, acct, oid, a):
                 variants = _pv(orig_phone)
                 db.merchants.update_many(
                     {"phone": {"$in": variants}},
-                    {"$set": {"status": "deleted", "phone": "", "token": None, "deleted_at": now_iso}})
+                    {"$set": {"status": "deleted", "token": None, "deleted_at": now_iso},
+                     "$unset": {"phone": ""}})
             except Exception:
                 pass
 
-        # Permanently purge: mark as deleted (keep record for audit, blank PII)
-        db.accounts.update_one({"_id": oid}, {"$set": {
-            "status":        "deleted",
-            "name":          "",
-            "phone":         "",
-            "phone_variants": [],
-            "city":          "",
-            "visit_points":  0,
-            "pool_points":   0,
-            "token":         None,
-            "deleted_at":    now_iso,
-        }})
+        # Permanently purge: mark as deleted (keep record for audit, blank PII).
+        # FIX: "phone" is under a unique+sparse index. Setting it to "" made every
+        # 2nd+ deletion collide on the same empty string (E11000 duplicate key).
+        # $unset removes the field so the sparse index excludes it.
+        db.accounts.update_one({"_id": oid}, {
+            "$set": {
+                "status":        "deleted",
+                "name":          "",
+                "phone_variants": [],
+                "city":          "",
+                "visit_points":  0,
+                "pool_points":   0,
+                "token":         None,
+                "deleted_at":    now_iso,
+            },
+            "$unset": {"phone": ""},
+        })
         # Sync to legacy users
         try:
-            db.users.update_one({"_id": oid}, {"$set": {
-                "status": "deleted", "name": "", "phone": "", "token": None,
-                "deleted_at": now_iso,
-            }})
+            db.users.update_one({"_id": oid}, {
+                "$set": {"status": "deleted", "name": "", "token": None, "deleted_at": now_iso},
+                "$unset": {"phone": ""},
+            })
         except Exception:
             pass
         # Log activity
