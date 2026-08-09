@@ -6583,10 +6583,12 @@ async function processDeletion(accountId, action) {
       showToast(d.message || 'Done', 'success');
       loadAccounts();
     } else {
-      showToast(d.detail || 'Failed', 'error');
+      showToast(d.detail || ('Failed (status ' + r.status + ')'), 'error');
     }
   } catch(e) {
-    showToast('Network error', 'error');
+    // Distinguish a real network failure (server unreachable / CORS / offline)
+    // from a bad/non-JSON response so the real cause is visible next time.
+    showToast('Network error: ' + (e.message || e), 'error');
   }
 }
 

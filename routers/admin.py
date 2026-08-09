@@ -835,6 +835,21 @@ def process_account_deletion(account_id: str, data: dict, a=Depends(get_current_
     if acct.get("status") != "delete_requested":
         raise HTTPException(400, "Account does not have a pending deletion request")
 
+    # ── FIX: whole body wrapped so a real error (with detail) is always returned
+    # as JSON instead of the connection dying mid-request (which the admin
+    # dashboard's fetch() reports as a generic "Network error" with no detail).
+    try:
+        return _do_process_account_deletion(account_id, action, acct, oid, a)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"[DELETE-ERROR] account_id={account_id} action={action} error={e}")
+        traceback.print_exc()
+        raise HTTPException(500, f"Deletion processing failed: {e}")
+
+
+def _do_process_account_deletion(account_id, action, acct, oid, a):
     if action == "approve":
         now_iso = datetime.utcnow().isoformat()
         orig_phone = acct.get("phone", "")
