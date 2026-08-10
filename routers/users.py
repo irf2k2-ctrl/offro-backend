@@ -124,6 +124,8 @@ def register_user(data: dict):
             "delete_reason":       None,
             "delete_feedback":     None,
             "delete_requested_at": None,
+            "terms_version":       "1.0",
+            "terms_accepted_at":   now,
         }
         db.accounts.update_one({"_id": existing["_id"]}, {"$set": fresh})
         db.users.update_one({"phone": {"$in": variants}}, {"$set": fresh}, upsert=True)
@@ -150,6 +152,8 @@ def register_user(data: dict):
         "token":          None,
         "created_at":     now,
         "updated_at":     now,
+        "terms_version":  "1.0",
+        "terms_accepted_at": now,
     }
     result = db.accounts.insert_one(account)
     acct_id = str(result.inserted_id)
@@ -185,7 +189,10 @@ def get_profile(user=Depends(get_current_user)):
         "visit_points":  user.get("visit_points", 0),
         "pool_points":   user.get("pool_points", 0),
         "total_points":  user.get("visit_points", 0) + user.get("pool_points", 0),
-        "profile_image": user.get("profile_image", ""),
+        "profile_image":      user.get("profile_image", ""),
+        "terms_version":      user.get("terms_version", ""),
+        "terms_accepted_at":  user.get("terms_accepted_at", ""),
+        "merchant_terms_accepted": user.get("merchant_terms_accepted", False),
     }
 
 
@@ -557,6 +564,9 @@ def update_user_profile(data: dict, user=Depends(get_current_user)):
     if not update:
         raise HTTPException(400, "Nothing to update")
     db.accounts.update_one({"_id": user["_id"]}, {"$set": update})
+    # SYNC: also update legacy users collection so get_current_user() fallback
+    # returns the updated profile_image (fixes profile image disappearing bug)
+    db.users.update_one({"_id": user["_id"]}, {"$set": update})
     return {"ok": True}
 
 @router.post("/fcm-token")

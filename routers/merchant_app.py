@@ -138,7 +138,8 @@ def get_merchant(request: Request):
             variants = _pv(str(m.get("phone", "")))
             db.accounts.update_one(
                 {"phone": {"$in": variants}},
-                {"$set": {"token": token, "merchant_id": _mid(m), "name": m.get("name",""), "phone": m.get("phone","")},
+                {"$set": {"token": token, "merchant_id": _mid(m), "name": m.get("name",""), "phone": m.get("phone",""),
+                             "profile_image": m.get("profile_image","")},
                  "$addToSet": {"roles": "merchant"}},
                 upsert=True,
             )
@@ -316,6 +317,7 @@ def merchant_me(m=Depends(get_merchant)):
         "area":          m.get("area", ""),
         "status":        m.get("status", "active"),
         "profile_image": m.get("profile_image", ""),
+        "merchant_terms_accepted": m.get("merchant_terms_accepted", False),
     }
 
 # ───────────── stores ─────────────
@@ -1003,6 +1005,17 @@ def merchant_terms():
     doc = db.terms.find_one({"type": "merchant"}) or {}
     return {"content": doc.get("content", "Merchant terms and conditions will be posted here.")}
 
+@router.post("/accept-terms")
+def accept_merchant_terms(data: dict, m=Depends(get_merchant)):
+    """Store merchant terms acceptance — version + timestamp."""
+    version = data.get("version", "1.0")
+    db.accounts.update_one({"_id": m["_id"]}, {"$set": {
+        "merchant_terms_accepted": True,
+        "merchant_terms_version": version,
+        "merchant_terms_accepted_at": datetime.utcnow().isoformat(),
+    }})
+    return {"ok": True, "message": "Merchant terms accepted."}
+
 # ───────────── subscriptions list ─────────────
 
 @router.get("/subscriptions")
@@ -1036,6 +1049,13 @@ def update_merchant_profile(data: dict, m=Depends(get_merchant)):
     if not update:
         raise HTTPException(400, "Nothing to update")
     db.accounts.update_one({"_id": m["_id"]}, {"$set": update})
+    # SYNC: also update legacy merchants collection so get_merchant() fallback
+    # returns the updated profile_image (fixes profile image disappearing bug)
+    mid = _mid(m)
+    db.merchants.update_one(
+        {"_id": m["_id"]},
+        {"$set": update}
+    )
     return {"ok": True}
 
 

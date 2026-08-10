@@ -2780,8 +2780,38 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
         if _approve_city or _approve_store_name:
             db.merchant_banners.update_one({"_id": ObjectId(bid)},
                 {"$set": {k: v for k, v in {"city": _approve_city, "store_name": _approve_store_name, "store_id": _approve_store_id}.items() if v}})
+    # DEDUP GUARD: Multi-layered check to prevent duplicate promo_sliders.
+    # Layer 1: Match by source_banner_id (same banner re-approved after toggle)
+    # Layer 2: Match by (merchant_id, image_url, source) — content dedup
+    # Layer 3: Match by (merchant_phone, title, store_id) — identity dedup
+    _existing_dup = db.promo_sliders.find_one({"source_banner_id": bid})
+    if not _existing_dup:
+        _existing_dup = db.promo_sliders.find_one({
+            "image_url": b.get("image_url",""),
+            "merchant_id": str(b.get("merchant_id","")),
+            "source": "merchant",
+        })
+    if not _existing_dup and b.get("merchant_phone"):
+        _existing_dup = db.promo_sliders.find_one({
+            "merchant_phone": str(b.get("merchant_phone","")),
+            "title": b.get("title",""),
+            "store_id": _approve_store_id,
+            "source": "merchant",
+        })
+    # If we found an existing promo_slider, update IT (no new doc created).
+    # Otherwise upsert by source_banner_id (creates new only if truly new).
+    _match_query = {"_id": _existing_dup["_id"]} if _existing_dup else {"source_banner_id": bid}
+    # Delete any OTHER stray duplicates that might exist before upserting
+    if _existing_dup:
+        db.promo_sliders.delete_many({
+            "source_banner_id": {"$ne": bid},
+            "merchant_id": str(b.get("merchant_id","")),
+            "image_url": b.get("image_url",""),
+            "source": "merchant",
+            "_id": {"$ne": _existing_dup["_id"]},
+        })
     db.promo_sliders.update_one(
-        {"source_banner_id": bid},
+        _match_query,
         {"$set": {
             "title":         b.get("title",""),
             "image_url":     b.get("image_url",""),
@@ -2789,13 +2819,6 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
             "sort_order":    50,
             "source":        "merchant",
             "source_banner_id": bid,
-            # FIX (duplicate banners bug root cause): this doc previously never
-            # stored merchant_id — only merchant_name/merchant_phone. The
-            # duplicate-detection signature in list_merchant_banners() and
-            # cleanup_duplicate_merchant_banners() matches on merchant_id, so
-            # it always compared "" (missing here) against the real merchant_id
-            # on the stray pending duplicate — never matching, so the stray
-            # duplicate was never hidden or cleaned up. Persist merchant_id now.
             "merchant_id":   str(b.get("merchant_id","")),
             "merchant_name": b.get("merchant_name",""),
             "expires_at":    b.get("end_date",""),
@@ -2811,6 +2834,15 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
          "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}},
         upsert=True
     )
+    # Also clean up any duplicate merchant_banners entries for the same order
+    # (prevents the "pending twin" from showing alongside the approved one)
+    _order_id = b.get("order_id", "")
+    if _order_id:
+        db.merchant_banners.delete_many({
+            "order_id": _order_id,
+            "_id": {"$ne": ObjectId(bid)},
+            "approval_status": {"$ne": "approved"},
+        })
     return {"ok": True, "message": "Banner approved and published to app."}
 
 @router.put("/merchant-banners/{bid}/reject")
