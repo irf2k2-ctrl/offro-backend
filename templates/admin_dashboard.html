@@ -3469,6 +3469,9 @@ function openBnViewModal(r) {
 }
 
 async function approveBnBanner(id) {
+  // DEBOUNCE GUARD: shared with approveMerchantBanner
+  if (window._approvingBanner === id) return;
+  window._approvingBanner = id;
   const btn = event?.target;
   if (btn) { btn.disabled=true; btn.textContent='Approving...'; }
   try {
@@ -3477,13 +3480,21 @@ async function approveBnBanner(id) {
       const err = await res.json().catch(()=>({detail:'Unknown error'}));
       showToast('❌ Approve failed: ' + (err.detail||res.status), 'danger');
       if (btn) { btn.disabled=false; btn.textContent='Approve'; }
+      window._approvingBanner = null;
       return;
     }
-    showToast('✅ Banner approved and published!', 'success');
+    const _result = await res.json().catch(()=>({}));
+    if (_result.already_approved) {
+      showToast('ℹ️ Banner was already approved.', 'info');
+    } else {
+      showToast('✅ Banner approved and published!', 'success');
+    }
     await loadSliders();
   } catch(e) {
     showToast('❌ Network error: ' + e.message, 'danger');
     if (btn) { btn.disabled=false; btn.textContent='Approve'; }
+  } finally {
+    window._approvingBanner = null;
   }
 }
 
@@ -5985,7 +5996,9 @@ async function resyncBannerDurations() {
   }
 }
 async function approveMerchantBanner(id) {
-  // TASK 7: Approve banner — update record, no duplicate, refresh immediately
+  // DEBOUNCE GUARD: prevent double-click / retry from creating duplicate API calls
+  if (window._approvingBanner === id) return;
+  window._approvingBanner = id;
   const btn = event?.target; if (btn) { btn.disabled=true; btn.textContent='Approving...'; }
   try {
     const _approveRes = await fetch(`/admin/merchant-banners/${id}/approve`, {method:'PUT', credentials:'include'});
@@ -5993,15 +6006,23 @@ async function approveMerchantBanner(id) {
       const errText = await _approveRes.text();
       showToast('❌ Approve failed: ' + errText, 'danger');
       if (btn) { btn.disabled=false; btn.textContent='Approve'; }
+      window._approvingBanner = null;
       return;
     }
-    showToast('✅ Banner approved and published to app!', 'success');
+    const _result = await _approveRes.json().catch(()=>({}));
+    if (_result.already_approved) {
+      showToast('ℹ️ Banner was already approved.', 'info');
+    } else {
+      showToast('✅ Banner approved and published to app!', 'success');
+    }
     if (typeof loadBanners === 'function') loadBanners();
     if (typeof loadSliders === 'function') loadSliders();
     if (typeof loadMerchantBanners === 'function') loadMerchantBanners();
   } catch(e) {
     showToast('❌ Network error: ' + e.message, 'danger');
     if (btn) { btn.disabled=false; btn.textContent='Approve'; }
+  } finally {
+    window._approvingBanner = null;
   }
 }
 async function rejectMerchantBanner(id) {

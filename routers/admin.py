@@ -2756,9 +2756,22 @@ def cleanup_duplicate_merchant_banners(a=Depends(get_current_admin)):
 @router.put("/merchant-banners/{bid}/approve")
 def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "approve")
-    """Approve a merchant banner — publishes it as a promo slider."""
+    """Approve a merchant banner — publishes it as a promo slider.
+    IDEMPOTENT: If already approved, returns success without creating
+    a duplicate promo_slider. One submitted banner = one banner record."""
     b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
     if not b: raise HTTPException(404, "Banner not found")
+
+    # IDEMPOTENCY GUARD: If already approved, return success.
+    # This prevents duplicate promo_sliders from double-clicks, retries,
+    # or concurrent requests — the #1 cause of the duplicate banner bug.
+    if b.get("approval_status") == "approved":
+        # Verify promo_slider exists; if missing (edge case), re-create it
+        _existing = db.promo_sliders.find_one({"source_banner_id": bid})
+        if _existing:
+            return {"ok": True, "message": "Banner already approved.", "already_approved": True}
+        # Fall through to re-create the promo_slider if it was deleted somehow
+
     db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {"approval_status":"approved","approved_at":datetime.utcnow()}})
     # TASK 9 FIX: upsert into promo_sliders — never create duplicates
     # Enrich city/store_name from stores if missing on old records
@@ -2843,6 +2856,13 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
             "_id": {"$ne": ObjectId(bid)},
             "approval_status": {"$ne": "approved"},
         })
+    # DEFENSIVE: Delete any stray promo_sliders duplicates that might have
+    # been created by race conditions before the idempotency guard was added
+    _all_promo_for_bid = list(db.promo_sliders.find({"source_banner_id": bid}))
+    if len(_all_promo_for_bid) > 1:
+        # Keep the first one, delete the rest
+        for _dup in _all_promo_for_bid[1:]:
+            db.promo_sliders.delete_one({"_id": _dup["_id"]})
     return {"ok": True, "message": "Banner approved and published to app."}
 
 @router.put("/merchant-banners/{bid}/reject")

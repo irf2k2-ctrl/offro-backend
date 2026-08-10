@@ -2454,24 +2454,35 @@ def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
 
 @router.post("/products/{pid}/upgrade/verify")
 def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
-    """Verify Razorpay payment and convert Standard product to Premium."""
+    """Verify Razorpay payment and convert Standard product to Premium.
+    For ₹0 (free after discount) orders, signature verification is skipped."""
     merchant_id = _mid(m)
     order_id   = data.get("razorpay_order_id", "")
     payment_id = data.get("razorpay_payment_id", "")
     signature  = data.get("razorpay_signature", "")
     plan       = data.get("plan", "1month")
-    if not RAZORPAY_KEY_SECRET:
-        raise HTTPException(503, "Payment verification unavailable — Razorpay not configured")
-    body   = f"{order_id}|{payment_id}"
-    digest = hmac.new(RAZORPAY_KEY_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
-    if digest != signature:
-        raise HTTPException(400, "Payment verification failed")
+
+    # Check if this is a free (₹0) order — skip Razorpay verification
+    upg_order_check = db.product_upgrade_orders.find_one({"razorpay_order_id": order_id}) if order_id else None
+    _is_free = upg_order_check and float(upg_order_check.get("amount", 0)) <= 0
+
+    if not _is_free:
+        if not RAZORPAY_KEY_SECRET:
+            raise HTTPException(503, "Payment verification unavailable — Razorpay not configured")
+        body   = f"{order_id}|{payment_id}"
+        digest = hmac.new(RAZORPAY_KEY_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+        if digest != signature:
+            raise HTTPException(400, "Payment verification failed")
     try:
         oid = ObjectId(pid)
     except Exception:
         raise HTTPException(400, "Invalid product ID")
     prod = db.gift_vouchers.find_one({"_id": oid, "merchant_id": merchant_id})
     if not prod:
+        # Check if already upgraded (idempotency — double-tap/retry)
+        already = db.merchant_vouchers.find_one({"_id": oid})
+        if already:
+            return {"ok": True, "message": "Product already upgraded to premium.", "already_upgraded": True}
         raise HTTPException(404, "Product not found")
     # Retrieve days + from_date from the stored upgrade order
     upg_order   = db.product_upgrade_orders.find_one({"razorpay_order_id": order_id})
@@ -2582,18 +2593,25 @@ def renew_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
 
 @router.post("/products/{pid}/renew/verify")
 def verify_renewal_payment(pid: str, data: dict, m=Depends(get_merchant)):
-    """Verify Razorpay payment and extend Premium product end_date."""
+    """Verify Razorpay payment and extend Premium product end_date.
+    For ₹0 (free after discount) orders, signature verification is skipped."""
     merchant_id = _mid(m)
     order_id   = data.get("razorpay_order_id", "")
     payment_id = data.get("razorpay_payment_id", "")
     signature  = data.get("razorpay_signature", "")
     plan       = data.get("plan", "1month")
-    if not RAZORPAY_KEY_SECRET:
-        raise HTTPException(503, "Payment verification unavailable — Razorpay not configured")
-    body   = f"{order_id}|{payment_id}"
-    digest = hmac.new(RAZORPAY_KEY_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
-    if digest != signature:
-        raise HTTPException(400, "Payment verification failed")
+
+    # Check if this is a free (₹0) order — skip Razorpay verification
+    ren_order_check = db.product_renewal_orders.find_one({"razorpay_order_id": order_id}) if order_id else None
+    _is_free = ren_order_check and float(ren_order_check.get("amount", 0)) <= 0
+
+    if not _is_free:
+        if not RAZORPAY_KEY_SECRET:
+            raise HTTPException(503, "Payment verification unavailable — Razorpay not configured")
+        body   = f"{order_id}|{payment_id}"
+        digest = hmac.new(RAZORPAY_KEY_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+        if digest != signature:
+            raise HTTPException(400, "Payment verification failed")
     try:
         oid = ObjectId(pid)
     except Exception:
