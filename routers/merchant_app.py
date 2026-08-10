@@ -603,6 +603,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
             "subscription_end":   end_date,
         }})
         invoice_no = f"LS-FREE-{datetime.utcnow().strftime('%Y%m%d')}-{sub_id[-6:].upper()}"
+        db.subscriptions.update_one({"_id": sub_result.inserted_id}, {"$set": {"invoice_no": invoice_no}})  # FIX: keep in sync with invoices collection
         store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
         db.invoices.insert_one({
             "invoice_no":    invoice_no,
@@ -754,6 +755,7 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
     }})
 
     invoice_no = f"LS-{datetime.utcnow().strftime('%Y%m%d')}-{str(sub['_id'])[-6:].upper()}"
+    db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {"invoice_no": invoice_no}})  # FIX: keep in sync with invoices collection
     store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
     db.invoices.insert_one({
         "invoice_no":         invoice_no,
@@ -809,6 +811,7 @@ def activate_free_subscription(data: dict, m=Depends(get_merchant)):
     }})
 
     invoice_no = f"LS-FREE-{now.strftime('%Y%m%d')}-{str(sub['_id'])[-6:].upper()}"
+    db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {"invoice_no": invoice_no}})  # FIX: keep in sync with invoices collection
     store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
     db.invoices.insert_one({
         "invoice_no":    invoice_no,
@@ -1092,10 +1095,17 @@ def get_my_banners(m=Depends(get_merchant)):
     # 1. Merchant-submitted banners — match by merchant_id OR legacy_mid OR phone
     try:
         id_candidates = list({mid for mid in [merchant_id, legacy_mid] if mid and mid != "None"})
-        mb_query = {"$or": [
-            {"merchant_id": {"$in": id_candidates}},
-            {"merchant_phone": merchant_phone},
-        ]} if merchant_phone else {"merchant_id": {"$in": id_candidates}}
+        # FIX: exclude deleted banners so a re-registered account (same phone,
+        # new merchant_id) does NOT inherit banners from the previous account.
+        # The admin delete-cascade sets status="deleted" + is_active=False.
+        base_q = {"status": {"$ne": "deleted"}, "is_active": {"$ne": False}}
+        if merchant_phone:
+            mb_query = {"$and": [base_q, {"$or": [
+                {"merchant_id": {"$in": id_candidates}},
+                {"merchant_phone": merchant_phone},
+            ]}]}
+        else:
+            mb_query = {"$and": [base_q, {"merchant_id": {"$in": id_candidates}}]}
         for b in db.merchant_banners.find(mb_query).sort("created_at", -1):
             _end_dt    = _banner_parse_any_date(b.get("end_date", ""))
             is_expired = bool(_end_dt and _end_dt < today_dt)
@@ -1901,16 +1911,32 @@ def get_full_invoices(m=Depends(get_merchant)):
     result = []
 
     def _fmt_dt(v):
+        # FIX: convert UTC -> IST (+5:30) and include time so invoices don't
+        # all show a misleading "12:00 AM". Backend always stores UTC
+        # (datetime.utcnow()); the app must see IST, matching activity_logs.
         if not v: return ""
         try:
-            from datetime import datetime as _dt
-            if isinstance(v, _dt): return v.strftime("%d %b %Y")
+            from datetime import datetime as _dt, timedelta as _td
+            if isinstance(v, _dt):
+                return (v + _td(hours=5, minutes=30)).strftime("%d %b %Y | %I:%M %p")
             return str(v)[:10]
-        except: return str(v)[:10]
+        except Exception:
+            return str(v)[:10]
+
+    def _date_key(v):
+        # Normalised date-only key (IST) used for de-dup matching across
+        # collections, independent of exact invoice_no string.
+        from datetime import datetime as _dt, timedelta as _td
+        if isinstance(v, _dt):
+            return (v + _td(hours=5, minutes=30)).strftime("%Y-%m-%d")
+        return str(v or "")[:10]
 
     # 1. Central invoices collection (most complete — has discount info)
+    inv_date_keys = set()   # FIX: (store_id, from_date) keys already covered by an invoice doc
     for inv in db.invoices.find({"merchant_id": merchant_id}).sort("created_at", -1):
         fd = inv.get("from_date"); ed = inv.get("end_date")
+        if inv.get("store_id") and fd is not None:
+            inv_date_keys.add((str(inv.get("store_id")), _date_key(fd)))
         result.append({
             "invoice_no":      inv.get("invoice_no", str(inv["_id"])[:8].upper()),
             "type":            inv.get("type", "store"),
@@ -1932,11 +1958,18 @@ def get_full_invoices(m=Depends(get_merchant)):
         })
 
     # 2. Fallback: store subscriptions not yet in invoices collection
+    # FIX: dedup by invoice_no AND by (store_id, from_date) — subscription
+    # docs historically never got invoice_no written back onto them, so a
+    # string match against inv_ids always failed and produced a duplicate
+    # "ghost" invoice entry for every free/paid subscription. The
+    # (store_id, from_date) key catches this even for already-existing data.
     inv_ids = {r["invoice_no"] for r in result}
     for sub in db.subscriptions.find({"merchant_id": merchant_id}).sort("created_at", -1):
         ino = sub.get("invoice_no", str(sub["_id"])[:8].upper())
-        if ino in inv_ids: continue
         fd = sub.get("from_date"); ed = sub.get("end_date")
+        sub_key = (str(sub.get("store_id")), _date_key(fd)) if sub.get("store_id") and fd is not None else None
+        if ino in inv_ids: continue
+        if sub_key and sub_key in inv_date_keys: continue
         result.append({
             "invoice_no":      ino,
             "type":            "store",
@@ -2110,7 +2143,12 @@ def list_merchant_products(m=Depends(get_merchant)):
         pass
     if merchant_phone:
         _prem_or.append({"merchant_phone": merchant_phone})
-    prem_query: dict = {"$or": _prem_or}
+    # FIX: exclude deleted vouchers — same isolation fix as banners.
+    # Admin delete-cascade sets status="deleted" + is_deleted=True.
+    prem_query: dict = {"$and": [
+        {"status": {"$ne": "deleted"}, "is_deleted": {"$ne": True}},
+        {"$or": _prem_or},
+    ]}
     for v in db.merchant_vouchers.find(prem_query).sort("created_at", -1):
         result.append({
             "_id":             str(v["_id"]),
