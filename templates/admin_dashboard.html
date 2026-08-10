@@ -2006,7 +2006,7 @@ async function loadGiftProductRequests() {
             return;
         }
         tbody.innerHTML = vouchers.map(v => {
-            const date = v.created_at ? new Date(v.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : "—";
+            const date = _toISTDate(v.created_at);
             const pts = v.points || 0;
             const val = (pts * (v.rate||0.1)).toFixed(2);
             const isPending = (v.status||"pending") === "pending";
@@ -3410,7 +3410,7 @@ function renderBanners(rows) {
       ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">Expired</span>`
       : `<span style="background:#f8f9fa;color:#6c757d;padding:3px 10px;border-radius:20px;font-size:11px">Hidden</span>`;
 
-    const createdFmt = (r.created_at||'').replace('T',' ').slice(0,16);
+    const createdFmt = _toIST(r.created_at);
 
     const isPending = (st==='pending'||st==='pending_approval');
     const approveBtn = (!isAdmin && isPending)
@@ -4563,6 +4563,19 @@ function _parseFlexDate(s) {
   return null;
 }
 
+// Convert UTC ISO/datetime string to IST date-only display (DD Mon YYYY)
+function _toISTDate(dtStr) {
+  if (!dtStr) return '\u2014';
+  try {
+    let d = new Date(dtStr.endsWith('Z') ? dtStr : dtStr + 'Z');
+    if (isNaN(d)) return String(dtStr).slice(0,10);
+    return d.toLocaleDateString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit', month: 'short', year: 'numeric'
+    });
+  } catch(e) { return String(dtStr).slice(0,10); }
+}
+
 async function loadGiftCards() {
   const tbody = document.getElementById('pc_unified_body');
   if (!tbody) return;
@@ -4897,7 +4910,7 @@ function renderProductCards() {
         ${approveBtn}
         <button class="btn-o" style="border:none;padding:4px 8px" onclick='openVZMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>
       </td>
-      <td style="font-size:11px;color:var(--muted);white-space:nowrap">${_fmtVZDate(r.created_at)}</td>
+      <td style="font-size:11px;color:var(--muted);white-space:nowrap">${_toIST(r.created_at)}</td>
     </tr>`;
   }).join('');
 }
@@ -4917,7 +4930,7 @@ function _fmtDate(s) {
     return d.toLocaleDateString('en-IN', opts);
   } catch(e) { return s; }
 }
-function _fmtVZDate(dt) {
+function _toIST(dt) {
   // FIX 3: Always render in Indian Standard Time (IST = UTC+5:30)
   if (!dt) return '—';
   try {

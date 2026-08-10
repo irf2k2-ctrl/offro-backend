@@ -3032,25 +3032,39 @@ def _compute_voucher_status(v):
     """Return real-time status — auto-expire if end_date has passed. stdlib only."""
     from datetime import datetime as _dt
     stored = v.get("approval_status", v.get("status", "pending_approval"))
-    if stored in ("pending_approval", "rejected"):
+    if stored in ("pending_approval", "rejected", "expired"):
         return stored
     end_raw = v.get("end_date", "")
     if end_raw:
         try:
             now_utc = _dt.utcnow()
+            _parsed = None
+            _s = str(end_raw).strip()
             if hasattr(end_raw, 'strftime'):
-                end_dt = end_raw
+                _parsed = end_raw
             else:
-                s = str(end_raw).strip().replace("Z","").replace(" ","T")[:19]
-                end_dt = _dt.fromisoformat(s)
-            if end_dt < now_utc:
-                try:
-                    db.merchant_vouchers.update_one(
-                        {"_id": v["_id"], "approval_status": {"$ne": "expired"}},
-                        {"$set": {"approval_status": "expired", "status": "expired"}}
-                    )
-                except: pass
-                return "expired"
+                for _fmt in ("%Y-%m-%d", "%d %b %Y", "%d/%m/%Y", "%d-%m-%Y"):
+                    try:
+                        _parsed = _dt.strptime(_s[:19].replace("Z",""), _fmt)
+                        break
+                    except ValueError:
+                        continue
+                if _parsed is None and "T" in _s:
+                    try:
+                        _parsed = _dt.fromisoformat(_s[:19].replace("Z",""))
+                    except ValueError:
+                        pass
+            if _parsed is not None:
+                # End-of-day comparison: "11 Aug 2026" means valid through 23:59:59.
+                _end_of_day = _parsed.replace(hour=23, minute=59, second=59)
+                if _end_of_day < now_utc:
+                    try:
+                        db.merchant_vouchers.update_one(
+                            {"_id": v["_id"], "approval_status": {"$ne": "expired"}},
+                            {"$set": {"approval_status": "expired", "status": "expired"}}
+                        )
+                    except: pass
+                    return "expired"
         except:
             pass
     return stored
@@ -3083,16 +3097,34 @@ def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Products", "approve")
     v = db.merchant_vouchers.find_one({"_id": ObjectId(vid)})
     if not v: raise HTTPException(404, "Voucher not found")
-    # TASK 8: check if product has already expired before setting status
+    # Check if product has already expired before setting status.
+    # stdlib only — no dateutil. Dates stored as "DD Mon YYYY" represent the
+    # full day, so we compare against END of that day (23:59:59), not midnight.
     end_date_raw = v.get("end_date", "")
     final_status = "approved"
     if end_date_raw:
         try:
-            from dateutil.parser import parse as _parse_dt
-            end_dt = _parse_dt(str(end_date_raw))
-            if end_dt < datetime.utcnow():
-                final_status = "expired"
-        except:
+            _s = str(end_date_raw).strip()
+            # Try ISO format first (YYYY-MM-DD)
+            _parsed = None
+            for _fmt in ("%Y-%m-%d", "%d %b %Y", "%d/%m/%Y", "%d-%m-%Y"):
+                try:
+                    _parsed = datetime.strptime(_s[:19].replace("Z",""), _fmt)
+                    break
+                except ValueError:
+                    continue
+            if _parsed is None and "T" in _s:
+                try:
+                    _parsed = datetime.fromisoformat(_s[:19].replace("Z",""))
+                except ValueError:
+                    pass
+            if _parsed is not None:
+                # End-of-day comparison: a product with end_date "11 Aug 2026"
+                # is valid through 23:59:59 on Aug 11, not midnight.
+                _end_of_day = _parsed.replace(hour=23, minute=59, second=59)
+                if _end_of_day < datetime.utcnow():
+                    final_status = "expired"
+        except Exception:
             pass
     db.merchant_vouchers.update_one(
         {"_id": ObjectId(vid)},
@@ -3103,26 +3135,39 @@ def approve_merchant_voucher(vid: str, a=Depends(get_current_admin)):
         }}
     )
     # TASK 1 FIX: upsert into gift_vouchers — update if exists, insert if not — NEVER duplicate
+    # Preserve ALL fields: logo_url, offer_text, price, original_price, merchant_phone,
+    # duration_days, end_date, from_date, approval_status — not just a subset.
+    _logo_val = v.get("logo_url", v.get("logo", ""))
     db.gift_vouchers.update_one(
         {"source_voucher_id": vid},
         {"$set": {
             "title":             v.get("title", ""),
-            "text":              v.get("offer_text", ""),
-            "logo":              v.get("logo_url", ""),
+            "text":              v.get("offer_text", v.get("text", "")),
+            "offer_text":        v.get("offer_text", v.get("text", "")),
+            "logo":              _logo_val,
+            "logo_url":          _logo_val,
             "validity":          v.get("validity") or (
                                      f"{v.get('from_date', '')} → {v.get('end_date', '')}"
                                      if v.get("from_date") else "30 days"
                                  ),
-            "is_active":         True,
+            "is_active":         final_status == "approved",
+            "approval_status":   final_status,
+            "status":            final_status,
             "source":            "merchant",
             "source_voucher_id": vid,
             "merchant_id":       str(v.get("merchant_id", "")),
             "merchant_name":     v.get("merchant_name", ""),
+            "merchant_phone":    v.get("merchant_phone", ""),
             "store_id":          v.get("store_id", ""),
             "store_name":        v.get("store_name", "") or v.get("merchant_name", ""),
             "city":              v.get("city", ""),
             "product_type":      "premium",
-            "amount":            v.get("amount", 0),
+            "price":             str(v.get("price", "") or ""),
+            "original_price":    str(v.get("original_price", "") or ""),
+            "amount":            v.get("amount", v.get("total", 0)),
+            "duration_days":     v.get("duration_days", 0),
+            "end_date":          v.get("end_date", ""),
+            "from_date":         v.get("from_date", ""),
             "updated_at":        datetime.utcnow().isoformat(),
         },
          "$setOnInsert": {
@@ -3915,10 +3960,23 @@ def approve_merchant_product_card(vid: str, a=Depends(get_current_admin)):
         final_status = "approved"
         if end_date_raw:
             try:
-                from dateutil.parser import parse as _parse_dt
-                end_dt = _parse_dt(str(end_date_raw))
-                if end_dt < datetime.utcnow():
-                    final_status = "expired"
+                _s = str(end_date_raw).strip()
+                _parsed = None
+                for _fmt in ("%Y-%m-%d", "%d %b %Y", "%d/%m/%Y", "%d-%m-%Y"):
+                    try:
+                        _parsed = datetime.strptime(_s[:19].replace("Z",""), _fmt)
+                        break
+                    except ValueError:
+                        continue
+                if _parsed is None and "T" in _s:
+                    try:
+                        _parsed = datetime.fromisoformat(_s[:19].replace("Z",""))
+                    except ValueError:
+                        pass
+                if _parsed is not None:
+                    _end_of_day = _parsed.replace(hour=23, minute=59, second=59)
+                    if _end_of_day < datetime.utcnow():
+                        final_status = "expired"
             except Exception:
                 pass
         db.merchant_vouchers.update_one(

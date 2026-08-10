@@ -1397,6 +1397,27 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         except Exception:
             pass
 
+    # CONTENT-BASED DEDUP GUARD (defense-in-depth, independent of order_id):
+    # Even if a DIFFERENT banner_orders doc was created (e.g. merchant backed
+    # out and resubmitted, or a client retry created a second order), this
+    # catches it by matching the actual banner content — one merchant
+    # submission for the same title/store/dates must always be ONE record.
+    _dedup_window = datetime.utcnow() - timedelta(minutes=15)
+    _dup = db.merchant_banners.find_one({
+        "merchant_id": merchant_id,
+        "title":       title,
+        "store_id":    store_id,
+        "from_date":   order.get("from_date", ""),
+        "end_date":    order.get("end_date", ""),
+        "created_at":  {"$gte": _dedup_window.isoformat()},
+    })
+    if _dup:
+        db.banner_orders.update_one({"_id": ObjectId(order_id)},
+            {"$set": {"status": "submitted", "banner_id": str(_dup["_id"]),
+                      "store_id": store_id, "city": city}})
+        return {"message": "Banner already submitted for review.",
+                "banner_id": str(_dup["_id"]), "invoice_no": _dup.get("invoice_no", "")}
+
     banner = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
@@ -1497,6 +1518,25 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
                 city = st.get("city", "")
         except Exception:
             pass
+
+    # CONTENT-BASED DEDUP GUARD (defense-in-depth, independent of order_id):
+    # Same protection as the free-activation path — catches duplicates even
+    # if a second banner_orders doc was created for identical banner content.
+    _dedup_window = datetime.utcnow() - timedelta(minutes=15)
+    _dup = db.merchant_banners.find_one({
+        "merchant_id": merchant_id,
+        "title":       title,
+        "store_id":    store_id,
+        "from_date":   order.get("from_date", ""),
+        "end_date":    order.get("end_date", ""),
+        "created_at":  {"$gte": _dedup_window.isoformat()},
+    })
+    if _dup:
+        db.banner_orders.update_one({"_id": ObjectId(order_id)},
+            {"$set": {"status": "paid", "banner_id": str(_dup["_id"]),
+                      "store_id": store_id, "city": city}})
+        return {"message": "Payment already verified.",
+                "banner_id": str(_dup["_id"]), "invoice_no": _dup.get("invoice_no", "")}
 
     banner = {
         "merchant_id":      merchant_id,
@@ -1754,6 +1794,17 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     if disc_code:
         db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
 
+    # Read store/city from Flutter payload — CRITICAL: these must be stored
+    # on the voucher so admin dashboard shows the correct store and city.
+    store_id   = (data.get("store_id")   or "").strip()
+    store_name = (data.get("store_name") or "").strip()
+    city       = (data.get("city")       or "").strip()
+    if not city and store_id:
+        try:
+            st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
+            if st: city = st.get("city", "")
+        except Exception: pass
+
     voucher = {
         "merchant_id":    merchant_id,
         "merchant_name":  m.get("name", ""),
@@ -1761,6 +1812,10 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
         "title":          title,
         "offer_text":     offer_text,
         "logo_url":       logo_url,
+        "logo_thumb":     logo_thumb,
+        "store_id":       store_id,
+        "store_name":     store_name,
+        "city":           city,
         "validity":       validity,
         "price":          price,
         "original_price": original_price,
@@ -1782,7 +1837,8 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     }
     res = db.merchant_vouchers.insert_one(voucher)
     db.voucher_orders.update_one({"_id": ObjectId(order_id)},
-        {"$set": {"status": "submitted", "voucher_id": str(res.inserted_id)}})
+        {"$set": {"status": "submitted", "voucher_id": str(res.inserted_id),
+                  "store_id": store_id, "city": city}})
 
     # Write free invoice for record-keeping
     invoice_no = f"PRD-FREE-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
@@ -1853,6 +1909,16 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
 
+    # Read store/city from Flutter payload — CRITICAL: must be stored on voucher
+    store_id   = (data.get("store_id")   or "").strip()
+    store_name = (data.get("store_name") or "").strip()
+    city       = (data.get("city")       or "").strip()
+    if not city and store_id:
+        try:
+            st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
+            if st: city = st.get("city", "")
+        except Exception: pass
+
     voucher = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
@@ -1861,6 +1927,9 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         "offer_text":       offer_text,
         "logo_url":         logo_url,
         "logo_thumb":       logo_thumb,
+        "store_id":         store_id,
+        "store_name":       store_name,
+        "city":             city,
         "validity":         validity,
         "price":            price,
         "original_price":   original_price,
@@ -1884,7 +1953,8 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
     }
     res = db.merchant_vouchers.insert_one(voucher)
     db.voucher_orders.update_one({"_id": ObjectId(order_id)},
-        {"$set": {"status": "paid", "voucher_id": str(res.inserted_id)}})
+        {"$set": {"status": "paid", "voucher_id": str(res.inserted_id),
+                  "store_id": store_id, "city": city}})
 
     # Generate invoice for product payment (mirrors store subscription verify_payment)
     invoice_no = f"PRD-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
@@ -2421,12 +2491,16 @@ def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     base_price    = round(price_per_day * days, 2)
     discount_code  = (data.get("discount_code") or "").strip().upper()
     discount_value = 0.0
+    discount_msg   = ""
     if discount_code:
-        dc = db.discount_codes.find_one({"code": discount_code, "active": True})
+        dc = db.discounts.find_one({"code": discount_code, "active": True})
         if dc:
             discount_value = float(dc.get("value", 0))
+            discount_msg = f"Code {discount_code} applied"
+        # ignore invalid codes silently for upgrade flow
     gst_amount = round(max(0, base_price - discount_value) * gst_pct / 100, 2)
     total      = round(max(0, base_price - discount_value) + gst_amount, 2)
+    amount_paise = int(total * 100)
     try:
         from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
     except Exception:
@@ -2434,22 +2508,36 @@ def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     end_date = from_date + timedelta(days=days)
     _months  = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
     def _df(dt): return f"{dt.day:02d} {_months[dt.month-1]} {dt.year}"
-    order_data = {"amount": int(total * 100), "currency": "INR",
-                  "receipt": f"upg_{pid[:8]}_{days}d",
-                  "notes": {"product_id": pid, "days": str(days), "merchant_id": merchant_id, "type": "upgrade"}}
-    resp = _razorpay_request("POST", "/v1/orders", (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), order_data)
-    rz = resp.json()
+
+    # For ₹0 (free after discount) — skip Razorpay, create a manual order
+    rp_order_id = None
+    pay_mode    = "manual"
+    if amount_paise > 0 and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+        try:
+            order_data = {"amount": amount_paise, "currency": "INR",
+                          "receipt": f"upg_{pid[:8]}_{days}d",
+                          "notes": {"product_id": pid, "days": str(days), "merchant_id": merchant_id, "type": "upgrade"}}
+            resp = _razorpay_request("POST", "/v1/orders", (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), order_data)
+            rz = resp.json()
+            rp_order_id = rz.get("id")
+            if rp_order_id: pay_mode = "razorpay"
+        except Exception:
+            pay_mode = "manual"
+
     db.product_upgrade_orders.insert_one({
-        "razorpay_order_id": rz["id"], "product_id": pid, "merchant_id": merchant_id,
+        "razorpay_order_id": rp_order_id, "product_id": pid, "merchant_id": merchant_id,
         "days": days, "from_date": from_date.isoformat(), "amount": total,
         "status": "created", "created_at": datetime.utcnow(),
     })
-    return {"order_id": rz["id"], "amount": total, "currency": "INR",
+    return {"order_id": rp_order_id or "", "amount": total, "currency": "INR",
             "key": RAZORPAY_KEY_ID, "gst": gst_amount, "days": days,
             "from_date": _df(from_date), "end_date": _df(end_date),
             "price_per_day": price_per_day, "base_price": base_price,
             "gst_percent": gst_pct, "gst_amount": gst_amount,
-            "discount_amount": discount_value, "amount_display": total}
+            "discount_amount": discount_value, "amount_display": total,
+            "amount_paise": amount_paise, "pay_mode": pay_mode,
+            "razorpay_key": RAZORPAY_KEY_ID, "razorpay_order_id": rp_order_id,
+            "discount_msg": discount_msg}
 
 
 @router.post("/products/{pid}/upgrade/verify")
@@ -2463,7 +2551,12 @@ def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
     plan       = data.get("plan", "1month")
 
     # Check if this is a free (₹0) order — skip Razorpay verification
+    # For ₹0 orders, order_id may be empty (no Razorpay order created).
+    # Look up by product_id as fallback.
     upg_order_check = db.product_upgrade_orders.find_one({"razorpay_order_id": order_id}) if order_id else None
+    if not upg_order_check:
+        upg_order_check = db.product_upgrade_orders.find_one(
+            {"product_id": pid, "status": "created"}, sort=[("created_at", -1)])
     _is_free = upg_order_check and float(upg_order_check.get("amount", 0)) <= 0
 
     if not _is_free:
@@ -2484,8 +2577,8 @@ def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
         if already:
             return {"ok": True, "message": "Product already upgraded to premium.", "already_upgraded": True}
         raise HTTPException(404, "Product not found")
-    # Retrieve days + from_date from the stored upgrade order
-    upg_order   = db.product_upgrade_orders.find_one({"razorpay_order_id": order_id})
+    # Retrieve days + from_date from the stored upgrade order (use fallback if already found)
+    upg_order   = upg_order_check or db.product_upgrade_orders.find_one({"razorpay_order_id": order_id})
     days        = int(upg_order.get("days", 30)) if upg_order else 30
     from_date_s = (upg_order or {}).get("from_date")
     try:
@@ -2559,12 +2652,15 @@ def renew_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     base_price    = round(price_per_day * days, 2)
     discount_code  = (data.get("discount_code") or "").strip().upper()
     discount_value = 0.0
+    discount_msg   = ""
     if discount_code:
-        dc = db.discount_codes.find_one({"code": discount_code, "active": True})
+        dc = db.discounts.find_one({"code": discount_code, "active": True})
         if dc:
             discount_value = float(dc.get("value", 0))
+            discount_msg = f"Code {discount_code} applied"
     gst_amount = round(max(0, base_price - discount_value) * gst_pct / 100, 2)
     total      = round(max(0, base_price - discount_value) + gst_amount, 2)
+    amount_paise = int(total * 100)
     # Compute renewal period from current end_date
     existing_end = prod.get("end_date")
     if isinstance(existing_end, datetime) and existing_end > datetime.utcnow():
@@ -2574,21 +2670,35 @@ def renew_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     new_end  = renew_from + timedelta(days=days)
     _months  = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
     def _df(dt): return f"{dt.day:02d} {_months[dt.month-1]} {dt.year}"
-    order_data = {"amount": int(total * 100), "currency": "INR",
-                  "receipt": f"ren_{pid[:8]}_{days}d",
-                  "notes": {"product_id": pid, "days": str(days), "merchant_id": merchant_id, "type": "renew"}}
-    resp = _razorpay_request("POST", "/v1/orders", (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), order_data)
-    rz = resp.json()
+
+    # For ₹0 (free after discount) — skip Razorpay, create a manual order
+    rp_order_id = None
+    pay_mode    = "manual"
+    if amount_paise > 0 and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+        try:
+            order_data = {"amount": amount_paise, "currency": "INR",
+                          "receipt": f"ren_{pid[:8]}_{days}d",
+                          "notes": {"product_id": pid, "days": str(days), "merchant_id": merchant_id, "type": "renew"}}
+            resp = _razorpay_request("POST", "/v1/orders", (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), order_data)
+            rz = resp.json()
+            rp_order_id = rz.get("id")
+            if rp_order_id: pay_mode = "razorpay"
+        except Exception:
+            pay_mode = "manual"
+
     db.product_renewal_orders.insert_one({
-        "razorpay_order_id": rz["id"], "product_id": pid, "merchant_id": merchant_id,
+        "razorpay_order_id": rp_order_id, "product_id": pid, "merchant_id": merchant_id,
         "days": days, "amount": total, "status": "created", "created_at": datetime.utcnow(),
     })
-    return {"order_id": rz["id"], "amount": total, "currency": "INR",
+    return {"order_id": rp_order_id or "", "amount": total, "currency": "INR",
             "key": RAZORPAY_KEY_ID, "gst": gst_amount, "days": days,
             "from_date": _df(renew_from), "end_date": _df(new_end),
             "price_per_day": price_per_day, "base_price": base_price,
             "gst_percent": gst_pct, "gst_amount": gst_amount,
-            "discount_amount": discount_value, "amount_display": total}
+            "discount_amount": discount_value, "amount_display": total,
+            "amount_paise": amount_paise, "pay_mode": pay_mode,
+            "razorpay_key": RAZORPAY_KEY_ID, "razorpay_order_id": rp_order_id,
+            "discount_msg": discount_msg}
 
 
 @router.post("/products/{pid}/renew/verify")
@@ -2602,7 +2712,11 @@ def verify_renewal_payment(pid: str, data: dict, m=Depends(get_merchant)):
     plan       = data.get("plan", "1month")
 
     # Check if this is a free (₹0) order — skip Razorpay verification
+    # For ₹0 orders, order_id may be empty (no Razorpay order created).
     ren_order_check = db.product_renewal_orders.find_one({"razorpay_order_id": order_id}) if order_id else None
+    if not ren_order_check:
+        ren_order_check = db.product_renewal_orders.find_one(
+            {"product_id": pid, "status": "created"}, sort=[("created_at", -1)])
     _is_free = ren_order_check and float(ren_order_check.get("amount", 0)) <= 0
 
     if not _is_free:
@@ -2616,8 +2730,8 @@ def verify_renewal_payment(pid: str, data: dict, m=Depends(get_merchant)):
         oid = ObjectId(pid)
     except Exception:
         raise HTTPException(400, "Invalid product ID")
-    # Retrieve days from the stored renewal order (per-day pricing)
-    ren_order = db.product_renewal_orders.find_one({"razorpay_order_id": order_id})
+    # Retrieve days from the stored renewal order (use fallback if already found)
+    ren_order = ren_order_check or db.product_renewal_orders.find_one({"razorpay_order_id": order_id})
     days = int(ren_order.get("days", 30)) if ren_order else 30
     prod = db.merchant_vouchers.find_one({"_id": oid, "merchant_id": merchant_id}, {"end_date": 1})
     existing_end = prod.get("end_date") if prod else None
