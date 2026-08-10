@@ -208,7 +208,7 @@ def get_store(store_id: str):
                 "price":          str(p.get("price","") or ""),
                 "original_price": str(p.get("original_price","") or ""),
                 "discount":       str(p.get("discount_label","") or ""),
-                "validity":       (str(p.get("end_date","") or "")[:10]) or (p.get("validity","") or ""),
+                "validity":       _safe_end_date(p) or (p.get("validity","") or ""),
                 "end_date":       str(p.get("end_date","") or ""),
                 # FIX: this endpoint never returned 'rating', so the Store
                 # Detail product cards (which read this list, not
@@ -240,7 +240,7 @@ def get_store(store_id: str):
                 "price":          str(p.get("price","") or ""),
                 "original_price": str(p.get("original_price","") or ""),
                 "discount":       "",
-                "validity":       (str(p.get("end_date","") or "")[:10]) or (p.get("validity","") or ""),
+                "validity":       _safe_end_date(p) or (p.get("validity","") or ""),
                 "end_date":       str(p.get("end_date","") or ""),
                 # FIX: this endpoint never returned 'rating' (see merchant_vouchers block above)
                 "rating":         float(p.get("rating") or p.get("avg_rating") or 0),
@@ -1342,7 +1342,7 @@ def get_gift_vouchers_public(city: str = ""):
             "id":           vid,
             "title":        d.get("title", ""),
             "text":         d.get("text", "") or d.get("offer_text", ""),
-            "validity":     (str(d.get("end_date","") or "")[:10]) or (d.get("validity","") or ""),
+            "validity":     _safe_end_date(d) or (d.get("validity","") or ""),
             "logo":         _resolve_img(d),
             "logo_url":     _resolve_img(d),
             "store_id":     sid,
@@ -1431,7 +1431,7 @@ def get_gift_vouchers_public(city: str = ""):
                 "id":           mvid,
                 "title":        mv.get("title") or mv.get("name") or "",
                 "text":         mv.get("offer_text") or mv.get("text") or "",
-                "validity":     (str(mv.get("end_date",""))[:10]) or (mv.get("validity","") or ""),
+                "validity":     _safe_end_date(mv) or (mv.get("validity","") or ""),
                 "logo":         _resolve_img(mv),
                 "logo_url":     _resolve_img(mv),
                 "store_id":     mvsid,

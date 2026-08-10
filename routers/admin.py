@@ -161,6 +161,55 @@ def _city_filter(a):
         return {"city": "____IMPOSSIBLE_CITY_NONE____"}
     return {"city": {"$in": cities}}
 
+def _safe_date(v, field):
+    """Return a date string WITHOUT corrupting 'DD Mon YYYY' format.
+    Handles: ISO datetime (YYYY-MM-DDTHH:MM:SS), ISO date (YYYY-MM-DD),
+    'DD Mon YYYY' (e.g. '12 Aug 2026'), datetime objects, and empty.
+    NEVER truncates 'DD Mon YYYY' to 10 chars — that produces '12 Aug 202'
+    which JavaScript parses as year 202 AD, causing false 'expired' status."""
+    raw = v.get(field, "") if isinstance(v, dict) else ""
+    if not raw:
+        return ""
+    if isinstance(raw, datetime):
+        return raw.strftime("%Y-%m-%d")
+    s = str(raw).strip()
+    if not s:
+        return ""
+    # ISO format: YYYY-MM-DD... -> first 10 chars is the date part
+    if len(s) >= 10 and s[4] == '-' and s[7] == '-':
+        return s[:10]
+    # 'DD Mon YYYY' (11 chars) or any other non-ISO format — return as-is
+    return s
+
+def _safe_logo(v):
+    """Return the best available logo URL from a product/voucher record.
+    Merchant vouchers store image as 'logo_url', admin products use 'logo'."""
+    for k in ("logo_url", "logo", "logo_thumb", "image_url"):
+        val = str(v.get(k, "") or "").strip()
+        if val:
+            return val
+    return ""
+
+def _safe_city(v):
+    """Return city from the record, with fallback to store lookup if missing.
+    Self-heals old records that were created before the city fix."""
+    city = str(v.get("city", "") or "").strip()
+    if city:
+        return city
+    store_id = str(v.get("store_id", "") or "").strip()
+    if store_id:
+        try:
+            from bson import ObjectId as _OID
+            st = db.stores.find_one({"_id": _OID(store_id)}, {"city": 1})
+            if st and st.get("city"):
+                return st["city"]
+        except Exception:
+            pass
+        st = db.stores.find_one({"store_id": store_id}, {"city": 1})
+        if st and st.get("city"):
+            return st["city"]
+    return ""
+
 def seed_admin():
     if not db.admins.find_one({"username": "admin"}):
         db.admins.insert_one({"username": "admin", "password": "admin123", "token": None})
@@ -3808,17 +3857,17 @@ def _fmt_admin_product_row(v, collection):
     mid   = v.get("merchant_id", "")
     phone = v.get("merchant_phone", "")
     src   = v.get("source", "admin")
-    # Normalise source: merchant_standard / merchant_premium → merchant
     is_merchant_src = src == "merchant" or src.startswith("merchant_")
     ptype = v.get("product_type", "premium")
-    # Build validity: use stored validity field, or construct from dates, or "Ongoing" for standard
+    _logo = _safe_logo(v)
+    _city = _safe_city(v)
     raw_validity = v.get("validity", "")
-    from_d = str(v.get("from_date", ""))[:10]
-    end_d  = str(v.get("end_date", ""))[:10]
+    from_d = _safe_date(v, "from_date")
+    end_d  = _safe_date(v, "end_date")
     if raw_validity:
         computed_validity = raw_validity
     elif from_d and end_d:
-        computed_validity = f"{from_d} → {end_d}"
+        computed_validity = f"{from_d} \u2192 {end_d}"
     elif end_d:
         computed_validity = f"Until {end_d}"
     elif ptype == "standard":
@@ -3829,10 +3878,11 @@ def _fmt_admin_product_row(v, collection):
         "id":                str(v["_id"]),
         "_id":               str(v["_id"]),
         "_collection":       collection,
-        "logo":              v.get("logo", ""),
+        "logo":              _logo,
+        "logo_url":          _logo,
         "title":             v.get("title", ""),
-        "text":              v.get("text", ""),
-        "offer_text":        v.get("text", ""),
+        "text":              v.get("text", "") or v.get("offer_text", ""),
+        "offer_text":        v.get("offer_text", v.get("text", "")),
         "price":             v.get("price", 0),
         "from_date":         from_d,
         "end_date":          end_d,
@@ -3848,19 +3898,19 @@ def _fmt_admin_product_row(v, collection):
         "merchant_phone":    phone,
         "store_id":          v.get("store_id", ""),
         "store_name":        v.get("store_name", ""),
-        "city":              v.get("city", ""),
+        "city":              _city,
         "sale_price":        v.get("sale_price", v.get("price", 0)),
         "original_price":    v.get("original_price", v.get("mrp", 0)),
-        "logo_url":          v.get("logo_url", v.get("logo", "")),
         "duration_days":     v.get("duration_days", 0),
-        "pay_from_date":     str(v.get("pay_from_date", ""))[:10],
-        "pay_to_date":       str(v.get("pay_to_date", ""))[:10],
+        "pay_from_date":     _safe_date(v, "pay_from_date"),
+        "pay_to_date":       _safe_date(v, "pay_to_date"),
         "pay_amount":        v.get("pay_amount", 0),
         "pay_gst":           v.get("pay_gst", 18),
         "pay_mode":          v.get("pay_mode", ""),
         "pay_ref":           v.get("pay_ref", ""),
         "created_at":        str(v.get("created_at", ""))[:19],
     }
+
 
 
 @router.get("/products")
@@ -3984,15 +4034,18 @@ def approve_merchant_product_card(vid: str, a=Depends(get_current_admin)):
             {"$set": {"approval_status": final_status, "status": final_status,
                       "approved_at": datetime.utcnow().isoformat()}}
         )
-        # Mirror into gift_vouchers
+        _logo_val = v.get("logo_url", v.get("logo", ""))
+        # Mirror into gift_vouchers — copy ALL fields for parity
         db.gift_vouchers.update_one(
             {"source_voucher_id": vid},
             {"$set": {
                 "title":             v.get("title", ""),
                 "text":              v.get("offer_text", v.get("text", "")),
-                "logo":              v.get("logo_url", v.get("logo", "")),
+                "offer_text":        v.get("offer_text", v.get("text", "")),
+                "logo":              _logo_val,
+                "logo_url":          _logo_val,
                 "validity":          v.get("validity") or (
-                                         f"{v.get('from_date', '')} → {v.get('end_date', '')}"
+                                         f"{v.get('from_date', '')} \u2192 {v.get('end_date', '')}"
                                          if v.get("from_date") else "30 days"),
                 "is_active":         final_status == "approved",
                 "approval_status":   final_status,
@@ -4001,10 +4054,13 @@ def approve_merchant_product_card(vid: str, a=Depends(get_current_admin)):
                 "source_voucher_id": vid,
                 "merchant_id":       str(v.get("merchant_id", "")),
                 "merchant_name":     v.get("merchant_name", ""),
+                "merchant_phone":    str(v.get("merchant_phone", "")),
                 "store_id":          v.get("store_id", ""),
                 "store_name":        v.get("store_name", "") or v.get("merchant_name", ""),
                 "city":              v.get("city", ""),
                 "product_type":      v.get("product_type", "premium"),
+                "price":             str(v.get("price", "") or ""),
+                "original_price":    str(v.get("original_price", "") or ""),
                 "amount":            v.get("amount", v.get("total", 0)),
                 "duration_days":     v.get("duration_days", 0),
                 "end_date":          v.get("end_date", ""),
@@ -4091,17 +4147,21 @@ def list_merchant_products(a=Depends(get_current_admin)):
     city_f = _city_filter(a)
     result = []
     for v in db.merchant_vouchers.find({**city_f} if city_f else {}).sort("_id", -1):
+        _logo = _safe_logo(v)
+        _city = _safe_city(v)
         result.append({
             "id":              str(v["_id"]),
             "_id":             str(v["_id"]),
             "_collection":     "merchant_vouchers",
-            "logo":            v.get("logo", ""),
+            "logo":            _logo,
+            "logo_url":        _logo,
             "title":           v.get("title", ""),
-            "text":            v.get("text", ""),
-            "offer_text":      v.get("text", ""),
+            "text":            v.get("text", "") or v.get("offer_text", ""),
+            "offer_text":      v.get("offer_text", v.get("text", "")),
             "price":           v.get("price", 0),
-            "from_date":       str(v.get("from_date", ""))[:10],
-            "end_date":        str(v.get("end_date", ""))[:10],
+            "original_price":  v.get("original_price", ""),
+            "from_date":       _safe_date(v, "from_date"),
+            "end_date":        _safe_date(v, "end_date"),
             "validity":        v.get("validity", ""),
             "is_active":       v.get("is_active", True),
             "status":          v.get("status", "pending"),
@@ -4112,7 +4172,8 @@ def list_merchant_products(a=Depends(get_current_admin)):
             "merchant_phone":  v.get("merchant_phone", ""),
             "store_id":        v.get("store_id", ""),
             "store_name":      v.get("store_name", ""),
-            "city":            v.get("city", ""),
+            "city":            _city,
+            "duration_days":   v.get("duration_days", 0),
             "created_at":      str(v.get("created_at", ""))[:19],
         })
     return result

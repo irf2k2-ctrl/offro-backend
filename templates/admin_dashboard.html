@@ -4548,18 +4548,20 @@ const _VZ_PER_PAGE = 15;
 function _parseFlexDate(s) {
   if (!s) return null;
   s = String(s).trim();
-  // Already ISO — just parse
+  const months = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  // DEFENSIVE: Try named patterns FIRST — handles "12 Aug 2026" correctly
+  // and also catches corrupted "12 Aug 202" (3-digit year from bad truncation)
+  // by requiring exactly 4 digits.
+  const named = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+  if (named) { const m = months[named[2].toLowerCase()]; if (m) { const d = new Date(`${named[3]}-${String(m).padStart(2,'0')}-${named[1].padStart(2,'0')}`); if (!isNaN(d)) return d; } }
+  const named2 = s.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})$/);
+  if (named2) { const m = months[named2[1].toLowerCase()]; if (m) { const d = new Date(`${named2[3]}-${String(m).padStart(2,'0')}-${named2[2].padStart(2,'0')}`); if (!isNaN(d)) return d; } }
+  // Try ISO first — but REJECT if year < 1000 (catches "12 Aug 202" = year 202 AD)
   let d = new Date(s);
-  if (!isNaN(d)) return d;
+  if (!isNaN(d) && d.getFullYear() >= 1000) return d;
   // DD-MM-YYYY or DD/MM/YYYY → YYYY-MM-DD
   const dmy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
   if (dmy) { d = new Date(`${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`); if (!isNaN(d)) return d; }
-  // "13 Jun 2026" or "Jun 13 2026"
-  const months = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
-  const named = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
-  if (named) { const m = months[named[2].toLowerCase()]; if (m) { d = new Date(`${named[3]}-${String(m).padStart(2,'0')}-${named[1].padStart(2,'0')}`); if (!isNaN(d)) return d; } }
-  const named2 = s.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})$/);
-  if (named2) { const m = months[named2[1].toLowerCase()]; if (m) { d = new Date(`${named2[3]}-${String(m).padStart(2,'0')}-${named2[2].padStart(2,'0')}`); if (!isNaN(d)) return d; } }
   return null;
 }
 
