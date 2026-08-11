@@ -5196,7 +5196,7 @@ function _vzUpdateDiscount() {
   const op = parseFloat(document.getElementById('pc_edit_original_price')?.value);
   const el = document.getElementById('pc_edit_discount');
   if (!el) return;
-  if (sp && op && op > sp > 0) {
+  if (sp && op && op > sp && sp > 0) {
     el.value = `${Math.round((op - sp) / op * 100)}% OFF`;
   } else {
     el.value = '';

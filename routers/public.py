@@ -1331,6 +1331,28 @@ def get_gift_vouchers_public(city: str = ""):
         except Exception:
             return ""
 
+    def _get_store_rating(sid: str, mid: str = "") -> float:
+        """Get store rating — try store_id first, then merchant_id lookup."""
+        for lookup_id, lookup_field in [(sid, "_id"), (mid, "merchant_id")]:
+            if not lookup_id:
+                continue
+            try:
+                if lookup_field == "_id":
+                    s = db.stores.find_one({"_id": OId(lookup_id)}, {"rating": 1, "admin_rating": 1})
+                else:
+                    clauses = [{"merchant_id": lookup_id}]
+                    try:
+                        clauses.append({"merchant_id": OId(lookup_id)})
+                    except Exception:
+                        pass
+                    s = db.stores.find_one({"$or": clauses}, {"rating": 1, "admin_rating": 1})
+                if s:
+                    r = s.get("rating") or s.get("admin_rating") or 0
+                    return float(r) if r else 0.0
+            except Exception:
+                pass
+        return 0.0
+
     # ── 1. gift_vouchers collection (Premium only — Standard are subscription-linked, shown in Store Detail) ──
     for d in db.gift_vouchers.find({"product_type": {"$ne": "standard"}}).sort("_id", -1):
         if not _is_active(d): continue
