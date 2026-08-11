@@ -4,6 +4,25 @@ from bson import ObjectId
 
 router = APIRouter(tags=["Public"])
 
+def _safe_end_date(p):
+    """Return end_date string without corrupting 'DD Mon YYYY' format.
+    The old [:10] truncation turned '12 Aug 2026' into '12 Aug 202' (year 202 AD).
+    Handles: ISO datetime, ISO date, 'DD Mon YYYY', datetime objects, and empty."""
+    from datetime import datetime as _dt
+    raw = p.get("end_date", "") if isinstance(p, dict) else ""
+    if not raw:
+        return ""
+    if isinstance(raw, _dt):
+        return raw.strftime("%Y-%m-%d")
+    s = str(raw).strip()
+    if not s:
+        return ""
+    # ISO format: YYYY-MM-DD... -> first 10 chars is the date part
+    if len(s) >= 10 and s[4] == '-' and s[7] == '-':
+        return s[:10]
+    # 'DD Mon YYYY' or other format — return as-is
+    return s
+
 # =================== PUBLIC STORES LIST ===================
 @router.get("/stores")
 def get_stores(city: str = None, category: str = None):
