@@ -4651,10 +4651,13 @@ async function loadGiftCards() {
         store_name:  v.store_name || '',
         city:        v.city       || '',
         // product-specific fields
-        price:       v.price || '',
-        discount:    v.discount || '',
-        category:    v.category || '',
-        description: v.description || '',
+        price:         v.price || '',
+        sale_price:    v.sale_price ?? v.price ?? '',
+        original_price: (v.original_price ?? v.mrp) ?? '',
+        discount:      v.discount || v.discount_label || '',
+        discount_label: v.discount_label || '',
+        category:      v.category || '',
+        description:   v.description || '',
         // product type — must be propagated so type badge renders correctly
         product_type: v.product_type || 'standard',
       };
@@ -4711,6 +4714,11 @@ async function loadGiftCards() {
         duration_days:v.duration_days || '',
         amount:       v.amount || 0,
         _raw: v,
+        // product-specific fields for edit modal
+        sale_price:     v.sale_price ?? v.price ?? '',
+        original_price: (v.original_price ?? v.mrp) ?? '',
+        discount_label: v.discount_label || v.discount || '',
+        discount:      v.discount || v.discount_label || '',
       };
     });
 
@@ -5039,6 +5047,25 @@ function openVZEdit(id, source) {
 
 // FIX 10: Merchant product edit modal (admin side)
 let _vzMerchantEditCurrent = null;
+// Convert any date format to YYYY-MM-DD for <input type="date">
+function _toISODate(s) {
+  if (!s) return '';
+  s = String(s).trim();
+  // Already ISO
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0,10);
+  // "DD Mon YYYY" format (e.g. "12 Aug 2026")
+  const m = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})/);
+  if (m) {
+    const months = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+    const d = m[1].padStart(2,'0');
+    const mo = months[m[2]] || '01';
+    return m[3] + '-' + mo + '-' + d;
+  }
+  // Try Date.parse
+  const dt = new Date(s);
+  if (!isNaN(dt)) return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+  return '';
+}
 function openVZMerchantEditModal(row) {
   _vzMerchantEditCurrent = row;
   const el = id => document.getElementById(id);
@@ -5161,14 +5188,16 @@ function openVZMerchantEditModal(row) {
   const el2 = id => document.getElementById(id);
   if(el2('pc_edit_title'))           el2('pc_edit_title').value           = row.title||'';
   if(el2('pc_edit_offer'))           el2('pc_edit_offer').value           = row.offer_text||row.text||'';
-  if(el2('pc_edit_from_date'))       el2('pc_edit_from_date').value       = row.from_date||'';
-  if(el2('pc_edit_end_date'))        el2('pc_edit_end_date').value        = row.end_date||'';
+  if(el2('pc_edit_from_date'))       el2('pc_edit_from_date').value       = _toISODate(row.from_date);
+  if(el2('pc_edit_end_date'))        el2('pc_edit_end_date').value        = _toISODate(row.end_date);
   if(el2('pc_edit_validity'))        el2('pc_edit_validity').value        = row.validity||'';
   if(el2('pc_edit_logo'))            el2('pc_edit_logo').value            = row.logo||row.logo_url||'';
   if(el2('pc_edit_city'))            el2('pc_edit_city').value            = row.city||'';
   if(el2('pc_edit_store_name'))      el2('pc_edit_store_name').value      = row.store_name||'';
   if(el2('pc_edit_sale_price'))      el2('pc_edit_sale_price').value      = row.sale_price ?? row.price ?? '';
   if(el2('pc_edit_original_price'))  el2('pc_edit_original_price').value  = row.original_price ?? row.mrp ?? '';
+  // Also populate discount label from row data
+  if(el2('pc_edit_discount') && !el2('pc_edit_discount').value) el2('pc_edit_discount').value = row.discount_label || row.discount || '';
   if(el2('pc_edit_product_type'))    el2('pc_edit_product_type').value    = row.product_type||'premium';
   if(el2('pc_edit_active'))          el2('pc_edit_active').checked        = row.is_active !== false;
   // Auto-compute discount label
