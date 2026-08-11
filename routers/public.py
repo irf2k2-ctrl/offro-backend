@@ -1077,12 +1077,11 @@ kyc@localsaver.in"""
 def _get_user_optional(request: _Req):
     token = request.cookies.get("user_token") or request.headers.get("Authorization","").replace("Bearer ","").strip()
     if not token: return None
-    # FIX: this only ever checked the legacy 'users' collection, so any user
-    # logged in via the unified 'accounts' collection (the primary path today)
-    # was never found here — submit_product_review then saved their review
-    # as user_id=None (anonymous), and get_my_product_review always returned {}.
-    # That's why a submitted rating always "disappeared" on refresh/return.
-    return db.accounts.find_one({"token": token}) or db.users.find_one({"token": token})
+    # FIX: also check merchants collection as fallback — some legacy accounts
+    # may only exist there. Also handle empty-string tokens that slip through.
+    if not token or token == "": return None
+    user = db.accounts.find_one({"token": token}) or db.users.find_one({"token": token}) or db.merchants.find_one({"token": token})
+    return user
 
 @router.post("/stores/{store_id}/rate")
 def rate_store(store_id: str, data: dict, request: _Req):
@@ -1312,13 +1311,17 @@ def get_gift_vouchers_public(city: str = ""):
         for k in ["logo", "logo_url", "image_url", "image", "thumbnail"]:
             v = str(doc.get(k, "") or "")
             if v.startswith("http"): return v
+            # FIX: accept base64 data:image values (used when Cloudinary isn't configured)
+            if v.startswith("data:image"): return v
         store_id = doc.get("store_id", "")
         if store_id:
             try:
                 s = db.stores.find_one({"_id": OId(store_id)},
                                        {"store_image2": 1, "image": 1, "image2": 1})
                 if s:
-                    return s.get("store_image2") or s.get("image2") or s.get("image") or ""
+                    for sk in ["store_image2", "image2", "image"]:
+                        sv = str(s.get(sk, "") or "")
+                        if sv.startswith("http") or sv.startswith("data:image"): return sv
             except: pass
         return ""
 
