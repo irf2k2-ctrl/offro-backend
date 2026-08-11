@@ -1587,14 +1587,29 @@ def track_product_event(pid: str, data: dict):
     event = data.get("event", "view")
     if event not in ("view", "share", "open"):
         event = "view"
-    merchant_id = data.get("merchant_id", "")
+    # FIX: the Flutter app's trackProductEvent() never sends merchant_id, so
+    # events were always stored with merchant_id="" — which meant
+    # get_product_analytics() (filtered by the logged-in merchant's real id)
+    # never matched any events and always showed 0. Resolve merchant_id
+    # server-side from the product document itself so tracking works
+    # regardless of what the client sends.
+    merchant_id = str(data.get("merchant_id", "") or "")
+    if not merchant_id:
+        try:
+            _pid_oid = _OId4(pid)
+            _src_doc = db.merchant_vouchers.find_one({"_id": _pid_oid}, {"merchant_id": 1}) \
+                or db.gift_vouchers.find_one({"_id": _pid_oid}, {"merchant_id": 1})
+            if _src_doc:
+                merchant_id = str(_src_doc.get("merchant_id", "") or "")
+        except Exception:
+            pass
     db.product_events.insert_one({
         "product_id": pid, "merchant_id": merchant_id,
         "event": event, "created_at": _dtt.utcnow(),
     })
     for col in [db.merchant_vouchers, db.gift_vouchers]:
         try:
-            col.update_one({"_id": _OId4(pid)}, {"$inc": {f"{event}_count": 1}})
+            col.update_one({"_id": _OId4(pid)}, {"$inc": {f"{event}_count": 1}, "$set": {"last_seen": _dtt.utcnow()}})
         except Exception:
             pass
     return {"ok": True}

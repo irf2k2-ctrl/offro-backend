@@ -2806,13 +2806,29 @@ def get_product_analytics(pid: str, m=Depends(get_merchant)):
         ObjectId(pid)
     except Exception:
         raise HTTPException(400, "Invalid product ID")
-    events = list(db.product_events.find({"product_id": pid, "merchant_id": merchant_id}, {"event": 1}))
+    # FIX: response keys must match what products_phase2.dart reads
+    # (views/shares/opens/last_viewed) — this previously returned
+    # view/share/open (no 's') + no last_viewed at all, so the Flutter
+    # ProductAnalyticsPage always showed 0s and "—" even when events existed.
+    events = list(db.product_events.find(
+        {"product_id": pid, "merchant_id": merchant_id}, {"event": 1, "created_at": 1}
+    ).sort("created_at", -1))
     counts = {"view": 0, "share": 0, "open": 0}
+    last_viewed = ""
     for e in events:
         ev = e.get("event", "")
         if ev in counts:
             counts[ev] += 1
-    return {"product_id": pid, **counts, "total": sum(counts.values())}
+        if ev == "view" and not last_viewed and e.get("created_at"):
+            last_viewed = str(e["created_at"])[:19]
+    return {
+        "product_id":  pid,
+        "views":       counts["view"],
+        "shares":      counts["share"],
+        "opens":       counts["open"],
+        "last_viewed": last_viewed,
+        "total":       sum(counts.values()),
+    }
 
 
 @router.get("/products/{pid}/history")
