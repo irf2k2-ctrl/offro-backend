@@ -291,6 +291,50 @@ def _ensure_indexes():
         db.accounts.create_index("roles",       background=True)
         db.accounts.create_index("merchant_id", background=True, sparse=True)
         db.accounts.create_index("user_id",     background=True, sparse=True)
+        # PERMANENT DUPLICATE-BANNER FIX: hard DB-level guarantee that a single
+        # banner_orders submission (order_id) can never produce more than one
+        # merchant_banners document — even under concurrent/double-tap requests
+        # that race past the application-level idempotency check. This is a
+        # sparse unique index (old records with no source_order_id are unaffected).
+        db.merchant_banners.create_index(
+            "source_order_id",
+            name="merchant_banners_source_order_id_unique",
+            unique=True,
+            sparse=True,
+            background=True,
+        )
+        # PERMANENT DUPLICATE-BANNER FIX (approval side): the admin "Approve"
+        # button upserts a promo_sliders doc keyed on source_banner_id. Without
+        # a unique index backing that key, MongoDB's upsert is NOT safe against
+        # concurrent requests (double-click, dashboard retry) — both can find
+        # "no existing match" before either has inserted, producing two
+        # promo_sliders documents for the same banner. This unique sparse index
+        # makes that scenario impossible at the DB layer (old admin-created
+        # banners with no source_banner_id are unaffected — sparse).
+        # SELF-HEALING: pre-existing duplicate source_banner_id values (created
+        # by the race before this fix existed) would make index creation fail,
+        # so clean those up first — keep the oldest doc per source_banner_id.
+        try:
+            _sbid_groups = {}
+            for _s in db.promo_sliders.find({"source_banner_id": {"$exists": True, "$ne": ""}}, {"_id": 1, "source_banner_id": 1, "created_at": 1}):
+                _sbid_groups.setdefault(_s["source_banner_id"], []).append(_s)
+            for _sbid, _docs in _sbid_groups.items():
+                if len(_docs) < 2:
+                    continue
+                _docs_sorted = sorted(_docs, key=lambda d: str(d.get("created_at", "")))
+                for _dup in _docs_sorted[1:]:
+                    db.promo_sliders.delete_one({"_id": _dup["_id"]})
+            if _sbid_groups:
+                print("✅ Pre-index dedup: cleaned any pre-existing promo_sliders duplicates")
+        except Exception as _dedup_err:
+            print(f"⚠️  Pre-index promo_sliders dedup warning: {_dedup_err}")
+        db.promo_sliders.create_index(
+            "source_banner_id",
+            name="promo_sliders_source_banner_id_unique",
+            unique=True,
+            sparse=True,
+            background=True,
+        )
         print("✅ MongoDB indexes ensured")
     except Exception as e:
         print(f"⚠️  Index creation warning: {e}")

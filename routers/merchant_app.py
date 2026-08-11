@@ -6,7 +6,9 @@ from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
 from datetime import datetime, timedelta
-import uuid, qrcode, io, base64, hmac, hashlib
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
+import uuid, qrcode, io, base64, hmac, hashlib, time as _banner_time
 
 
 import os as _cld_os, hashlib as _cld_hash, time as _cld_time
@@ -1365,16 +1367,34 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     image_url   = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
     image_thumb = _make_thumb_url(image_url)
 
-    order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
-    if not order:
-        raise HTTPException(404, "Order not found")
-
-    # IDEMPOTENCY GUARD: if already submitted → return existing data, never insert twice.
-    # (Mirrors the guard in verify_banner_payment below — prevents double-tap / retry
-    # from creating a second merchant_banners document for the same order, which showed
-    # up in the admin dashboard as a "duplicate" banner: one pending, one approved.)
-    if order.get("status") in ("submitted", "paid"):
-        existing_banner_id = order.get("banner_id", "")
+    # ATOMIC CLAIM (PERMANENT DUPLICATE-BANNER FIX): a single banner_orders
+    # document can only be "claimed" for submission ONCE. find_one_and_update
+    # is a single atomic Mongo operation, so if two requests race (double-tap,
+    # network retry, client resubmit), only ONE of them can successfully
+    # transition status out of its pre-submission state — the loser gets
+    # order=None back and falls into the "already submitted" branch below
+    # instead of proceeding to insert a second merchant_banners document.
+    # This closes the exact race window that the old find_one-then-insert_one
+    # pattern left open (both requests could pass the check before either wrote).
+    order = db.banner_orders.find_one_and_update(
+        {"_id": ObjectId(order_id), "merchant_id": merchant_id,
+         "status": {"$nin": ["submitted", "paid", "claimed"]}},
+        {"$set": {"status": "claimed", "claimed_at": datetime.utcnow()}},
+        return_document=ReturnDocument.BEFORE,
+    )
+    if order is None:
+        existing = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
+        if not existing:
+            raise HTTPException(404, "Order not found")
+        # Another request already claimed/submitted this order. If it's still
+        # mid-flight ("claimed" but banner_id not yet set), briefly poll —
+        # the insert below takes milliseconds — then return its result.
+        for _ in range(20):
+            if existing.get("banner_id") or existing.get("status") not in ("claimed",):
+                break
+            _banner_time.sleep(0.15)
+            existing = db.banner_orders.find_one({"_id": ObjectId(order_id)})
+        existing_banner_id = existing.get("banner_id", "")
         existing_banner = db.merchant_banners.find_one({"_id": ObjectId(existing_banner_id)}) if existing_banner_id else None
         existing_inv_no = (existing_banner or {}).get("invoice_no", "")
         return {"message": "Banner already activated.", "banner_id": existing_banner_id, "invoice_no": existing_inv_no}
@@ -1441,9 +1461,24 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "payment_status":   "free",
         "status":           "pending",
         "approval_status":  "pending",
+        "source_order_id":  order_id,  # DB-level unique index enforces one banner per order — hard duplicate guarantee
         "created_at":       datetime.utcnow().isoformat(),
     }
-    res = db.merchant_banners.insert_one(banner)
+    # DB-LEVEL SAFETY NET: even if the atomic claim above were somehow bypassed
+    # (e.g. two different order_ids for identical content, a scenario the
+    # content-dedup check above already mostly catches), the unique index on
+    # source_order_id makes a true duplicate for THIS order physically
+    # impossible at the database layer — insert_one raises DuplicateKeyError
+    # instead of silently creating a second document.
+    try:
+        res = db.merchant_banners.insert_one(banner)
+    except DuplicateKeyError:
+        _existing = db.merchant_banners.find_one({"source_order_id": order_id})
+        db.banner_orders.update_one({"_id": ObjectId(order_id)},
+            {"$set": {"status": "submitted", "banner_id": str(_existing["_id"]),
+                      "store_id": store_id, "city": city}})
+        return {"message": "Banner already submitted for review.",
+                "banner_id": str(_existing["_id"]), "invoice_no": _existing.get("invoice_no", "")}
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "submitted", "banner_id": str(res.inserted_id),
                   "store_id": store_id, "city": city}})
@@ -1490,21 +1525,40 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     razorpay_order_id   = data.get("razorpay_order_id", "")
     razorpay_signature  = data.get("razorpay_signature", "")
 
-    order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
-    if not order:
+    _precheck_order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
+    if not _precheck_order:
         raise HTTPException(404, "Order not found")
-
-    # IDEMPOTENCY GUARD: if already paid → return existing data, never insert twice
-    if order.get("status") == "paid":
-        existing_banner = db.merchant_banners.find_one({"_id": ObjectId(order.get("banner_id", ""))}) if order.get("banner_id") else None
-        existing_inv_no = (existing_banner or {}).get("invoice_no") or order.get("invoice_no", "")
-        return {"message": "Payment already verified.", "banner_id": order.get("banner_id", ""), "invoice_no": existing_inv_no}
 
     if RAZORPAY_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
         msg = f"{razorpay_order_id}|{razorpay_payment_id}"
         expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
+
+    # ATOMIC CLAIM (PERMANENT DUPLICATE-BANNER FIX): mirrors activate_free_banner
+    # above — a single banner_orders document can only be "claimed" for
+    # verification ONCE. find_one_and_update is a single atomic Mongo operation,
+    # so double-tap / retry requests racing each other can no longer both pass
+    # a stale "already paid?" check before either has written — only one wins
+    # the atomic transition and proceeds to insert a merchant_banners doc.
+    order = db.banner_orders.find_one_and_update(
+        {"_id": ObjectId(order_id), "merchant_id": merchant_id,
+         "status": {"$nin": ["submitted", "paid", "claimed"]}},
+        {"$set": {"status": "claimed", "claimed_at": datetime.utcnow()}},
+        return_document=ReturnDocument.BEFORE,
+    )
+    if order is None:
+        existing = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
+        if not existing:
+            raise HTTPException(404, "Order not found")
+        for _ in range(20):
+            if existing.get("banner_id") or existing.get("status") not in ("claimed",):
+                break
+            _banner_time.sleep(0.15)
+            existing = db.banner_orders.find_one({"_id": ObjectId(order_id)})
+        existing_banner = db.merchant_banners.find_one({"_id": ObjectId(existing.get("banner_id", ""))}) if existing.get("banner_id") else None
+        existing_inv_no = (existing_banner or {}).get("invoice_no") or existing.get("invoice_no", "")
+        return {"message": "Payment already verified.", "banner_id": existing.get("banner_id", ""), "invoice_no": existing_inv_no}
 
     # Read store/city from Flutter payload (Flutter sends these on payment verification)
     store_id   = (data.get("store_id")   or "").strip()
@@ -1563,9 +1617,19 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "payment_status":   "paid",
         "status":           "pending",
         "approval_status":  "pending",
+        "source_order_id":  order_id,  # DB-level unique index enforces one banner per order — hard duplicate guarantee
         "created_at":       datetime.utcnow().isoformat(),
     }
-    res = db.merchant_banners.insert_one(banner)
+    # DB-LEVEL SAFETY NET — see activate_free_banner for full rationale.
+    try:
+        res = db.merchant_banners.insert_one(banner)
+    except DuplicateKeyError:
+        _existing = db.merchant_banners.find_one({"source_order_id": order_id})
+        db.banner_orders.update_one({"_id": ObjectId(order_id)},
+            {"$set": {"status": "paid", "banner_id": str(_existing["_id"]),
+                      "store_id": store_id, "city": city}})
+        return {"message": "Payment already verified.",
+                "banner_id": str(_existing["_id"]), "invoice_no": _existing.get("invoice_no", "")}
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "paid", "banner_id": str(res.inserted_id),
                   "store_id": store_id, "city": city}})

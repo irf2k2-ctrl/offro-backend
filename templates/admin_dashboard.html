@@ -3556,9 +3556,16 @@ function openBnMerchantEditModal(row) {
           <input id="bn_edit_title" type="text" class="form-control" style="margin-top:4px">
         </div>
         <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Image URL</label>
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Banner Image</label>
           <input id="bn_edit_image" type="text" class="form-control" style="margin-top:4px" placeholder="https://...">
-          <img id="bn_edit_preview" src="" style="margin-top:8px;width:100%;height:80px;object-fit:cover;border-radius:8px;display:none">
+          <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+            <label style="flex:1;cursor:pointer;text-align:center;padding:8px 12px;border:1.5px dashed var(--border);border-radius:8px;font-size:12px;color:var(--muted);transition:all .2s" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+              📁 Choose Image File
+              <input type="file" id="bn_edit_file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="bnUploadEditFile(this)">
+            </label>
+          </div>
+          <div id="bn_edit_upload_status" style="font-size:11px;margin-top:4px"></div>
+          <img id="bn_edit_preview" src="" style="margin-top:8px;width:100%;height:100px;object-fit:contain;border-radius:8px;border:1px solid var(--border);display:none;background:#f8faf9">
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
           <div>
@@ -3639,6 +3646,43 @@ function autoCalcBnEndDate() {
     }
   }
   endEl.value = '';
+}
+
+// Upload banner image file (for edit modal)
+async function bnUploadEditFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('bn_edit_upload_status');
+  const imgEl    = document.getElementById('bn_edit_preview');
+  const urlEl    = document.getElementById('bn_edit_image');
+
+  statusEl.style.color = 'var(--muted)';
+  statusEl.innerText = '\u23f3 Uploading...';
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/admin/upload-image', {
+      method: 'POST',
+      credentials: 'include',
+      body: fd
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      statusEl.style.color = 'var(--danger)';
+      statusEl.innerText = '\u2717 ' + (data.error || 'Upload failed');
+      return;
+    }
+    // Set the URL in the text field + preview
+    urlEl.value = data.url;
+    imgEl.src = data.url;
+    imgEl.style.display = 'block';
+    statusEl.style.color = 'var(--primary)';
+    statusEl.innerText = '\u2713 Image uploaded successfully';
+  } catch(e) {
+    statusEl.style.color = 'var(--danger)';
+    statusEl.innerText = '\u2717 Upload error: ' + e.message;
+  }
 }
 
 async function saveBnMerchantEdit() {

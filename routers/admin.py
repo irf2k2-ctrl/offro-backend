@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
 from datetime import datetime, timedelta
+from pymongo.errors import DuplicateKeyError
 import uuid, qrcode, io, base64
 import time as _time
 
@@ -2872,30 +2873,40 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
             "source": "merchant",
             "_id": {"$ne": _existing_dup["_id"]},
         })
-    db.promo_sliders.update_one(
-        _match_query,
-        {"$set": {
-            "title":         b.get("title",""),
-            "image_url":     b.get("image_url",""),
-            "is_active":     True,
-            "sort_order":    50,
-            "source":        "merchant",
-            "source_banner_id": bid,
-            "merchant_id":   str(b.get("merchant_id","")),
-            "merchant_name": b.get("merchant_name",""),
-            "expires_at":    b.get("end_date",""),
-            "from_date":     b.get("from_date",""),
-            "end_date":      b.get("end_date",""),
-            "duration_days": b.get("duration_days",""),
-            "merchant_phone": b.get("merchant_phone",""),
-            "city":          _approve_city,
-            "store_id":      _approve_store_id,
-            "store_name":    _approve_store_name,
-            "updated_at":    datetime.utcnow().isoformat(),
-        },
-         "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}},
-        upsert=True
-    )
+    _promo_set_fields = {
+        "title":         b.get("title",""),
+        "image_url":     b.get("image_url",""),
+        "is_active":     True,
+        "sort_order":    50,
+        "source":        "merchant",
+        "source_banner_id": bid,
+        "merchant_id":   str(b.get("merchant_id","")),
+        "merchant_name": b.get("merchant_name",""),
+        "expires_at":    b.get("end_date",""),
+        "from_date":     b.get("from_date",""),
+        "end_date":      b.get("end_date",""),
+        "duration_days": b.get("duration_days",""),
+        "merchant_phone": b.get("merchant_phone",""),
+        "city":          _approve_city,
+        "store_id":      _approve_store_id,
+        "store_name":    _approve_store_name,
+        "updated_at":    datetime.utcnow().isoformat(),
+    }
+    # DB-LEVEL SAFETY NET (PERMANENT DUPLICATE-BANNER FIX): promo_sliders now
+    # has a unique index on source_banner_id (see server.py _ensure_indexes).
+    # Two concurrent "Approve" clicks racing past the _existing_dup check above
+    # (both saw "no existing promo_slider yet") can no longer both succeed —
+    # the loser's upsert-insert is rejected by the unique index, we catch that
+    # and fall back to a plain update on the winner's now-existing document.
+    try:
+        db.promo_sliders.update_one(
+            _match_query,
+            {"$set": _promo_set_fields,
+             "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}},
+            upsert=True
+        )
+    except DuplicateKeyError:
+        db.promo_sliders.update_one({"source_banner_id": bid}, {"$set": _promo_set_fields})
     # Also clean up any duplicate merchant_banners entries for the same order
     # (prevents the "pending twin" from showing alongside the approved one)
     _order_id = b.get("order_id", "")
@@ -2941,7 +2952,20 @@ def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
         {"$set": update_data}
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Banner not found")
+        raise HTTPException(404, detail="Banner not found")
+    # If banner is approved, sync image/title changes to the linked promo_slider
+    # so the app shows the updated image immediately without re-approval.
+    _slider_sync = {}
+    if "image_url" in update_data:
+        _slider_sync["image_url"] = update_data["image_url"]
+    if "title" in update_data:
+        _slider_sync["title"] = update_data["title"]
+    if _slider_sync:
+        _slider_sync["updated_at"] = datetime.utcnow().isoformat()
+        db.promo_sliders.update_many(
+            {"source_banner_id": bid},
+            {"$set": _slider_sync}
+        )
     return {"ok": True, "updated": update_data}
 
 
