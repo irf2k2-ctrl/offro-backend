@@ -1286,6 +1286,28 @@ def get_gift_vouchers_public(city: str = ""):
                 pass
         return False
 
+    def _not_started(doc) -> bool:
+        """True if the product's from_date/start_date is still in the future — hide until then."""
+        from datetime import datetime as _dt3
+        _now3 = _dt3.utcnow()
+        for k in ("from_date", "start_date", "valid_from"):
+            v = doc.get(k)
+            if not v:
+                continue
+            try:
+                if isinstance(v, _dt3):
+                    if v > _now3:
+                        return True
+                else:
+                    vs = str(v).strip()
+                    if vs and vs not in ("", "null", "None"):
+                        vdt = _dt3.fromisoformat(vs[:19].replace(" ", "T"))
+                        if vdt > _now3:
+                            return True
+            except Exception:
+                pass
+        return False
+
     def _resolve_img(doc):
         for k in ["logo", "logo_url", "image_url", "image", "thumbnail"]:
             v = str(doc.get(k, "") or "")
@@ -1357,6 +1379,7 @@ def get_gift_vouchers_public(city: str = ""):
     for d in db.gift_vouchers.find({"product_type": {"$ne": "standard"}}).sort("_id", -1):
         if not _is_active(d): continue
         if _is_expired(d): continue
+        if _not_started(d): continue
         # Skip if admin explicitly expired or rejected:
         _as = d.get("approval_status", d.get("status", ""))
         if _as in ("expired", "rejected", "removed"): continue
@@ -1405,6 +1428,7 @@ def get_gift_vouchers_public(city: str = ""):
     for p in db.products.find({}).sort("_id", -1):
         if not _is_active(p): continue
         if _is_expired(p): continue
+        if _not_started(p): continue
         # Skip if admin explicitly expired or rejected:
         _ps = p.get("approval_status", p.get("status", ""))
         if _ps in ("expired", "rejected", "removed"): continue
@@ -1459,6 +1483,7 @@ def get_gift_vouchers_public(city: str = ""):
         for mv in db.merchant_vouchers.find({"product_type": "premium"}).sort("_id", -1):
             if not _is_active(mv): continue
             if _is_expired(mv): continue
+            if _not_started(mv): continue
             # Skip if admin explicitly expired or rejected:
             _mvs = mv.get("approval_status", mv.get("status", ""))
             if _mvs in ("expired", "rejected", "removed", "pending_approval"): continue
