@@ -233,7 +233,7 @@ def get_store(store_id: str):
                 # Detail product cards (which read this list, not
                 # /products/by-store/) always showed no rating overlay even
                 # after a review was submitted and averaged elsewhere.
-                "rating":         float(p.get("rating") or p.get("avg_rating") or 0),
+                "rating":         float(store.get("rating") or store.get("admin_rating") or 0),
             })
 
     # 2. gift_vouchers — linked to this store_id, active
@@ -261,8 +261,8 @@ def get_store(store_id: str):
                 "discount":       "",
                 "validity":       _safe_end_date(p) or (p.get("validity","") or ""),
                 "end_date":       str(p.get("end_date","") or ""),
-                # FIX: this endpoint never returned 'rating' (see merchant_vouchers block above)
-                "rating":         float(p.get("rating") or p.get("avg_rating") or 0),
+                # Use store's rating — products don't have their own rating
+                "rating":         float(store.get("rating") or store.get("admin_rating") or 0),
             })
 
     # Rating count
@@ -1361,18 +1361,22 @@ def get_gift_vouchers_public(city: str = ""):
             "id":           vid,
             "title":        d.get("title", ""),
             "text":         d.get("text", "") or d.get("offer_text", ""),
-            "validity":     _safe_end_date(d) or (d.get("validity","") or ""),
-            "logo":         _resolve_img(d),
-            "logo_url":     _resolve_img(d),
-            "store_id":     sid,
-            "store_name":   resolved_store_name,
-            "city":         doc_city,
-            "from_date":    d.get("from_date", ""),
-            "end_date":     d.get("end_date", ""),
-            "is_active":    True,
-            "source":       "gift_vouchers",
-            "rating":       float(d.get("rating") or d.get("avg_rating") or 0),
-            "rating_count": int(d.get("rating_count") or d.get("review_count") or 0),
+            "validity":       _safe_end_date(d) or (d.get("validity","") or ""),
+            "logo":           _resolve_img(d),
+            "logo_url":       _resolve_img(d),
+            "store_id":       sid,
+            "store_name":     resolved_store_name,
+            "city":           doc_city,
+            "from_date":      d.get("from_date", ""),
+            "end_date":       d.get("end_date", ""),
+            "price":          str(d.get("price", "") or ""),
+            "original_price": str(d.get("original_price", "") or ""),
+            "sale_price":     str(d.get("sale_price", d.get("price", "")) or ""),
+            "discount_label": str(d.get("discount_label", "") or ""),
+            "is_active":      True,
+            "source":         "gift_vouchers",
+            "rating":         _get_store_rating(sid, mid),
+            "rating_count":   int(d.get("rating_count") or d.get("review_count") or 0),
         })
 
     # ── 2. products collection ───────────────────────────────────────────────
@@ -1407,18 +1411,22 @@ def get_gift_vouchers_public(city: str = ""):
             "id":           pid,
             "title":        p.get("name") or p.get("title") or "",
             "text":         offer_text,
-            "validity":     p.get("validity") or p.get("valid_till") or "",
-            "logo":         _resolve_img(p),
-            "logo_url":     _resolve_img(p),
-            "store_id":     psid,
-            "store_name":   resolved_p_store,
-            "city":         pdoc_city,
-            "from_date":    p.get("from_date") or p.get("start_date") or "",
-            "end_date":     p.get("end_date") or p.get("expiry") or "",
-            "is_active":    True,
-            "source":       "products",
-            "rating":       float(p.get("rating") or p.get("avg_rating") or 0),
-            "rating_count": int(p.get("rating_count") or p.get("review_count") or 0),
+            "validity":       p.get("validity") or p.get("valid_till") or "",
+            "logo":           _resolve_img(p),
+            "logo_url":       _resolve_img(p),
+            "store_id":       psid,
+            "store_name":     resolved_p_store,
+            "city":           pdoc_city,
+            "from_date":      p.get("from_date") or p.get("start_date") or "",
+            "end_date":       p.get("end_date") or p.get("expiry") or "",
+            "price":          str(p.get("price", "") or ""),
+            "original_price": str(p.get("original_price", "") or ""),
+            "sale_price":     str(p.get("sale_price", p.get("price", "")) or ""),
+            "discount_label": str(p.get("discount_label", "") or ""),
+            "is_active":      True,
+            "source":         "products",
+            "rating":         _get_store_rating(psid, pmid),
+            "rating_count":   int(p.get("rating_count") or p.get("review_count") or 0),
         })
 
     # ── 3. merchant_vouchers collection (Premium products — source of truth) ──
@@ -1447,21 +1455,25 @@ def get_gift_vouchers_public(city: str = ""):
                 or mv.get("merchant_name", "")
             )
             result.append({
-                "id":           mvid,
-                "title":        mv.get("title") or mv.get("name") or "",
-                "text":         mv.get("offer_text") or mv.get("text") or "",
-                "validity":     _safe_end_date(mv) or (mv.get("validity","") or ""),
-                "logo":         _resolve_img(mv),
-                "logo_url":     _resolve_img(mv),
-                "store_id":     mvsid,
-                "store_name":   resolved_mv_store,
-                "city":         mv_city,
-                "from_date":    mv.get("from_date") or mv.get("start_date") or "",
-                "end_date":     mv.get("end_date") or "",
-                "is_active":    True,
-                "source":       "merchant_vouchers",
-                "rating":       float(mv.get("rating") or mv.get("avg_rating") or 0),
-                "rating_count": int(mv.get("rating_count") or mv.get("review_count") or 0),
+                "id":             mvid,
+                "title":          mv.get("title") or mv.get("name") or "",
+                "text":           mv.get("offer_text") or mv.get("text") or "",
+                "validity":       _safe_end_date(mv) or (mv.get("validity","") or ""),
+                "logo":           _resolve_img(mv),
+                "logo_url":       _resolve_img(mv),
+                "store_id":       mvsid,
+                "store_name":     resolved_mv_store,
+                "city":           mv_city,
+                "from_date":      mv.get("from_date") or mv.get("start_date") or "",
+                "end_date":       mv.get("end_date") or "",
+                "price":          str(mv.get("price", "") or ""),
+                "original_price": str(mv.get("original_price", "") or ""),
+                "sale_price":     str(mv.get("sale_price", mv.get("price", "")) or ""),
+                "discount_label": str(mv.get("discount_label", "") or ""),
+                "is_active":      True,
+                "source":         "merchant_vouchers",
+                "rating":         _get_store_rating(mvsid, mvmid),
+                "rating_count":   int(mv.get("rating_count") or mv.get("review_count") or 0),
             })
 
     return result

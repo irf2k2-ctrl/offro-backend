@@ -5033,11 +5033,8 @@ function openVZMoreMenu(evt, id, source, status) {
 function openVZEdit(id, source) {
   const row = _allProductRows.find(r=>r._id===id);
   if (!row) return;
-  if (source==='admin' || source==='products') { editGiftCard(row._raw); }
-  else {
-    // Admin can edit merchant products directly
-    openVZMerchantEditModal(row);
-  }
+  // UNIFIED EDIT: always use the same modal for all product types
+  openVZMerchantEditModal(row);
 }
 
 // FIX 10: Merchant product edit modal (admin side)
@@ -5050,13 +5047,32 @@ function openVZMerchantEditModal(row) {
     modal.id = 'pc_merchant_edit_modal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
     modal.innerHTML = `
-      <div style="background:#fff;border-radius:16px;padding:28px;width:500px;max-height:92vh;overflow-y:auto">
+      <div style="background:#fff;border-radius:16px;padding:28px;width:540px;max-width:94vw;max-height:92vh;overflow-y:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
           <h5 style="margin:0;color:var(--primary)">✏️ Edit Product</h5>
           <button onclick="document.getElementById('pc_merchant_edit_modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">&times;</button>
         </div>
 
-        <!-- ISSUE 5: Same fields as App -->
+        <!-- Product Type + Status row -->
+        <div class="row mb-3">
+          <div class="col-6">
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">Product Type</label>
+            <select id="pc_edit_product_type" class="form-select" style="margin-top:4px">
+              <option value="premium">🟣 Premium</option>
+              <option value="standard">🟢 Standard</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">Status</label>
+            <select id="pc_edit_status" class="form-select" style="margin-top:4px">
+              <option value="pending">Pending Approval</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="expired">Expired</option>
+            </select>
+          </div>
+        </div>
+
         <div class="mb-3">
           <label style="font-size:12px;font-weight:600;color:var(--muted)">Product Title *</label>
           <input id="pc_edit_title" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. ₹999 DEALS">
@@ -5068,16 +5084,26 @@ function openVZMerchantEditModal(row) {
         <div class="row mb-3">
           <div class="col-6">
             <label style="font-size:12px;font-weight:600;color:var(--muted)">Selling Price (₹)</label>
-            <input id="pc_edit_sale_price" type="number" class="form-control" style="margin-top:4px" placeholder="e.g. 299" min="0" step="0.01">
+            <input id="pc_edit_sale_price" type="number" class="form-control" style="margin-top:4px" placeholder="e.g. 299" min="0" step="0.01" oninput="_vzUpdateDiscount()">
           </div>
           <div class="col-6">
             <label style="font-size:12px;font-weight:600;color:var(--muted)">Original Price / MRP (₹)</label>
-            <input id="pc_edit_original_price" type="number" class="form-control" style="margin-top:4px" placeholder="e.g. 499" min="0" step="0.01">
+            <input id="pc_edit_original_price" type="number" class="form-control" style="margin-top:4px" placeholder="e.g. 499" min="0" step="0.01" oninput="_vzUpdateDiscount()">
           </div>
         </div>
         <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">City</label>
-          <input id="pc_edit_city" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. Ballari">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Discount Label <small class="text-muted">(auto-computed)</small></label>
+          <input id="pc_edit_discount" type="text" class="form-control" style="margin-top:4px;background:#f7faf8" readonly placeholder="Auto-filled from prices">
+        </div>
+        <div class="row mb-3">
+          <div class="col-6">
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">City</label>
+            <input id="pc_edit_city" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. Ballari">
+          </div>
+          <div class="col-6">
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">Store Name</label>
+            <input id="pc_edit_store_name" type="text" class="form-control" style="margin-top:4px" placeholder="Store name">
+          </div>
         </div>
         <div class="row mb-3">
           <div class="col-6">
@@ -5090,11 +5116,11 @@ function openVZMerchantEditModal(row) {
           </div>
         </div>
         <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Validity Display <small class="text-muted">(auto-filled)</small></label>
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Validity Display</label>
           <input id="pc_edit_validity" type="text" class="form-control" style="margin-top:4px" placeholder="e.g. 22 May 2026 → 22 Jun 2026">
         </div>
 
-        <!-- ISSUE 6: File upload + URL option for logo -->
+        <!-- Logo upload -->
         <div class="mb-3">
           <label style="font-size:12px;font-weight:600;color:var(--muted)">Product Image</label>
           <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -5109,15 +5135,12 @@ function openVZMerchantEditModal(row) {
           </div>
         </div>
 
-        <div class="mb-3">
-          <label style="font-size:12px;font-weight:600;color:var(--muted)">Status</label>
-          <select id="pc_edit_status" class="form-select" style="margin-top:4px">
-            <option value="pending">Pending Approval</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-            <option value="expired">Expired</option>
-          </select>
+        <!-- Active checkbox -->
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="pc_edit_active" checked>
+          <label class="form-check-label" for="pc_edit_active" style="font-size:13px">Active (show in app)</label>
         </div>
+
         <div id="pc_edit_msg" style="font-size:12px;margin-bottom:8px"></div>
         <div style="display:flex;gap:10px">
           <button class="btn-o" style="flex:1" onclick="document.getElementById('pc_merchant_edit_modal').remove()">Cancel</button>
@@ -5143,8 +5166,13 @@ function openVZMerchantEditModal(row) {
   if(el2('pc_edit_validity'))        el2('pc_edit_validity').value        = row.validity||'';
   if(el2('pc_edit_logo'))            el2('pc_edit_logo').value            = row.logo||row.logo_url||'';
   if(el2('pc_edit_city'))            el2('pc_edit_city').value            = row.city||'';
+  if(el2('pc_edit_store_name'))      el2('pc_edit_store_name').value      = row.store_name||'';
   if(el2('pc_edit_sale_price'))      el2('pc_edit_sale_price').value      = row.sale_price ?? row.price ?? '';
   if(el2('pc_edit_original_price'))  el2('pc_edit_original_price').value  = row.original_price ?? row.mrp ?? '';
+  if(el2('pc_edit_product_type'))    el2('pc_edit_product_type').value    = row.product_type||'premium';
+  if(el2('pc_edit_active'))          el2('pc_edit_active').checked        = row.is_active !== false;
+  // Auto-compute discount label
+  _vzUpdateDiscount();
   if(row.logo||row.logo_url) _vzShowLogoPreview(row.logo||row.logo_url); else _vzClearLogo();
   if(el2('pc_edit_logo_file')) el2('pc_edit_logo_file').value = '';
   if(el2('pc_edit_status'))    el2('pc_edit_status').value    = row.status||'pending';
@@ -5161,6 +5189,17 @@ function _vzUpdateValidity() {
   if (from && to) {
     const fmtD = d => { const o=new Date(d); return `${o.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][o.getMonth()]} ${o.getFullYear()}`; };
     el.value = `${fmtD(from)} → ${fmtD(to)}`;
+  }
+}
+function _vzUpdateDiscount() {
+  const sp = parseFloat(document.getElementById('pc_edit_sale_price')?.value);
+  const op = parseFloat(document.getElementById('pc_edit_original_price')?.value);
+  const el = document.getElementById('pc_edit_discount');
+  if (!el) return;
+  if (sp && op && op > sp > 0) {
+    el.value = `${Math.round((op - sp) / op * 100)}% OFF`;
+  } else {
+    el.value = '';
   }
 }
 function _vzShowLogoPreview(src) {
@@ -5200,6 +5239,10 @@ async function saveVZMerchantEdit() {
   const _saleP  = parseFloat(el('pc_edit_sale_price')?.value);
   const _origP  = parseFloat(el('pc_edit_original_price')?.value);
   const _editCity = el('pc_edit_city')?.value?.trim() || row.city || '';
+  const _editStoreName = el('pc_edit_store_name')?.value?.trim() || row.store_name || '';
+  const _prodType = el('pc_edit_product_type')?.value || row.product_type || 'premium';
+  const _isActive = el('pc_edit_active')?.checked;
+  const _discount = el('pc_edit_discount')?.value?.trim() || '';
   const payload = {
     title:          el('pc_edit_title')?.value?.trim()    || row.title,
     offer_text:     el('pc_edit_offer')?.value?.trim()    || row.offer_text,
@@ -5211,12 +5254,31 @@ async function saveVZMerchantEdit() {
     end_date:       toVal,
     status:         el('pc_edit_status')?.value           || row.status,
     city:           _editCity,
+    store_name:     _editStoreName,
+    product_type:   _prodType,
+    is_active:      _isActive,
+    discount_label: _discount,
     price:          isNaN(_saleP)  ? undefined : _saleP,
     sale_price:     isNaN(_saleP)  ? undefined : _saleP,
     original_price: isNaN(_origP)  ? undefined : _origP,
   };
+  // Clean undefined values
+  Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
   try {
-    const res = await fetch(`/admin/merchant-products/${row._id}`, {
+    // Route to correct endpoint based on source/collection
+    const _src = row._source || row._raw?._collection || '';
+    const _col = row._raw?._collection || '';
+    let url;
+    if (_src === 'merchant' || _col === 'merchant_vouchers') {
+      url = `/admin/merchant-products/${row._id}`;
+    } else if (_col === 'products') {
+      url = `/admin/products/${row._id}`;
+      payload._collection = 'products';
+    } else {
+      // gift_vouchers — try merchant-products first (it falls back to gift_vouchers)
+      url = `/admin/merchant-products/${row._id}`;
+    }
+    const res = await fetch(url, {
       method:'PUT', credentials:'include',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(payload)
