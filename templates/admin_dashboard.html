@@ -5175,11 +5175,11 @@ function openVZMerchantEditModal(row) {
         </div>
       </div>`;
 
-    // Logo URL input → preview
+    document.body.appendChild(modal);
+    // Logo URL input → preview (queried AFTER appendChild — element must be in the live DOM)
     document.getElementById('pc_edit_logo').addEventListener('input', function(){
       _vzShowLogoPreview(this.value);
     });
-    document.body.appendChild(modal);
     modal.addEventListener('click', function(e) { if(e.target===modal) modal.remove(); });
     const _pcEscClose = function(e) { if(e.key==='Escape') { modal.remove(); document.removeEventListener('keydown',_pcEscClose); } };
     document.addEventListener('keydown', _pcEscClose);
