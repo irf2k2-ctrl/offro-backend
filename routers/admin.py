@@ -2643,6 +2643,33 @@ def banner_forensics(title: str = "", phone: str = "", a=Depends(get_current_adm
         bo_query = {"$or": bo_query_parts} if len(bo_query_parts) > 1 else bo_query_parts[0]
         bo_docs = list(db.banner_orders.find(bo_query).sort("created_at", 1))
 
+    # ── Test 3, automated: call the ACTUAL list endpoints the admin dashboard
+    # uses (same functions, same logic, zero duplication) and filter their
+    # output for this search — shows exactly what the UI's two data sources
+    # return, without anyone having to scroll a huge Network tab response.
+    def _matches(row):
+        t = (row.get("title") or "").lower()
+        p = "".join(c for c in (row.get("merchant_phone") or "") if c.isdigit())[-10:]
+        return (title and title.lower() in t) or (phone_digits and phone_digits == p)
+
+    try:
+        api_merchant_banners_full = list_merchant_banners(a)
+    except Exception as e:
+        api_merchant_banners_full = []
+        _mb_api_error = str(e)
+    else:
+        _mb_api_error = None
+    try:
+        api_promo_sliders_full = list_promo_sliders(a)
+    except Exception as e:
+        api_promo_sliders_full = []
+        _ps_api_error = str(e)
+    else:
+        _ps_api_error = None
+
+    api_merchant_banners_matched = [r for r in api_merchant_banners_full if _matches(r)]
+    api_promo_sliders_matched    = [r for r in api_promo_sliders_full if _matches(r)]
+
     return {
         "query": {"title": title, "phone": phone},
         "counts": {
@@ -2654,6 +2681,19 @@ def banner_forensics(title: str = "", phone: str = "", a=Depends(get_current_adm
             "banner_orders":    [_clean(d) for d in bo_docs],
             "merchant_banners": [_clean(d) for d in mb_docs],
             "promo_sliders":    [_clean(d) for d in ps_docs],
+        },
+        "TEST_3_live_api_check": {
+            "note": "This calls the SAME /admin/merchant-banners and /admin/promo-sliders "
+                    "functions the dashboard uses, filtered to your search term. If a title "
+                    "appears more than once in EITHER list below, that endpoint is the source "
+                    "of the duplicate row. If each appears exactly once total (combined), the "
+                    "bug is purely in how the frontend JS merges/renders these two lists.",
+            "merchant_banners_api_error": _mb_api_error,
+            "promo_sliders_api_error":    _ps_api_error,
+            "merchant_banners_api_matches": api_merchant_banners_matched,
+            "promo_sliders_api_matches":    api_promo_sliders_matched,
+            "merchant_banners_api_match_count": len(api_merchant_banners_matched),
+            "promo_sliders_api_match_count":    len(api_promo_sliders_matched),
         },
     }
 
