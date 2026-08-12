@@ -2819,6 +2819,19 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
         # Verify promo_slider exists; if missing (edge case), re-create it
         _existing = db.promo_sliders.find_one({"source_banner_id": bid})
         if _existing:
+            # Even on the "already approved" fast path, sweep for sibling
+            # duplicates (same content, different _id) that never got
+            # cleaned up — this is what makes re-clicking Approve on an
+            # already-approved banner also fix a stuck "pending twin".
+            db.merchant_banners.delete_many({
+                "merchant_id": str(b.get("merchant_id", "")),
+                "title":       b.get("title", ""),
+                "store_id":    str(b.get("store_id", "") or "").strip(),
+                "from_date":   b.get("from_date", ""),
+                "end_date":    b.get("end_date", ""),
+                "_id":         {"$ne": ObjectId(bid)},
+                "approval_status": {"$ne": "approved"},
+            })
             return {"ok": True, "message": "Banner already approved.", "already_approved": True}
         # Fall through to re-create the promo_slider if it was deleted somehow
 
@@ -2907,15 +2920,29 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
         )
     except DuplicateKeyError:
         db.promo_sliders.update_one({"source_banner_id": bid}, {"$set": _promo_set_fields})
-    # Also clean up any duplicate merchant_banners entries for the same order
-    # (prevents the "pending twin" from showing alongside the approved one)
-    _order_id = b.get("order_id", "")
-    if _order_id:
-        db.merchant_banners.delete_many({
-            "order_id": _order_id,
-            "_id": {"$ne": ObjectId(bid)},
-            "approval_status": {"$ne": "approved"},
-        })
+    # PERMANENT FIX for "pending twin" duplicates: the old version of this
+    # cleanup matched on a field called "order_id" — but merchant_banners
+    # documents NEVER actually have that field set (only banner_orders docs
+    # do). So `_order_id` was always "" and this delete_many never ran —
+    # it was dead code. This is why sibling duplicates (two separate
+    # merchant_banners docs for the same banner content, e.g. from a
+    # double-tap submit) survived forever: one gets approved here, the
+    # other(s) stay stuck as "pending" and both show up in the dashboard.
+    #
+    # Real fix: match by CONTENT (merchant + title + store + date range) —
+    # this is origin-agnostic (catches duplicates regardless of which
+    # order_id/order flow created them) and hard-deletes any sibling
+    # merchant_banners docs that were never approved. Never touches other
+    # already-approved records (those have their own promo_slider already).
+    db.merchant_banners.delete_many({
+        "merchant_id": str(b.get("merchant_id", "")),
+        "title":       b.get("title", ""),
+        "store_id":    _approve_store_id,
+        "from_date":   b.get("from_date", ""),
+        "end_date":    b.get("end_date", ""),
+        "_id":         {"$ne": ObjectId(bid)},
+        "approval_status": {"$ne": "approved"},
+    })
     # DEFENSIVE: Delete any stray promo_sliders duplicates that might have
     # been created by race conditions before the idempotency guard was added
     _all_promo_for_bid = list(db.promo_sliders.find({"source_banner_id": bid}))
