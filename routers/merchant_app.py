@@ -1207,6 +1207,7 @@ def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
     """Merchant can turn their own approved banner ON or OFF.
     PERMANENT FIX: Searches merchant_banners first, then promo_sliders.
     Always syncs both collections."""
+    import traceback as _tb
     merchant_id = _mid(m)
     merchant_phone = str(m.get("phone", ""))
     try:
@@ -1223,10 +1224,16 @@ def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
     if not b:
         raise HTTPException(404, "Banner not found")
 
-    # Verify ownership
+    # Verify ownership — compare both as strings (merchant_id may be stored
+    # as ObjectId in the banner doc). Also try matching by phone.
+    b_mid_raw = b.get("merchant_id", "")
+    b_mid_str = str(b_mid_raw) if b_mid_raw else ""
     b_phone = re.sub(r'\D', '', str(b.get("merchant_phone", "")))[-10:]
     m_phone = re.sub(r'\D', '', merchant_phone)[-10:] if merchant_phone else ""
-    if str(b.get("merchant_id","")) != merchant_id and (not m_phone or b_phone != m_phone):
+    # Also check legacy merchant_id field
+    legacy_mid = str(m.get("merchant_id", "")) if m.get("merchant_id") else ""
+    mid_matches = (b_mid_str == merchant_id) or (b_mid_str == legacy_mid)
+    if not mid_matches and (not m_phone or b_phone != m_phone):
         raise HTTPException(403, "Not your banner")
 
     # Cannot re-activate a banner removed by admin
@@ -1235,17 +1242,21 @@ def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
 
     new_active = not bool(b.get("is_active", True))
 
-    if found_in == "merchant_banners":
-        db.merchant_banners.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
-        db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
-    else:
-        db.promo_sliders.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
-        src_bid = b.get("source_banner_id", "")
-        if src_bid:
-            try:
-                db.merchant_banners.update_one({"_id": ObjectId(src_bid)}, {"$set": {"is_active": new_active, "toggled_at": ts}})
-            except Exception:
-                pass
+    try:
+        if found_in == "merchant_banners":
+            db.merchant_banners.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+            db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+        else:
+            db.promo_sliders.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+            src_bid = b.get("source_banner_id", "")
+            if src_bid:
+                try:
+                    db.merchant_banners.update_one({"_id": ObjectId(src_bid)}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+                except Exception:
+                    pass
+    except Exception as e:
+        _tb.print_exc()
+        raise HTTPException(500, f"Toggle failed: {type(e).__name__}: {e}")
     return {"ok": True, "is_active": new_active}
 
 # ── POST /merchant/banners/order  ──────────────────────────────────────────

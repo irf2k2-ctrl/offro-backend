@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Request, UploadFile, File
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +31,41 @@ app.include_router(popup_campaigns.router)
 app.include_router(webhook.router)          # WhatsApp Cloud API webhook — no prefix
 app.include_router(wa_chat.router, prefix="/admin")  # WhatsApp Live Chat admin API
 app.include_router(dashboard_auth.router, prefix="/admin")  # RBAC dashboard auth — /admin/auth/*
+
+# ── GLOBAL JSON ERROR HANDLER ──────────────────────────────────────────────
+# ROOT CAUSE FIX (Flutter "FormatException: Unexpected character (at
+# character 1)" crashes): Starlette's DEFAULT behavior for an unhandled
+# exception (debug=False, which is what Railway runs in production) is to
+# return a raw PlainTextResponse with the literal body "Internal Server
+# Error" — NOT JSON. Every Dart API call does `jsonDecode(response.body)`,
+# so ANY unhandled backend exception — on ANY endpoint, present or future —
+# surfaced in the app as an opaque FormatException instead of a readable
+# error. This handler guarantees every single response, success or failure,
+# is valid JSON, and bakes the real Python exception type + message into
+# the "detail" field so the NEXT time something breaks, the app shows the
+# actual cause instead of a crash.
+import traceback as _tb
+
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    _tb.print_exc()  # full traceback still goes to Railway logs for debugging
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"{type(exc).__name__}: {exc}"},
+    )
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # Preserve normal HTTPException(status_code, detail) behavior as JSON
+    # (FastAPI does this by default, but once a catch-all Exception handler
+    # is registered above, HTTPException must be explicitly re-registered
+    # too or it would otherwise fall through to the generic handler).
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
 
 # ── Root redirect → admin login (dashboard route itself re-checks the session) ──
 @app.get("/", include_in_schema=False)

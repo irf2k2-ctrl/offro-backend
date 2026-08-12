@@ -1423,7 +1423,7 @@ def get_gift_vouchers_public(city: str = ""):
             "discount_label": str(d.get("discount_label", "") or ""),
             "is_active":      True,
             "source":         "gift_vouchers",
-            "rating":         _get_store_rating(sid, mid),
+            "rating":         float(d.get("rating") or 0),
             "rating_count":   int(d.get("rating_count") or d.get("review_count") or 0),
         })
 
@@ -1474,7 +1474,7 @@ def get_gift_vouchers_public(city: str = ""):
             "discount_label": str(p.get("discount_label", "") or ""),
             "is_active":      True,
             "source":         "products",
-            "rating":         _get_store_rating(psid, pmid),
+            "rating":         float(p.get("rating") or 0),
             "rating_count":   int(p.get("rating_count") or p.get("review_count") or 0),
         })
 
@@ -1522,7 +1522,7 @@ def get_gift_vouchers_public(city: str = ""):
                 "discount_label": str(mv.get("discount_label", "") or ""),
                 "is_active":      True,
                 "source":         "merchant_vouchers",
-                "rating":         _get_store_rating(mvsid, mvmid),
+                "rating":         float(mv.get("rating") or 0),
                 "rating_count":   int(mv.get("rating_count") or mv.get("review_count") or 0),
             })
 
