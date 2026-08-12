@@ -3177,8 +3177,19 @@ async function loadSliders() {
     const sliders  = slidersR.ok  ? await slidersR.json()  : [];
     const mbanners_raw = merchantR.ok ? await merchantR.json() : [];
     console.log('[loadSliders] promo-sliders:', sliders.length, 'merchant-banners:', mbanners_raw.length);
-    const mbanners = mbanners_raw;
-    // mbanners already set above with debug log
+    // ROOT CAUSE FIX (banner duplication bug): /admin/merchant-banners returns a
+    // MERGED list — raw pending/rejected merchant_banners docs AND already-
+    // approved promo_slider mirrors (tagged source:"promo_sliders", carrying the
+    // PROMO SLIDER'S OWN _id, not the original banner's _id). Those mirror
+    // entries are ALREADY rendered via the separate /admin/promo-sliders fetch
+    // below (adminRows). Keeping them here too caused a phantom duplicate row:
+    // the later _id-based dedup (approvedMerchantIds) compares against
+    // source_banner_id and can never match a promo_slider's own _id, so the
+    // mirror entry always survived as a second "merchant" row. Filter to ONLY
+    // genuine merchant_banners-sourced rows before building merchantRows.
+    const mbanners = mbanners_raw.filter(b => !b.source || b.source === 'merchant_banners');
+    console.log('[loadSliders] after source-filter, raw merchant_banners rows:', mbanners.length,
+                '(dropped', mbanners_raw.length - mbanners.length, 'already-approved mirror dupes)');
 
     // Normalize admin sliders (auto approved)
     const now = new Date();
