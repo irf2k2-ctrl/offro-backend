@@ -2561,6 +2561,103 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
 # ADMIN — MERCHANT BANNER APPROVAL
 # ═══════════════════════════════════════════════════════════
 
+@router.get("/banner-forensics")
+def banner_forensics(title: str = "", phone: str = "", a=Depends(get_current_admin)):
+    """
+    READ-ONLY FORENSIC TOOL — added specifically to investigate the recurring
+    banner-duplication reports without guessing. Does ZERO writes. Queries the
+    THREE raw collections directly (banner_orders, merchant_banners,
+    promo_sliders) and returns every matching document EXACTLY as stored in
+    MongoDB — no merging, no deduplication, no interpretation layer. This is
+    the ground truth the admin dashboard's unified table is built FROM.
+
+    Usage: log into the admin dashboard normally, then open this URL directly
+    in the SAME browser tab/session (it reuses your existing admin_token
+    cookie) — e.g.:
+      https://admin.theoffro.com/admin/banner-forensics?title=test%20afterbuld
+    or by phone:
+      https://admin.theoffro.com/admin/banner-forensics?phone=8106074906
+
+    Workflow to answer the open question definitively:
+    1. Create ONE banner from the Merchant App.
+    2. Immediately call this endpoint (by title or phone) → note counts/records.
+    3. Approve it ONCE from the Admin dashboard.
+    4. Immediately call this endpoint again (same title/phone) → diff the output.
+       - If merchant_banners still shows exactly 1 doc, and its approval_status
+         flipped pending -> approved, and promo_sliders shows exactly 1 new
+         doc: the DB is completely correct — the duplicate row is a display
+         bug in loadSliders()/renderBanners(), not a data problem.
+       - If merchant_banners shows 2 (or more) docs at ANY point: that's the
+         real, physical duplicate, and this output shows exactly which fields
+         differ between them (title casing/spacing, store_id, from_date/
+         end_date format) — the reason any exact-match dedup check missed it.
+    """
+    _check_perm(a, "Banners", "view")
+    if not title and not phone:
+        raise HTTPException(400, "Provide ?title=... or ?phone=... to search")
+
+    def _clean(doc):
+        # Return every stored field as-is (converted to JSON-safe types) —
+        # no filtering, no renaming, no "helpful" transformation.
+        out = {}
+        for k, v in doc.items():
+            if isinstance(v, ObjectId):
+                out[k] = str(v)
+            elif isinstance(v, datetime):
+                out[k] = v.isoformat()
+            else:
+                out[k] = v
+        return out
+
+    phone_digits = "".join(c for c in phone if c.isdigit())[-10:] if phone else ""
+
+    mb_query_parts = []
+    if title:
+        mb_query_parts.append({"title": {"$regex": title, "$options": "i"}})
+    if phone_digits:
+        mb_query_parts.append({"merchant_phone": {"$regex": phone_digits}})
+    mb_query = {"$or": mb_query_parts} if len(mb_query_parts) > 1 else mb_query_parts[0]
+
+    mb_docs = list(db.merchant_banners.find(mb_query).sort("created_at", 1))
+    ps_docs = list(db.promo_sliders.find(mb_query).sort("created_at", 1))
+
+    # banner_orders never stores "title" (only set later at activation), so we
+    # find it via merchant_phone directly AND via source_order_id referenced
+    # on any matched merchant_banners doc — covers orders that never even
+    # reached activation (e.g. an abandoned/duplicate order attempt).
+    order_ids = set()
+    for b in mb_docs:
+        soid = b.get("source_order_id")
+        if soid:
+            order_ids.add(str(soid))
+    bo_query_parts = []
+    if phone_digits:
+        bo_query_parts.append({"merchant_phone": {"$regex": phone_digits}})
+    if order_ids:
+        try:
+            bo_query_parts.append({"_id": {"$in": [ObjectId(x) for x in order_ids]}})
+        except Exception:
+            pass
+    bo_docs = []
+    if bo_query_parts:
+        bo_query = {"$or": bo_query_parts} if len(bo_query_parts) > 1 else bo_query_parts[0]
+        bo_docs = list(db.banner_orders.find(bo_query).sort("created_at", 1))
+
+    return {
+        "query": {"title": title, "phone": phone},
+        "counts": {
+            "banner_orders":    len(bo_docs),
+            "merchant_banners": len(mb_docs),
+            "promo_sliders":    len(ps_docs),
+        },
+        "records": {
+            "banner_orders":    [_clean(d) for d in bo_docs],
+            "merchant_banners": [_clean(d) for d in mb_docs],
+            "promo_sliders":    [_clean(d) for d in ps_docs],
+        },
+    }
+
+
 @router.get("/merchant-banners")
 def list_merchant_banners(a=Depends(get_current_admin)):
     """All merchant-submitted banners with approval status.
