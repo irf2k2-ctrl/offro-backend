@@ -1363,7 +1363,14 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
 def activate_free_banner(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id    = data.get("order_id", "")
-    title       = data.get("title", "")
+    # NORMALIZE title (ROOT-CAUSE FIX): the content-dedup check below relies on
+    # EXACT string equality. An un-stripped title ("Test" vs "Test ") from a
+    # retried/resubmitted client request defeats that check silently, letting
+    # a second, content-identical banner slip through as "different". This is
+    # the real reason duplicates kept surviving despite the order_id-level
+    # protections — those two submissions had two different order_ids AND
+    # (invisibly) different title whitespace, so no existing guard caught them.
+    title       = (data.get("title", "") or "").strip()
     image_url   = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
     image_thumb = _make_thumb_url(image_url)
 
@@ -1399,6 +1406,9 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_banner or {}).get("invoice_no", "")
         return {"message": "Banner already activated.", "banner_id": existing_banner_id, "invoice_no": existing_inv_no}
 
+    _req_id = str(uuid.uuid4())[:8]
+    print(f"[BANNER-TRACE][{_req_id}] activate_free_banner CLAIMED order={order_id} merchant={merchant_id} at={datetime.utcnow().isoformat()}")
+
     # Mark discount code used if applied
     disc_code = order.get("discount_code")
     if disc_code:
@@ -1432,6 +1442,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "created_at":  {"$gte": _dedup_window.isoformat()},
     })
     if _dup:
+        print(f"[BANNER-TRACE][{_req_id}] CONTENT-DEDUP HIT — reusing existing banner_id={_dup['_id']} title={title!r} store={store_id}")
         db.banner_orders.update_one({"_id": ObjectId(order_id)},
             {"$set": {"status": "submitted", "banner_id": str(_dup["_id"]),
                       "store_id": store_id, "city": city}})
@@ -1472,13 +1483,26 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     # instead of silently creating a second document.
     try:
         res = db.merchant_banners.insert_one(banner)
+        print(f"[BANNER-TRACE][{_req_id}] INSERTED new merchant_banners _id={res.inserted_id} title={title!r} store={store_id}")
     except DuplicateKeyError:
+        # A unique index rejected the insert — this is the DB-level safety net
+        # kicking in (either the per-order index or the per-content pending
+        # index). Recover by finding the winning sibling: try source_order_id
+        # first, then fall back to content match (the content-index case has
+        # a DIFFERENT source_order_id on the winner).
         _existing = db.merchant_banners.find_one({"source_order_id": order_id})
+        if not _existing:
+            _existing = db.merchant_banners.find_one({
+                "merchant_id": merchant_id, "title": title, "store_id": store_id,
+                "from_date": order.get("from_date", ""), "end_date": order.get("end_date", ""),
+            })
+        print(f"[BANNER-TRACE][{_req_id}] DUPLICATE-KEY-REJECTED insert — reused existing banner_id={_existing['_id'] if _existing else None}")
         db.banner_orders.update_one({"_id": ObjectId(order_id)},
-            {"$set": {"status": "submitted", "banner_id": str(_existing["_id"]),
+            {"$set": {"status": "submitted", "banner_id": str(_existing["_id"]) if _existing else "",
                       "store_id": store_id, "city": city}})
         return {"message": "Banner already submitted for review.",
-                "banner_id": str(_existing["_id"]), "invoice_no": _existing.get("invoice_no", "")}
+                "banner_id": str(_existing["_id"]) if _existing else "",
+                "invoice_no": _existing.get("invoice_no", "") if _existing else ""}
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "submitted", "banner_id": str(res.inserted_id),
                   "store_id": store_id, "city": city}})
@@ -1518,7 +1542,8 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
 def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id          = data.get("order_id", "")
-    title             = data.get("title", "")
+    # NORMALIZE title — see activate_free_banner for full rationale.
+    title             = (data.get("title", "") or "").strip()
     image_url         = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
     image_thumb       = _make_thumb_url(image_url)
     razorpay_payment_id = data.get("razorpay_payment_id", "")
@@ -1573,6 +1598,9 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         except Exception:
             pass
 
+    _req_id = str(uuid.uuid4())[:8]
+    print(f"[BANNER-TRACE][{_req_id}] verify_banner_payment CLAIMED order={order_id} merchant={merchant_id} at={datetime.utcnow().isoformat()}")
+
     # CONTENT-BASED DEDUP GUARD (defense-in-depth, independent of order_id):
     # Same protection as the free-activation path — catches duplicates even
     # if a second banner_orders doc was created for identical banner content.
@@ -1586,6 +1614,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "created_at":  {"$gte": _dedup_window.isoformat()},
     })
     if _dup:
+        print(f"[BANNER-TRACE][{_req_id}] CONTENT-DEDUP HIT — reusing existing banner_id={_dup['_id']} title={title!r} store={store_id}")
         db.banner_orders.update_one({"_id": ObjectId(order_id)},
             {"$set": {"status": "paid", "banner_id": str(_dup["_id"]),
                       "store_id": store_id, "city": city}})
@@ -1623,13 +1652,21 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     # DB-LEVEL SAFETY NET — see activate_free_banner for full rationale.
     try:
         res = db.merchant_banners.insert_one(banner)
+        print(f"[BANNER-TRACE][{_req_id}] INSERTED new merchant_banners _id={res.inserted_id} title={title!r} store={store_id}")
     except DuplicateKeyError:
         _existing = db.merchant_banners.find_one({"source_order_id": order_id})
+        if not _existing:
+            _existing = db.merchant_banners.find_one({
+                "merchant_id": merchant_id, "title": title, "store_id": store_id,
+                "from_date": order.get("from_date", ""), "end_date": order.get("end_date", ""),
+            })
+        print(f"[BANNER-TRACE][{_req_id}] DUPLICATE-KEY-REJECTED insert — reused existing banner_id={_existing['_id'] if _existing else None}")
         db.banner_orders.update_one({"_id": ObjectId(order_id)},
-            {"$set": {"status": "paid", "banner_id": str(_existing["_id"]),
+            {"$set": {"status": "paid", "banner_id": str(_existing["_id"]) if _existing else "",
                       "store_id": store_id, "city": city}})
         return {"message": "Payment already verified.",
-                "banner_id": str(_existing["_id"]), "invoice_no": _existing.get("invoice_no", "")}
+                "banner_id": str(_existing["_id"]) if _existing else "",
+                "invoice_no": _existing.get("invoice_no", "") if _existing else ""}
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "paid", "banner_id": str(res.inserted_id),
                   "store_id": store_id, "city": city}})

@@ -2809,8 +2809,42 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     """Approve a merchant banner — publishes it as a promo slider.
     IDEMPOTENT: If already approved, returns success without creating
     a duplicate promo_slider. One submitted banner = one banner record."""
+    _req_id = str(uuid.uuid4())[:8]
+    _t0 = datetime.utcnow().isoformat()
     b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
     if not b: raise HTTPException(404, "Banner not found")
+    _status_before = b.get("approval_status")
+    print(f"[BANNER-TRACE][{_req_id}] APPROVE requested banner_id={bid} merchant_id={b.get('merchant_id')} "
+          f"admin={a.get('mobile', a.get('username',''))} status_before={_status_before} at={_t0}")
+
+    # ATOMIC CLAIM ON THE APPROVAL ITSELF: closes the same double-click race
+    # window as the submission side — two admins (or one admin double-clicking)
+    # hitting Approve on the same bid in the same instant could both read
+    # approval_status="pending" before either write lands. This atomically
+    # transitions pending -> approving so only ONE request proceeds past this
+    # point; the loser sees the updated state and takes the idempotent path.
+    _claim = db.merchant_banners.find_one_and_update(
+        {"_id": ObjectId(bid), "approval_status": {"$nin": ["approved", "approving"]}},
+        {"$set": {"approval_status": "approving"}},
+    )
+    if _claim is None:
+        # Someone else is approving this right now, or it's already approved.
+        # Briefly poll for the in-flight "approving" request to finish (mirrors
+        # the submission-side pattern) so we return the FINAL state, not a
+        # transient one, and never fall through to re-run approval logic
+        # concurrently with the request that's already doing it.
+        b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
+        for _ in range(20):
+            if b.get("approval_status") != "approving":
+                break
+            _time.sleep(0.15)
+            b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
+        print(f"[BANNER-TRACE][{_req_id}] APPROVE short-circuit — concurrent claim already in flight/done, "
+              f"final status={b.get('approval_status')}")
+        if b.get("approval_status") == "approved":
+            return {"ok": True, "message": "Banner already approved.", "already_approved": True}
+        # If it's neither approving nor approved after polling (e.g. the other
+        # request failed), fall through and retry approval normally below.
 
     # IDEMPOTENCY GUARD: If already approved, return success.
     # This prevents duplicate promo_sliders from double-clicks, retries,
@@ -2950,6 +2984,7 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
         # Keep the first one, delete the rest
         for _dup in _all_promo_for_bid[1:]:
             db.promo_sliders.delete_one({"_id": _dup["_id"]})
+    print(f"[BANNER-TRACE][{_req_id}] APPROVE completed banner_id={bid} status_before={_status_before} status_after=approved at={datetime.utcnow().isoformat()}")
     return {"ok": True, "message": "Banner approved and published to app."}
 
 @router.put("/merchant-banners/{bid}/reject")

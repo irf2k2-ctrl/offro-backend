@@ -335,6 +335,64 @@ def _ensure_indexes():
             sparse=True,
             background=True,
         )
+        # STRUCTURAL DUPLICATE-BANNER FIX (the real, final root cause): every
+        # earlier fix protected against duplicates from the SAME banner_orders
+        # document (source_order_id) — but if the client ends up creating two
+        # INDEPENDENT orders for what is logically the same banner submission
+        # (e.g. a slow/timed-out request the merchant retried from scratch),
+        # each one is a perfectly legitimate, never-before-seen order, so the
+        # per-order unique index and the atomic claim never fire — they're
+        # simply two different, valid orders. The application-level content
+        # dedup check in activate_free_banner/verify_banner_payment catches
+        # most of these, but it depends on an EXACT string match on title —
+        # so it can be silently defeated by something as small as an
+        # un-normalized trailing space (now fixed with .strip(), but a DB
+        # index shouldn't depend on every future code path getting that right).
+        #
+        # This partial unique index makes the actual invariant impossible to
+        # violate at the database layer, independent of order_id or which
+        # endpoint/code path created the record: a merchant can have at most
+        # ONE PENDING banner for a given (title, store, date range). Scoped to
+        # approval_status == "pending" only, so: already-approved banners
+        # never conflict with a new legitimate resubmission, and a rejected
+        # banner can always be resubmitted fresh.
+        #
+        # SELF-HEALING: dedupe existing pending duplicates first (keep the
+        # oldest), so the index can actually be created on top of whatever
+        # duplicates already exist in production right now.
+        try:
+            _content_groups = {}
+            for _cb in db.merchant_banners.find(
+                {"approval_status": "pending"},
+                {"_id": 1, "merchant_id": 1, "title": 1, "store_id": 1, "from_date": 1, "end_date": 1, "created_at": 1},
+            ):
+                _ckey = (
+                    str(_cb.get("merchant_id", "")),
+                    str(_cb.get("title", "")).strip(),
+                    str(_cb.get("store_id", "")).strip(),
+                    str(_cb.get("from_date", "")),
+                    str(_cb.get("end_date", "")),
+                )
+                _content_groups.setdefault(_ckey, []).append(_cb)
+            _content_dupes_removed = 0
+            for _ckey, _cdocs in _content_groups.items():
+                if len(_cdocs) < 2 or not _ckey[1]:
+                    continue
+                _cdocs_sorted = sorted(_cdocs, key=lambda d: str(d.get("created_at", "")))
+                for _cdup in _cdocs_sorted[1:]:
+                    db.merchant_banners.delete_one({"_id": _cdup["_id"]})
+                    _content_dupes_removed += 1
+            if _content_dupes_removed:
+                print(f"✅ Pre-index dedup: removed {_content_dupes_removed} duplicate pending merchant_banners")
+        except Exception as _content_dedup_err:
+            print(f"⚠️  Pre-index merchant_banners content-dedup warning: {_content_dedup_err}")
+        db.merchant_banners.create_index(
+            [("merchant_id", 1), ("title", 1), ("store_id", 1), ("from_date", 1), ("end_date", 1)],
+            name="merchant_banners_pending_content_unique",
+            unique=True,
+            partialFilterExpression={"approval_status": "pending"},
+            background=True,
+        )
         print("✅ MongoDB indexes ensured")
     except Exception as e:
         print(f"⚠️  Index creation warning: {e}")
