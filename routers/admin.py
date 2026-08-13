@@ -2488,23 +2488,9 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
             else:
                 # Token-based send: used for specific user only
                 phone = (data.get("target_phone") or "").strip()
-                # ── Phone normalisation: try all common formats ──
-                # DB may store +91xxxxxxxxxx, users enter 10-digit numbers
-                # Safe phone normalisation (lstrip is buggy — strips chars not prefixes)
-                _pd = phone.strip().replace(" ", "").replace("-", "").replace("+", "")
-                # Normalise to bare 10-digit number
-                if len(_pd) == 12 and _pd.startswith("91"): _pd = _pd[2:]
-                elif len(_pd) == 11 and _pd.startswith("0"): _pd = _pd[1:]
-                elif len(_pd) == 13 and _pd.startswith("091"): _pd = _pd[3:]
-                _last10 = _pd[-10:] if len(_pd) >= 10 else _pd
-                phone_variants = list({
-                    phone.strip(),          # as-typed by admin
-                    f"+91{_last10}",        # E.164 international
-                    f"91{_last10}",         # without +
-                    _last10,                # 10-digit bare
-                    f"0{_last10}",          # with leading 0
-                    f"+{_last10}",          # with + only (edge case)
-                })
+                # ── Phone normalisation: use shared _phone_variants for consistency ──
+                from routers.users import _phone_variants
+                phone_variants = _phone_variants(phone)
                 u = (db.accounts.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1}) or
                      db.users.find_one({"phone": {"$in": phone_variants}}, {"fcm_token": 1, "phone": 1}))
                 print(f"[FCM] specific: phone={phone} variants={phone_variants} found={u is not None} stored_phone={u.get('phone') if u else None} has_token={bool(u and u.get('fcm_token'))}")
@@ -2565,6 +2551,79 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         "sent_count": sent_count,
         "error": fcm_error if status not in ("sent", "queued") else "",
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# ADMIN — FCM TOKEN DIAGNOSTIC (read-only)
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/fcm-debug")
+def fcm_debug(phone: str = "", a=Depends(get_current_admin)):
+    """
+    READ-ONLY diagnostic — checks all 3 collections for FCM tokens matching
+    the given phone number. Returns exactly what the send-notification endpoint
+    would find. Use this to verify iOS token registration after app rebuild.
+    """
+    from routers.users import _phone_variants
+
+    raw_phone = phone.strip()
+    if not raw_phone:
+        raise HTTPException(400, "phone parameter is required")
+
+    variants = _phone_variants(raw_phone)
+    result = {
+        "query_phone": raw_phone,
+        "variants_tried": variants,
+        "accounts": None,
+        "users": None,
+        "fcm_pending": None,
+        "token_found": False,
+        "token_source": "",
+        "token_preview": "",
+    }
+
+    acc = db.accounts.find_one({"phone": {"$in": variants}}, {"fcm_token": 1, "phone": 1, "fcm_updated_at": 1})
+    if acc:
+        tok = acc.get("fcm_token", "")
+        result["accounts"] = {
+            "phone": acc.get("phone"),
+            "has_token": bool(tok),
+            "token_preview": tok[:20] + "..." if tok else "",
+            "fcm_updated_at": str(acc.get("fcm_updated_at", "")),
+        }
+        if tok:
+            result["token_found"] = True
+            result["token_source"] = "accounts"
+            result["token_preview"] = tok[:20] + "..."
+
+    usr = db.users.find_one({"phone": {"$in": variants}}, {"fcm_token": 1, "phone": 1})
+    if usr:
+        tok = usr.get("fcm_token", "")
+        result["users"] = {
+            "phone": usr.get("phone"),
+            "has_token": bool(tok),
+            "token_preview": tok[:20] + "..." if tok else "",
+        }
+        if tok and not result["token_found"]:
+            result["token_found"] = True
+            result["token_source"] = "users"
+            result["token_preview"] = tok[:20] + "..."
+
+    pending = db.fcm_pending.find_one({"phone": {"$in": variants}}, {"fcm_token": 1, "phone": 1, "updated_at": 1})
+    if pending:
+        tok = pending.get("fcm_token", "")
+        result["fcm_pending"] = {
+            "phone": pending.get("phone"),
+            "has_token": bool(tok),
+            "token_preview": tok[:20] + "..." if tok else "",
+            "updated_at": str(pending.get("updated_at", "")),
+        }
+        if tok and not result["token_found"]:
+            result["token_found"] = True
+            result["token_source"] = "fcm_pending"
+            result["token_preview"] = tok[:20] + "..."
+
+    return result
 
 
 # ═══════════════════════════════════════════════════════════

@@ -231,6 +231,9 @@ async def register_fcm_token(request: Request):
                 db.users.find_one({"phone": {"$in": variants}}))
 
     if user:
+        # Save token to the collection where the user was found.
+        # Also try to mirror to the other collection (best-effort, no error if miss).
+        _coll = "accounts" if db.accounts.find_one({"_id": user["_id"]}) else "users"
         db.accounts.update_one(
             {"_id": user["_id"]},
             {"$set": {"fcm_token": fcm_token, "fcm_updated_at": datetime.datetime.utcnow()}},
@@ -239,18 +242,23 @@ async def register_fcm_token(request: Request):
             {"_id": user["_id"]},
             {"$set": {"fcm_token": fcm_token}},
         )
-        print(f"[FCM] ✅ Token saved for {user.get('phone','?')}")
-        return JSONResponse({"ok": True})
+        print(f"[FCM] ✅ Token saved to {_coll} for phone={user.get('phone','?')} user_id={user_id} token_preview={fcm_token[:20]}...")
+        return JSONResponse({"ok": True, "saved_to": _coll})
     else:
-        # Save with phone key only — user may not be registered yet
+        # User not found — save token to fcm_pending using ALL phone variants
+        # so the send-notification lookup will always find it regardless of format
         if phone:
-            db.fcm_pending.update_one(
-                {"phone": phone},
-                {"$set": {"fcm_token": fcm_token, "updated_at": datetime.datetime.utcnow()}},
-                upsert=True,
-            )
-        print(f"[FCM] ⚠️ User not found for phone={phone} user_id={user_id} — token pending")
-        return JSONResponse({"ok": True, "note": "user not found, token queued"})
+            variants = _phone_variants(phone)
+            for v in variants:
+                db.fcm_pending.update_one(
+                    {"phone": v},
+                    {"$set": {"fcm_token": fcm_token, "updated_at": datetime.datetime.utcnow(), "raw_phone": phone}},
+                    upsert=True,
+                )
+            print(f"[FCM] ⚠️ User not found for phone={phone} user_id={user_id} — token saved to fcm_pending with {len(variants)} variants. token_preview={fcm_token[:20]}...")
+        else:
+            print(f"[FCM] ⚠️ No phone or user_id provided — token cannot be saved. token_preview={fcm_token[:20]}...")
+        return JSONResponse({"ok": True, "note": "user not found, token queued" if phone else "no phone provided"})
 
 
 @app.on_event("startup")
