@@ -868,12 +868,67 @@ def resolve_maps_link(url: str):
         raw = m.group(1).replace('+', ' ')
         place_name = urllib.parse.unquote(raw).strip()
 
+    # ── Step 2b: Fallback — if no decimal coords in the URL, try to
+    # resolve via Nominatim search using the place name we extracted.
+    # This handles Google Maps share links that use the 0xHEX:0xHEX
+    # place-ID format (e.g. /data=!4m2!3m1!1s0x3bb7133d20659cbb:...)
+    # instead of decimal coordinates.  These links carry a place name
+    # in the URL path (e.g. /maps/place/NEEMA+Opticals,...) but no
+    # !3d/!4d coordinate values, so the regex patterns above all miss.
+    if lat is None or lng is None:
+        if place_name:
+            try:
+                _search_resp = _req.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={"q": place_name, "format": "json", "limit": 1,
+                            "countrycodes": "in"},
+                    headers={"User-Agent": "OFFRO-App/1.0"},
+                    timeout=10,
+                )
+                if _search_resp.status_code == 200:
+                    _results = _search_resp.json()
+                    if _results:
+                        lat = float(_results[0]["lat"])
+                        lng = float(_results[0]["lon"])
+                        # Overwrite place_name with Nominatim's display_name
+                        # which is usually cleaner
+            except Exception:
+                pass
+
+    # ── Step 2c: Still no coords? Try with just the area/locality portion ──
+    if lat is None or lng is None and place_name:
+        # Strip shop name, keep the area + city portion
+        _parts = [p.strip() for p in place_name.split(",") if p.strip()]
+        # Use last 3 parts (usually area, city, state+pin)
+        _area = ", ".join(_parts[-3:]) if len(_parts) >= 3 else place_name
+        try:
+            _search_resp2 = _req.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": _area, "format": "json", "limit": 1,
+                        "countrycodes": "in"},
+                headers={"User-Agent": "OFFRO-App/1.0"},
+                timeout=10,
+            )
+            if _search_resp2.status_code == 200:
+                _results2 = _search_resp2.json()
+                if _results2:
+                    lat = float(_results2[0]["lat"])
+                    lng = float(_results2[0]["lon"])
+                    if not place_name:
+                        place_name = _results2[0].get("display_name", "")
+        except Exception:
+            pass
+
     if lat is None or lng is None:
         return {
             "error": (
                 "Could not extract coordinates from this link. "
-                "In Google Maps, tap Share → Copy link, then paste the full link here."
-            )
+                "Try opening the location in Google Maps, tap Share → Copy link, "
+                "then paste the full link here.  "
+                "If the problem persists, try searching for the place name manually."
+            ),
+            "place_name": place_name,
+            "final_url": final_url,
         }
 
     # ── Step 3: Nominatim reverse geocode for address auto-fill ──

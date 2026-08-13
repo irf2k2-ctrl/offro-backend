@@ -2410,9 +2410,19 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         if _fcm_image:
             notif_android["image"] = _fcm_image
         # Build APNS section with image support for iOS
-        _apns = {
-            "payload": {"aps": {"sound": "default", "badge": 1, "mutable-content": 1}},
+        # FIX iOS: Previously the aps dict had sound/badge/mutable-content but
+        # NO "alert" field.  FCM v1 auto-generates aps.alert from the top-level
+        # "notification" block, but only when the client doesn't override aps.
+        # Some iOS/APNs gateway versions silently drop the notification when
+        # aps.alert is missing from an explicit apns.payload.  Adding it
+        # explicitly guarantees the banner is delivered.
+        _aps = {
+            "alert": {"title": title, "body": body},
+            "sound": "default",
+            "badge": 1,
+            "mutable-content": 1,
         }
+        _apns = {"payload": {"aps": _aps}}
         if _fcm_image:
             # iOS image in FCM notification: needs fcm_options.image
             _apns["fcm_options"] = {"image": _fcm_image}
