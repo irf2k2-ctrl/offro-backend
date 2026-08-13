@@ -2441,6 +2441,7 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                     "title": title,
                     "body": body,
                     "image_url": image_url,
+                    "screen": data.get("screen", ""),
                 },
             }
         }
