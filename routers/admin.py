@@ -2416,19 +2416,22 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         # Some iOS/APNs gateway versions silently drop the notification when
         # aps.alert is missing from an explicit apns.payload.  Adding it
         # explicitly guarantees the banner is delivered.
+        # content-available:1 is REQUIRED for iOS notification persistence.
+        # With FirebaseAppDelegateProxyEnabled=false, the FCM Flutter plugin
+        # does NOT auto-swizzle. iOS only calls
+        # application(_:didReceiveRemoteNotification:fetchCompletionHandler:)
+        # — the method that delivers the message data to the FCM plugin so
+        # onMessage/onBackgroundMessage can fire — when content-available:1
+        # is present in the aps payload. Without it, iOS shows the banner
+        # (via willPresent / aps.alert) but never delivers the data payload
+        # to the app, so the notification is never saved to in-app history.
+        # Android works without this flag because the FCM Android SDK always
+        # delivers the full message regardless.
         _aps = {
             "alert": {"title": title, "body": body},
             "sound": "default",
             "badge": 1,
             "mutable-content": 1,
-            # FIX iOS notification persistence: without content-available:1,
-            # iOS treats this as a plain visible-alert push and does NOT grant
-            # the app any background execution time — Firebase's
-            # onBackgroundMessage handler (which saves to local history) is
-            # never invoked while the app is backgrounded. Adding
-            # content-available:1 makes this a hybrid alert+background push,
-            # so iOS wakes the app (when backgrounded, not force-quit) and
-            # runs onBackgroundMessage before/alongside showing the banner.
             "content-available": 1,
         }
         _apns = {"payload": {"aps": _aps}}
