@@ -2599,6 +2599,39 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
 # ADMIN — FCM TOKEN DIAGNOSTIC (read-only)
 # ═══════════════════════════════════════════════════════════
 
+@router.get("/fcm-tokens")
+def fcm_tokens_list(a=Depends(get_current_admin)):
+    """
+    READ-ONLY diagnostic — lists all registered FCM tokens.
+    iOS tokens are typically longer and have a different format than Android.
+    Use this to verify that an iOS device's token is actually registered.
+    """
+    tokens = []
+    seen = set()
+    for coll_name, coll in [("accounts", db.accounts), ("users", db.users)]:
+        for rec in coll.find({"fcm_token": {"$exists": True, "$ne": ""}}, {"fcm_token": 1, "phone": 1}).limit(500):
+            tok = (rec.get("fcm_token") or "").strip()
+            if not tok or tok in seen:
+                continue
+            seen.add(tok)
+            # iOS FCM tokens are typically 160+ chars, start with a hex-like string
+            # Android FCM tokens are typically 150+ chars, start with various prefixes
+            is_ios = len(tok) > 150 and not tok.startswith("APA")
+            tokens.append({
+                "phone": rec.get("phone", "?"),
+                "token_preview": tok[:30] + "...",
+                "token_length": len(tok),
+                "likely_platform": "iOS" if is_ios else "Android",
+                "source": coll_name,
+            })
+    return {
+        "total_tokens": len(tokens),
+        "ios_count": len([t for t in tokens if t["likely_platform"] == "iOS"]),
+        "android_count": len([t for t in tokens if t["likely_platform"] == "Android"]),
+        "tokens": tokens,
+    }
+
+
 @router.get("/fcm-debug")
 def fcm_debug(phone: str = "", a=Depends(get_current_admin)):
     """
