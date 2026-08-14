@@ -2421,6 +2421,15 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
             "sound": "default",
             "badge": 1,
             "mutable-content": 1,
+            # FIX iOS notification persistence: without content-available:1,
+            # iOS treats this as a plain visible-alert push and does NOT grant
+            # the app any background execution time — Firebase's
+            # onBackgroundMessage handler (which saves to local history) is
+            # never invoked while the app is backgrounded. Adding
+            # content-available:1 makes this a hybrid alert+background push,
+            # so iOS wakes the app (when backgrounded, not force-quit) and
+            # runs onBackgroundMessage before/alongside showing the banner.
+            "content-available": 1,
         }
         _apns = {"payload": {"aps": _aps}}
         if _fcm_image:
