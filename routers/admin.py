@@ -2410,31 +2410,26 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         if _fcm_image:
             notif_android["image"] = _fcm_image
         # Build APNS section with image support for iOS
-        # FIX iOS: Previously the aps dict had sound/badge/mutable-content but
-        # NO "alert" field.  FCM v1 auto-generates aps.alert from the top-level
-        # "notification" block, but only when the client doesn't override aps.
-        # Some iOS/APNs gateway versions silently drop the notification when
-        # aps.alert is missing from an explicit apns.payload.  Adding it
-        # explicitly guarantees the banner is delivered.
-        # content-available:1 is REQUIRED for iOS notification persistence.
-        # With FirebaseAppDelegateProxyEnabled=false, the FCM Flutter plugin
-        # does NOT auto-swizzle. iOS only calls
-        # application(_:didReceiveRemoteNotification:fetchCompletionHandler:)
-        # — the method that delivers the message data to the FCM plugin so
-        # onMessage/onBackgroundMessage can fire — when content-available:1
-        # is present in the aps payload. Without it, iOS shows the banner
-        # (via willPresent / aps.alert) but never delivers the data payload
-        # to the app, so the notification is never saved to in-app history.
-        # Android works without this flag because the FCM Android SDK always
-        # delivers the full message regardless.
+        # ORIGINAL aps: sound/badge/mutable-content — FCM v1 auto-generates
+        # aps.alert from the top-level "notification" block. Do NOT add an
+        # explicit "alert" key — doing so caused APNs to treat the push as a
+        # mixed alert+content-available notification and silently drop it.
+        # MINIMAL FIX: add content-available:1 so iOS calls
+        # didReceiveRemoteNotification:fetchCompletionHandler: which the FCM
+        # plugin needs to fire onMessage/onBackgroundMessage (required for
+        # saving notifications to in-app history). Also set apns-priority:10
+        # to ensure immediate delivery (FCM defaults to 5 when
+        # content-available is present, which causes throttling).
         _aps = {
-            "alert": {"title": title, "body": body},
             "sound": "default",
             "badge": 1,
             "mutable-content": 1,
             "content-available": 1,
         }
-        _apns = {"payload": {"aps": _aps}}
+        _apns = {
+            "payload": {"aps": _aps},
+            "headers": {"apns-priority": "10"},
+        }
         if _fcm_image:
             # iOS image in FCM notification: needs fcm_options.image
             _apns["fcm_options"] = {"image": _fcm_image}
