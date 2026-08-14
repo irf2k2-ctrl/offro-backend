@@ -2491,12 +2491,41 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 else:
                     topics = ["all_users"]
 
+                # FCM topic messaging is "best-effort" per Google's own docs -
+                # messages:send returning success only means Google ACCEPTED
+                # the message, not that any device received it. Topic fanout
+                # can silently drop or delay messages with no error reported.
+                # For "all_users"/"offers" we broadcast via direct tokens
+                # instead - much more reliable, and we get real per-token
+                # success/failure counts. Topic send is kept as a best-effort
+                # backup (costs nothing extra) for any device that missed
+                # token registration.
                 for topic in topics:
-                    msg = _build_fcm_message(topic=topic)
-                    mid = _fcm_send(access_token, _pid, msg)
-                    print(f"[FCM] topic={topic} message_id={mid}")
-                    sent_count += 1
-                status = "sent" if sent_count > 0 else "failed"
+                    try:
+                        msg = _build_fcm_message(topic=topic)
+                        mid = _fcm_send(access_token, _pid, msg)
+                        print(f"[FCM] topic={topic} message_id={mid}")
+                    except Exception as te:
+                        print(f"[FCM] topic={topic} send failed (non-fatal, continuing to token broadcast): {te}")
+
+                # Direct-token broadcast: the reliable path.
+                fail_count = 0
+                seen_tokens = set()
+                cursor_fields = {"fcm_token": 1}
+                for coll in (db.accounts, db.users):
+                    for rec in coll.find({"fcm_token": {"$exists": True, "$ne": ""}}, cursor_fields).limit(3000):
+                        tok = (rec.get("fcm_token") or "").strip()
+                        if not tok or tok in seen_tokens:
+                            continue
+                        seen_tokens.add(tok)
+                        try:
+                            mid = _fcm_send(access_token, _pid, _build_fcm_message(token=tok))
+                            sent_count += 1
+                        except Exception as fe:
+                            fail_count += 1
+                            fcm_error = str(fe)
+                print(f"[FCM] broadcast target={target}: sent={sent_count} failed={fail_count} total_tokens={len(seen_tokens)}")
+                status = "sent" if sent_count > 0 else ("failed" if fail_count > 0 else "skipped_no_tokens")
 
             else:
                 # Token-based send: used for specific user only
