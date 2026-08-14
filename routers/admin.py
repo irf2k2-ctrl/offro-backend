@@ -2409,28 +2409,21 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         }
         if _fcm_image:
             notif_android["image"] = _fcm_image
-        # Build APNS section with image support for iOS
-        # ORIGINAL aps: sound/badge/mutable-content — FCM v1 auto-generates
-        # aps.alert from the top-level "notification" block. Do NOT add an
-        # explicit "alert" key — doing so caused APNs to treat the push as a
-        # mixed alert+content-available notification and silently drop it.
-        # APNs payload for visible push notifications.
-        # NOTE: content-available:1 was REMOVED. It caused iOS to throttle
-        # subsequent notifications because it marks the push as a silent/
-        # background notification. The visible notification (title+body) is
-        # enough — onMessage/onBackgroundMessage fire via FCM plugin swizzle
-        # + UIBackgroundModes=remote-notification. apns-priority:10 ensures
-        # immediate delivery.
+        # APNs payload for iOS.
+        # CRITICAL: We include an explicit "alert" key with title+body.
+        # Without it, FCM v1 may not auto-generate alert from the notification
+        # block when custom aps fields are present, causing iOS to treat the
+        # push as a SILENT notification (no alert) and throttle subsequent
+        # deliveries. With explicit alert + content-available:1, iOS sees a
+        # VISIBLE notification with background delivery — NOT throttled.
+        # content-available:1 is required for the FCM plugin to fire
+        # onMessage (foreground) via didReceiveRemoteNotification:fetchCompletionHandler:
         _aps = {
+            "alert": {"title": title, "body": body},
             "sound": "default",
             "badge": 1,
             "mutable-content": 1,
-            # content-available:1 REMOVED — it caused iOS to treat pushes as
-            # silent/background notifications and throttle subsequent deliveries.
-            # The notification block (title/body) already makes this a visible
-            # push, which is what we want. onMessage fires in foreground via
-            # FCM plugin swizzle, onBackgroundMessage fires in background via
-            # UIBackgroundModes=remote-notification. No content-available needed.
+            "content-available": 1,
         }
         _apns = {
             "payload": {"aps": _aps},
@@ -2497,24 +2490,11 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 else:
                     topics = ["all_users"]
 
-                # FCM topic messaging is "best-effort" per Google's own docs -
-                # messages:send returning success only means Google ACCEPTED
-                # the message, not that any device received it. Topic fanout
-                # can silently drop or delay messages with no error reported.
-                # For "all_users"/"offers" we broadcast via direct tokens
-                # instead - much more reliable, and we get real per-token
-                # success/failure counts. Topic send is kept as a best-effort
-                # backup (costs nothing extra) for any device that missed
-                # token registration.
-                for topic in topics:
-                    try:
-                        msg = _build_fcm_message(topic=topic)
-                        mid = _fcm_send(access_token, _pid, msg)
-                        print(f"[FCM] topic={topic} message_id={mid}")
-                    except Exception as te:
-                        print(f"[FCM] topic={topic} send failed (non-fatal, continuing to token broadcast): {te}")
-
-                # Direct-token broadcast: the reliable path.
+                # Direct-token broadcast ONLY (no topic send).
+                # Topic send was REMOVED — it caused duplicate notifications
+                # because every device received via BOTH topic subscription
+                # AND direct token. Direct tokens are more reliable and give
+                # per-token success/failure counts.
                 fail_count = 0
                 seen_tokens = set()
                 cursor_fields = {"fcm_token": 1}
