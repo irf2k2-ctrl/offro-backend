@@ -2414,17 +2414,23 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         # aps.alert from the top-level "notification" block. Do NOT add an
         # explicit "alert" key — doing so caused APNs to treat the push as a
         # mixed alert+content-available notification and silently drop it.
-        # MINIMAL FIX: add content-available:1 so iOS calls
-        # didReceiveRemoteNotification:fetchCompletionHandler: which the FCM
-        # plugin needs to fire onMessage/onBackgroundMessage (required for
-        # saving notifications to in-app history). Also set apns-priority:10
-        # to ensure immediate delivery (FCM defaults to 5 when
-        # content-available is present, which causes throttling).
+        # APNs payload for visible push notifications.
+        # NOTE: content-available:1 was REMOVED. It caused iOS to throttle
+        # subsequent notifications because it marks the push as a silent/
+        # background notification. The visible notification (title+body) is
+        # enough — onMessage/onBackgroundMessage fire via FCM plugin swizzle
+        # + UIBackgroundModes=remote-notification. apns-priority:10 ensures
+        # immediate delivery.
         _aps = {
             "sound": "default",
             "badge": 1,
             "mutable-content": 1,
-            "content-available": 1,
+            # content-available:1 REMOVED — it caused iOS to treat pushes as
+            # silent/background notifications and throttle subsequent deliveries.
+            # The notification block (title/body) already makes this a visible
+            # push, which is what we want. onMessage fires in foreground via
+            # FCM plugin swizzle, onBackgroundMessage fires in background via
+            # UIBackgroundModes=remote-notification. No content-available needed.
         }
         _apns = {
             "payload": {"aps": _aps},
