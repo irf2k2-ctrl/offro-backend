@@ -2464,8 +2464,13 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 "Content-Type": "application/json",
             },
         )
-        with _ureq.urlopen(req, timeout=12) as r:
-            return _json.loads(r.read()).get("name", "ok")
+        try:
+            with _ureq.urlopen(req, timeout=12) as r:
+                return _json.loads(r.read()).get("name", "ok")
+        except _ureq.HTTPError as e:
+            error_body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+            print(f"[FCM] HTTP {e.code} from FCM: {error_body}")
+            raise
 
     if sa_json and (project_id or "project_id" in sa_json):
         try:
