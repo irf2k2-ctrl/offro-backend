@@ -6,9 +6,7 @@ from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
 from datetime import datetime, timedelta
-from pymongo import ReturnDocument
-from pymongo.errors import DuplicateKeyError
-import uuid, qrcode, io, base64, hmac, hashlib, time as _banner_time
+import uuid, qrcode, io, base64, hmac, hashlib
 
 
 import os as _cld_os, hashlib as _cld_hash, time as _cld_time
@@ -1207,7 +1205,6 @@ def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
     """Merchant can turn their own approved banner ON or OFF.
     PERMANENT FIX: Searches merchant_banners first, then promo_sliders.
     Always syncs both collections."""
-    import traceback as _tb
     merchant_id = _mid(m)
     merchant_phone = str(m.get("phone", ""))
     try:
@@ -1224,16 +1221,10 @@ def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
     if not b:
         raise HTTPException(404, "Banner not found")
 
-    # Verify ownership — compare both as strings (merchant_id may be stored
-    # as ObjectId in the banner doc). Also try matching by phone.
-    b_mid_raw = b.get("merchant_id", "")
-    b_mid_str = str(b_mid_raw) if b_mid_raw else ""
+    # Verify ownership
     b_phone = re.sub(r'\D', '', str(b.get("merchant_phone", "")))[-10:]
     m_phone = re.sub(r'\D', '', merchant_phone)[-10:] if merchant_phone else ""
-    # Also check legacy merchant_id field
-    legacy_mid = str(m.get("merchant_id", "")) if m.get("merchant_id") else ""
-    mid_matches = (b_mid_str == merchant_id) or (b_mid_str == legacy_mid)
-    if not mid_matches and (not m_phone or b_phone != m_phone):
+    if str(b.get("merchant_id","")) != merchant_id and (not m_phone or b_phone != m_phone):
         raise HTTPException(403, "Not your banner")
 
     # Cannot re-activate a banner removed by admin
@@ -1242,21 +1233,17 @@ def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
 
     new_active = not bool(b.get("is_active", True))
 
-    try:
-        if found_in == "merchant_banners":
-            db.merchant_banners.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
-            db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
-        else:
-            db.promo_sliders.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
-            src_bid = b.get("source_banner_id", "")
-            if src_bid:
-                try:
-                    db.merchant_banners.update_one({"_id": ObjectId(src_bid)}, {"$set": {"is_active": new_active, "toggled_at": ts}})
-                except Exception:
-                    pass
-    except Exception as e:
-        _tb.print_exc()
-        raise HTTPException(500, f"Toggle failed: {type(e).__name__}: {e}")
+    if found_in == "merchant_banners":
+        db.merchant_banners.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+        db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+    else:
+        db.promo_sliders.update_one({"_id": oid}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+        src_bid = b.get("source_banner_id", "")
+        if src_bid:
+            try:
+                db.merchant_banners.update_one({"_id": ObjectId(src_bid)}, {"$set": {"is_active": new_active, "toggled_at": ts}})
+            except Exception:
+                pass
     return {"ok": True, "is_active": new_active}
 
 # ── POST /merchant/banners/order  ──────────────────────────────────────────
@@ -1374,51 +1361,23 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
 def activate_free_banner(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id    = data.get("order_id", "")
-    # NORMALIZE title (ROOT-CAUSE FIX): the content-dedup check below relies on
-    # EXACT string equality. An un-stripped title ("Test" vs "Test ") from a
-    # retried/resubmitted client request defeats that check silently, letting
-    # a second, content-identical banner slip through as "different". This is
-    # the real reason duplicates kept surviving despite the order_id-level
-    # protections — those two submissions had two different order_ids AND
-    # (invisibly) different title whitespace, so no existing guard caught them.
-    title       = (data.get("title", "") or "").strip()
+    title       = data.get("title", "")
     image_url   = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
     image_thumb = _make_thumb_url(image_url)
 
-    # ATOMIC CLAIM (PERMANENT DUPLICATE-BANNER FIX): a single banner_orders
-    # document can only be "claimed" for submission ONCE. find_one_and_update
-    # is a single atomic Mongo operation, so if two requests race (double-tap,
-    # network retry, client resubmit), only ONE of them can successfully
-    # transition status out of its pre-submission state — the loser gets
-    # order=None back and falls into the "already submitted" branch below
-    # instead of proceeding to insert a second merchant_banners document.
-    # This closes the exact race window that the old find_one-then-insert_one
-    # pattern left open (both requests could pass the check before either wrote).
-    order = db.banner_orders.find_one_and_update(
-        {"_id": ObjectId(order_id), "merchant_id": merchant_id,
-         "status": {"$nin": ["submitted", "paid", "claimed"]}},
-        {"$set": {"status": "claimed", "claimed_at": datetime.utcnow()}},
-        return_document=ReturnDocument.BEFORE,
-    )
-    if order is None:
-        existing = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
-        if not existing:
-            raise HTTPException(404, "Order not found")
-        # Another request already claimed/submitted this order. If it's still
-        # mid-flight ("claimed" but banner_id not yet set), briefly poll —
-        # the insert below takes milliseconds — then return its result.
-        for _ in range(20):
-            if existing.get("banner_id") or existing.get("status") not in ("claimed",):
-                break
-            _banner_time.sleep(0.15)
-            existing = db.banner_orders.find_one({"_id": ObjectId(order_id)})
-        existing_banner_id = existing.get("banner_id", "")
+    order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    # IDEMPOTENCY GUARD: if already submitted → return existing data, never insert twice.
+    # (Mirrors the guard in verify_banner_payment below — prevents double-tap / retry
+    # from creating a second merchant_banners document for the same order, which showed
+    # up in the admin dashboard as a "duplicate" banner: one pending, one approved.)
+    if order.get("status") in ("submitted", "paid"):
+        existing_banner_id = order.get("banner_id", "")
         existing_banner = db.merchant_banners.find_one({"_id": ObjectId(existing_banner_id)}) if existing_banner_id else None
         existing_inv_no = (existing_banner or {}).get("invoice_no", "")
         return {"message": "Banner already activated.", "banner_id": existing_banner_id, "invoice_no": existing_inv_no}
-
-    _req_id = str(uuid.uuid4())[:8]
-    print(f"[BANNER-TRACE][{_req_id}] activate_free_banner CLAIMED order={order_id} merchant={merchant_id} at={datetime.utcnow().isoformat()}")
 
     # Mark discount code used if applied
     disc_code = order.get("discount_code")
@@ -1453,7 +1412,6 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "created_at":  {"$gte": _dedup_window.isoformat()},
     })
     if _dup:
-        print(f"[BANNER-TRACE][{_req_id}] CONTENT-DEDUP HIT — reusing existing banner_id={_dup['_id']} title={title!r} store={store_id}")
         db.banner_orders.update_one({"_id": ObjectId(order_id)},
             {"$set": {"status": "submitted", "banner_id": str(_dup["_id"]),
                       "store_id": store_id, "city": city}})
@@ -1483,37 +1441,9 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "payment_status":   "free",
         "status":           "pending",
         "approval_status":  "pending",
-        "source_order_id":  order_id,  # DB-level unique index enforces one banner per order — hard duplicate guarantee
         "created_at":       datetime.utcnow().isoformat(),
     }
-    # DB-LEVEL SAFETY NET: even if the atomic claim above were somehow bypassed
-    # (e.g. two different order_ids for identical content, a scenario the
-    # content-dedup check above already mostly catches), the unique index on
-    # source_order_id makes a true duplicate for THIS order physically
-    # impossible at the database layer — insert_one raises DuplicateKeyError
-    # instead of silently creating a second document.
-    try:
-        res = db.merchant_banners.insert_one(banner)
-        print(f"[BANNER-TRACE][{_req_id}] INSERTED new merchant_banners _id={res.inserted_id} title={title!r} store={store_id}")
-    except DuplicateKeyError:
-        # A unique index rejected the insert — this is the DB-level safety net
-        # kicking in (either the per-order index or the per-content pending
-        # index). Recover by finding the winning sibling: try source_order_id
-        # first, then fall back to content match (the content-index case has
-        # a DIFFERENT source_order_id on the winner).
-        _existing = db.merchant_banners.find_one({"source_order_id": order_id})
-        if not _existing:
-            _existing = db.merchant_banners.find_one({
-                "merchant_id": merchant_id, "title": title, "store_id": store_id,
-                "from_date": order.get("from_date", ""), "end_date": order.get("end_date", ""),
-            })
-        print(f"[BANNER-TRACE][{_req_id}] DUPLICATE-KEY-REJECTED insert — reused existing banner_id={_existing['_id'] if _existing else None}")
-        db.banner_orders.update_one({"_id": ObjectId(order_id)},
-            {"$set": {"status": "submitted", "banner_id": str(_existing["_id"]) if _existing else "",
-                      "store_id": store_id, "city": city}})
-        return {"message": "Banner already submitted for review.",
-                "banner_id": str(_existing["_id"]) if _existing else "",
-                "invoice_no": _existing.get("invoice_no", "") if _existing else ""}
+    res = db.merchant_banners.insert_one(banner)
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "submitted", "banner_id": str(res.inserted_id),
                   "store_id": store_id, "city": city}})
@@ -1553,48 +1483,28 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
 def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id          = data.get("order_id", "")
-    # NORMALIZE title — see activate_free_banner for full rationale.
-    title             = (data.get("title", "") or "").strip()
+    title             = data.get("title", "")
     image_url         = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
     image_thumb       = _make_thumb_url(image_url)
     razorpay_payment_id = data.get("razorpay_payment_id", "")
     razorpay_order_id   = data.get("razorpay_order_id", "")
     razorpay_signature  = data.get("razorpay_signature", "")
 
-    _precheck_order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
-    if not _precheck_order:
+    order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
+    if not order:
         raise HTTPException(404, "Order not found")
+
+    # IDEMPOTENCY GUARD: if already paid → return existing data, never insert twice
+    if order.get("status") == "paid":
+        existing_banner = db.merchant_banners.find_one({"_id": ObjectId(order.get("banner_id", ""))}) if order.get("banner_id") else None
+        existing_inv_no = (existing_banner or {}).get("invoice_no") or order.get("invoice_no", "")
+        return {"message": "Payment already verified.", "banner_id": order.get("banner_id", ""), "invoice_no": existing_inv_no}
 
     if RAZORPAY_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
         msg = f"{razorpay_order_id}|{razorpay_payment_id}"
         expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
         if expected != razorpay_signature:
             raise HTTPException(400, "Payment verification failed")
-
-    # ATOMIC CLAIM (PERMANENT DUPLICATE-BANNER FIX): mirrors activate_free_banner
-    # above — a single banner_orders document can only be "claimed" for
-    # verification ONCE. find_one_and_update is a single atomic Mongo operation,
-    # so double-tap / retry requests racing each other can no longer both pass
-    # a stale "already paid?" check before either has written — only one wins
-    # the atomic transition and proceeds to insert a merchant_banners doc.
-    order = db.banner_orders.find_one_and_update(
-        {"_id": ObjectId(order_id), "merchant_id": merchant_id,
-         "status": {"$nin": ["submitted", "paid", "claimed"]}},
-        {"$set": {"status": "claimed", "claimed_at": datetime.utcnow()}},
-        return_document=ReturnDocument.BEFORE,
-    )
-    if order is None:
-        existing = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
-        if not existing:
-            raise HTTPException(404, "Order not found")
-        for _ in range(20):
-            if existing.get("banner_id") or existing.get("status") not in ("claimed",):
-                break
-            _banner_time.sleep(0.15)
-            existing = db.banner_orders.find_one({"_id": ObjectId(order_id)})
-        existing_banner = db.merchant_banners.find_one({"_id": ObjectId(existing.get("banner_id", ""))}) if existing.get("banner_id") else None
-        existing_inv_no = (existing_banner or {}).get("invoice_no") or existing.get("invoice_no", "")
-        return {"message": "Payment already verified.", "banner_id": existing.get("banner_id", ""), "invoice_no": existing_inv_no}
 
     # Read store/city from Flutter payload (Flutter sends these on payment verification)
     store_id   = (data.get("store_id")   or "").strip()
@@ -1609,9 +1519,6 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         except Exception:
             pass
 
-    _req_id = str(uuid.uuid4())[:8]
-    print(f"[BANNER-TRACE][{_req_id}] verify_banner_payment CLAIMED order={order_id} merchant={merchant_id} at={datetime.utcnow().isoformat()}")
-
     # CONTENT-BASED DEDUP GUARD (defense-in-depth, independent of order_id):
     # Same protection as the free-activation path — catches duplicates even
     # if a second banner_orders doc was created for identical banner content.
@@ -1625,7 +1532,6 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "created_at":  {"$gte": _dedup_window.isoformat()},
     })
     if _dup:
-        print(f"[BANNER-TRACE][{_req_id}] CONTENT-DEDUP HIT — reusing existing banner_id={_dup['_id']} title={title!r} store={store_id}")
         db.banner_orders.update_one({"_id": ObjectId(order_id)},
             {"$set": {"status": "paid", "banner_id": str(_dup["_id"]),
                       "store_id": store_id, "city": city}})
@@ -1657,27 +1563,9 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "payment_status":   "paid",
         "status":           "pending",
         "approval_status":  "pending",
-        "source_order_id":  order_id,  # DB-level unique index enforces one banner per order — hard duplicate guarantee
         "created_at":       datetime.utcnow().isoformat(),
     }
-    # DB-LEVEL SAFETY NET — see activate_free_banner for full rationale.
-    try:
-        res = db.merchant_banners.insert_one(banner)
-        print(f"[BANNER-TRACE][{_req_id}] INSERTED new merchant_banners _id={res.inserted_id} title={title!r} store={store_id}")
-    except DuplicateKeyError:
-        _existing = db.merchant_banners.find_one({"source_order_id": order_id})
-        if not _existing:
-            _existing = db.merchant_banners.find_one({
-                "merchant_id": merchant_id, "title": title, "store_id": store_id,
-                "from_date": order.get("from_date", ""), "end_date": order.get("end_date", ""),
-            })
-        print(f"[BANNER-TRACE][{_req_id}] DUPLICATE-KEY-REJECTED insert — reused existing banner_id={_existing['_id'] if _existing else None}")
-        db.banner_orders.update_one({"_id": ObjectId(order_id)},
-            {"$set": {"status": "paid", "banner_id": str(_existing["_id"]) if _existing else "",
-                      "store_id": store_id, "city": city}})
-        return {"message": "Payment already verified.",
-                "banner_id": str(_existing["_id"]) if _existing else "",
-                "invoice_no": _existing.get("invoice_no", "") if _existing else ""}
+    res = db.merchant_banners.insert_one(banner)
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "paid", "banner_id": str(res.inserted_id),
                   "store_id": store_id, "city": city}})
@@ -1932,6 +1820,14 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
         "price":          price,
         "original_price": original_price,
         "discount_label": discount_label,
+        # FIX (premium product missing from home screen): this collection
+        # (merchant_vouchers) is exclusively for premium product cards, but
+        # this insert never set product_type. The home screen query in
+        # public.py (get_gift_vouchers_public, section 3) filters strictly
+        # on {"product_type": "premium"} — without this field the product
+        # was created + approved successfully but silently never appeared
+        # on the Discover Products / home screen section.
+        "product_type":   "premium",
         "duration_days":  order.get("days", 30),
         "from_date":      order.get("from_date", ""),
         "end_date":       order.get("end_date", ""),
@@ -2046,6 +1942,9 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         "price":            price,
         "original_price":   original_price,
         "discount_label":   discount_label,
+        # FIX (premium product missing from home screen): same missing-field
+        # issue as activate_free_voucher() — see comment there.
+        "product_type":     "premium",
         "duration_days":    order.get("days", 30),
         "from_date":        order.get("from_date", ""),
         "end_date":         order.get("end_date", ""),
@@ -2918,29 +2817,13 @@ def get_product_analytics(pid: str, m=Depends(get_merchant)):
         ObjectId(pid)
     except Exception:
         raise HTTPException(400, "Invalid product ID")
-    # FIX: response keys must match what products_phase2.dart reads
-    # (views/shares/opens/last_viewed) — this previously returned
-    # view/share/open (no 's') + no last_viewed at all, so the Flutter
-    # ProductAnalyticsPage always showed 0s and "—" even when events existed.
-    events = list(db.product_events.find(
-        {"product_id": pid, "merchant_id": merchant_id}, {"event": 1, "created_at": 1}
-    ).sort("created_at", -1))
+    events = list(db.product_events.find({"product_id": pid, "merchant_id": merchant_id}, {"event": 1}))
     counts = {"view": 0, "share": 0, "open": 0}
-    last_viewed = ""
     for e in events:
         ev = e.get("event", "")
         if ev in counts:
             counts[ev] += 1
-        if ev == "view" and not last_viewed and e.get("created_at"):
-            last_viewed = str(e["created_at"])[:19]
-    return {
-        "product_id":  pid,
-        "views":       counts["view"],
-        "shares":      counts["share"],
-        "opens":       counts["open"],
-        "last_viewed": last_viewed,
-        "total":       sum(counts.values()),
-    }
+    return {"product_id": pid, **counts, "total": sum(counts.values())}
 
 
 @router.get("/products/{pid}/history")

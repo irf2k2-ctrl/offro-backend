@@ -248,6 +248,16 @@ def get_store(store_id: str):
         for p in db.gift_vouchers.find(_gv_q).sort("_id", -1).limit(30):
             if p.get("is_active", True) in (False, "false", "0", 0): continue
             if _prod_expired(p): continue
+            # FIX (duplicate product card bug): gift_vouchers docs with a
+            # non-empty source_voucher_id are mirror copies auto-created
+            # when a premium product is approved (see admin.py
+            # approve_merchant_product_card). The authoritative record for
+            # that same product is already returned from merchant_vouchers
+            # in section 1 above — keeping this mirror here caused every
+            # approved premium product to render TWICE on the Store Detail
+            # "Featured Products" tab, with the mirror copy missing its
+            # discount field (forcing a broken client-side fallback badge).
+            if p.get("source_voucher_id"): continue
             pid = str(p["_id"])
             if pid in seen_product_ids: continue
             seen_product_ids.add(pid)
@@ -868,67 +878,12 @@ def resolve_maps_link(url: str):
         raw = m.group(1).replace('+', ' ')
         place_name = urllib.parse.unquote(raw).strip()
 
-    # ── Step 2b: Fallback — if no decimal coords in the URL, try to
-    # resolve via Nominatim search using the place name we extracted.
-    # This handles Google Maps share links that use the 0xHEX:0xHEX
-    # place-ID format (e.g. /data=!4m2!3m1!1s0x3bb7133d20659cbb:...)
-    # instead of decimal coordinates.  These links carry a place name
-    # in the URL path (e.g. /maps/place/NEEMA+Opticals,...) but no
-    # !3d/!4d coordinate values, so the regex patterns above all miss.
-    if lat is None or lng is None:
-        if place_name:
-            try:
-                _search_resp = _req.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={"q": place_name, "format": "json", "limit": 1,
-                            "countrycodes": "in"},
-                    headers={"User-Agent": "OFFRO-App/1.0"},
-                    timeout=10,
-                )
-                if _search_resp.status_code == 200:
-                    _results = _search_resp.json()
-                    if _results:
-                        lat = float(_results[0]["lat"])
-                        lng = float(_results[0]["lon"])
-                        # Overwrite place_name with Nominatim's display_name
-                        # which is usually cleaner
-            except Exception:
-                pass
-
-    # ── Step 2c: Still no coords? Try with just the area/locality portion ──
-    if lat is None or lng is None and place_name:
-        # Strip shop name, keep the area + city portion
-        _parts = [p.strip() for p in place_name.split(",") if p.strip()]
-        # Use last 3 parts (usually area, city, state+pin)
-        _area = ", ".join(_parts[-3:]) if len(_parts) >= 3 else place_name
-        try:
-            _search_resp2 = _req.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={"q": _area, "format": "json", "limit": 1,
-                        "countrycodes": "in"},
-                headers={"User-Agent": "OFFRO-App/1.0"},
-                timeout=10,
-            )
-            if _search_resp2.status_code == 200:
-                _results2 = _search_resp2.json()
-                if _results2:
-                    lat = float(_results2[0]["lat"])
-                    lng = float(_results2[0]["lon"])
-                    if not place_name:
-                        place_name = _results2[0].get("display_name", "")
-        except Exception:
-            pass
-
     if lat is None or lng is None:
         return {
             "error": (
                 "Could not extract coordinates from this link. "
-                "Try opening the location in Google Maps, tap Share → Copy link, "
-                "then paste the full link here.  "
-                "If the problem persists, try searching for the place name manually."
-            ),
-            "place_name": place_name,
-            "final_url": final_url,
+                "In Google Maps, tap Share → Copy link, then paste the full link here."
+            )
         }
 
     # ── Step 3: Nominatim reverse geocode for address auto-fill ──
@@ -1132,11 +1087,12 @@ kyc@localsaver.in"""
 def _get_user_optional(request: _Req):
     token = request.cookies.get("user_token") or request.headers.get("Authorization","").replace("Bearer ","").strip()
     if not token: return None
-    # FIX: also check merchants collection as fallback — some legacy accounts
-    # may only exist there. Also handle empty-string tokens that slip through.
-    if not token or token == "": return None
-    user = db.accounts.find_one({"token": token}) or db.users.find_one({"token": token}) or db.merchants.find_one({"token": token})
-    return user
+    # FIX: this only ever checked the legacy 'users' collection, so any user
+    # logged in via the unified 'accounts' collection (the primary path today)
+    # was never found here — submit_product_review then saved their review
+    # as user_id=None (anonymous), and get_my_product_review always returned {}.
+    # That's why a submitted rating always "disappeared" on refresh/return.
+    return db.accounts.find_one({"token": token}) or db.users.find_one({"token": token})
 
 @router.post("/stores/{store_id}/rate")
 def rate_store(store_id: str, data: dict, request: _Req):
@@ -1366,17 +1322,13 @@ def get_gift_vouchers_public(city: str = ""):
         for k in ["logo", "logo_url", "image_url", "image", "thumbnail"]:
             v = str(doc.get(k, "") or "")
             if v.startswith("http"): return v
-            # FIX: accept base64 data:image values (used when Cloudinary isn't configured)
-            if v.startswith("data:image"): return v
         store_id = doc.get("store_id", "")
         if store_id:
             try:
                 s = db.stores.find_one({"_id": OId(store_id)},
                                        {"store_image2": 1, "image": 1, "image2": 1})
                 if s:
-                    for sk in ["store_image2", "image2", "image"]:
-                        sv = str(s.get(sk, "") or "")
-                        if sv.startswith("http") or sv.startswith("data:image"): return sv
+                    return s.get("store_image2") or s.get("image2") or s.get("image") or ""
             except: pass
         return ""
 
@@ -1478,7 +1430,7 @@ def get_gift_vouchers_public(city: str = ""):
             "discount_label": str(d.get("discount_label", "") or ""),
             "is_active":      True,
             "source":         "gift_vouchers",
-            "rating":         float(d.get("rating") or 0),
+            "rating":         _get_store_rating(sid, mid),
             "rating_count":   int(d.get("rating_count") or d.get("review_count") or 0),
         })
 
@@ -1529,7 +1481,7 @@ def get_gift_vouchers_public(city: str = ""):
             "discount_label": str(p.get("discount_label", "") or ""),
             "is_active":      True,
             "source":         "products",
-            "rating":         float(p.get("rating") or 0),
+            "rating":         _get_store_rating(psid, pmid),
             "rating_count":   int(p.get("rating_count") or p.get("review_count") or 0),
         })
 
@@ -1577,7 +1529,7 @@ def get_gift_vouchers_public(city: str = ""):
                 "discount_label": str(mv.get("discount_label", "") or ""),
                 "is_active":      True,
                 "source":         "merchant_vouchers",
-                "rating":         float(mv.get("rating") or 0),
+                "rating":         _get_store_rating(mvsid, mvmid),
                 "rating_count":   int(mv.get("rating_count") or mv.get("review_count") or 0),
             })
 
@@ -1642,29 +1594,14 @@ def track_product_event(pid: str, data: dict):
     event = data.get("event", "view")
     if event not in ("view", "share", "open"):
         event = "view"
-    # FIX: the Flutter app's trackProductEvent() never sends merchant_id, so
-    # events were always stored with merchant_id="" — which meant
-    # get_product_analytics() (filtered by the logged-in merchant's real id)
-    # never matched any events and always showed 0. Resolve merchant_id
-    # server-side from the product document itself so tracking works
-    # regardless of what the client sends.
-    merchant_id = str(data.get("merchant_id", "") or "")
-    if not merchant_id:
-        try:
-            _pid_oid = _OId4(pid)
-            _src_doc = db.merchant_vouchers.find_one({"_id": _pid_oid}, {"merchant_id": 1}) \
-                or db.gift_vouchers.find_one({"_id": _pid_oid}, {"merchant_id": 1})
-            if _src_doc:
-                merchant_id = str(_src_doc.get("merchant_id", "") or "")
-        except Exception:
-            pass
+    merchant_id = data.get("merchant_id", "")
     db.product_events.insert_one({
         "product_id": pid, "merchant_id": merchant_id,
         "event": event, "created_at": _dtt.utcnow(),
     })
     for col in [db.merchant_vouchers, db.gift_vouchers]:
         try:
-            col.update_one({"_id": _OId4(pid)}, {"$inc": {f"{event}_count": 1}, "$set": {"last_seen": _dtt.utcnow()}})
+            col.update_one({"_id": _OId4(pid)}, {"$inc": {f"{event}_count": 1}})
         except Exception:
             pass
     return {"ok": True}
@@ -1747,6 +1684,9 @@ def get_products_by_store(store_id: str, limit: int = 20):
     _gv_by_store_q = {**q_oid, "approval_status": "approved"}
     for p in db.gift_vouchers.find(_gv_by_store_q).sort("_id", -1).limit(limit):
         if p.get("is_active", True) in (False, "false", "0", 0): continue
+        # FIX (duplicate product card bug): skip premium mirror copies —
+        # same product is already returned from merchant_vouchers above.
+        if p.get("source_voucher_id"): continue
         # FIX: skip expired gift_vouchers by end_date string or datetime
         _gv_ed = p.get("end_date") or p.get("validity_end") or p.get("expiry")
         if _gv_ed:
