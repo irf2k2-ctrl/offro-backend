@@ -1031,19 +1031,6 @@ def resolve_maps_link(
 
     place_id = _extract_place_id(url)
 
-    # Google short/share links can redirect to a URL containing
-    # unrelated/default viewport coordinates. Only trust coordinates
-    # extracted from the original URL for short-link inputs.
-    try:
-        original_host = urlparse(url).netloc.lower().split(":")[0]
-    except Exception:
-        original_host = ""
-
-    is_short_maps_link = original_host in {
-        "maps.app.goo.gl",
-        "goo.gl",
-    }
-
     if lat is not None and lng is not None:
 
         print(
@@ -1076,7 +1063,7 @@ def resolve_maps_link(
             f"{resolved_url}"
         )
 
-        if (lat is None or lng is None) and not is_short_maps_link:
+        if lat is None or lng is None:
 
             lat, lng = _extract_coordinates(
                 resolved_url
@@ -1112,7 +1099,7 @@ def resolve_maps_link(
 
             html = response.text or ""
 
-            if (lat is None or lng is None) and not is_short_maps_link:
+            if lat is None or lng is None:
 
                 lat, lng = (
                     _extract_coordinates_from_html(
