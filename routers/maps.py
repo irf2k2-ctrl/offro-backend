@@ -58,7 +58,7 @@ def _valid_coordinates(lat, lng):
     return None, None
 
 
-def _extract_coordinates(text: str):
+def _extract_coordinates(text: str, allow_generic_fallback=True):
     """
     Extract latitude/longitude from common Google Maps URL/page formats.
 
@@ -172,22 +172,26 @@ def _extract_coordinates(text: str):
 
         # ---------------------------------------------------------------
         # 4. Generic coordinate pair fallback
+        #
+        # Useful for URLs, but unsafe for arbitrary Google Maps HTML,
+        # which can contain unrelated coordinate pairs.
         # ---------------------------------------------------------------
 
-        match = re.search(
-            r'(?<!\d)(-?\d{1,3}\.\d{4,})\s*,\s*'
-            r'(-?\d{1,3}\.\d{4,})(?!\d)',
-            candidate,
-        )
-
-        if match:
-            lat, lng = _valid_coordinates(
-                match.group(1),
-                match.group(2),
+        if allow_generic_fallback:
+            match = re.search(
+                r'(?<!\d)(-?\d{1,3}\.\d{4,})\s*,\s*'
+                r'(-?\d{1,3}\.\d{4,})(?!\d)',
+                candidate,
             )
 
-            if lat is not None:
-                return lat, lng
+            if match:
+                lat, lng = _valid_coordinates(
+                    match.group(1),
+                    match.group(2),
+                )
+
+                if lat is not None:
+                    return lat, lng
 
     return None, None
 
@@ -878,6 +882,25 @@ def _extract_html_title(html: str):
             flags=re.IGNORECASE,
         ).strip()
 
+        # Do not pass Google error/interstitial titles to Places Search.
+        invalid_titles = {
+            "dynamic link not found",
+            "page not found",
+            "google maps",
+            "error",
+            "404",
+            "not found",
+        }
+
+        normalized_title = title.casefold().strip()
+
+        if (
+            not normalized_title
+            or normalized_title in invalid_titles
+            or "dynamic link not found" in normalized_title
+        ):
+            return ""
+
         return title
 
     except Exception:
@@ -891,50 +914,32 @@ def _extract_coordinates_from_html(html: str):
 
     # First run normal coordinate extraction.
 
-    lat, lng = _extract_coordinates(html)
+    lat, lng = _extract_coordinates(html, allow_generic_fallback=False)
 
     if lat is not None:
         return lat, lng
 
-    # Additional JSON-like patterns.
-
-    patterns = [
-
-        (
-            r'"latitude"\s*:\s*'
-            r'(-?\d+(?:\.\d+)?)'
-            r'.{0,300}'
-            r'"longitude"\s*:\s*'
-            r'(-?\d+(?:\.\d+)?)'
-        ),
-
-        (
-            r'"lat"\s*:\s*'
-            r'(-?\d+(?:\.\d+)?)'
-            r'.{0,300}'
-            r'"lng"\s*:\s*'
-            r'(-?\d+(?:\.\d+)?)'
-        ),
-
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            html,
-            re.IGNORECASE | re.DOTALL,
-        )
-
-        if match:
-
-            lat, lng = _valid_coordinates(
-                match.group(1),
-                match.group(2),
-            )
-
-            if lat is not None:
-                return lat, lng
+    # NOTE (fixed):
+    #
+    # This function previously also tried generic "lat"/"lng" and
+    # "latitude"/"longitude" JSON-key regex patterns as a fallback here.
+    # That fallback was too permissive: modern Google Maps pages bundle a
+    # large amount of unrelated JS/JSON (map defaults, other embedded
+    # scripts, etc.), and the regex could match an unrelated coordinate
+    # pair elsewhere on the page instead of the actual business location.
+    #
+    # Because this ran during STEP 3 (HTML parsing) of resolve_maps_link,
+    # a false-positive match here would set lat/lng to a WRONG value and
+    # cause the function to skip STEP 4-6 (Resolution API / Places API /
+    # Text Search) entirely, since those only run "if lat is None or lng
+    # is None". That meant a bad guess here silently pre-empted the more
+    # authoritative, reliable API-based resolution.
+    #
+    # This function uses _extract_coordinates() with its generic coordinate
+    # fallback disabled, so arbitrary coordinate pairs in page HTML cannot
+    # pre-empt the authoritative API-based resolution path. If those patterns
+    # don't find anything, resolve_maps_link() correctly falls through to
+    # the Resolution API / Places API / Text Search steps instead.
 
     return None, None
 
