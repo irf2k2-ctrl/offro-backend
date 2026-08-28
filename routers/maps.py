@@ -744,6 +744,107 @@ def _get_place_details(place_id: str):
         return None
 
 
+
+# ---------------------------------------------------------------------------
+# Google Places Text Search (New) fallback
+# ---------------------------------------------------------------------------
+
+def _search_place_text(query: str):
+    """
+    Resolve a place name/address using Google Places Text Search (New).
+
+    This is a LAST-RESORT fallback only. Existing coordinate extraction,
+    Maps Resolution API, and Place Details remain the preferred paths.
+    """
+    if not GOOGLE_MAPS_API_KEY or not query:
+        return None
+
+    query = re.sub(r"\s+", " ", str(query)).strip()
+
+    if not query:
+        return None
+
+    endpoint = "https://places.googleapis.com/v1/places:searchText"
+
+    print(f"[MAPS] Places Text Search fallback: {query}")
+
+    try:
+        response = requests.post(
+            endpoint,
+            json={
+                "textQuery": query,
+                "regionCode": "IN",
+                "pageSize": 1,
+            },
+            timeout=HTTP_TIMEOUT,
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+                "X-Goog-FieldMask": (
+                    "places.id,"
+                    "places.displayName,"
+                    "places.formattedAddress,"
+                    "places.location,"
+                    "places.googleMapsUri"
+                ),
+                "User-Agent": "Offro/1.0",
+            },
+        )
+
+        print(
+            f"[MAPS] Places Text Search HTTP status: "
+            f"{response.status_code}"
+        )
+
+        if response.status_code != 200:
+            print(
+                "[MAPS] Places Text Search ERROR:"
+            )
+            print(response.text[:2000])
+            return None
+
+        data = response.json()
+        places = data.get("places") or []
+
+        if not places:
+            print("[MAPS] Places Text Search returned no places.")
+            return None
+
+        place = places[0] or {}
+        location = place.get("location") or {}
+
+        lat, lng = _valid_coordinates(
+            location.get("latitude"),
+            location.get("longitude"),
+        )
+
+        if lat is None or lng is None:
+            return None
+
+        display_name = place.get("displayName") or {}
+
+        return {
+            "place_id": place.get("id") or "",
+            "lat": lat,
+            "lng": lng,
+            "place_name": display_name.get("text") or "",
+            "address": place.get("formattedAddress") or "",
+            "url": place.get("googleMapsUri") or "",
+        }
+
+    except requests.RequestException as exc:
+        print(
+            f"[MAPS] Places Text Search request failed: {exc}"
+        )
+        return None
+
+    except Exception as exc:
+        print(
+            f"[MAPS] Places Text Search unexpected error: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
 # ---------------------------------------------------------------------------
 # HTML fallback
 # ---------------------------------------------------------------------------
@@ -1125,6 +1226,58 @@ def resolve_maps_link(
 
     # -----------------------------------------------------------------------
     # STEP 6:
+    # Last-resort Google Places Text Search fallback.
+    #
+    # This handles place/search links where Google did not expose coordinates
+    # or a usable Place ID in the URL/page.
+    # -----------------------------------------------------------------------
+    if (lat is None or lng is None) and GOOGLE_MAPS_API_KEY:
+        search_query = ""
+
+        # Prefer an extracted place name from the Google Maps URL.
+        if place_name:
+            search_query = place_name
+
+        # If available, use a useful query parameter instead.
+        try:
+            parsed_search = urlparse(resolved_url)
+            search_params = parse_qs(parsed_search.query)
+
+            for key in ("query", "q", "destination"):
+                values = search_params.get(key) or []
+                if values and values[0].strip():
+                    value = values[0].strip()
+
+                    if not re.fullmatch(
+                        r"-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?",
+                        value,
+                    ):
+                        search_query = value
+                        break
+        except Exception:
+            pass
+
+        if search_query:
+            details = _search_place_text(search_query)
+
+            if details:
+                lat = details.get("lat")
+                lng = details.get("lng")
+
+                if details.get("place_id"):
+                    place_id = details["place_id"]
+
+                if details.get("place_name"):
+                    place_name = details["place_name"]
+
+                if details.get("address"):
+                    address = details["address"]
+
+                if details.get("url"):
+                    resolved_url = details["url"]
+
+    # -----------------------------------------------------------------------
+    # STEP 7:
     # Validate final coordinates.
     # -----------------------------------------------------------------------
 
