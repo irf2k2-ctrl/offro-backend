@@ -588,6 +588,90 @@ def _resolve_maps_url_with_resolution_api(url: str):
         return None
 
 
+
+# ---------------------------------------------------------------------------
+# Google Places address component helpers
+# ---------------------------------------------------------------------------
+
+def _extract_address_components(place_data: dict):
+    """
+    Extract structured State, City, and Area values from a Google Places
+    API (New) response.
+
+    Google may return multiple component types for the same address. We use
+    the most specific component available for each OffrO field.
+    """
+
+    if not isinstance(place_data, dict):
+        return {
+            "state": "",
+            "city": "",
+            "area": "",
+        }
+
+    components = place_data.get("addressComponents") or []
+
+    state = ""
+    city = ""
+    area = ""
+
+    # Prefer the first matching component in Google's returned order.
+    for component in components:
+        if not isinstance(component, dict):
+            continue
+
+        long_text = (
+            component.get("longText")
+            or component.get("shortText")
+            or ""
+        ).strip()
+
+        if not long_text:
+            continue
+
+        types = component.get("types") or []
+
+        if not isinstance(types, list):
+            types = [types]
+
+        types = {
+            str(value).strip().lower()
+            for value in types
+            if value
+        }
+
+        if (
+            not state
+            and "administrative_area_level_1" in types
+        ):
+            state = long_text
+
+        if (
+            not city
+            and (
+                "locality" in types
+                or "postal_town" in types
+            )
+        ):
+            city = long_text
+
+        if (
+            not area
+            and (
+                "sublocality_level_1" in types
+                or "sublocality" in types
+                or "neighborhood" in types
+            )
+        ):
+            area = long_text
+
+    return {
+        "state": state,
+        "city": city,
+        "area": area,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Google Places API (New)
 # ---------------------------------------------------------------------------
@@ -640,6 +724,7 @@ def _get_place_details(place_id: str):
                     "id,"
                     "displayName,"
                     "formattedAddress,"
+                    "addressComponents,"
                     "location,"
                     "googleMapsUri"
                 ),
@@ -697,6 +782,10 @@ def _get_place_details(place_id: str):
             or ""
         )
 
+        address_components = _extract_address_components(
+            data
+        )
+
         result = {
             "place_id": (
                 data.get("id")
@@ -709,6 +798,9 @@ def _get_place_details(place_id: str):
                 data.get("formattedAddress")
                 or ""
             ),
+            "state": address_components["state"],
+            "city": address_components["city"],
+            "area": address_components["area"],
             "url": (
                 data.get("googleMapsUri")
                 or ""
@@ -788,6 +880,7 @@ def _search_place_text(query: str):
                     "places.id,"
                     "places.displayName,"
                     "places.formattedAddress,"
+                    "places.addressComponents,"
                     "places.location,"
                     "places.googleMapsUri"
                 ),
@@ -826,6 +919,9 @@ def _search_place_text(query: str):
             return None
 
         display_name = place.get("displayName") or {}
+        address_components = _extract_address_components(
+            place
+        )
 
         return {
             "place_id": place.get("id") or "",
@@ -833,6 +929,9 @@ def _search_place_text(query: str):
             "lng": lng,
             "place_name": display_name.get("text") or "",
             "address": place.get("formattedAddress") or "",
+            "state": address_components["state"],
+            "city": address_components["city"],
+            "area": address_components["area"],
             "url": place.get("googleMapsUri") or "",
         }
 
@@ -967,6 +1066,9 @@ def resolve_maps_link(
         longitude
         place_name
         address
+        state
+        city
+        area
         url
         place_id
     """
@@ -1033,6 +1135,10 @@ def resolve_maps_link(
     place_name = _extract_place_name(url)
 
     address = ""
+
+    state = ""
+    city = ""
+    area = ""
 
     place_id = _extract_place_id(url)
 
@@ -1181,6 +1287,15 @@ def resolve_maps_link(
                         "address"
                     ]
 
+                if details.get("state"):
+                    state = details["state"]
+
+                if details.get("city"):
+                    city = details["city"]
+
+                if details.get("area"):
+                    area = details["area"]
+
                 if details.get("url"):
 
                     resolved_url = details[
@@ -1222,6 +1337,15 @@ def resolve_maps_link(
                 address = details[
                     "address"
                 ]
+
+            if details.get("state"):
+                state = details["state"]
+
+            if details.get("city"):
+                city = details["city"]
+
+            if details.get("area"):
+                area = details["area"]
 
             if details.get("url"):
 
@@ -1277,6 +1401,15 @@ def resolve_maps_link(
 
                 if details.get("address"):
                     address = details["address"]
+
+                if details.get("state"):
+                    state = details["state"]
+
+                if details.get("city"):
+                    city = details["city"]
+
+                if details.get("area"):
+                    area = details["area"]
 
                 if details.get("url"):
                     resolved_url = details["url"]
@@ -1371,6 +1504,18 @@ def resolve_maps_link(
     )
 
     print(
+        f"[MAPS] State: {state}"
+    )
+
+    print(
+        f"[MAPS] City: {city}"
+    )
+
+    print(
+        f"[MAPS] Area: {area}"
+    )
+
+    print(
         f"[MAPS] Place ID: {place_id}"
     )
 
@@ -1386,6 +1531,9 @@ def resolve_maps_link(
         "longitude": lng,
         "place_name": place_name,
         "address": address,
+        "state": state,
+        "city": city,
+        "area": area,
         "url": resolved_url,
         "place_id": place_id or "",
     }
