@@ -1736,6 +1736,9 @@ def save_social(body: dict, a=Depends(get_current_admin)):
 
 # ===================== DISCOUNT CODES =====================
 
+_DISCOUNT_TYPES  = {"VALUE", "PERCENTAGE"}
+_DISCOUNT_SCOPES = {"STORE", "BANNERS", "PRODUCTS", "ALL"}
+
 @router.get("/discounts")
 def list_discounts(a=Depends(get_current_admin)):
     docs = list(db.discounts.find().sort("created_at", -1))
@@ -1744,7 +1747,9 @@ def list_discounts(a=Depends(get_current_admin)):
         result.append({
             "_id":         str(d["_id"]),
             "code":        d.get("code",""),
+            "type":        d.get("type","VALUE"),
             "value":       d.get("value",0),
+            "applies_to":  d.get("applies_to","ALL"),
             "max_uses":    d.get("max_uses",0),
             "used_count":  d.get("used_count",0),
             "active":      d.get("active",True),
@@ -1757,11 +1762,21 @@ def list_discounts(a=Depends(get_current_admin)):
 def create_discount(body: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Deals", "add")
     code = (body.get("code","")).strip().upper()
+    dtype = str(body.get("type","VALUE")).strip().upper()
+    applies_to = str(body.get("applies_to","ALL")).strip().upper()
     value = float(body.get("value",0))
     if not code:
         raise HTTPException(400, "Code is required")
-    if value < 1:
-        raise HTTPException(400, "Value must be at least ₹1")
+    if dtype not in _DISCOUNT_TYPES:
+        raise HTTPException(400, "Type of Discount must be VALUE or PERCENTAGE")
+    if applies_to not in _DISCOUNT_SCOPES:
+        raise HTTPException(400, "Map With must be one of STORE, BANNERS, PRODUCTS, ALL")
+    if dtype == "PERCENTAGE":
+        if not (0 < value <= 100):
+            raise HTTPException(400, "Percentage value must be between 1 and 100")
+    else:
+        if value < 1:
+            raise HTTPException(400, "Value must be at least ₹1")
     if db.discounts.find_one({"code": code}):
         raise HTTPException(400, "Code already exists")
     expiry = None
@@ -1770,7 +1785,9 @@ def create_discount(body: dict, a=Depends(get_current_admin)):
         except: pass
     db.discounts.insert_one({
         "code": code,
+        "type": dtype,
         "value": value,
+        "applies_to": applies_to,
         "max_uses": int(body.get("max_uses",0)),
         "used_count": 0,
         "active": True,
@@ -1784,8 +1801,37 @@ def update_discount(discount_id: str, body: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Deals", "edit")
     update = {}
     if "active" in body: update["active"] = body["active"]
-    if "value" in body: update["value"] = float(body["value"])
+    if "type" in body:
+        dtype = str(body["type"]).strip().upper()
+        if dtype not in _DISCOUNT_TYPES:
+            raise HTTPException(400, "Type of Discount must be VALUE or PERCENTAGE")
+        update["type"] = dtype
+    if "applies_to" in body:
+        applies_to = str(body["applies_to"]).strip().upper()
+        if applies_to not in _DISCOUNT_SCOPES:
+            raise HTTPException(400, "Map With must be one of STORE, BANNERS, PRODUCTS, ALL")
+        update["applies_to"] = applies_to
+    if "value" in body:
+        value = float(body["value"])
+        # Validate against the resulting type (new type if provided in this
+        # same request, else whatever's already stored on the document).
+        effective_type = update.get("type")
+        if not effective_type:
+            existing = db.discounts.find_one({"_id": ObjectId(discount_id)}, {"type": 1}) or {}
+            effective_type = existing.get("type", "VALUE")
+        if effective_type == "PERCENTAGE":
+            if not (0 < value <= 100):
+                raise HTTPException(400, "Percentage value must be between 1 and 100")
+        elif value < 1:
+            raise HTTPException(400, "Value must be at least ₹1")
+        update["value"] = value
     if "max_uses" in body: update["max_uses"] = int(body["max_uses"])
+    if "expiry_date" in body:
+        if body["expiry_date"]:
+            try: update["expiry_date"] = datetime.strptime(body["expiry_date"], "%Y-%m-%d")
+            except Exception: pass
+        else:
+            update["expiry_date"] = None
     if not update:
         raise HTTPException(400, "Nothing to update")
     db.discounts.update_one({"_id": ObjectId(discount_id)}, {"$set": update})

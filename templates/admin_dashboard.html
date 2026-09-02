@@ -926,8 +926,24 @@ td[style*="sticky"]{background:#fff;}
         <input id="disc_code" class="form-control" placeholder="e.g. SAVE50" style="text-transform:uppercase;">
       </div>
       <div class="mb-2">
-        <label class="form-label">Discount Value (₹) *</label>
+        <label class="form-label">Type of Discount *</label>
+        <select id="disc_type" class="form-control" onchange="_discUpdateValueLabel()">
+          <option value="VALUE">VALUE (flat ₹ off)</option>
+          <option value="PERCENTAGE">PERCENTAGE (% off)</option>
+        </select>
+      </div>
+      <div class="mb-2">
+        <label class="form-label" id="disc_value_label">Discount Value (₹) *</label>
         <input id="disc_value" class="form-control" type="number" min="1" placeholder="e.g. 50">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Map With *</label>
+        <select id="disc_applies_to" class="form-control">
+          <option value="STORE">STORE (store subscription only)</option>
+          <option value="BANNERS">BANNERS (banner purchase only)</option>
+          <option value="PRODUCTS">PRODUCTS (premium product / upgrade / renewal)</option>
+          <option value="ALL" selected>ALL (any supported paid checkout)</option>
+        </select>
       </div>
       <div class="mb-2">
         <label class="form-label">Max Uses (0 = unlimited)</label>
@@ -945,7 +961,7 @@ td[style*="sticky"]{background:#fff;}
         <input id="disc_search" class="form-control form-control-sm" placeholder="Search code..." style="max-width:220px;" oninput="renderDiscounts()">
       </div>
       <table><thead><tr>
-        <th>Code</th><th>Value (₹)</th><th>Used</th><th>Max Uses</th><th>Expiry</th><th>Status</th><th>Actions</th>
+        <th>Code</th><th>Type</th><th>Value</th><th>Map With</th><th>Used</th><th>Max Uses</th><th>Expiry</th><th>Status</th><th>Actions</th>
       </tr></thead>
       <tbody id="disc_body"></tbody></table>
     </div>
@@ -1770,9 +1786,13 @@ function renderDiscounts() {
     const st = d.active ? '<span class="badge-active">Active</span>' : '<span class="badge-inactive">Inactive</span>';
     const expiry = d.expiry_date ? d.expiry_date.substring(0,10) : '—';
     const maxU = d.max_uses > 0 ? d.max_uses : '∞';
+    const dtype = d.type || 'VALUE';
+    const valueDisplay = dtype === 'PERCENTAGE' ? `${d.value}%` : `₹${d.value}`;
     return `<tr>
       <td><b>${d.code}</b></td>
-      <td>₹${d.value}</td>
+      <td>${dtype}</td>
+      <td>${valueDisplay}</td>
+      <td>${d.applies_to || 'ALL'}</td>
       <td>${d.used_count||0}</td>
       <td>${maxU}</td>
       <td>${expiry}</td>
@@ -1782,26 +1802,40 @@ function renderDiscounts() {
         <button class="btn-sm-danger" onclick="deleteDiscount('${d._id}')">Delete</button>
       </td>
     </tr>`;
-  }).join("") : '<tr><td colspan="7" style="text-align:center;color:var(--muted);">No discount codes</td></tr>';
+  }).join("") : '<tr><td colspan="9" style="text-align:center;color:var(--muted);">No discount codes</td></tr>';
+}
+function _discUpdateValueLabel() {
+  const t = document.getElementById("disc_type").value;
+  document.getElementById("disc_value_label").innerText =
+    t === "PERCENTAGE" ? "Discount Value (%) *" : "Discount Value (₹) *";
 }
 async function addDiscount() {
   const code = document.getElementById("disc_code").value.trim().toUpperCase();
+  const type = document.getElementById("disc_type").value;
+  const applies_to = document.getElementById("disc_applies_to").value;
   const value = parseFloat(document.getElementById("disc_value").value);
   const max_uses = parseInt(document.getElementById("disc_max_uses").value)||0;
   const expiry = document.getElementById("disc_expiry").value;
   const msg = document.getElementById("disc_msg");
   if (!code) { msg.style.color="red"; msg.innerText="Code is required"; return; }
-  if (!value||value<1) { msg.style.color="red"; msg.innerText="Value must be ≥ ₹1"; return; }
+  if (type === "PERCENTAGE") {
+    if (!value || value<=0 || value>100) { msg.style.color="red"; msg.innerText="Percentage value must be between 1 and 100"; return; }
+  } else {
+    if (!value||value<1) { msg.style.color="red"; msg.innerText="Value must be ≥ ₹1"; return; }
+  }
   try {
     let r = await fetch("/admin/discounts", {method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({code,value,max_uses,expiry_date:expiry||null})});
+      body: JSON.stringify({code,type,value,applies_to,max_uses,expiry_date:expiry||null})});
     let d = await r.json();
     if (!r.ok) { msg.style.color="red"; msg.innerText=d.detail||"Error"; return; }
     msg.style.color="var(--primary)"; msg.innerText="✅ Code added!";
     document.getElementById("disc_code").value="";
+    document.getElementById("disc_type").value="VALUE";
+    document.getElementById("disc_applies_to").value="ALL";
     document.getElementById("disc_value").value="";
     document.getElementById("disc_max_uses").value="0";
     document.getElementById("disc_expiry").value="";
+    _discUpdateValueLabel();
     loadDiscounts();
   } catch(e) { msg.style.color="red"; msg.innerText="Error: "+e.message; }
 }

@@ -1083,6 +1083,12 @@ def validate_discount(body: dict):
     code = (body.get("code","")).strip().upper()
     if not code:
         raise HTTPException(400, "Code required")
+    # Optional: caller may pass the checkout scope it intends to use this
+    # code for (STORE / BANNERS / PRODUCTS) so the preview can reject a
+    # code that's valid but mapped to a different checkout type. This is
+    # a preview-time convenience only — _resolve_discount() in
+    # merchant_app.py remains the sole authority at order-creation time.
+    checkout_scope = (body.get("checkout_scope") or body.get("scope") or "").strip().upper()
     doc = db.discounts.find_one({"code": code})
     if not doc:
         raise HTTPException(404, "Invalid discount code")
@@ -1092,10 +1098,15 @@ def validate_discount(body: dict):
         raise HTTPException(400, "This code has expired")
     if doc.get("max_uses", 0) > 0 and doc.get("used_count", 0) >= doc["max_uses"]:
         raise HTTPException(400, "This code has reached its usage limit")
+    code_scope = str(doc.get("applies_to") or "ALL").upper()
+    if checkout_scope and checkout_scope in {"STORE", "BANNERS", "PRODUCTS"} and code_scope != "ALL" and code_scope != checkout_scope:  # real checkout types only — "ALL" is a code-scope value, not a checkout type
+        raise HTTPException(400, f"Code '{code}' is valid but can only be used for {code_scope.title()} checkout, not {checkout_scope.title()}.")
     return {
         "ok": True,
         "code": code,
+        "type": doc.get("type", "VALUE"),
         "value": doc.get("value", 0),
+        "applies_to": code_scope,
         "discount_id": str(doc["_id"])
     }
 

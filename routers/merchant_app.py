@@ -178,6 +178,104 @@ def _log_tx(merchant_id: str, tx_type: str, description: str, amount: float = 0,
     except Exception:
         pass  # never crash the main flow due to logging
 
+
+# ───────────── discount engine (single source of truth: db.discounts) ─────────────
+# Scope values ("Map With"): STORE, BANNERS, PRODUCTS, ALL
+# Type values: VALUE, PERCENTAGE
+# This is the ONLY place discount codes are resolved/calculated for merchant
+# checkout. Callers must never trust a discount amount sent by the client —
+# only the resulting dict from _resolve_discount() may be used to compute
+# the payable amount sent to Razorpay.
+
+_DISCOUNT_SCOPES = {"STORE", "BANNERS", "PRODUCTS", "ALL"}
+_CHECKOUT_SCOPES = {"STORE", "BANNERS", "PRODUCTS"}  # real checkout types (excludes "ALL", which is only a code-scope value)
+_DISCOUNT_TYPES  = {"VALUE", "PERCENTAGE"}
+
+
+def _resolve_discount(discount_code: str, checkout_scope: str, pre_tax_amount: float) -> dict:
+    """Authoritative discount lookup + calculation against db.discounts.
+
+    checkout_scope: one of "STORE", "BANNERS", "PRODUCTS" — the scope of the
+    checkout currently being performed (never "ALL"; that's a code-side value).
+    pre_tax_amount: the taxable (pre-GST) order amount discount is applied against.
+
+    Returns a dict with keys: code, type, applies_to, discount_value,
+    discount_amount, message. discount_amount is always <= pre_tax_amount and
+    >= 0 — the caller can safely subtract it from pre_tax_amount before GST.
+
+    Raises HTTPException(400) for an invalid/expired/exhausted/out-of-scope code.
+    If discount_code is falsy, returns a harmless zero-discount dict (no code
+    applied is not an error — discount codes are optional at checkout).
+    """
+    code = (discount_code or "").strip().upper()
+    if not code:
+        return {
+            "code": "", "type": None, "applies_to": None,
+            "discount_value": 0.0, "discount_amount": 0.0, "message": "",
+        }
+
+    disc = db.discounts.find_one({"code": code})
+    if not disc or not disc.get("active", True):
+        raise HTTPException(400, "Invalid or inactive discount code.")
+
+    max_u = int(disc.get("max_uses", 0) or 0)
+    used  = int(disc.get("used_count", 0) or 0)
+    if max_u > 0 and used >= max_u:
+        raise HTTPException(400, "This discount code has reached its usage limit.")
+
+    expiry = disc.get("expiry_date")
+    if expiry and expiry < datetime.utcnow():
+        raise HTTPException(400, "This discount code has expired.")
+
+    scope = str(disc.get("applies_to") or "ALL").upper()
+    if scope not in _DISCOUNT_SCOPES:
+        scope = "ALL"
+    if scope != "ALL" and scope != checkout_scope:
+        raise HTTPException(400, f"Code '{code}' cannot be used for this checkout.")
+
+    dtype = str(disc.get("type") or "VALUE").upper()
+    if dtype not in _DISCOUNT_TYPES:
+        dtype = "VALUE"
+    configured_value = float(disc.get("value", 0) or 0)
+
+    if dtype == "PERCENTAGE":
+        amount = round(pre_tax_amount * configured_value / 100.0, 2)
+    else:
+        amount = configured_value
+
+    # A discount must never exceed the order amount / make it negative.
+    amount = max(0.0, min(round(amount, 2), round(pre_tax_amount, 2)))
+
+    return {
+        "code": code,
+        "type": dtype,
+        "applies_to": scope,
+        "discount_value": configured_value,
+        "discount_amount": amount,
+        "message": f"Code '{code}' applied — ₹{amount:.2f} off",
+    }
+
+
+def _mark_discount_used(discount_code: str):
+    """Increment used_count exactly once, after successful payment/activation.
+    Atomic: only increments if the code is unlimited OR still under max_uses,
+    so it can never push used_count past max_uses even under concurrent calls."""
+    code = (discount_code or "").strip().upper()
+    if not code:
+        return
+    db.discounts.update_one(
+        {
+            "code": code,
+            "$or": [
+                {"max_uses": {"$in": [0, None]}},
+                {"max_uses": {"$exists": False}},
+                {"$expr": {"$lt": ["$used_count", "$max_uses"]}},
+            ],
+        },
+        {"$inc": {"used_count": 1}},
+    )
+
+
 # ───────────── auth ─────────────
 
 @router.post("/register")
@@ -546,30 +644,17 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     ])}
     if plan not in plans_map: raise HTTPException(400, "Invalid plan")
 
-    price       = plans_map[plan]["price"]
-    gst_amt     = round(price * gst / 100, 2)
-    total       = round(price + gst_amt, 2)
-    total_paise = int(total * 100)
+    price = plans_map[plan]["price"]
 
-    # ── Apply discount code ──
-    discount_code  = data.get("discount_code")
-    discount_value = float(data.get("discount_value", 0))
-    if discount_code:
-        disc_doc = db.discounts.find_one({"code": discount_code.upper(), "active": True})
-        if disc_doc:
-            max_u = disc_doc.get("max_uses", 0)
-            used  = disc_doc.get("used_count", 0)
-            from datetime import datetime as _dt
-            expired = disc_doc.get("expiry_date") and _dt.utcnow() > disc_doc["expiry_date"]
-            if not expired and (max_u == 0 or used < max_u):
-                discount_value = float(disc_doc.get("value", 0))
-                db.discounts.update_one({"_id": disc_doc["_id"]}, {"$inc": {"used_count": 1}})
-            else:
-                discount_value = 0
-        else:
-            discount_value = 0
+    # ── Discount code (backend-authoritative; discount applied to pre-tax
+    # price first, then GST calculated on the discounted taxable amount) ──
+    discount_code = data.get("discount_code")
+    disc = _resolve_discount(discount_code, "STORE", price)
+    discount_amount = disc["discount_amount"]
 
-    total     = max(0, round(total - discount_value, 2))
+    taxable_amount = max(0.0, round(price - discount_amount, 2))
+    gst_amt     = round(taxable_amount * gst / 100, 2)
+    total       = round(taxable_amount + gst_amt, 2)
     total_paise = int(total * 100)
 
     from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
@@ -579,25 +664,32 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     # Razorpay does NOT accept amount=0; activate immediately instead.
     if total_paise <= 0:
         sub_doc = {
-            "store_id":       store_id,
-            "merchant_id": _mid(m),
-            "plan":           plan,
-            "from_date":      from_date,
-            "end_date":       end_date,
-            "price":          price,
-            "gst":            gst_amt,
-            "gst_percent":    gst,
-            "total":          0,
-            "status":         "paid",
-            "pay_mode":       "free",
-            "discount_code":  discount_code,
-            "discount_value": discount_value,
-            "created_at":     datetime.utcnow(),
-            "paid_at":        datetime.utcnow(),
-            "free_activation": True,
+            "store_id":         store_id,
+            "merchant_id":      _mid(m),
+            "plan":             plan,
+            "from_date":        from_date,
+            "end_date":         end_date,
+            "price":            price,
+            "gst":              gst_amt,
+            "gst_percent":      gst,
+            "total":            0,
+            "status":           "paid",
+            "pay_mode":         "free",
+            "discount_code":    disc["code"],
+            "discount_type":    disc["type"],
+            "discount_scope":   disc["applies_to"],
+            "discount_value":   disc["discount_value"],
+            "discount_amount":  discount_amount,
+            "original_amount":  price,
+            "final_amount":     0,
+            "created_at":       datetime.utcnow(),
+            "paid_at":          datetime.utcnow(),
+            "free_activation":  True,
         }
         sub_result = db.subscriptions.insert_one(sub_doc)
         sub_id = str(sub_result.inserted_id)
+        # Free activation IS the successful activation — count usage exactly once.
+        _mark_discount_used(disc["code"])
         db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {
             "status":             "waiting_approval",
             "subscription_plan":  plan,
@@ -608,17 +700,24 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
         db.subscriptions.update_one({"_id": sub_result.inserted_id}, {"$set": {"invoice_no": invoice_no}})  # FIX: keep in sync with invoices collection
         store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
         db.invoices.insert_one({
-            "invoice_no":    invoice_no,
-            "merchant_id": _mid(m),
-            "merchant_name": m.get("name"),
-            "merchant_phone": m.get("phone"),
-            "store_id":      store_id,
-            "store_name":    store_doc.get("store_name", ""),
-            "plan":          plan,
-            "base_price":    0, "gst": 0, "total": 0,
-            "from_date":     from_date,
-            "end_date":      end_date,
-            "created_at":    datetime.utcnow(),
+            "invoice_no":      invoice_no,
+            "merchant_id":     _mid(m),
+            "merchant_name":   m.get("name"),
+            "merchant_phone":  m.get("phone"),
+            "store_id":        store_id,
+            "store_name":      store_doc.get("store_name", ""),
+            "plan":            plan,
+            "base_price":      price, "gst": 0, "total": 0,
+            "original_amount": price,
+            "discount_code":   disc["code"],
+            "discount_type":   disc["type"],
+            "discount_scope":  disc["applies_to"],
+            "discount_value":  disc["discount_value"],
+            "discount_amount": discount_amount,
+            "final_amount":    0,
+            "from_date":       from_date,
+            "end_date":        end_date,
+            "created_at":      datetime.utcnow(),
         })
         _log_tx(_mid(m), "subscription",
                 f"Free plan activated for '{store_doc.get('store_name','')}' — {plan}",
@@ -679,7 +778,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     # Insert subscription record
     sub_doc = {
         "store_id":           store_id,
-        "merchant_id": _mid(m),
+        "merchant_id":        _mid(m),
         "plan":               plan,
         "from_date":          from_date,
         "end_date":           end_date,
@@ -690,8 +789,13 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
         "razorpay_order_id":  rp_order_id,
         "status":             "pending",
         "pay_mode":           pay_mode,
-        "discount_code":      discount_code,
-        "discount_value":     discount_value,
+        "discount_code":      disc["code"],
+        "discount_type":      disc["type"],
+        "discount_scope":     disc["applies_to"],
+        "discount_value":     disc["discount_value"],
+        "discount_amount":    discount_amount,
+        "original_amount":    price,
+        "final_amount":       total,
         "created_at":         datetime.utcnow(),
     }
     sub_result = db.subscriptions.insert_one(sub_doc)
@@ -748,6 +852,8 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
         "razorpay_payment_id": payment_id,
         "paid_at":            datetime.utcnow(),
     }})
+    # Payment just succeeded — count discount usage exactly once, here.
+    _mark_discount_used(sub.get("discount_code"))
     db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {
         "status":              "waiting_approval",
         "subscription_plan":   sub["plan"],
@@ -761,13 +867,20 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
     store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
     db.invoices.insert_one({
         "invoice_no":         invoice_no,
-        "merchant_id": _mid(m),
+        "merchant_id":        _mid(m),
         "merchant_name":      m.get("name"),
         "merchant_phone":     m.get("phone"),
         "store_id":           store_id,
         "store_name":         store_doc.get("store_name", ""),
         "plan":               sub["plan"],
         "base_price":         sub["price"],
+        "original_amount":    sub.get("original_amount", sub["price"]),
+        "discount_code":      sub.get("discount_code", ""),
+        "discount_type":      sub.get("discount_type"),
+        "discount_scope":     sub.get("discount_scope"),
+        "discount_value":     sub.get("discount_value", 0),
+        "discount_amount":    sub.get("discount_amount", 0),
+        "final_amount":       sub.get("final_amount", sub["total"]),
         "gst":                sub["gst"],
         "total":              sub["total"],
         "from_date":          sub["from_date"],
@@ -805,6 +918,8 @@ def activate_free_subscription(data: dict, m=Depends(get_merchant)):
         "paid_at": now,
         "free_activation": True,
     }})
+    # This IS the activation for this subscription — count usage exactly once.
+    _mark_discount_used(sub.get("discount_code"))
     db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {
         "status":             "waiting_approval",
         "subscription_plan":  sub["plan"],
@@ -816,19 +931,26 @@ def activate_free_subscription(data: dict, m=Depends(get_merchant)):
     db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {"invoice_no": invoice_no}})  # FIX: keep in sync with invoices collection
     store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
     db.invoices.insert_one({
-        "invoice_no":    invoice_no,
-        "merchant_id": _mid(m),
-        "merchant_name": m.get("name"),
-        "merchant_phone": m.get("phone"),
-        "store_id":      store_id,
-        "store_name":    store_doc.get("store_name", ""),
-        "plan":          sub["plan"],
-        "base_price":    0,
-        "gst":           0,
-        "total":         0,
-        "from_date":     sub["from_date"],
-        "end_date":      sub["end_date"],
-        "created_at":    now,
+        "invoice_no":      invoice_no,
+        "merchant_id":     _mid(m),
+        "merchant_name":   m.get("name"),
+        "merchant_phone":  m.get("phone"),
+        "store_id":        store_id,
+        "store_name":      store_doc.get("store_name", ""),
+        "plan":            sub["plan"],
+        "base_price":      sub.get("price", 0),
+        "original_amount": sub.get("original_amount", sub.get("price", 0)),
+        "discount_code":   sub.get("discount_code", ""),
+        "discount_type":   sub.get("discount_type"),
+        "discount_scope":  sub.get("discount_scope"),
+        "discount_value":  sub.get("discount_value", 0),
+        "discount_amount": sub.get("discount_amount", 0),
+        "final_amount":    0,
+        "gst":             0,
+        "total":           0,
+        "from_date":       sub["from_date"],
+        "end_date":        sub["end_date"],
+        "created_at":      now,
     })
     _log_tx(_mid(m), "subscription",
             f"Free plan activated for '{store_doc.get('store_name','')}' — {sub['plan']}",
@@ -1256,16 +1378,6 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     days = int(data.get("days", 30))
     from_date_str = data.get("from_date", "")
-    # TASK 4 FIX: read discount_code from request body
-    discount_code  = (data.get("discount_code") or "").strip().upper()
-    discount_value = 0.0
-    discount_msg   = ""
-    if discount_code:
-        disc_doc = db.discounts.find_one({"code": discount_code, "active": True})
-        if disc_doc:
-            discount_value = float(disc_doc.get("value", 0))
-            discount_msg = f"✅ Code '{discount_code}' applied — ₹{discount_value:.0f} off!"
-        # ignore invalid codes silently (don't block order creation)
 
     if days < 1:
         raise HTTPException(400, "days must be ≥ 1")
@@ -1280,9 +1392,15 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     gst_pct       = float(doc.get("gst_percent", 18))
     price_per_day = float(doc.get("banner_price_per_day", 15))
     base_price    = round(price_per_day * days, 2)
-    gst_amount    = round(base_price * gst_pct / 100, 2)
-    # TASK 4 FIX: apply discount before GST total calculation
-    final_pre_tax = max(0.0, base_price - discount_value)
+
+    # ── Discount code (backend-authoritative; discount applied to pre-tax
+    # base_price first, then GST calculated on the discounted taxable amount) ──
+    discount_code = data.get("discount_code")
+    disc = _resolve_discount(discount_code, "BANNERS", base_price)
+    discount_amount = disc["discount_amount"]
+    discount_msg    = disc["message"]
+
+    final_pre_tax = max(0.0, round(base_price - discount_amount, 2))
     gst_amount    = round(final_pre_tax * gst_pct / 100, 2)
     total         = round(final_pre_tax + gst_amount, 2)
     amount_paise  = int(total * 100)
@@ -1304,8 +1422,12 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
         "gst_amount":     gst_amount,
         "total":          total,
         "amount_paise":   amount_paise,
-        "discount_code":  discount_code,
-        "discount_amount": discount_value,
+        "discount_code":  disc["code"],
+        "discount_type":  disc["type"],
+        "discount_scope": disc["applies_to"],
+        "discount_value": disc["discount_value"],
+        "discount_amount": discount_amount,
+        "original_amount": base_price,
         "final_amount":   total,
         "status":         "pending",
         "approval_status": "pending",
@@ -1345,9 +1467,10 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
         "base_price":        base_price,
         "gst_percent":       gst_pct,
         "gst_amount":        gst_amount,
-        "discount_code":     discount_code or "",
-        "discount_value":    discount_value,
-        "discount_amount":   discount_value,
+        "discount_code":     disc["code"],
+        "discount_type":     disc["type"],
+        "discount_value":    disc["discount_value"],
+        "discount_amount":   discount_amount,
         "discount_msg":      discount_msg,
         "amount_display":    total,
         "amount_paise":      amount_paise,
@@ -1379,10 +1502,8 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_banner or {}).get("invoice_no", "")
         return {"message": "Banner already activated.", "banner_id": existing_banner_id, "invoice_no": existing_inv_no}
 
-    # Mark discount code used if applied
-    disc_code = order.get("discount_code")
-    if disc_code:
-        db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
+    # Free activation IS the successful activation — count usage exactly once.
+    _mark_discount_used(order.get("discount_code"))
 
     # Read store/city from Flutter payload (Flutter sends these on activation)
     store_id   = (data.get("store_id")   or "").strip()
@@ -1460,9 +1581,12 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "store_name":     title,
         "plan":           f"{order.get('from_date','')} → {order.get('end_date','')}",
         "base_price":     order.get("base_price", 0),
-        "original_amount":order.get("base_price", 0),
+        "original_amount":order.get("original_amount", order.get("base_price", 0)),
         "discount_code":  order.get("discount_code", ""),
-        "discount_amount":order.get("discount_value", 0),
+        "discount_type":  order.get("discount_type"),
+        "discount_scope": order.get("discount_scope"),
+        "discount_value": order.get("discount_value", 0),
+        "discount_amount":order.get("discount_amount", 0),
         "final_amount":   order.get("total", 0),
         "gst":            order.get("gst_amount", 0),
         "gst_percent":    order.get("gst_percent", 18),
@@ -1557,7 +1681,10 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "gst_amount":       order.get("gst_amount", 0),
         "total":            order.get("total", 0),
         "discount_code":    order.get("discount_code", ""),
-        "discount_amount":  order.get("discount_amount", order.get("discount", 0)),
+        "discount_type":    order.get("discount_type"),
+        "discount_scope":   order.get("discount_scope"),
+        "discount_value":   order.get("discount_value", 0),
+        "discount_amount":  order.get("discount_amount", 0),
         "final_amount":     order.get("final_amount", order.get("total", 0)),
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":   "paid",
@@ -1569,6 +1696,9 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "paid", "banner_id": str(res.inserted_id),
                   "store_id": store_id, "city": city}})
+
+    # Payment just succeeded — count discount usage exactly once, here.
+    _mark_discount_used(order.get("discount_code"))
 
     # Generate invoice for banner payment (mirrors store subscription verify_payment)
     invoice_no = f"BNR-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
@@ -1582,9 +1712,12 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "store_name":         title,
         "plan":               f"{order.get('from_date','')} → {order.get('end_date','')}",
         "base_price":         order.get("base_price", 0),
-        "original_amount":    order.get("base_price", 0),
+        "original_amount":    order.get("original_amount", order.get("base_price", 0)),
         "discount_code":      order.get("discount_code", ""),
-        "discount_amount":    order.get("discount_amount", order.get("discount", 0)),
+        "discount_type":      order.get("discount_type"),
+        "discount_scope":     order.get("discount_scope"),
+        "discount_value":     order.get("discount_value", 0),
+        "discount_amount":    order.get("discount_amount", 0),
         "final_amount":       order.get("final_amount", order.get("total", 0)),
         "gst":                order.get("gst_amount", 0),
         "gst_percent":        order.get("gst_percent", 18),
@@ -1669,32 +1802,17 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
     gst_pct        = float(doc.get("gst_percent", 18))
     price_per_day  = float(doc.get("voucher_price_per_day", 10))
     base_price     = round(price_per_day * days, 2)
-    gst_amount     = round(base_price * gst_pct / 100, 2)
-    total          = round(base_price + gst_amount, 2)
-    amount_paise   = int(total * 100)
 
     plan_label = f"{days} Day{'s' if days!=1 else ''} Product"
 
-    # ── Discount code validation (Item 6) ──
-    discount_code  = (data.get("discount_code") or "").strip().upper()
-    discount_value = 0.0
-    discount_msg   = ""
-    if discount_code:
-        disc_doc = db.discounts.find_one({"code": discount_code, "active": True})
-        if not disc_doc:
-            raise HTTPException(400, "Invalid or expired discount code.")
-        max_u = disc_doc.get("max_uses", 0)
-        used  = disc_doc.get("used_count", 0)
-        if max_u > 0 and used >= max_u:
-            raise HTTPException(400, "Discount code has reached its usage limit.")
-        if disc_doc.get("expiry_date") and disc_doc["expiry_date"] < datetime.utcnow():
-            raise HTTPException(400, "Discount code has expired.")
-        discount_value = float(disc_doc.get("value", 0))
-        if discount_value >= base_price:
-            discount_value = base_price
-        discount_msg = f"Code {discount_code} applied"
+    # ── Discount code (backend-authoritative; discount applied to pre-tax
+    # base_price first, then GST calculated on the discounted taxable amount) ──
+    discount_code = data.get("discount_code")
+    disc = _resolve_discount(discount_code, "PRODUCTS", base_price)
+    discount_amount = disc["discount_amount"]
+    discount_msg    = disc["message"]
 
-    discounted_base = round(base_price - discount_value, 2)
+    discounted_base = round(base_price - discount_amount, 2)
     gst_amount      = round(discounted_base * gst_pct / 100, 2)
     total           = round(discounted_base + gst_amount, 2)
     amount_paise    = int(total * 100)
@@ -1709,11 +1827,16 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
         "end_date":       end_date.strftime("%d %b %Y"),
         "price_per_day":  price_per_day,
         "base_price":     base_price,
-        "discount_code":  discount_code or None,
-        "discount_value": discount_value,
+        "discount_code":  disc["code"] or None,
+        "discount_type":  disc["type"],
+        "discount_scope": disc["applies_to"],
+        "discount_value": disc["discount_value"],
+        "discount_amount": discount_amount,
+        "original_amount": base_price,
         "gst_percent":    gst_pct,
         "gst_amount":     gst_amount,
         "total":          total,
+        "final_amount":   total,
         "amount_paise":   amount_paise,
         "status":         "pending",
         "approval_status": "pending",
@@ -1753,9 +1876,10 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
         "base_price":        base_price,
         "gst_percent":       gst_pct,
         "gst_amount":        gst_amount,
-        "discount_code":     discount_code or "",
-        "discount_value":    discount_value,
-        "discount_amount":   discount_value,
+        "discount_code":     disc["code"],
+        "discount_type":     disc["type"],
+        "discount_value":    disc["discount_value"],
+        "discount_amount":   discount_amount,
         "discount_msg":      discount_msg,
         "amount_display":    total,
         "amount_paise":      amount_paise,
@@ -1789,10 +1913,20 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
     if not order:
         raise HTTPException(404, "Order not found")
 
-    # Mark discount used if applied
+    # IDEMPOTENCY GUARD: if already submitted/activated → return existing data,
+    # never insert twice. (Mirrors the guard in activate_free_banner and in
+    # verify_voucher_payment below — prevents double-tap / retry from creating
+    # a second merchant_vouchers document, a second invoice, or double-counting
+    # discount usage for the same order.)
+    if order.get("status") in ("submitted", "paid"):
+        existing_voucher_id = order.get("voucher_id", "")
+        existing_voucher = db.merchant_vouchers.find_one({"_id": ObjectId(existing_voucher_id)}) if existing_voucher_id else None
+        existing_inv_no = (existing_voucher or {}).get("invoice_no") or order.get("invoice_no", "")
+        return {"message": "Product already activated.", "voucher_id": existing_voucher_id, "invoice_no": existing_inv_no}
+
     disc_code = order.get("discount_code")
-    if disc_code:
-        db.discounts.update_one({"code": disc_code}, {"$inc": {"used_count": 1}})
+    # Free activation IS the successful activation — count usage exactly once.
+    _mark_discount_used(disc_code)
 
     # Read store/city from Flutter payload — CRITICAL: these must be stored
     # on the voucher so admin dashboard shows the correct store and city.
@@ -1834,7 +1968,11 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
         "price_per_day":  order.get("price_per_day", 0),
         "base_price":     order.get("base_price", 0),
         "discount_code":  disc_code or "",
+        "discount_type":  order.get("discount_type"),
+        "discount_scope": order.get("discount_scope"),
         "discount_value": order.get("discount_value", 0),
+        "discount_amount":order.get("discount_amount", 0),
+        "final_amount":   order.get("total", 0),
         "gst_percent":    order.get("gst_percent", 18),
         "gst_amount":     order.get("gst_amount", 0),
         "total":          order.get("total", 0),
@@ -1860,9 +1998,12 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
         "store_name":     title,
         "plan":           f"{order.get('from_date','')} → {order.get('end_date','')}",
         "base_price":     order.get("base_price", 0),
-        "original_amount":order.get("base_price", 0),
+        "original_amount":order.get("original_amount", order.get("base_price", 0)),
         "discount_code":  order.get("discount_code", ""),
-        "discount_amount":order.get("discount_value", 0),
+        "discount_type":  order.get("discount_type"),
+        "discount_scope": order.get("discount_scope"),
+        "discount_value": order.get("discount_value", 0),
+        "discount_amount":order.get("discount_amount", 0),
         "final_amount":   order.get("total", 0),
         "gst":            order.get("gst_amount", 0),
         "gst_percent":    order.get("gst_percent", 18),
@@ -1954,7 +2095,10 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         "gst_amount":       order.get("gst_amount", 0),
         "total":            order.get("total", 0),
         "discount_code":    order.get("discount_code", ""),
-        "discount_amount":  order.get("discount", 0),
+        "discount_type":    order.get("discount_type"),
+        "discount_scope":   order.get("discount_scope"),
+        "discount_value":   order.get("discount_value", 0),
+        "discount_amount":  order.get("discount_amount", 0),
         "final_amount":     order.get("final_amount", order.get("total", 0)),
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":   "paid",
@@ -1966,6 +2110,9 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
     db.voucher_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "paid", "voucher_id": str(res.inserted_id),
                   "store_id": store_id, "city": city}})
+
+    # Payment just succeeded — count discount usage exactly once, here.
+    _mark_discount_used(order.get("discount_code"))
 
     # Generate invoice for product payment (mirrors store subscription verify_payment)
     invoice_no = f"PRD-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
@@ -1979,9 +2126,12 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         "store_name":         title,
         "plan":               f"{order.get('from_date','')} → {order.get('end_date','')}",
         "base_price":         order.get("base_price", 0),
-        "original_amount":    order.get("base_price", 0),
+        "original_amount":    order.get("original_amount", order.get("base_price", 0)),
         "discount_code":      order.get("discount_code", ""),
-        "discount_amount":    order.get("discount_value", 0),
+        "discount_type":      order.get("discount_type"),
+        "discount_scope":     order.get("discount_scope"),
+        "discount_value":     order.get("discount_value", 0),
+        "discount_amount":    order.get("discount_amount", 0),
         "final_amount":       order.get("final_amount", order.get("total", 0)),
         "gst":                order.get("gst_amount", 0),
         "gst_percent":        order.get("gst_percent", 18),
@@ -2148,6 +2298,12 @@ def validate_discount_code(data: dict, m=Depends(get_merchant)):
     code = (data.get("code") or "").strip().upper()
     if not code:
         raise HTTPException(400, "Code is required")
+    # Optional: caller may pass the checkout scope it intends to use this
+    # code for (STORE / BANNERS / PRODUCTS) so the preview can reject a
+    # code that's valid but mapped to a different checkout type. This is
+    # a preview-time convenience only — _resolve_discount() above remains
+    # the sole authority at order-creation/payment time.
+    checkout_scope = (data.get("checkout_scope") or data.get("scope") or "").strip().upper()
     disc = db.discounts.find_one({"code": code, "active": True})
     if not disc:
         raise HTTPException(404, "Invalid or expired discount code.")
@@ -2158,10 +2314,19 @@ def validate_discount_code(data: dict, m=Depends(get_merchant)):
     from datetime import datetime
     if disc.get("expiry_date") and disc["expiry_date"] < datetime.utcnow():
         raise HTTPException(400, "This discount code has expired.")
+    code_scope = str(disc.get("applies_to") or "ALL").upper()
+    if checkout_scope and checkout_scope in _CHECKOUT_SCOPES and code_scope != "ALL" and code_scope != checkout_scope:
+        raise HTTPException(400, f"Code '{code}' is valid but can only be used for {code_scope.title()} checkout, not {checkout_scope.title()}.")
     return {
         "code":  code,
+        "type":  disc.get("type", "VALUE"),
         "value": float(disc.get("value", 0)),
-        "message": f"Code valid — ₹{disc.get('value', 0):.0f} discount applied",
+        "applies_to": code_scope,
+        "message": (
+            f"Code valid — {disc.get('value', 0):.0f}% off"
+            if str(disc.get("type", "VALUE")).upper() == "PERCENTAGE"
+            else f"Code valid — ₹{disc.get('value', 0):.0f} discount applied"
+        ),
     }
 
 
@@ -2500,17 +2665,16 @@ def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     price_per_day = float(pricing.get("voucher_price_per_day", 10))
     gst_pct       = float(pricing.get("gst_percent", 0))
     base_price    = round(price_per_day * days, 2)
-    discount_code  = (data.get("discount_code") or "").strip().upper()
-    discount_value = 0.0
-    discount_msg   = ""
-    if discount_code:
-        dc = db.discounts.find_one({"code": discount_code, "active": True})
-        if dc:
-            discount_value = float(dc.get("value", 0))
-            discount_msg = f"Code {discount_code} applied"
-        # ignore invalid codes silently for upgrade flow
-    gst_amount = round(max(0, base_price - discount_value) * gst_pct / 100, 2)
-    total      = round(max(0, base_price - discount_value) + gst_amount, 2)
+
+    # ── Discount code (backend-authoritative; discount applied to pre-tax
+    # base_price first, then GST calculated on the discounted taxable amount) ──
+    discount_code = data.get("discount_code")
+    disc = _resolve_discount(discount_code, "PRODUCTS", base_price)
+    discount_amount = disc["discount_amount"]
+    discount_msg    = disc["message"]
+
+    gst_amount = round(max(0, base_price - discount_amount) * gst_pct / 100, 2)
+    total      = round(max(0, base_price - discount_amount) + gst_amount, 2)
     amount_paise = int(total * 100)
     try:
         from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
@@ -2538,6 +2702,10 @@ def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     db.product_upgrade_orders.insert_one({
         "razorpay_order_id": rp_order_id, "product_id": pid, "merchant_id": merchant_id,
         "days": days, "from_date": from_date.isoformat(), "amount": total,
+        "discount_code": disc["code"], "discount_type": disc["type"],
+        "discount_scope": disc["applies_to"], "discount_value": disc["discount_value"],
+        "discount_amount": discount_amount, "original_amount": base_price,
+        "final_amount": total,
         "status": "created", "created_at": datetime.utcnow(),
     })
     return {"order_id": rp_order_id or "", "amount": total, "currency": "INR",
@@ -2545,7 +2713,9 @@ def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
             "from_date": _df(from_date), "end_date": _df(end_date),
             "price_per_day": price_per_day, "base_price": base_price,
             "gst_percent": gst_pct, "gst_amount": gst_amount,
-            "discount_amount": discount_value, "amount_display": total,
+            "discount_code": disc["code"], "discount_type": disc["type"],
+            "discount_value": disc["discount_value"],
+            "discount_amount": discount_amount, "amount_display": total,
             "amount_paise": amount_paise, "pay_mode": pay_mode,
             "razorpay_key": RAZORPAY_KEY_ID, "razorpay_order_id": rp_order_id,
             "discount_msg": discount_msg}
@@ -2624,6 +2794,14 @@ def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
         "text":               _offer_text_upgraded,
         "price":              _price_upgraded,
         "original_price":     _orig_price_upgraded,
+        # Discount used for this upgrade, carried onto the product record.
+        "discount_code":      (upg_order or {}).get("discount_code", ""),
+        "discount_type":      (upg_order or {}).get("discount_type"),
+        "discount_scope":     (upg_order or {}).get("discount_scope"),
+        "discount_value":     (upg_order or {}).get("discount_value", 0),
+        "discount_amount":    (upg_order or {}).get("discount_amount", 0),
+        "original_amount":    (upg_order or {}).get("original_amount", 0),
+        "final_amount":       (upg_order or {}).get("final_amount", (upg_order or {}).get("amount", 0)),
     }
     updated_doc.pop("upgraded",    None)
     updated_doc.pop("upgraded_at", None)
@@ -2640,6 +2818,8 @@ def verify_upgrade_payment(pid: str, data: dict, m=Depends(get_merchant)):
         {"razorpay_order_id": order_id},
         {"$set": {"status": "paid", "payment_id": payment_id, "paid_at": datetime.utcnow()}},
     )
+    # Payment/activation just succeeded — count discount usage exactly once, here.
+    _mark_discount_used((upg_order or {}).get("discount_code"))
     _log_tx(merchant_id, "product_upgrade", f"Product upgraded to premium ({plan})",
             amount=data.get("amount", 0), meta={"product_id": pid, "plan": plan})
     return {"ok": True, "message": "Product upgraded to premium. Awaiting admin approval."}
@@ -2661,16 +2841,16 @@ def renew_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     price_per_day = float(pricing.get("voucher_price_per_day", 10))
     gst_pct       = float(pricing.get("gst_percent", 0))
     base_price    = round(price_per_day * days, 2)
-    discount_code  = (data.get("discount_code") or "").strip().upper()
-    discount_value = 0.0
-    discount_msg   = ""
-    if discount_code:
-        dc = db.discounts.find_one({"code": discount_code, "active": True})
-        if dc:
-            discount_value = float(dc.get("value", 0))
-            discount_msg = f"Code {discount_code} applied"
-    gst_amount = round(max(0, base_price - discount_value) * gst_pct / 100, 2)
-    total      = round(max(0, base_price - discount_value) + gst_amount, 2)
+
+    # ── Discount code (backend-authoritative; discount applied to pre-tax
+    # base_price first, then GST calculated on the discounted taxable amount) ──
+    discount_code = data.get("discount_code")
+    disc = _resolve_discount(discount_code, "PRODUCTS", base_price)
+    discount_amount = disc["discount_amount"]
+    discount_msg    = disc["message"]
+
+    gst_amount = round(max(0, base_price - discount_amount) * gst_pct / 100, 2)
+    total      = round(max(0, base_price - discount_amount) + gst_amount, 2)
     amount_paise = int(total * 100)
     # Compute renewal period from current end_date
     existing_end = prod.get("end_date")
@@ -2699,14 +2879,21 @@ def renew_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
 
     db.product_renewal_orders.insert_one({
         "razorpay_order_id": rp_order_id, "product_id": pid, "merchant_id": merchant_id,
-        "days": days, "amount": total, "status": "created", "created_at": datetime.utcnow(),
+        "days": days, "amount": total,
+        "discount_code": disc["code"], "discount_type": disc["type"],
+        "discount_scope": disc["applies_to"], "discount_value": disc["discount_value"],
+        "discount_amount": discount_amount, "original_amount": base_price,
+        "final_amount": total,
+        "status": "created", "created_at": datetime.utcnow(),
     })
     return {"order_id": rp_order_id or "", "amount": total, "currency": "INR",
             "key": RAZORPAY_KEY_ID, "gst": gst_amount, "days": days,
             "from_date": _df(renew_from), "end_date": _df(new_end),
             "price_per_day": price_per_day, "base_price": base_price,
             "gst_percent": gst_pct, "gst_amount": gst_amount,
-            "discount_amount": discount_value, "amount_display": total,
+            "discount_code": disc["code"], "discount_type": disc["type"],
+            "discount_value": disc["discount_value"],
+            "discount_amount": discount_amount, "amount_display": total,
             "amount_paise": amount_paise, "pay_mode": pay_mode,
             "razorpay_key": RAZORPAY_KEY_ID, "razorpay_order_id": rp_order_id,
             "discount_msg": discount_msg}
@@ -2753,12 +2940,22 @@ def verify_renewal_payment(pid: str, data: dict, m=Depends(get_merchant)):
         {"_id": oid},
         {"$set": {"end_date": new_end, "status": "approved", "approval_status": "approved",
                   "renewed_at": datetime.utcnow(), "last_renewal_plan": plan,
-                  "razorpay_renewal_order_id": order_id}},
+                  "razorpay_renewal_order_id": order_id,
+                  "discount_code":   (ren_order or {}).get("discount_code", ""),
+                  "discount_type":   (ren_order or {}).get("discount_type"),
+                  "discount_scope":  (ren_order or {}).get("discount_scope"),
+                  "discount_value":  (ren_order or {}).get("discount_value", 0),
+                  "discount_amount": (ren_order or {}).get("discount_amount", 0),
+                  "original_amount": (ren_order or {}).get("original_amount", 0),
+                  "final_amount":    (ren_order or {}).get("final_amount", (ren_order or {}).get("amount", 0)),
+                  }},
     )
     db.product_renewal_orders.update_one(
         {"razorpay_order_id": order_id},
         {"$set": {"status": "paid", "payment_id": payment_id, "paid_at": datetime.utcnow()}},
     )
+    # Payment/activation just succeeded — count discount usage exactly once, here.
+    _mark_discount_used((ren_order or {}).get("discount_code"))
     _log_tx(merchant_id, "product_renew", f"Premium product renewed ({plan})",
             amount=data.get("amount", 0), meta={"product_id": pid, "plan": plan})
     return {"ok": True, "new_end_date": new_end.isoformat(),
