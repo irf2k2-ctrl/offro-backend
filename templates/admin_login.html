@@ -371,48 +371,52 @@ async function verifyOtp() {
     msgEl.innerText = "";
 
     try {
-        // Step 2a: Verify OTP directly with MSG91 Widget
-        let m91 = await msg91VerifyOTP(_loginMobile, otp);
-        console.log('[MSG91 verifyOtp]', m91);
-
-        const m91Type = (m91.type || m91.message_type || "").toLowerCase();
-        const m91Ok   = m91Type === "success" || m91.success === true || m91.status === "success";
-
-        if (!m91Ok) {
-            let errMsg = m91.message || m91.msg || m91.error || "Invalid OTP. Please try again.";
-            msgEl.innerText = errMsg;
-            msgEl.style.color = "#c0392b";
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
-            document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
-            let first = document.querySelector(".otp-box[data-index='0']");
-            if (first) first.focus();
-            return;
-        }
-
-        // Step 2b: MSG91 verified — now complete session with backend
+        // Verify the OTP through our backend.
+        // The backend generated and stored this OTP during login.
         let res = await fetch("/admin/auth/verify-otp", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mobile: _loginMobile, otp: otp, trust_device: trustDevice, msg91_verified: true }),
+            body: JSON.stringify({
+                mobile: _loginMobile,
+                otp: otp,
+                trust_device: trustDevice
+            }),
             credentials: "include"
         });
+
         let data = await res.json();
 
         if (!res.ok) {
-            msgEl.innerText = data.detail || "Verification failed";
+            msgEl.innerText = data.detail || "Invalid OTP. Please try again.";
             msgEl.style.color = "#c0392b";
+
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
+
+            document.querySelectorAll(".otp-box").forEach(b => {
+                b.value = "";
+                b.classList.remove("filled");
+            });
+
+            let first = document.querySelector(".otp-box[data-index='0']");
+            if (first) first.focus();
+
             return;
         }
 
-        btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' + (data.user ? data.user.full_name : 'Admin') + '!';
-        setTimeout(() => { window.location.href = "/admin/dashboard"; }, 600);
+        btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' +
+            (data.user ? data.user.full_name : 'Admin') + '!';
+
+        setTimeout(() => {
+            window.location.href = "/admin/dashboard";
+        }, 600);
+
     } catch (err) {
         console.error('[verifyOtp error]', err);
+
         msgEl.innerText = "Error verifying OTP. Please try again.";
         msgEl.style.color = "#c0392b";
+
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
     }
