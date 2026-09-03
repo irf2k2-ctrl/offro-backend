@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
 from datetime import datetime, timedelta
-import uuid, qrcode, io, base64, hmac, hashlib
+import uuid, qrcode, io, base64, hmac, hashlib, re
 
 
 import os as _cld_os, hashlib as _cld_hash, time as _cld_time
@@ -1502,6 +1502,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_banner or {}).get("invoice_no", "")
         return {"message": "Banner already activated.", "banner_id": existing_banner_id, "invoice_no": existing_inv_no}
 
+    disc_code = order.get("discount_code")
     # Free activation IS the successful activation — count usage exactly once.
     _mark_discount_used(order.get("discount_code"))
 
