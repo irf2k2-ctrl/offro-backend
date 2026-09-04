@@ -738,6 +738,12 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
             "merchant_name":   m.get("name"),
             "merchant_phone":  m.get("phone"),
             "store_name":      store.get("store_name"),
+            "discount_code":   disc["code"],
+            "discount_type":   disc["type"],
+            "discount_scope":  disc["applies_to"],
+            "discount_value":  disc["discount_value"],
+            "discount_amount": discount_amount,
+            "original_amount": price,
         }
 
     # ── Razorpay integration ──
@@ -817,6 +823,15 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
         "merchant_name":      m.get("name"),
         "merchant_phone":     m.get("phone"),
         "store_name":         store.get("store_name"),
+        # Discount info (Issue 1 fix): previously computed and saved to
+        # sub_doc but never returned to the client, so the confirmation
+        # screen had no way to display what discount was actually applied.
+        "discount_code":      disc["code"],
+        "discount_type":      disc["type"],
+        "discount_scope":     disc["applies_to"],
+        "discount_value":     disc["discount_value"],
+        "discount_amount":    discount_amount,
+        "original_amount":    price,
     }
 
 @router.post("/subscribe/verify")
@@ -1225,6 +1240,18 @@ def get_my_banners(m=Depends(get_merchant)):
     today_dt       = dt.utcnow()
 
     result = []
+    # Root cause of the duplicate-banner-after-approval bug: on approval,
+    # the original merchant_banners doc is updated in place (never deleted)
+    # AND a separate promo_sliders doc is created to represent the live,
+    # admin-approved banner — both collections are queried below, so
+    # without de-duplication an approved banner shows up twice, once per
+    # collection. We keep the "merchant" entry (it carries the real price
+    # paid, unlike the promo_sliders entry which hardcodes amount=0) and
+    # skip the corresponding "admin" entry — merchant_toggle_banner already
+    # looks up merchant_banners first and syncs the change forward to the
+    # linked promo_sliders doc, so all existing actions (Edit Title, Turn
+    # Off) keep working unchanged when driven from the "merchant" entry.
+    merchant_banner_ids = set()
 
     def _safe_str_date(val):
         """Convert datetime or string to ISO string safely."""
@@ -1257,8 +1284,10 @@ def get_my_banners(m=Depends(get_merchant)):
             # to re-derive expiry itself.
             _status          = "expired" if is_expired else b.get("status", "pending")
             _approval_status = "expired" if is_expired else b.get("approval_status", "pending")
+            _bid_str = str(b["_id"])
+            merchant_banner_ids.add(_bid_str)
             result.append({
-                "_id":             str(b["_id"]),
+                "_id":             _bid_str,
                 "title":           b.get("title", ""),
                 "image_url":       b.get("image_url", ""),
                 "duration":        b.get("duration_days", 0),
@@ -1285,6 +1314,12 @@ def get_my_banners(m=Depends(get_merchant)):
             ):
                 s_phone_10 = re.sub(r'\D', '', str(s.get("merchant_phone", "")))[-10:]
                 if s_phone_10 != phone_10:
+                    continue
+                # Skip this promo_sliders entry if it's the live/promoted
+                # copy of a banner we already listed from merchant_banners
+                # above — otherwise the same approved banner shows twice.
+                _src_bid = str(s.get("source_banner_id") or "")
+                if _src_bid and _src_bid in merchant_banner_ids:
                     continue
                 _end_dt    = _banner_parse_any_date(s.get("end_date") or s.get("expires_at"))
                 is_expired = bool(_end_dt and _end_dt < today_dt)
