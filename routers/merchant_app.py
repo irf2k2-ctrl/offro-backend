@@ -1403,6 +1403,53 @@ def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
                 pass
     return {"ok": True, "is_active": new_active}
 
+# ── PUT /merchant/banners/{bid}  (Edit Title) ───────────────────────────────
+@router.put("/banners/{bid}")
+def merchant_update_banner_title(bid: str, data: dict, m=Depends(get_merchant)):
+    """Merchant can edit their own banner's title.
+    Mirrors merchant_toggle_banner's ownership-check and cross-collection
+    sync pattern immediately above: searches merchant_banners first, then
+    promo_sliders, and keeps both collections' title in sync when an
+    approved/live banner has a linked record in the other collection."""
+    merchant_id = _mid(m)
+    merchant_phone = str(m.get("phone", ""))
+    try:
+        oid = ObjectId(bid)
+    except Exception:
+        raise HTTPException(400, "Invalid banner id")
+
+    new_title = str(data.get("title", "")).strip()
+    if not new_title:
+        raise HTTPException(400, "Title is required")
+
+    ts = datetime.utcnow().isoformat()
+    b = db.merchant_banners.find_one({"_id": oid})
+    found_in = "merchant_banners"
+    if not b:
+        b = db.promo_sliders.find_one({"_id": oid})
+        found_in = "promo_sliders"
+    if not b:
+        raise HTTPException(404, "Banner not found")
+
+    # Verify ownership (same pattern as merchant_toggle_banner)
+    b_phone = re.sub(r'\D', '', str(b.get("merchant_phone", "")))[-10:]
+    m_phone = re.sub(r'\D', '', merchant_phone)[-10:] if merchant_phone else ""
+    if str(b.get("merchant_id","")) != merchant_id and (not m_phone or b_phone != m_phone):
+        raise HTTPException(403, "Not your banner")
+
+    if found_in == "merchant_banners":
+        db.merchant_banners.update_one({"_id": oid}, {"$set": {"title": new_title, "updated_at": ts}})
+        db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"title": new_title, "updated_at": ts}})
+    else:
+        db.promo_sliders.update_one({"_id": oid}, {"$set": {"title": new_title, "updated_at": ts}})
+        src_bid = b.get("source_banner_id", "")
+        if src_bid:
+            try:
+                db.merchant_banners.update_one({"_id": ObjectId(src_bid)}, {"$set": {"title": new_title, "updated_at": ts}})
+            except Exception:
+                pass
+    return {"ok": True, "title": new_title}
+
 # ── POST /merchant/banners/order  ──────────────────────────────────────────
 @router.post("/banners/order")
 def create_banner_order(data: dict, m=Depends(get_merchant)):
