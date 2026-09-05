@@ -1257,7 +1257,7 @@ def get_gift_vouchers_public(city: str = ""):
     def _resolve_img(doc):
         for k in ["logo", "logo_url", "image_url", "image", "thumbnail"]:
             v = str(doc.get(k, "") or "")
-            if v.startswith("http"): return v
+            if v.startswith("http") or v.startswith("data:"): return v
         store_id = doc.get("store_id", "")
         if store_id:
             try:
