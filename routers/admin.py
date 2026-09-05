@@ -2971,21 +2971,62 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             return phone
         return str(doc.get("merchant_id", "") or "").strip()
 
-    _approved_signatures = set()
+    # FIX (false-positive dedup): the signature match below used to have no
+    # time dimension, so a brand-new, legitimate banner submission that
+    # happens to reuse the same title/store as an already-approved banner
+    # (e.g. a merchant repeatedly testing with the title "test") was
+    # incorrectly treated as a stray duplicate of that old approved banner
+    # and silently dropped from the admin list. The fix mirrors the same
+    # 15-minute dedup window already used in merchant_app.verify_banner_payment()
+    # for content-duplicate detection at creation time: a pending banner is
+    # only suppressed as a duplicate if its signature matches an approved
+    # banner's AND the two were created within that window of each other —
+    # which is what a genuine double-tap/duplicate submission looks like.
+    # A submission made minutes/hours/days later with a reused title is a
+    # separate, legitimate banner and must still appear for approval.
+    _DEDUP_WINDOW = timedelta(minutes=15)
+
+    def _safe_parse_dt(val):
+        """Robustly parse a created_at value that may be a native datetime
+        or an ISO string (merchant_banners and promo_sliders both currently
+        store ISO strings via .isoformat(), but this stays defensive against
+        older/inconsistent data). Never raises; returns None on failure."""
+        if val is None:
+            return None
+        if hasattr(val, "strftime"):
+            return val
+        s = str(val).strip()
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(s.replace("Z", "")[:26])
+        except Exception:
+            pass
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d %b %Y"):
+            try:
+                return datetime.strptime(s[:len(fmt)+2].strip(), fmt)
+            except Exception:
+                continue
+        return None
+
+    # signature -> list of approved created_at datetimes sharing that signature
+    _approved_signatures = {}
     for s in db.promo_sliders.find({"source_banner_id": {"$exists": True, "$ne": ""}}).sort("created_at", -1):
         row = _enrich_and_build(s, "promo_sliders", override_status="approved")
         if row:
             result.append(row)
-            _approved_signatures.add((
+            _sig = (
                 _identity_key(s),
                 str(s.get("title", "")).strip().lower(),
                 str(s.get("store_id", "")).strip(),
-            ))
+            )
+            _approved_signatures.setdefault(_sig, []).append(_safe_parse_dt(s.get("created_at")))
 
     # ── 2. merchant_banners — ONLY pending/rejected/removed ──
     # Once approved, the SAME banner already exists in promo_sliders (loop #1 above).
     # Skip approved ones here, AND skip stray pending duplicates that share the
-    # same merchant/title/store as an already-approved banner ("duplicate" bug).
+    # same merchant/title/store AND were created within the dedup window of an
+    # already-approved banner ("duplicate" bug) — see _DEDUP_WINDOW note above.
     for b in db.merchant_banners.find().sort("created_at", -1):
         _st = b.get("approval_status", b.get("status", "pending_approval"))
         if _st == "approved" and not b.get("deleted_by_admin"):
@@ -2995,7 +3036,20 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             str(b.get("title", "")).strip().lower(),
             str(b.get("store_id", "")).strip(),
         )
-        if _sig in _approved_signatures and not b.get("deleted_by_admin"):
+        _approved_times = _approved_signatures.get(_sig)
+        _is_stray_duplicate = False
+        if _approved_times and not b.get("deleted_by_admin"):
+            _pending_dt = _safe_parse_dt(b.get("created_at"))
+            # Suppression requires BOTH created_at values to parse
+            # successfully and fall within the dedup window. If either
+            # can't be parsed, we cannot prove this is a duplicate, so the
+            # pending banner is NOT suppressed (fails open, not closed).
+            if _pending_dt is not None:
+                for _approved_dt in _approved_times:
+                    if _approved_dt is not None and abs(_pending_dt - _approved_dt) <= _DEDUP_WINDOW:
+                        _is_stray_duplicate = True
+                        break
+        if _is_stray_duplicate:
             continue
         row = _enrich_and_build(b, "merchant_banners")
         if row:
