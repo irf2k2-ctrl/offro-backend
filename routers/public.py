@@ -29,7 +29,14 @@ def get_stores(city: str = None, category: str = None):
     """Public endpoint - Flutter app fetches this"""
     query = {"status": "active"}
     if city:
-        query["city"] = {"$regex": city, "$options": "i"}
+        # FIX: escape the city string before using it in $regex — city comes
+        # from live GPS reverse-geocoding on the client and is not curated
+        # like a picked value, so it can contain regex-special characters
+        # (parentheses, periods, etc.) that would otherwise break the query
+        # or raise an unhandled error. Mirrors the same protection already
+        # applied to `category` below.
+        import re as _re
+        query["city"] = {"$regex": _re.escape(city.strip()), "$options": "i"}
     if category and category.strip() and category.strip() != "All":
         # Flexible case-insensitive contains match:
         # "Restaurant" matches "Restaurant", "Restaurants", "Indian Restaurant", "Restaurant / Bar"
