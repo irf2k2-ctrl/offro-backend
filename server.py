@@ -439,6 +439,13 @@ def _ensure_indexes():
             partialFilterExpression={"approval_status": "pending"},
             background=True,
         )
+        # Influencers — city+status lookup (Home Screen city query), category filter
+        db.influencers.create_index(
+            [("city", 1), ("status", 1)],
+            name="influencers_city_status",
+            background=True,
+        )
+        db.influencers.create_index([("category", 1)], name="influencers_category", background=True)
         print("✅ MongoDB indexes ensured")
     except Exception as e:
         print(f"⚠️  Index creation warning: {e}")

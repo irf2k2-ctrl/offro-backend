@@ -1843,6 +1843,170 @@ def delete_discount(discount_id: str, a=Depends(get_current_admin)):
     db.discounts.delete_one({"_id": ObjectId(discount_id)})
     return {"ok": True}
 
+# ===================== INFLUENCERS (Phase 1: Admin CRUD only) =====================
+# PRIVACY: `phone` is stored for future promotion-request functionality but is
+# never included in any response here — the admin list/get responses below
+# deliberately omit it, same discipline as the eventual public API will need.
+# No public-facing endpoint is added in this phase.
+
+def _influencer_row(d):
+    """Admin-facing influencer representation. Phone is intentionally
+    included here (admin-only view) but this shape must never be reused
+    for a public/merchant-facing endpoint."""
+    return {
+        "_id":          str(d["_id"]),
+        "name":         d.get("name", ""),
+        "city":         d.get("city", ""),
+        "category":     d.get("category", ""),
+        "photo_url":    d.get("photo_url", ""),
+        "social":       d.get("social", {}) or {},
+        "rating":       d.get("rating", 0),
+        "review_count": d.get("review_count", 0),
+        "status":       d.get("status", "active"),
+        "phone":        d.get("phone", ""),
+        "created_at":   d["created_at"].strftime("%d %b %Y") if d.get("created_at") else "",
+        "updated_at":   d["updated_at"].strftime("%d %b %Y") if d.get("updated_at") else "",
+    }
+
+def _validate_influencer_city(city: str) -> str:
+    """Validate against the existing db.cities collection (single source of
+    truth for city names — same pattern used for stores) and return the
+    CANONICAL name/casing as stored there, not whatever case the admin typed."""
+    city = (city or "").strip()
+    if not city:
+        raise HTTPException(400, "City is required")
+    existing = db.cities.find_one({"name": {"$regex": f"^{city}$", "$options": "i"}})
+    if not existing:
+        raise HTTPException(400, f"'{city}' is not a recognized city. Add it under Cities first.")
+    return existing["name"]
+
+def _resolve_influencer_photo(raw: str, existing_url: str = "") -> str:
+    """Same idiom used throughout admin.py for other entities' photos:
+    if it's already a URL, keep it as-is (no re-upload); if it's new
+    base64 data, upload it; if empty, keep whatever existed before."""
+    raw = (raw or "").strip()
+    if not raw:
+        return existing_url
+    if raw.startswith("http"):
+        return raw
+    cdn = _cloudinary_upload(raw, folder="offro/influencers")
+    return cdn if cdn and cdn.startswith("http") else existing_url
+
+@router.get("/influencers")
+def list_influencers(a=Depends(get_current_admin)):
+    query = _city_filter(a)
+    docs = list(db.influencers.find(query).sort("created_at", -1))
+    return [_influencer_row(d) for d in docs]
+
+@router.post("/influencers")
+def create_influencer(body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Influencers", "add")
+    name = (body.get("name", "")).strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+    city = _validate_influencer_city(body.get("city", ""))
+    category = (body.get("category", "")).strip()
+    status = str(body.get("status", "active")).strip().lower()
+    if status not in ("active", "inactive"):
+        raise HTTPException(400, "Status must be 'active' or 'inactive'")
+    social_in = body.get("social") or {}
+    social = {
+        "instagram": str(social_in.get("instagram", "")).strip(),
+        "facebook":  str(social_in.get("facebook", "")).strip(),
+        "youtube":   str(social_in.get("youtube", "")).strip(),
+    }
+    photo_url = _resolve_influencer_photo(body.get("photo_url", ""))
+    now = datetime.utcnow()
+    doc = {
+        "name": name,
+        "city": city,
+        "category": category,
+        "photo_url": photo_url,
+        "social": social,
+        "rating": 0,
+        "review_count": 0,
+        "status": status,
+        "phone": (body.get("phone", "")).strip(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    res = db.influencers.insert_one(doc)
+    return {"ok": True, "_id": str(res.inserted_id)}
+
+@router.put("/influencers/{influencer_id}")
+def update_influencer(influencer_id: str, body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Influencers", "edit")
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        raise HTTPException(400, "Invalid influencer id")
+    existing = db.influencers.find_one({"_id": oid})
+    if not existing:
+        raise HTTPException(404, "Influencer not found")
+    is_super_admin = a.get("role_name") == "Super Admin"
+    assigned = a.get("assigned_cities", [])
+    if not is_super_admin:
+        if "*" not in assigned and existing.get("city") not in assigned:
+            raise HTTPException(403, "Not permitted to edit influencers outside your assigned cities")
+
+    update = {}
+    if "name" in body:
+        name = (body["name"] or "").strip()
+        if not name:
+            raise HTTPException(400, "Name cannot be empty")
+        update["name"] = name
+    if "city" in body:
+        new_city = _validate_influencer_city(body["city"])
+        # FIX: validating that the city exists is not the same as validating
+        # that THIS admin is allowed to move an influencer there. Without
+        # this check, a city-scoped admin who legitimately owns an
+        # influencer (per the check above) could move it to any other real
+        # city, escaping their assigned_cities scope. Super Admin is
+        # unaffected, matching the existing check above exactly.
+        if not is_super_admin and "*" not in assigned and new_city not in assigned:
+            raise HTTPException(403, "Not permitted to move an influencer to a city outside your assigned cities")
+        update["city"] = new_city
+    if "category" in body:
+        update["category"] = (body["category"] or "").strip()
+    if "status" in body:
+        status = str(body["status"]).strip().lower()
+        if status not in ("active", "inactive"):
+            raise HTTPException(400, "Status must be 'active' or 'inactive'")
+        update["status"] = status
+    if "phone" in body:
+        update["phone"] = (body["phone"] or "").strip()
+    if "social" in body:
+        social_in = body.get("social") or {}
+        update["social"] = {
+            "instagram": str(social_in.get("instagram", "")).strip(),
+            "facebook":  str(social_in.get("facebook", "")).strip(),
+            "youtube":   str(social_in.get("youtube", "")).strip(),
+        }
+    if "photo_url" in body:
+        update["photo_url"] = _resolve_influencer_photo(body["photo_url"], existing.get("photo_url", ""))
+    if not update:
+        raise HTTPException(400, "Nothing to update")
+    update["updated_at"] = datetime.utcnow()
+    db.influencers.update_one({"_id": oid}, {"$set": update})
+    return {"ok": True}
+
+@router.delete("/influencers/{influencer_id}")
+def delete_influencer(influencer_id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Influencers", "delete")
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        raise HTTPException(400, "Invalid influencer id")
+    existing = db.influencers.find_one({"_id": oid})
+    if not existing:
+        raise HTTPException(404, "Influencer not found")
+    if a.get("role_name") != "Super Admin":
+        assigned = a.get("assigned_cities", [])
+        if "*" not in assigned and existing.get("city") not in assigned:
+            raise HTTPException(403, "Not permitted to delete influencers outside your assigned cities")
+    db.influencers.delete_one({"_id": oid})
+    return {"ok": True}
+
 # ===================== ABOUT US =====================
 
 @router.get("/about")
