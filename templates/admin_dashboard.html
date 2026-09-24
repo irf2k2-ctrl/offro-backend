@@ -337,6 +337,10 @@ td[style*="sticky"]{background:#fff;}
       style="padding:8px 22px;border:none;background:none;font-size:13px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer;margin-bottom:-2px;">
       📦 Product Reviews
     </button>
+    <button id="rev_tab_influencers" onclick="switchReviewTab('influencers')"
+      style="padding:8px 22px;border:none;background:none;font-size:13px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer;margin-bottom:-2px;">
+      ⭐ Influencer Reviews
+    </button>
   </div>
 
   <!-- Store Reviews Panel -->
@@ -374,6 +378,32 @@ td[style*="sticky"]{background:#fff;}
         </thead>
         <tbody id="prod_reviews_table">
           <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Influencer Reviews Panel -->
+  <!-- No influencer review backend exists yet (see routers/public.py —
+       influencers have no review-submission endpoint). This panel is built
+       to the same structure as the two above so it can be wired to real
+       data with a one-line change to loadInfluencerReviews() once that
+       backend exists — never displays a phone number, matching every other
+       influencer-facing view. -->
+  <div id="rev_panel_influencers" style="display:none">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+      <input type="text" id="inf_reviews_filter" class="form-control"
+        placeholder="Filter by influencer name..." style="max-width:220px;font-size:13px;"
+        oninput="_infReviewsFilter=this.value;_renderInfluencerReviews(_infReviewsCache);">
+      <button class="btn-p" onclick="loadInfluencerReviews()"><i class="fas fa-sync me-1"></i> Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Influencer</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
+        </thead>
+        <tbody id="inf_reviews_table">
+          <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>
         </tbody>
       </table>
     </div>
@@ -985,7 +1015,7 @@ td[style*="sticky"]{background:#fff;}
     </div>
     <div class="table-wrap"><table>
       <thead><tr>
-        <th>Photo</th><th>Name</th><th>City</th><th>Category</th><th>Rating</th><th>Status</th><th>Actions</th>
+        <th>Photo</th><th>Name</th><th>Mobile</th><th>City</th><th>Category</th><th>Rating</th><th>Status</th><th>Actions</th>
       </tr></thead>
       <tbody id="inf_body"></tbody>
     </table></div>
@@ -998,12 +1028,16 @@ td[style*="sticky"]{background:#fff;}
         <input id="inf_name" class="form-control" placeholder="e.g. Priya Sharma">
       </div>
       <div class="mb-2">
+        <label class="form-label">State *</label>
+        <select id="inf_state" class="form-control" onchange="onInfStateChange()"><option value="">— Select State —</option></select>
+      </div>
+      <div class="mb-2">
         <label class="form-label">City *</label>
-        <select id="inf_city" class="form-control"><option value="">Loading cities…</option></select>
+        <select id="inf_city" class="form-control"><option value="">Select state first</option></select>
       </div>
       <div class="mb-2">
         <label class="form-label">Category</label>
-        <input id="inf_category" class="form-control" placeholder="e.g. Lifestyle & Food">
+        <select id="inf_category" class="form-control"><option value="">Select category</option></select>
       </div>
       <div class="mb-2">
         <label class="form-label">Phone</label>
@@ -1029,7 +1063,7 @@ td[style*="sticky"]{background:#fff;}
         <label class="form-label"><i class="fab fa-facebook"></i> Facebook URL</label>
         <input id="inf_facebook" class="form-control" placeholder="https://facebook.com/...">
       </div>
-      <button class="btn-p" onclick="saveInfluencer()"><i class="fas fa-check"></i> <span id="inf_save_btn_label">Add Influencer</span></button>
+      <button class="btn-p" id="inf_save_btn" onclick="saveInfluencer()"><i class="fas fa-check"></i> <span id="inf_save_btn_label">Add Influencer</span></button>
       <button class="btn-sm-outline" style="margin-left:8px;" id="inf_cancel_edit_btn" onclick="cancelInfluencerEdit()">Cancel</button>
       <p id="inf_msg" class="mt-2" style="font-size:12px;color:var(--primary);"></p>
     </div>
@@ -1936,13 +1970,13 @@ async function loadInfluencers() {
       return;
     }
     if (!r.ok) {
-      document.getElementById("inf_body").innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
+      document.getElementById("inf_body").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
       return;
     }
     allInfluencers = await r.json();
     renderInfluencers();
   } catch(e) {
-    document.getElementById("inf_body").innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
+    document.getElementById("inf_body").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
   }
   if (!infCitiesCache.length) {
     try {
@@ -1951,15 +1985,52 @@ async function loadInfluencers() {
       infCitiesCache = Array.isArray(data) ? data.map(c => c.name||c) : [];
     } catch(e) { infCitiesCache = []; }
   }
-  const sel = document.getElementById('inf_city');
-  if (sel) {
-    sel.innerHTML = '<option value="">Select city</option>' +
-      infCitiesCache.map(c => `<option value="${c}">${c}</option>`).join('');
+  // The Add/Edit form's State→City selects use the same INDIA_STATES_CITIES
+  // cascading dropdown as the Store form (populateInfStateDropdown/
+  // onInfStateChange below) — NOT infCitiesCache, which stays reserved for
+  // the table's "All Cities" FILTER, matching OffrO's curated serviceable-
+  // city list (the same list influencer city authorization is checked
+  // against server-side — unchanged).
+  populateInfStateDropdown();
+  if (!categoriesList.length) {
+    try { await loadCategories(); } catch(e) {}
+  }
+  const catSel = document.getElementById('inf_category');
+  if (catSel) {
+    const cats = categoriesList.length ? categoriesList.map(c => c.name || c) : [];
+    catSel.innerHTML = '<option value="">Select category</option>' +
+      cats.map(c => `<option value="${c}">${c}</option>`).join('');
   }
   const filterSel = document.getElementById('inf_city_filter');
   if (filterSel) {
     filterSel.innerHTML = '<option value="">All Cities</option>' +
       infCitiesCache.map(c => `<option value="${c}">${c}</option>`).join('');
+  }
+}
+
+function populateInfStateDropdown(selectedState) {
+  // Reuses the SAME INDIA_STATES_CITIES object the Store form uses — no
+  // separate influencer-specific state/city list.
+  const sel = document.getElementById("inf_state");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Select State —</option>' +
+    Object.keys(INDIA_STATES_CITIES).sort().map(s =>
+      `<option value="${s}"${s === selectedState ? ' selected' : ''}>${s}</option>`
+    ).join('');
+}
+
+function onInfStateChange(preselectCity) {
+  const state = document.getElementById("inf_state")?.value || "";
+  const citySel = document.getElementById("inf_city");
+  if (!citySel) return;
+  citySel.innerHTML = '<option value="">— Select City —</option>';
+  if (state && INDIA_STATES_CITIES[state]) {
+    INDIA_STATES_CITIES[state].sort().forEach(c => {
+      const o = document.createElement("option");
+      o.value = c; o.innerText = c;
+      if (preselectCity && c === preselectCity) o.selected = true;
+      citySel.appendChild(o);
+    });
   }
 }
 
@@ -1981,6 +2052,7 @@ function renderInfluencers() {
     return `<tr>
       <td>${photo}</td>
       <td><b>${i.name}</b></td>
+      <td>${i.phone || '—'}</td>
       <td>${i.city}</td>
       <td>${i.category||'—'}</td>
       <td>⭐ ${(i.rating||0).toFixed ? i.rating.toFixed(1) : i.rating} (${i.review_count||0})</td>
@@ -1991,7 +2063,7 @@ function renderInfluencers() {
         <button class="btn-sm-danger" onclick="deleteInfluencerRow('${i._id}')">Delete</button>
       </td>
     </tr>`;
-  }).join("") : '<tr><td colspan="7" style="text-align:center;color:var(--muted);">No influencers yet</td></tr>';
+  }).join("") : '<tr><td colspan="8" style="text-align:center;color:var(--muted);">No influencers yet</td></tr>';
 }
 
 function infPreviewPhoto(input) {
@@ -2011,7 +2083,8 @@ function cancelInfluencerEdit() {
   document.getElementById('inf_save_btn_label').innerText = 'Add Influencer';
   document.getElementById('inf_cancel_edit_btn').style.display = 'none';
   document.getElementById('inf_name').value = '';
-  document.getElementById('inf_city').value = '';
+  populateInfStateDropdown('');
+  document.getElementById('inf_city').innerHTML = '<option value="">Select state first</option>';
   document.getElementById('inf_category').value = '';
   document.getElementById('inf_phone').value = '';
   document.getElementById('inf_instagram').value = '';
@@ -2026,8 +2099,21 @@ function cancelInfluencerEdit() {
 
 function openAddInfluencerForm() {
   cancelInfluencerEdit();
+  document.getElementById('inf_cancel_edit_btn').style.display = 'inline-block';
   document.getElementById('inf_form_wrap').style.display = 'block';
   document.getElementById('inf_form_wrap').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+// Reverse-lookup helper for influencers saved before the `state` field
+// existed — finds which state a given city belongs to in the same shared
+// INDIA_STATES_CITIES object, so editing an older record still preselects
+// correctly instead of leaving City blank.
+function _findStateForCity(city) {
+  if (!city) return '';
+  for (const s of Object.keys(INDIA_STATES_CITIES)) {
+    if (INDIA_STATES_CITIES[s].some(c => c.toLowerCase() === city.toLowerCase())) return s;
+  }
+  return '';
 }
 
 function editInfluencer(id) {
@@ -2038,8 +2124,21 @@ function editInfluencer(id) {
   document.getElementById('inf_save_btn_label').innerText = 'Save Changes';
   document.getElementById('inf_cancel_edit_btn').style.display = 'inline-block';
   document.getElementById('inf_name').value = inf.name || '';
-  document.getElementById('inf_city').value = inf.city || '';
-  document.getElementById('inf_category').value = inf.category || '';
+  const state = inf.state || _findStateForCity(inf.city || '');
+  populateInfStateDropdown(state);
+  onInfStateChange(inf.city || '');
+  const catSel = document.getElementById('inf_category');
+  if (catSel) {
+    // Preserve compatibility: if this influencer's stored category isn't in
+    // the current Categories list (e.g. an older/custom value), add it as a
+    // fallback option instead of silently losing it on edit.
+    if (inf.category && !Array.from(catSel.options).some(o => o.value === inf.category)) {
+      const opt = document.createElement('option');
+      opt.value = inf.category; opt.innerText = inf.category + ' (existing)';
+      catSel.appendChild(opt);
+    }
+    catSel.value = inf.category || '';
+  }
   document.getElementById('inf_phone').value = inf.phone || '';
   const social = inf.social || {};
   document.getElementById('inf_instagram').value = social.instagram || '';
@@ -2058,7 +2157,10 @@ function editInfluencer(id) {
   document.getElementById('inf_form_wrap').scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
+let _infSaving = false; // FIX (duplicate submissions): guards against rapid double-clicks
+
 async function saveInfluencer() {
+  if (_infSaving) return; // a save is already in flight — ignore this click entirely
   const id = document.getElementById('inf_edit_id').value;
   const name = document.getElementById('inf_name').value.trim();
   const city = document.getElementById('inf_city').value;
@@ -2067,6 +2169,7 @@ async function saveInfluencer() {
   if (!city) { msg.style.color='red'; msg.innerText='City is required'; return; }
   const body = {
     name, city,
+    state: document.getElementById('inf_state').value,
     category: document.getElementById('inf_category').value.trim(),
     phone: document.getElementById('inf_phone').value.trim(),
     social: {
@@ -2076,6 +2179,12 @@ async function saveInfluencer() {
     },
   };
   if (infPhotoBase64) body.photo_url = infPhotoBase64;
+  const btn = document.getElementById('inf_save_btn');
+  const label = document.getElementById('inf_save_btn_label');
+  const originalLabel = label.innerText;
+  _infSaving = true;
+  if (btn) btn.disabled = true;
+  label.innerText = id ? 'Saving...' : 'Adding...';
   try {
     const url = id ? `/admin/influencers/${id}` : '/admin/influencers';
     const method = id ? 'PUT' : 'POST';
@@ -2086,6 +2195,11 @@ async function saveInfluencer() {
     cancelInfluencerEdit();
     loadInfluencers();
   } catch(e) { msg.style.color='red'; msg.innerText = 'Error: '+e.message; }
+  finally {
+    _infSaving = false;
+    if (btn) btn.disabled = false;
+    label.innerText = originalLabel;
+  }
 }
 
 async function toggleInfluencerStatus(id, newStatus) {
@@ -4695,18 +4809,70 @@ let _activeReviewTab = "stores";
 
 function switchReviewTab(tab) {
   _activeReviewTab = tab;
-  document.getElementById("rev_panel_stores").style.display   = tab === "stores"   ? "" : "none";
-  document.getElementById("rev_panel_products").style.display = tab === "products" ? "" : "none";
+  document.getElementById("rev_panel_stores").style.display      = tab === "stores"      ? "" : "none";
+  document.getElementById("rev_panel_products").style.display    = tab === "products"    ? "" : "none";
+  document.getElementById("rev_panel_influencers").style.display = tab === "influencers" ? "" : "none";
   const btnS = document.getElementById("rev_tab_stores");
   const btnP = document.getElementById("rev_tab_products");
+  const btnI = document.getElementById("rev_tab_influencers");
   btnS.style.color       = tab === "stores"   ? "var(--primary)" : "var(--muted)";
   btnS.style.borderBottomColor = tab === "stores"   ? "var(--primary)" : "transparent";
   btnS.style.fontWeight  = tab === "stores"   ? "700" : "600";
   btnP.style.color       = tab === "products" ? "var(--primary)" : "var(--muted)";
   btnP.style.borderBottomColor = tab === "products" ? "var(--primary)" : "transparent";
   btnP.style.fontWeight  = tab === "products" ? "700" : "600";
+  btnI.style.color       = tab === "influencers" ? "var(--primary)" : "var(--muted)";
+  btnI.style.borderBottomColor = tab === "influencers" ? "var(--primary)" : "transparent";
+  btnI.style.fontWeight  = tab === "influencers" ? "700" : "600";
   if (tab === "products") loadProductReviews();
   if (tab === "stores"   && !_reviewsCache.length)     loadReviews();
+  if (tab === "influencers") loadInfluencerReviews();
+}
+
+// Influencer Reviews — UI structure only; no backend endpoint exists yet
+// (routers/public.py has no influencer review-submission API). This is
+// intentionally NOT a separate review system: it's built to call the same
+// kind of endpoint (`/admin/influencer-reviews`) the moment one exists,
+// following the exact loadProductReviews()/loadReviews() shape above.
+let _infReviewsCache = [];
+let _infReviewsFilter = '';
+async function loadInfluencerReviews() {
+  const tbody = document.getElementById("inf_reviews_table");
+  if (!tbody) return;
+  try {
+    const r = await fetch("/admin/influencer-reviews", { credentials:"include" });
+    if (r.status === 404) {
+      // Expected today — no such endpoint exists yet.
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>`;
+      return;
+    }
+    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+    if (!r.ok) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--danger)">Failed to load. Please refresh.</td></tr>`;
+      return;
+    }
+    _infReviewsCache = await r.json();
+    _renderInfluencerReviews(_infReviewsCache);
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>`;
+  }
+}
+function _renderInfluencerReviews(reviews) {
+  const tbody = document.getElementById("inf_reviews_table");
+  if (!tbody) return;
+  const q = (_infReviewsFilter || '').toLowerCase();
+  const rows = (reviews || []).filter(r => !q || (r.influencer_name||'').toLowerCase().includes(q));
+  // NOTE: never render a phone field here even if a future backend
+  // response happens to include one — this table only ever reads the
+  // fields listed below.
+  tbody.innerHTML = rows.length ? rows.map(r => `<tr>
+      <td>${r.influencer_name || ''}</td>
+      <td>${r.user_name || ''}</td>
+      <td>⭐ ${r.rating ?? ''}</td>
+      <td>${r.text || ''}</td>
+      <td>${r.date || ''}</td>
+      <td></td>
+    </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>`;
 }
 
 async function loadProductReviews() {

@@ -1856,6 +1856,7 @@ def _influencer_row(d):
     return {
         "_id":          str(d["_id"]),
         "name":         d.get("name", ""),
+        "state":        d.get("state", ""),
         "city":         d.get("city", ""),
         "category":     d.get("category", ""),
         "photo_url":    d.get("photo_url", ""),
@@ -1917,8 +1918,28 @@ def create_influencer(body: dict, a=Depends(get_current_admin)):
     }
     photo_url = _resolve_influencer_photo(body.get("photo_url", ""))
     now = datetime.utcnow()
+
+    # FIX (duplicate submissions): backend-level safety net behind the
+    # frontend's disable-button guard. If an influencer with the exact same
+    # name+city was created by ANY admin in the last 10 seconds, treat this
+    # as a duplicate double-submit (e.g. a slow network + repeated click
+    # racing past the disabled button) and return that existing record
+    # instead of creating a second one. The window is intentionally short —
+    # long enough to absorb a rapid double-click, far too short to ever
+    # block two genuinely different admins legitimately adding two
+    # different influencers who simply happen to share a name and city.
+    _dedup_window_start = now - timedelta(seconds=10)
+    _recent_dup = db.influencers.find_one({
+        "name": {"$regex": f"^{name}$", "$options": "i"},
+        "city": city,
+        "created_at": {"$gte": _dedup_window_start},
+    })
+    if _recent_dup:
+        return {"ok": True, "_id": str(_recent_dup["_id"])}
+
     doc = {
         "name": name,
+        "state": (body.get("state", "") or "").strip(),
         "city": city,
         "category": category,
         "photo_url": photo_url,
@@ -1955,6 +1976,8 @@ def update_influencer(influencer_id: str, body: dict, a=Depends(get_current_admi
         if not name:
             raise HTTPException(400, "Name cannot be empty")
         update["name"] = name
+    if "state" in body:
+        update["state"] = (body["state"] or "").strip()
     if "city" in body:
         new_city = _validate_influencer_city(body["city"])
         # FIX: validating that the city exists is not the same as validating
