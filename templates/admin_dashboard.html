@@ -162,6 +162,7 @@ td[style*="sticky"]{background:#fff;}
   <a href="#" onclick="showSection('product_cards',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
   <a href="#" onclick="showSection('admin_banners',this)"><i class="fas fa-ad fa-fw"></i> Admin Banners</a>
+  <a href="#" onclick="showSection('influencers',this)"><i class="fas fa-star fa-fw"></i> Influencers</a>
   <a href="#" onclick="showSection('popup_campaigns',this)"><i class="fas fa-bullhorn fa-fw"></i> Popup Campaigns</a>
   <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
   <a href="#" onclick="showSection('gift_product_requests',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
@@ -172,7 +173,6 @@ td[style*="sticky"]{background:#fff;}
   <div class="sep"></div>
   <a href="#" onclick="showSection('reviews',this)"><i class="fas fa-comment-dots fa-fw"></i> Rating &amp; Review</a>
   <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
-  <a href="#" onclick="showSection('influencers',this)"><i class="fas fa-star fa-fw"></i> Influencers</a>
   <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
   <a href="#" onclick="showSection('policies',this)"><i class="fas fa-shield-alt fa-fw"></i> Policies</a>
   <div class="sep"></div>
@@ -970,8 +970,27 @@ td[style*="sticky"]{background:#fff;}
 
   <!-- INFLUENCERS -->
   <div id="section-influencers" class="section">
-    <div class="page-title">Influencers</div>
-    <div class="table-wrap" style="padding:20px;max-width:560px;margin-bottom:20px;">
+    <div class="section-header">
+      <div class="page-title" style="margin:0">Influencers</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="inf_search" class="form-control" style="max-width:190px;" placeholder="🔍 Search name..." oninput="renderInfluencers()">
+        <select id="inf_city_filter" class="form-select" style="max-width:150px;" onchange="renderInfluencers()"><option value="">All Cities</option></select>
+        <select id="inf_status_filter" class="form-select" style="max-width:140px;" onchange="renderInfluencers()">
+          <option value="">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <button class="btn-add-compact" onclick="openAddInfluencerForm()"><i class="fas fa-plus" style="font-size:10px"></i> Add Influencer</button>
+      </div>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Photo</th><th>Name</th><th>City</th><th>Category</th><th>Rating</th><th>Status</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="inf_body"></tbody>
+    </table></div>
+
+    <div id="inf_form_wrap" class="table-wrap" style="display:none;padding:20px;max-width:560px;margin-top:20px;">
       <h6 style="color:var(--primary);font-weight:700;margin-bottom:14px;"><i class="fas fa-user-plus"></i> <span id="inf_form_title">Add Influencer</span></h6>
       <input type="hidden" id="inf_edit_id" value="">
       <div class="mb-2">
@@ -1011,17 +1030,8 @@ td[style*="sticky"]{background:#fff;}
         <input id="inf_facebook" class="form-control" placeholder="https://facebook.com/...">
       </div>
       <button class="btn-p" onclick="saveInfluencer()"><i class="fas fa-check"></i> <span id="inf_save_btn_label">Add Influencer</span></button>
-      <button class="btn-sm-outline" style="margin-left:8px;display:none;" id="inf_cancel_edit_btn" onclick="cancelInfluencerEdit()">Cancel</button>
+      <button class="btn-sm-outline" style="margin-left:8px;" id="inf_cancel_edit_btn" onclick="cancelInfluencerEdit()">Cancel</button>
       <p id="inf_msg" class="mt-2" style="font-size:12px;color:var(--primary);"></p>
-    </div>
-    <div class="table-wrap">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
-        <input id="inf_search" class="form-control form-control-sm" placeholder="Search name..." style="max-width:220px;" oninput="renderInfluencers()">
-      </div>
-      <table><thead><tr>
-        <th>Photo</th><th>Name</th><th>City</th><th>Category</th><th>Rating</th><th>Status</th><th>Actions</th>
-      </tr></thead>
-      <tbody id="inf_body"></tbody></table>
     </div>
   </div>
 
@@ -1946,11 +1956,23 @@ async function loadInfluencers() {
     sel.innerHTML = '<option value="">Select city</option>' +
       infCitiesCache.map(c => `<option value="${c}">${c}</option>`).join('');
   }
+  const filterSel = document.getElementById('inf_city_filter');
+  if (filterSel) {
+    filterSel.innerHTML = '<option value="">All Cities</option>' +
+      infCitiesCache.map(c => `<option value="${c}">${c}</option>`).join('');
+  }
 }
 
 function renderInfluencers() {
   const q = (document.getElementById("inf_search")?.value||"").toLowerCase();
-  const rows = allInfluencers.filter(i=>(i.name||"").toLowerCase().includes(q));
+  const cityF = document.getElementById("inf_city_filter")?.value || "";
+  const statusF = document.getElementById("inf_status_filter")?.value || "";
+  const rows = allInfluencers.filter(i => {
+    const nameMatch = !q || (i.name||"").toLowerCase().includes(q);
+    const cityMatch = !cityF || (i.city||"").toLowerCase() === cityF.toLowerCase();
+    const statusMatch = !statusF || (i.status||"") === statusF;
+    return nameMatch && cityMatch && statusMatch;
+  });
   document.getElementById("inf_body").innerHTML = rows.length ? rows.map(i => {
     const st = i.status === 'active' ? '<span class="badge-active">Active</span>' : '<span class="badge-inactive">Inactive</span>';
     const photo = i.photo_url
@@ -1999,6 +2021,13 @@ function cancelInfluencerEdit() {
   document.getElementById('inf_photo_preview_wrap').style.display = 'none';
   infPhotoBase64 = '';
   document.getElementById('inf_msg').innerText = '';
+  document.getElementById('inf_form_wrap').style.display = 'none';
+}
+
+function openAddInfluencerForm() {
+  cancelInfluencerEdit();
+  document.getElementById('inf_form_wrap').style.display = 'block';
+  document.getElementById('inf_form_wrap').scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
 function editInfluencer(id) {
@@ -2025,7 +2054,8 @@ function editInfluencer(id) {
     document.getElementById('inf_photo_preview_wrap').style.display = 'none';
   }
   document.getElementById('inf_msg').innerText = '';
-  window.scrollTo({top: 0, behavior: 'smooth'});
+  document.getElementById('inf_form_wrap').style.display = 'block';
+  document.getElementById('inf_form_wrap').scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
 async function saveInfluencer() {

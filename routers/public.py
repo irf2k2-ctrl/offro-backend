@@ -330,6 +330,53 @@ def get_store(store_id: str):
     }
 
 
+# =================== INFLUENCERS (Phase 2: public, read-only) ===================
+# PRIVACY: `phone` is never included in this response shape — the admin-only
+# shape (with phone) lives exclusively in routers/admin.py and is never
+# reused here. Only active influencers are ever returned; inactive/deleted
+# influencers and any city with no active influencers correctly return [],
+# never another city's data (no fallback of any kind).
+
+def _public_influencer_row(d):
+    return {
+        "_id":          str(d["_id"]),
+        "name":         d.get("name", ""),
+        "city":         d.get("city", ""),
+        "category":     d.get("category", ""),
+        "photo_url":    d.get("photo_url", ""),
+        "social":       d.get("social", {}) or {},
+        "rating":       d.get("rating", 0),
+        "review_count": d.get("review_count", 0),
+    }
+
+@router.get("/influencers")
+def get_influencers_public(city: str = None):
+    """Public endpoint — Home Screen 'City Influencers' section.
+    Same city-filter convention as /stores above (escaped regex, case-
+    insensitive). Only status=active influencers are ever returned."""
+    query = {"status": "active"}
+    if city and city.strip():
+        import re as _re
+        query["city"] = {"$regex": _re.escape(city.strip()), "$options": "i"}
+    docs = list(db.influencers.find(query).sort("created_at", -1))
+    return [_public_influencer_row(d) for d in docs]
+
+@router.get("/influencers/{influencer_id}")
+def get_influencer_public(influencer_id: str):
+    """Public influencer profile. Returns 404 for a missing OR inactive
+    influencer — inactive influencers are not publicly viewable at all,
+    not merely hidden from the list."""
+    from fastapi import HTTPException
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        raise HTTPException(404, "Influencer not found")
+    d = db.influencers.find_one({"_id": oid, "status": "active"})
+    if not d:
+        raise HTTPException(404, "Influencer not found")
+    return _public_influencer_row(d)
+
+
 # =================== STORE REVIEWS ===================
 
 @router.get("/stores/{store_id}/reviews")
