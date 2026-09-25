@@ -4871,8 +4871,16 @@ function _renderInfluencerReviews(reviews) {
       <td>⭐ ${r.rating ?? ''}</td>
       <td>${r.text || ''}</td>
       <td>${r.date || ''}</td>
-      <td></td>
+      <td><button class="btn-sm-danger" onclick="deleteInfluencerReview('${r._id}')">Delete</button></td>
     </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>`;
+}
+async function deleteInfluencerReview(id) {
+  if (!confirm('Delete this review?')) return;
+  try {
+    const r = await fetch(`/admin/influencer-reviews/${id}`, {method:'DELETE', credentials:'include'});
+    if (!r.ok) { alert('Could not delete review.'); return; }
+    loadInfluencerReviews();
+  } catch(e) { alert('Error: '+e.message); }
 }
 
 async function loadProductReviews() {

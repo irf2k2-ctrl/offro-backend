@@ -377,6 +377,119 @@ def get_influencer_public(influencer_id: str):
     return _public_influencer_row(d)
 
 
+# =================== INFLUENCER REVIEWS (Item 4: real persistence) ===================
+# Follows the exact same pattern as submit_product_review/get_my_product_review
+# above — one review per (influencer_id, user_id) via upsert, aggregate
+# recomputed from db.influencer_reviews and written onto the influencer doc.
+# Uses the SAME _get_user_optional() helper (already fixed to check both
+# db.accounts and the legacy db.users collection) — reusing it means this
+# never regresses into the exact "review disappears on reopen" bug that
+# helper's own fix comment describes for products, since an accounts-based
+# login (the primary login path today) is already correctly recognized.
+
+@router.get("/influencers/{influencer_id}/reviews")
+def get_influencer_reviews(influencer_id: str, limit: int = 10, skip: int = 0):
+    """Public: paginated reviews for an influencer.
+
+    FIX (items 1 & 2): this used to (a) return the raw MongoDB review
+    document — including user_id, a private/internal field never meant to
+    be public — and (b) never checked whether the influencer itself exists
+    or is active, so reviews for an inactive/deleted influencer were still
+    publicly fetchable even though the influencer's own profile (404 via
+    get_influencer_public above) was correctly hidden. Both are fixed here:
+    the influencer is validated the exact same way get_influencer_public
+    does (same 404 on invalid/missing/inactive), and only an explicit,
+    public-safe field list is ever returned per review.
+    """
+    from fastapi import HTTPException
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        raise HTTPException(404, "Influencer not found")
+    influencer = db.influencers.find_one({"_id": oid, "status": "active"})
+    if not influencer:
+        raise HTTPException(404, "Influencer not found")
+
+    total = db.influencer_reviews.count_documents({"influencer_id": influencer_id})
+    cursor = (
+        db.influencer_reviews.find({"influencer_id": influencer_id})
+        .sort("created_at", -1).skip(skip).limit(limit)
+    )
+    reviews = [
+        {
+            "_id":           str(r["_id"]),
+            "influencer_id": r.get("influencer_id", influencer_id),
+            "user_name":     r.get("user_name", ""),
+            "rating":        r.get("rating", 0),
+            "text":          r.get("text", ""),
+            "created_at":    r.get("created_at", ""),
+        }
+        for r in cursor
+    ]
+    return {"reviews": reviews, "total": total}
+
+@router.post("/influencers/{influencer_id}/review")
+def submit_influencer_review(influencer_id: str, data: dict, request: _Req):
+    """Authenticated: submit or update an influencer review (one per user)."""
+    from fastapi import HTTPException as _HTTPEx
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        raise _HTTPEx(400, "Invalid influencer id")
+    influencer = db.influencers.find_one({"_id": oid, "status": "active"})
+    if not influencer:
+        raise _HTTPEx(404, "Influencer not found")
+
+    rating = float(data.get("rating", 0))
+    text   = (data.get("text", "") or "").strip()
+    if not (1 <= rating <= 5):
+        raise _HTTPEx(400, "Rating must be 1–5")
+    if len(text) < 3:
+        raise _HTTPEx(400, "Review text too short (min 3 chars)")
+
+    user = _get_user_optional(request)
+    if not user:
+        raise _HTTPEx(401, "Session expired")
+    user_id   = str(user["_id"])
+    user_name = (user.get("name") or user.get("full_name") or "").strip() or "Anonymous"
+
+    from datetime import datetime as _dt
+    db.influencer_reviews.update_one(
+        {"influencer_id": influencer_id, "user_id": user_id},
+        {"$set": {
+            "influencer_id": influencer_id,
+            "user_id":       user_id,
+            "user_name":     user_name,
+            "rating":        rating,
+            "text":          text,
+            "updated_at":    _dt.utcnow().isoformat(),
+        }, "$setOnInsert": {"created_at": _dt.utcnow().isoformat()}},
+        upsert=True,
+    )
+
+    all_revs = list(db.influencer_reviews.find({"influencer_id": influencer_id}, {"rating": 1}))
+    avg = round(sum(r["rating"] for r in all_revs) / len(all_revs), 1) if all_revs else rating
+    db.influencers.update_one({"_id": oid}, {"$set": {"rating": avg, "review_count": len(all_revs)}})
+    return {"ok": True, "message": "Review submitted!", "avg_rating": avg, "review_count": len(all_revs)}
+
+@router.get("/influencers/{influencer_id}/my-review")
+def get_my_influencer_review(influencer_id: str, request: _Req):
+    """Authenticated: the current user's own review for this influencer, if any."""
+    user = _get_user_optional(request)
+    if not user:
+        return {}
+    user_id = str(user["_id"])
+    try:
+        ObjectId(influencer_id)
+    except Exception:
+        return {}
+    rev = db.influencer_reviews.find_one({"influencer_id": influencer_id, "user_id": user_id})
+    if not rev:
+        return {}
+    rev["_id"] = str(rev["_id"])
+    return rev
+
+
 # =================== STORE REVIEWS ===================
 
 @router.get("/stores/{store_id}/reviews")

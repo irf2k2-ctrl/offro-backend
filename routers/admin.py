@@ -41,6 +41,12 @@ def _cloudinary_upload(b64_or_url: str, folder: str = "offro") -> str:
         )
         if resp.status_code == 200:
             return resp.json().get("secure_url", b64_or_url)
+        # FIX: a non-200 response from Cloudinary (bad signature, invalid
+        # folder, quota, etc.) previously logged NOTHING at all — worse
+        # than the exception branch below, which at least prints something.
+        # This is purely additive logging — no return-value/behavior change
+        # for any existing caller (stores, categories, sliders, etc.).
+        print(f"[CDN] upload rejected: status={resp.status_code} body={resp.text[:300]}")
     except Exception as e:
         print(f"[CDN] upload failed: {e}")
     return b64_or_url
@@ -1884,14 +1890,29 @@ def _validate_influencer_city(city: str) -> str:
 def _resolve_influencer_photo(raw: str, existing_url: str = "") -> str:
     """Same idiom used throughout admin.py for other entities' photos:
     if it's already a URL, keep it as-is (no re-upload); if it's new
-    base64 data, upload it; if empty, keep whatever existed before."""
+    base64 data, upload it; if empty, keep whatever existed before.
+
+    FIX (Item 2 — photos not appearing): this previously fell back to
+    `existing_url` SILENTLY whenever the Cloudinary upload failed, so a
+    save would report success while actually storing no photo at all —
+    with nothing anywhere (server logs the admin can see, or the API
+    response) indicating a photo was even attempted. That silent-fallback
+    is the confirmed, reproducible bug: every other layer (storage field,
+    both API responses, Flutter rendering) reads/returns whatever is
+    actually in `photo_url` correctly — there was simply nothing valid
+    there to read. Now a genuine upload failure raises a clear error
+    instead, so it can be caught, reported here, and reproduced with
+    real evidence in Railway logs.
+    """
     raw = (raw or "").strip()
     if not raw:
         return existing_url
     if raw.startswith("http"):
         return raw
     cdn = _cloudinary_upload(raw, folder="offro/influencers")
-    return cdn if cdn and cdn.startswith("http") else existing_url
+    if cdn and cdn.startswith("http"):
+        return cdn
+    raise HTTPException(502, "Photo upload to Cloudinary failed — the influencer was not saved with a new photo. Please try again or use a smaller image.")
 
 @router.get("/influencers")
 def list_influencers(a=Depends(get_current_admin)):
@@ -5049,3 +5070,82 @@ def delete_product_review(review_id: str, a=Depends(get_current_admin)):
     except Exception:
         raise HTTPException(400, "Invalid review ID")
     return {"ok": True}
+
+
+# ===================== INFLUENCER REVIEWS (Item 4) =====================
+# Same shape as list_product_reviews above — resolves the referenced
+# entity's name so the dashboard doesn't show a raw ObjectId, and follows
+# the same visibility/delete moderation pattern. Uses the "Influencers"
+# permission module (not "Reports") for consistency with every other
+# influencer admin endpoint in this file.
+
+@router.get("/influencer-reviews")
+def list_influencer_reviews(a=Depends(get_current_admin)):
+    """Admin: list all influencer reviews across all influencers."""
+    reviews = list(db.influencer_reviews.find().sort("created_at", -1))
+
+    iids = {r.get("influencer_id") for r in reviews if r.get("influencer_id")}
+    ioids = []
+    for iid in iids:
+        try:
+            ioids.append(ObjectId(iid))
+        except Exception:
+            pass
+    influencer_names = {}
+    if ioids:
+        for inf in db.influencers.find({"_id": {"$in": ioids}}, {"name": 1}):
+            influencer_names[str(inf["_id"])] = inf.get("name", "")
+
+    for r in reviews:
+        r["_id"] = str(r["_id"])
+        r["influencer_name"] = influencer_names.get(r.get("influencer_id", ""), "")
+        # Match the field names admin_dashboard.html's _renderInfluencerReviews
+        # already expects (date display, not a raw ISO string).
+        r["date"] = r.get("created_at", "")
+        r["text"] = r.get("text", "")
+        r["user_name"] = r.get("user_name", "")
+    return reviews
+
+@router.delete("/influencer-reviews/{review_id}")
+def delete_influencer_review(review_id: str, a=Depends(get_current_admin)):
+    """Admin: delete an influencer review, then recompute that influencer's
+    rating/review_count from whatever reviews remain.
+
+    FIX (item 3): this used to delete the review document only — the
+    influencer's rating/review_count were left exactly as they were
+    computed at the time of the LAST submission, so a deleted review still
+    counted toward the displayed aggregate everywhere (Flutter, admin list)
+    even though it no longer existed. Now the aggregate is recomputed the
+    same way submit_influencer_review computes it (simple average over
+    db.influencer_reviews), including the case where the deleted review was
+    the influencer's only one — that correctly resets rating/review_count
+    to 0 rather than leaving a stale non-zero value with nothing behind it.
+    """
+    _check_perm(a, "Influencers", "delete")
+    try:
+        oid = ObjectId(review_id)
+    except Exception:
+        raise HTTPException(400, "Invalid review ID")
+
+    review = db.influencer_reviews.find_one({"_id": oid})
+    if not review:
+        raise HTTPException(404, "Influencer review not found")
+    influencer_id = review.get("influencer_id", "")
+
+    db.influencer_reviews.delete_one({"_id": oid})
+
+    # Recompute from whatever remains, then update the influencer doc — if
+    # the influencer_id doesn't resolve to a real influencer anymore (e.g.
+    # it was itself deleted), skip the aggregate update cleanly rather than
+    # raising, since the review deletion itself already succeeded.
+    try:
+        inf_oid = ObjectId(influencer_id)
+    except Exception:
+        return {"ok": True}
+    remaining = list(db.influencer_reviews.find({"influencer_id": influencer_id}, {"rating": 1}))
+    new_rating = round(sum(r["rating"] for r in remaining) / len(remaining), 1) if remaining else 0
+    db.influencers.update_one(
+        {"_id": inf_oid},
+        {"$set": {"rating": new_rating, "review_count": len(remaining)}},
+    )
+    return {"ok": True, "rating": new_rating, "review_count": len(remaining)}
