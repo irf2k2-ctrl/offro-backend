@@ -446,6 +446,23 @@ def _ensure_indexes():
             background=True,
         )
         db.influencers.create_index([("category", 1)], name="influencers_category", background=True)
+        # One-influencer-per-account enforcement (works on a standalone
+        # deployment, no transaction/replica-set needed): a sparse unique
+        # index on account_id. Sparse means documents where account_id
+        # doesn't exist at all (every admin-created influencer — confirmed
+        # via inspection that create_influencer()/update_influencer() never
+        # set this field) are excluded from the uniqueness constraint
+        # entirely, so this cannot affect existing/admin-created records.
+        # Only C1's self-service create/update ever sets account_id, and
+        # for those, MongoDB itself now guarantees at most one document per
+        # account_id, atomically, even under concurrent requests.
+        db.influencers.create_index(
+            [("account_id", 1)],
+            name="influencers_account_id_unique",
+            unique=True,
+            sparse=True,
+            background=True,
+        )
         print("✅ MongoDB indexes ensured")
     except Exception as e:
         print(f"⚠️  Index creation warning: {e}")

@@ -1865,6 +1865,7 @@ def _influencer_row(d):
         "state":        d.get("state", ""),
         "city":         d.get("city", ""),
         "category":     d.get("category", ""),
+        "categories":   _derive_influencer_categories(d),
         "photo_url":    d.get("photo_url", ""),
         "social":       d.get("social", {}) or {},
         "rating":       d.get("rating", 0),
@@ -1886,6 +1887,35 @@ def _validate_influencer_city(city: str) -> str:
     if not existing:
         raise HTTPException(400, f"'{city}' is not a recognized city. Add it under Cities first.")
     return existing["name"]
+
+def _normalize_influencer_categories(raw_categories, raw_category_str):
+    """Issue 3 (multi-category support): accepts either a new-style
+    `categories` list or the legacy single `category` string, and returns
+    (category_str, categories_list) always kept in sync — category_str is
+    ", ".join(categories_list), so every EXISTING reader that expects a
+    single string (admin dashboard JS, Flutter's public listing/profile/
+    share-card) keeps working completely unchanged, while `categories_list`
+    is the new canonical field for anything that wants real multi-select
+    (the C2 authenticated influencer profile form). One consistent
+    representation is always written to the document; nothing reads a
+    stale/inconsistent pairing of the two fields."""
+    if isinstance(raw_categories, list) and raw_categories:
+        cats = [str(c).strip() for c in raw_categories if str(c).strip()]
+    elif raw_category_str:
+        cats = [str(raw_category_str).strip()]
+    else:
+        cats = []
+    return ", ".join(cats), cats
+
+def _derive_influencer_categories(d):
+    """Read-path helper: for a document written before this change (only
+    has the legacy `category` string, no `categories` list at all), derive
+    a sensible categories list on the fly rather than requiring a
+    migration. Existing records are never modified just by being read."""
+    if isinstance(d.get("categories"), list) and d["categories"]:
+        return d["categories"]
+    legacy = str(d.get("category", "") or "").strip()
+    return [legacy] if legacy else []
 
 def _resolve_influencer_photo(raw: str, existing_url: str = "") -> str:
     """Same idiom used throughout admin.py for other entities' photos:
@@ -1927,7 +1957,7 @@ def create_influencer(body: dict, a=Depends(get_current_admin)):
     if not name:
         raise HTTPException(400, "Name is required")
     city = _validate_influencer_city(body.get("city", ""))
-    category = (body.get("category", "")).strip()
+    category_str, categories_list = _normalize_influencer_categories(body.get("categories"), body.get("category", ""))
     status = str(body.get("status", "active")).strip().lower()
     if status not in ("active", "inactive"):
         raise HTTPException(400, "Status must be 'active' or 'inactive'")
@@ -1962,7 +1992,8 @@ def create_influencer(body: dict, a=Depends(get_current_admin)):
         "name": name,
         "state": (body.get("state", "") or "").strip(),
         "city": city,
-        "category": category,
+        "category": category_str,
+        "categories": categories_list,
         "photo_url": photo_url,
         "social": social,
         "rating": 0,
@@ -2010,8 +2041,10 @@ def update_influencer(influencer_id: str, body: dict, a=Depends(get_current_admi
         if not is_super_admin and "*" not in assigned and new_city not in assigned:
             raise HTTPException(403, "Not permitted to move an influencer to a city outside your assigned cities")
         update["city"] = new_city
-    if "category" in body:
-        update["category"] = (body["category"] or "").strip()
+    if "category" in body or "categories" in body:
+        category_str, categories_list = _normalize_influencer_categories(body.get("categories"), body.get("category", ""))
+        update["category"] = category_str
+        update["categories"] = categories_list
     if "status" in body:
         status = str(body["status"]).strip().lower()
         if status not in ("active", "inactive"):

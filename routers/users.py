@@ -385,11 +385,22 @@ def create_influencer_profile(data: dict, user=Depends(get_current_user)):
     name = (data.get("name", "") or "").strip()
     if not name:
         raise HTTPException(400, "Name is required")
-    from routers.admin import _validate_influencer_city, _resolve_influencer_photo
+    from routers.admin import _validate_influencer_city, _resolve_influencer_photo, _normalize_influencer_categories
     city = _validate_influencer_city(data.get("city", ""))
-    category = (data.get("category", "") or "").strip()
+    category_str, categories_list = _normalize_influencer_categories(data.get("categories"), data.get("category", ""))
     state = (data.get("state", "") or "").strip()
-    phone = (data.get("phone", "") or "").strip() or acct.get("phone", "")
+    # FIX (Issue 2): validate only when the caller actually supplied a
+    # phone value — the fallback-to-account-phone case is already a
+    # proper number by construction (set at account/OTP login time).
+    # Scoped to this influencer-profile endpoint only, per the request.
+    raw_phone_input = (data.get("phone", "") or "").strip()
+    if raw_phone_input:
+        import re as _re
+        if not _re.fullmatch(r"\d{10}", raw_phone_input):
+            raise HTTPException(400, "Please enter a valid 10-digit mobile number.")
+        phone = raw_phone_input
+    else:
+        phone = acct.get("phone", "")
     social_in = data.get("social") or {}
     social = {
         "instagram": str(social_in.get("instagram", "")).strip(),
@@ -399,46 +410,72 @@ def create_influencer_profile(data: dict, user=Depends(get_current_user)):
     photo_url = _resolve_influencer_photo(data.get("photo_url", ""))
     now = datetime.utcnow()
     doc = {
-        "name": name, "state": state, "city": city, "category": category,
+        "name": name, "state": state, "city": city, "category": category_str, "categories": categories_list,
         "photo_url": photo_url, "social": social,
         "rating": 0, "review_count": 0, "status": "active",
         "phone": phone,
         "account_id": str(acct["_id"]),
         "created_at": now, "updated_at": now,
     }
-    # Atomic create + link (this fix): both the influencer document and the
-    # account linkage (influencer_id + role) must succeed together, or
-    # neither should remain — using a real MongoDB session/transaction via
-    # the existing pymongo client (see database.py: `from pymongo import
-    # MongoClient` / `client = MongoClient(...)`), not a manual compensating
-    # rollback. PyMongo's transaction context manager aborts automatically
-    # if anything inside it raises, so the insert_one is rolled back too if
-    # the account update fails for any reason.
+    # FIX (Issue 1): the previous implementation wrapped this in a MongoDB
+    # session/transaction (client.start_session()/start_transaction()).
+    # Investigation: staging's generic "Something went wrong" error is
+    # produced client-side (Flutter) specifically when the backend's error
+    # detail is empty OR exceeds 200 characters — ruling out every other
+    # candidate (category/social/phone are all unvalidated free-text at
+    # this stage; photo_url is empty when no photo is selected, so
+    # _resolve_influencer_photo returns immediately without ever calling
+    # Cloudinary) leaves MongoDB transaction support as the only remaining,
+    # previously-flagged-as-uncertain candidate: transactions require a
+    # replica set/mongos, and this codebase had never used a transaction
+    # anywhere before that earlier fix — a standalone staging MongoDB
+    # rejects the attempt with a verbose OperationFailure, which easily
+    # exceeds 200 characters once wrapped in this function's own message,
+    # producing exactly the reported generic fallback text.
     #
-    # IMPORTANT — could not verify from this environment whether the actual
-    # staging MongoDB deployment is a replica set/mongos, which MongoDB
-    # transactions require (a standalone mongod does not support them at
-    # all). No use of transactions exists anywhere else in this codebase to
-    # confirm support either way. If this deployment is standalone, MongoDB
-    # itself will reject the transaction attempt with an OperationFailure
-    # (typically mentioning "replica set") the first time this endpoint is
-    # called — that failure is surfaced below as a clear 500, not silently
-    # caught or worked around with a non-atomic fallback.
-    from database import client as _mongo_client
-    from pymongo.errors import OperationFailure as _MongoOpFailure
-    influencer_id = None
+    # Fix: removed the transaction dependency entirely, replaced with an
+    # explicit compensating action — if the account-linkage step fails for
+    # any reason, the just-created influencer document is deleted manually.
+    # This does not require a replica set and works on any MongoDB
+    # deployment. It is a slightly weaker guarantee than a true ACID
+    # transaction (a brief window exists where a concurrent read could see
+    # the influencer doc before the compensating delete completes, and if
+    # the delete itself fails the record could remain), but per this
+    # investigation's finding it is the correct trade-off for this
+    # deployment, and matches the "smallest safe alternative" already
+    # proposed when the transaction risk was first flagged.
+    # FIX (this task — race-safe 1:1 enforcement): the pre-checks above
+    # (acct.get("influencer_id") and find_one by account_id) are a fast,
+    # friendly early-exit for the common case, but they are NOT what
+    # actually guarantees one-profile-per-account under concurrency — two
+    # simultaneous requests can both pass those checks before either has
+    # written anything. The real guarantee is the sparse unique index on
+    # influencers.account_id (see server.py _ensure_indexes) — MongoDB
+    # enforces it atomically at the storage layer for every insert, with no
+    # transaction or replica set required, so it works unchanged on this
+    # standalone deployment. If two requests race, exactly one insert
+    # succeeds; the other raises DuplicateKeyError here, caught below and
+    # turned into the same friendly message — it never reaches the
+    # account-linkage step at all, so there is nothing to roll back for the
+    # losing request, and no risk of accounts.influencer_id ever pointing
+    # at a document that doesn't exist.
+    from pymongo.errors import DuplicateKeyError as _DupKeyError
     try:
-        with _mongo_client.start_session() as session:
-            with session.start_transaction():
-                res = db.influencers.insert_one(doc, session=session)
-                influencer_id = str(res.inserted_id)
-                db.accounts.update_one(
-                    {"_id": acct["_id"]},
-                    {"$set": {"influencer_id": influencer_id}, "$addToSet": {"roles": "influencer"}},
-                    session=session,
-                )
-    except _MongoOpFailure as e:
-        raise HTTPException(500, f"Could not create influencer profile atomically: {e}")
+        res = db.influencers.insert_one(doc)
+    except _DupKeyError:
+        raise HTTPException(400, "You already have an influencer profile.")
+    influencer_id = str(res.inserted_id)
+    try:
+        result = db.accounts.update_one(
+            {"_id": acct["_id"]},
+            {"$set": {"influencer_id": influencer_id}, "$addToSet": {"roles": "influencer"}},
+        )
+        if result.matched_count == 0:
+            raise Exception("account not found during linkage step")
+    except Exception as e:
+        db.influencers.delete_one({"_id": res.inserted_id})
+        print(f"[INFLUENCER-CREATE] account linkage failed, rolled back influencer {influencer_id}: {e}")
+        raise HTTPException(500, "Could not create your influencer profile. Please try again.")
     return {"ok": True, "influencer_id": influencer_id}
 
 @router.get("/influencer-profile")
@@ -459,6 +496,11 @@ def get_my_influencer_profile(user=Depends(get_current_user)):
     if not d:
         return {}
     d["_id"] = str(d["_id"])
+    # Issue 3: derive `categories` on the fly for a profile saved before
+    # multi-category support existed (only has the legacy `category`
+    # string) — never modifies the stored document just by reading it.
+    from routers.admin import _derive_influencer_categories
+    d["categories"] = _derive_influencer_categories(d)
     return d
 
 @router.put("/influencer-profile")
@@ -481,7 +523,7 @@ def update_my_influencer_profile(data: dict, user=Depends(get_current_user)):
     if existing.get("account_id") != str(acct["_id"]):
         raise HTTPException(403, "You do not have permission to edit this influencer profile.")
 
-    from routers.admin import _validate_influencer_city, _resolve_influencer_photo
+    from routers.admin import _validate_influencer_city, _resolve_influencer_photo, _normalize_influencer_categories
     update = {}
     if "name" in data:
         name = (data["name"] or "").strip()
@@ -492,10 +534,17 @@ def update_my_influencer_profile(data: dict, user=Depends(get_current_user)):
         update["state"] = (data["state"] or "").strip()
     if "city" in data:
         update["city"] = _validate_influencer_city(data["city"])
-    if "category" in data:
-        update["category"] = (data["category"] or "").strip()
+    if "category" in data or "categories" in data:
+        category_str, categories_list = _normalize_influencer_categories(data.get("categories"), data.get("category", ""))
+        update["category"] = category_str
+        update["categories"] = categories_list
     if "phone" in data:
-        update["phone"] = (data["phone"] or "").strip()
+        new_phone = (data["phone"] or "").strip()
+        if new_phone:
+            import re as _re
+            if not _re.fullmatch(r"\d{10}", new_phone):
+                raise HTTPException(400, "Please enter a valid 10-digit mobile number.")
+        update["phone"] = new_phone
     if "social" in data:
         social_in = data.get("social") or {}
         update["social"] = {

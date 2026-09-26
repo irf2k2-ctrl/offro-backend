@@ -338,11 +338,13 @@ def get_store(store_id: str):
 # never another city's data (no fallback of any kind).
 
 def _public_influencer_row(d):
+    from routers.admin import _derive_influencer_categories
     return {
         "_id":          str(d["_id"]),
         "name":         d.get("name", ""),
         "city":         d.get("city", ""),
         "category":     d.get("category", ""),
+        "categories":   _derive_influencer_categories(d),
         "photo_url":    d.get("photo_url", ""),
         "social":       d.get("social", {}) or {},
         "rating":       d.get("rating", 0),
