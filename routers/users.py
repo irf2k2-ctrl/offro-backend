@@ -315,22 +315,27 @@ def account_login(data: dict):
     acct_id   = str(acct["_id"])
     user_id   = acct.get("user_id", acct_id if not is_merchant else "")
     merch_id  = acct.get("merchant_id", acct_id if is_merchant else "")
+    # C1: same additive pattern as merchant_id above — resolves to "" for
+    # every existing account (nothing currently sets this), so this cannot
+    # change behavior for any existing user/merchant login.
+    influencer_id = acct.get("influencer_id", "") if "influencer" in roles else ""
 
     print(f"[ACCOUNT-LOGIN] ✅ {raw_phone} roles={roles} id={acct_id}")
 
     resp_data = {
-        "account_id":   acct_id,
-        "user_id":      user_id,
-        "merchant_id":  merch_id,
-        "name":         acct.get("name", ""),
-        "phone":        acct.get("phone", raw_phone),
-        "token":        token,
-        "roles":        roles,
-        "is_merchant":  is_merchant,
-        "role":         "merchant" if is_merchant and "user" not in roles else ("both" if is_merchant else "user"),
-        "visit_points": acct.get("visit_points", 0),
-        "pool_points":  acct.get("pool_points", 0),
-        "city":         acct.get("city", ""),
+        "account_id":     acct_id,
+        "user_id":        user_id,
+        "merchant_id":    merch_id,
+        "influencer_id":  influencer_id,
+        "name":           acct.get("name", ""),
+        "phone":          acct.get("phone", raw_phone),
+        "token":          token,
+        "roles":          roles,
+        "is_merchant":    is_merchant,
+        "role":           "merchant" if is_merchant and "user" not in roles else ("both" if is_merchant else "user"),
+        "visit_points":   acct.get("visit_points", 0),
+        "pool_points":    acct.get("pool_points", 0),
+        "city":           acct.get("city", ""),
     }
     response = JSONResponse(content=resp_data)
     response.set_cookie(key="user_token", value=token, httponly=True,
@@ -339,6 +344,172 @@ def account_login(data: dict):
         response.set_cookie(key="merchant_token", value=token, httponly=True,
             samesite="Lax", secure=False, max_age=3600 * 24 * 30)
     return response
+
+
+# ===================== INFLUENCER PROFILE (Step C1) =====================
+# Self-service profile creation/edit for the AUTHENTICATED account — not an
+# admin-side operation. Reuses get_current_user (the same dependency every
+# other authenticated account endpoint here uses) rather than a new auth
+# system. Ownership is always the caller's own account, resolved from their
+# token — never a client-supplied account_id, per the explicit security
+# requirement. Follows the exact "$addToSet roles" + linkage-field pattern
+# already used by merchant_register()/merchant_app.py for account↔identity
+# linkage, just from the account side rather than at registration time,
+# since an influencer's account already exists via the normal login flow.
+
+def _resolve_own_account(user: dict):
+    """get_current_user() may return either a db.accounts doc or (via its
+    legacy fallback) a db.users doc — only db.accounts has influencer_id/
+    roles in the unified sense this feature relies on. Resolves robustly to
+    the real db.accounts document either way."""
+    acct = db.accounts.find_one({"_id": user["_id"]})
+    if not acct:
+        acct = db.accounts.find_one({"phone": {"$in": _phone_variants(user.get("phone", ""))}})
+    return acct
+
+@router.post("/influencer-profile")
+def create_influencer_profile(data: dict, user=Depends(get_current_user)):
+    """Create the influencer profile for the AUTHENTICATED account. One
+    account can have at most one influencer profile (1:1)."""
+    acct = _resolve_own_account(user)
+    if not acct:
+        raise HTTPException(400, "Please log in again to continue.")
+    if acct.get("influencer_id"):
+        raise HTTPException(400, "You already have an influencer profile.")
+    # Defense in depth: also check by account_id directly, in case
+    # influencer_id was ever unset on the account without removing the
+    # underlying profile — keeps the relationship 1:1 either way.
+    if db.influencers.find_one({"account_id": str(acct["_id"])}):
+        raise HTTPException(400, "You already have an influencer profile.")
+
+    name = (data.get("name", "") or "").strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+    from routers.admin import _validate_influencer_city, _resolve_influencer_photo
+    city = _validate_influencer_city(data.get("city", ""))
+    category = (data.get("category", "") or "").strip()
+    state = (data.get("state", "") or "").strip()
+    phone = (data.get("phone", "") or "").strip() or acct.get("phone", "")
+    social_in = data.get("social") or {}
+    social = {
+        "instagram": str(social_in.get("instagram", "")).strip(),
+        "facebook":  str(social_in.get("facebook", "")).strip(),
+        "youtube":   str(social_in.get("youtube", "")).strip(),
+    }
+    photo_url = _resolve_influencer_photo(data.get("photo_url", ""))
+    now = datetime.utcnow()
+    doc = {
+        "name": name, "state": state, "city": city, "category": category,
+        "photo_url": photo_url, "social": social,
+        "rating": 0, "review_count": 0, "status": "active",
+        "phone": phone,
+        "account_id": str(acct["_id"]),
+        "created_at": now, "updated_at": now,
+    }
+    # Atomic create + link (this fix): both the influencer document and the
+    # account linkage (influencer_id + role) must succeed together, or
+    # neither should remain — using a real MongoDB session/transaction via
+    # the existing pymongo client (see database.py: `from pymongo import
+    # MongoClient` / `client = MongoClient(...)`), not a manual compensating
+    # rollback. PyMongo's transaction context manager aborts automatically
+    # if anything inside it raises, so the insert_one is rolled back too if
+    # the account update fails for any reason.
+    #
+    # IMPORTANT — could not verify from this environment whether the actual
+    # staging MongoDB deployment is a replica set/mongos, which MongoDB
+    # transactions require (a standalone mongod does not support them at
+    # all). No use of transactions exists anywhere else in this codebase to
+    # confirm support either way. If this deployment is standalone, MongoDB
+    # itself will reject the transaction attempt with an OperationFailure
+    # (typically mentioning "replica set") the first time this endpoint is
+    # called — that failure is surfaced below as a clear 500, not silently
+    # caught or worked around with a non-atomic fallback.
+    from database import client as _mongo_client
+    from pymongo.errors import OperationFailure as _MongoOpFailure
+    influencer_id = None
+    try:
+        with _mongo_client.start_session() as session:
+            with session.start_transaction():
+                res = db.influencers.insert_one(doc, session=session)
+                influencer_id = str(res.inserted_id)
+                db.accounts.update_one(
+                    {"_id": acct["_id"]},
+                    {"$set": {"influencer_id": influencer_id}, "$addToSet": {"roles": "influencer"}},
+                    session=session,
+                )
+    except _MongoOpFailure as e:
+        raise HTTPException(500, f"Could not create influencer profile atomically: {e}")
+    return {"ok": True, "influencer_id": influencer_id}
+
+@router.get("/influencer-profile")
+def get_my_influencer_profile(user=Depends(get_current_user)):
+    """Returns the authenticated account's OWN influencer profile (full
+    detail, including phone — this is the owner's own view, not the public
+    directory API, so the usual public-field restriction doesn't apply
+    here). Returns {} if this account has no influencer profile."""
+    acct = _resolve_own_account(user)
+    influencer_id = acct.get("influencer_id") if acct else None
+    if not influencer_id:
+        return {}
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        return {}
+    d = db.influencers.find_one({"_id": oid})
+    if not d:
+        return {}
+    d["_id"] = str(d["_id"])
+    return d
+
+@router.put("/influencer-profile")
+def update_my_influencer_profile(data: dict, user=Depends(get_current_user)):
+    """Edit the authenticated account's OWN influencer profile only.
+    Ownership is enforced by checking the influencer document's own
+    account_id against the caller's authenticated account — the client
+    cannot submit someone else's account_id or influencer_id to bypass
+    this, since neither is ever read from the request body here."""
+    acct = _resolve_own_account(user)
+    if not acct or not acct.get("influencer_id"):
+        raise HTTPException(404, "No influencer profile found for this account.")
+    try:
+        oid = ObjectId(acct["influencer_id"])
+    except Exception:
+        raise HTTPException(400, "Invalid influencer profile reference.")
+    existing = db.influencers.find_one({"_id": oid})
+    if not existing:
+        raise HTTPException(404, "Influencer profile not found.")
+    if existing.get("account_id") != str(acct["_id"]):
+        raise HTTPException(403, "You do not have permission to edit this influencer profile.")
+
+    from routers.admin import _validate_influencer_city, _resolve_influencer_photo
+    update = {}
+    if "name" in data:
+        name = (data["name"] or "").strip()
+        if not name:
+            raise HTTPException(400, "Name cannot be empty")
+        update["name"] = name
+    if "state" in data:
+        update["state"] = (data["state"] or "").strip()
+    if "city" in data:
+        update["city"] = _validate_influencer_city(data["city"])
+    if "category" in data:
+        update["category"] = (data["category"] or "").strip()
+    if "phone" in data:
+        update["phone"] = (data["phone"] or "").strip()
+    if "social" in data:
+        social_in = data.get("social") or {}
+        update["social"] = {
+            "instagram": str(social_in.get("instagram", "")).strip(),
+            "facebook":  str(social_in.get("facebook", "")).strip(),
+            "youtube":   str(social_in.get("youtube", "")).strip(),
+        }
+    if "photo_url" in data:
+        update["photo_url"] = _resolve_influencer_photo(data["photo_url"], existing.get("photo_url", ""))
+    if not update:
+        raise HTTPException(400, "Nothing to update")
+    update["updated_at"] = datetime.utcnow()
+    db.influencers.update_one({"_id": oid}, {"$set": update})
+    return {"ok": True}
 
 
 @router.post("/wallet/withdraw")
