@@ -416,6 +416,19 @@ def create_influencer_profile(data: dict, user=Depends(get_current_user)):
         "phone": phone,
         "account_id": str(acct["_id"]),
         "created_at": now, "updated_at": now,
+        # ── Influencer Subscription Fee + Payment + Publish ─────────────
+        # A brand-new self-service profile always starts UNPAID/draft —
+        # this is what makes "Save" (this endpoint) a draft-only action per
+        # the approved business rule: the profile exists and is editable,
+        # but is never publicly visible until Save & Publish completes a
+        # verified payment (see /influencer-profile/publish below). This
+        # never applies to admin-created records (routers/admin.py never
+        # sets these fields, and existing profiles with no payment_status/
+        # publish_status at all are treated as already-published — see the
+        # backward-compatibility handling in routers/public.py).
+        "payment_status": "UNPAID",
+        "publish_status": "draft",
+        "is_active": True,
     }
     # FIX (Issue 1): the previous implementation wrapped this in a MongoDB
     # session/transaction (client.start_session()/start_transaction()).
@@ -554,11 +567,351 @@ def update_my_influencer_profile(data: dict, user=Depends(get_current_user)):
         }
     if "photo_url" in data:
         update["photo_url"] = _resolve_influencer_photo(data["photo_url"], existing.get("photo_url", ""))
+    # Enable/Disable (rule 5): a self-service visibility toggle, deliberately
+    # separate from payment_status and publish_status — disabling a paid,
+    # published profile must NOT touch its payment record, and re-enabling
+    # it must NOT require a new payment. It is also separate from the
+    # existing admin `status` field (admin moderation/visibility): an
+    # admin-suspended profile (status="inactive") must stay hidden even if
+    # the influencer re-enables it here, so public visibility (routers/
+    # public.py) requires status=="active" AND is_active AND published.
+    if "is_active" in data:
+        update["is_active"] = bool(data["is_active"])
     if not update:
         raise HTTPException(400, "Nothing to update")
     update["updated_at"] = datetime.utcnow()
     db.influencers.update_one({"_id": oid}, {"$set": update})
     return {"ok": True}
+
+
+@router.delete("/influencer-profile")
+def delete_my_influencer_profile(user=Depends(get_current_user)):
+    """Permanently deletes the authenticated account's OWN influencer
+    profile (rule 4 — DELETE is permanent and ends the profile/payment
+    relationship for good). Historical payment records in db.subscriptions/
+    db.invoices are left untouched for audit purposes but become orphaned
+    from any live profile — they are never reused. Clearing
+    accounts.influencer_id here (rather than leaving it dangling) is what
+    makes the NEXT create_influencer_profile() call for this account
+    succeed as a genuinely brand-new profile with a fresh influencer_id and
+    payment_status starting at UNPAID; the account keeps its "influencer"
+    role so Switch Mode still offers Influencer mode, which — per the
+    existing C1/C2 empty-state behavior already built into
+    InfluencerModuleScreen — correctly routes back to "Add Influencer
+    Profile" rather than any second registration flow."""
+    acct = _resolve_own_account(user)
+    if not acct or not acct.get("influencer_id"):
+        raise HTTPException(404, "No influencer profile found for this account.")
+    try:
+        oid = ObjectId(acct["influencer_id"])
+    except Exception:
+        raise HTTPException(400, "Invalid influencer profile reference.")
+    existing = db.influencers.find_one({"_id": oid})
+    if existing and existing.get("account_id") != str(acct["_id"]):
+        raise HTTPException(403, "You do not have permission to delete this influencer profile.")
+    db.influencers.delete_one({"_id": oid})
+    db.accounts.update_one({"_id": acct["_id"]}, {"$unset": {"influencer_id": ""}})
+    return {"ok": True}
+
+
+# ===================== INFLUENCER SUBSCRIPTION FEE + PAYMENT + PUBLISH =====================
+# Reuses the exact existing Razorpay implementation (order creation helper,
+# key env vars, HMAC-SHA256 signature verification) from routers/merchant_app.py
+# — imported locally to avoid the module-level circular-import issue that
+# affects every other cross-router helper in this file (see
+# _validate_influencer_city et al. above) — rather than standing up a second
+# payment integration. Amounts are always computed here, server-side, from
+# db.pricing's influencer_subscription block; the Flutter client never
+# supplies and is never trusted for price, GST, or total.
+
+def _influencer_subscription_pricing() -> dict:
+    from routers.admin import _influencer_subscription_block
+    pricing = db.pricing.find_one({}) or {}
+    return _influencer_subscription_block(pricing)
+
+
+@router.get("/influencer-profile/subscription-pricing")
+def get_influencer_subscription_pricing(user=Depends(get_current_user)):
+    """Returns the current admin-configured fee/GST/total for the profile
+    creation screen to display before Save & Publish — and whether THIS
+    account's own profile (if any) already has payment_status PAID, so the
+    app can skip the payment step and its explanation entirely."""
+    acct = _resolve_own_account(user)
+    already_paid = False
+    if acct and acct.get("influencer_id"):
+        try:
+            d = db.influencers.find_one({"_id": ObjectId(acct["influencer_id"])})
+            already_paid = bool(d) and d.get("payment_status", "PAID") == "PAID"
+        except Exception:
+            pass
+    pricing = _influencer_subscription_pricing()
+    pricing["currency"] = "INR"
+    pricing["already_paid"] = already_paid
+    return pricing
+
+
+@router.post("/influencer-profile/publish")
+def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
+    """SAVE & PUBLISH. `data` may optionally carry the same profile fields
+    accepted by PUT /influencer-profile (name/state/city/category/phone/
+    social/photo_url) — the profile is saved first with those fields (the
+    "validate/save" step), exactly like a normal edit, before the
+    payment/publish decision is made. Never accepts or trusts
+    payment_status/publish_status/amount fields from the client.
+
+    Returns one of:
+      - {"ok": True, "publish_status": "published", "payment_required": False, ...}
+            when payment isn't needed (already PAID, or admin has the
+            subscription toggle disabled, or the configured fee is 0).
+      - {"ok": True, "payment_required": True, "razorpay_order_id": ..., ...}
+            when a Razorpay order was created and the app must open
+            checkout, then call /influencer-profile/verify-payment.
+    """
+    acct = _resolve_own_account(user)
+    if not acct or not acct.get("influencer_id"):
+        raise HTTPException(404, "Please save your influencer profile before publishing.")
+    try:
+        oid = ObjectId(acct["influencer_id"])
+    except Exception:
+        raise HTTPException(400, "Invalid influencer profile reference.")
+    existing = db.influencers.find_one({"_id": oid})
+    if not existing:
+        raise HTTPException(404, "Influencer profile not found.")
+    if existing.get("account_id") != str(acct["_id"]):
+        raise HTTPException(403, "You do not have permission to publish this influencer profile.")
+
+    # Step 1 — validate/save (reuses the same field handling as PUT, minus
+    # is_active, which has nothing to do with publishing).
+    from routers.admin import _validate_influencer_city, _resolve_influencer_photo, _normalize_influencer_categories
+    update = {}
+    if "name" in data:
+        name = (data["name"] or "").strip()
+        if not name:
+            raise HTTPException(400, "Name cannot be empty")
+        update["name"] = name
+    if "state" in data:
+        update["state"] = (data["state"] or "").strip()
+    if "city" in data:
+        update["city"] = _validate_influencer_city(data["city"])
+    if "category" in data or "categories" in data:
+        category_str, categories_list = _normalize_influencer_categories(data.get("categories"), data.get("category", ""))
+        update["category"] = category_str
+        update["categories"] = categories_list
+    if "phone" in data:
+        new_phone = (data["phone"] or "").strip()
+        if new_phone:
+            import re as _re
+            if not _re.fullmatch(r"\d{10}", new_phone):
+                raise HTTPException(400, "Please enter a valid 10-digit mobile number.")
+        update["phone"] = new_phone
+    if "social" in data:
+        social_in = data.get("social") or {}
+        update["social"] = {
+            "instagram": str(social_in.get("instagram", "")).strip(),
+            "facebook":  str(social_in.get("facebook", "")).strip(),
+            "youtube":   str(social_in.get("youtube", "")).strip(),
+        }
+    if "photo_url" in data:
+        update["photo_url"] = _resolve_influencer_photo(data["photo_url"], existing.get("photo_url", ""))
+    if update:
+        update["updated_at"] = datetime.utcnow()
+        db.influencers.update_one({"_id": oid}, {"$set": update})
+        existing = db.influencers.find_one({"_id": oid})  # re-read post-save state
+
+    # Step 2 — payment/publish decision. Never trust client-supplied
+    # payment/publish state; everything below is derived from the
+    # server's own record and the server's own pricing config.
+    pricing = _influencer_subscription_pricing()
+
+    if existing.get("payment_status", "PAID") == "PAID":
+        # Already paid (rule: one-time payment) — publish/update only.
+        db.influencers.update_one({"_id": oid}, {"$set": {
+            "publish_status": "published", "updated_at": datetime.utcnow(),
+        }})
+        return {"ok": True, "publish_status": "published", "payment_required": False, "already_paid": True}
+
+    if not pricing["enabled"]:
+        # Admin has switched the subscription requirement off entirely —
+        # the explicit admin override the original analysis anticipated
+        # for the UNPAID → PUBLISHED path. No charge, no payment_status
+        # change (there was never a charge to record).
+        db.influencers.update_one({"_id": oid}, {"$set": {
+            "publish_status": "published", "updated_at": datetime.utcnow(),
+        }})
+        return {"ok": True, "publish_status": "published", "payment_required": False, "subscription_enabled": False}
+
+    total = pricing["total"]
+    if total <= 0:
+        # Configured fee resolves to ₹0 — mirrors the existing merchant
+        # subscription's zero-price fast path (Razorpay rejects amount=0
+        # orders): activate immediately as PAID, no Razorpay order.
+        now = datetime.utcnow()
+        db.influencers.update_one({"_id": oid}, {"$set": {
+            "payment_status": "PAID", "publish_status": "published",
+            "subscription_amount": pricing["fee"], "gst_percent": pricing["gst_percent"],
+            "gst_amount": pricing["gst_amount"], "total_amount": total,
+            "paid_at": now, "updated_at": now,
+        }})
+        return {"ok": True, "publish_status": "published", "payment_required": False, "total": total}
+
+    amount_paise = int(round(total * 100))
+    from routers.merchant_app import _razorpay_request, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+
+    # ── Reuse a still-valid PAYMENT_PENDING Razorpay order instead of
+    # creating a new one on every retry (e.g. the user's network dropped
+    # right after Save & Publish, before they ever saw the checkout sheet,
+    # and they tap it again). Reused ONLY when the pending order's amount
+    # matches the CURRENT pricing exactly — if admin changed the fee/GST in
+    # the meantime, that match fails and a fresh order is created below, so
+    # the amount actually charged can never be stale. Never touches an
+    # already-PAID profile's behavior (that case already returned above).
+    now = datetime.utcnow()
+    existing_pending = db.subscriptions.find_one({
+        "entity_type": "influencer",
+        "influencer_id": str(oid),
+        "status": "pending",
+        "pay_mode": "razorpay",
+        "razorpay_order_id": {"$ne": None},
+        "base_price": pricing["fee"],
+        "gst_percent": pricing["gst_percent"],
+        "total": total,
+    }, sort=[("created_at", -1)])
+
+    if existing_pending:
+        rp_order_id = existing_pending["razorpay_order_id"]
+        pay_mode = "razorpay"
+        sub_id_str = str(existing_pending["_id"])
+        db.subscriptions.update_one({"_id": existing_pending["_id"]}, {"$set": {"updated_at": now}})
+    else:
+        # No reusable order — create a new Razorpay order the same way the
+        # existing merchant subscription/upgrade flows do.
+        rp_order_id = None
+        pay_mode = "manual"
+        if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+            try:
+                order_data = {
+                    "amount": amount_paise, "currency": "INR",
+                    "receipt": f"infl_{str(oid)[-8:]}",
+                    "notes": {"influencer_id": str(oid), "account_id": str(acct["_id"]), "type": "influencer_subscription"},
+                }
+                resp = _razorpay_request("POST", "/v1/orders", (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), order_data)
+                rz = resp.json()
+                rp_order_id = rz.get("id")
+                if rp_order_id:
+                    pay_mode = "razorpay"
+            except Exception:
+                pay_mode = "manual"
+
+        sub_doc = {
+            "entity_type": "influencer",
+            "influencer_id": str(oid),
+            "account_id": str(acct["_id"]),
+            "razorpay_order_id": rp_order_id,
+            "base_price": pricing["fee"], "gst_percent": pricing["gst_percent"],
+            "gst_amount": pricing["gst_amount"], "total": total,
+            "currency": "INR",
+            "status": "pending",
+            "pay_mode": pay_mode,
+            "created_at": now, "updated_at": now,
+        }
+        sub_result = db.subscriptions.insert_one(sub_doc)
+        sub_id_str = str(sub_result.inserted_id)
+
+    db.influencers.update_one({"_id": oid}, {"$set": {
+        "payment_status": "PAYMENT_PENDING",
+        "razorpay_order_id": rp_order_id,
+        "subscription_amount": pricing["fee"], "gst_percent": pricing["gst_percent"],
+        "gst_amount": pricing["gst_amount"], "total_amount": total,
+        "updated_at": now,
+    }})
+
+    return {
+        "ok": True,
+        "payment_required": True,
+        "publish_status": existing.get("publish_status", "draft"),
+        "subscription_id": sub_id_str,
+        "pay_mode": pay_mode,
+        "razorpay_order_id": rp_order_id,
+        "razorpay_key": RAZORPAY_KEY_ID if pay_mode == "razorpay" else None,
+        "amount": amount_paise,
+        "amount_display": total,
+        "base_price": pricing["fee"],
+        "gst_percent": pricing["gst_percent"],
+        "gst_amount": pricing["gst_amount"],
+        "total": total,
+        "currency": "INR",
+    }
+
+
+@router.post("/influencer-profile/verify-payment")
+def verify_influencer_payment(data: dict, user=Depends(get_current_user)):
+    """Verifies a completed Razorpay payment for the authenticated account's
+    OWN influencer profile using the exact same HMAC-SHA256 signature check
+    already used by routers/merchant_app.py's verify_payment(). Only a
+    successful, verified signature can ever set payment_status=PAID /
+    publish_status=published — the client's claim of success is never
+    trusted on its own."""
+    acct = _resolve_own_account(user)
+    if not acct or not acct.get("influencer_id"):
+        raise HTTPException(404, "No influencer profile found for this account.")
+    try:
+        oid = ObjectId(acct["influencer_id"])
+    except Exception:
+        raise HTTPException(400, "Invalid influencer profile reference.")
+    existing = db.influencers.find_one({"_id": oid})
+    if not existing or existing.get("account_id") != str(acct["_id"]):
+        raise HTTPException(403, "You do not have permission to verify payment for this influencer profile.")
+
+    # Idempotency — a retry/double-tap after a successful verification must
+    # not fail or double-charge; just report the already-published state.
+    if existing.get("payment_status") == "PAID":
+        return {"ok": True, "publish_status": "published", "already_paid": True}
+
+    order_id   = str(data.get("razorpay_order_id", "") or "")
+    payment_id = str(data.get("razorpay_payment_id", "") or "")
+    signature  = str(data.get("razorpay_signature", "") or "")
+
+    sub = db.subscriptions.find_one({
+        "entity_type": "influencer",
+        "influencer_id": str(oid),
+        "razorpay_order_id": order_id,
+    }, sort=[("created_at", -1)]) if order_id else None
+    if not sub:
+        raise HTTPException(400, "No matching payment order found for this influencer profile.")
+
+    from routers.merchant_app import RAZORPAY_KEY_SECRET
+    import hmac as _hmac, hashlib as _hashlib
+    if not RAZORPAY_KEY_SECRET:
+        raise HTTPException(503, "Payment verification unavailable — Razorpay not configured")
+    msg = f"{order_id}|{payment_id}"
+    expected = _hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), _hashlib.sha256).hexdigest()
+    if not _hmac.compare_digest(expected, signature):
+        db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {"status": "failed", "updated_at": datetime.utcnow()}})
+        db.influencers.update_one({"_id": oid}, {"$set": {"payment_status": "PAYMENT_FAILED", "updated_at": datetime.utcnow()}})
+        raise HTTPException(400, "Payment verification failed. Please try again.")
+
+    now = datetime.utcnow()
+    db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {
+        "status": "paid", "razorpay_payment_id": payment_id, "razorpay_signature": signature,
+        "updated_at": now,
+    }})
+    invoice_no = f"INF-{now.strftime('%Y%m%d')}-{str(sub['_id'])[-6:].upper()}"
+    db.invoices.insert_one({
+        "invoice_no": invoice_no,
+        "entity_type": "influencer",
+        "influencer_id": str(oid),
+        "account_id": str(acct["_id"]),
+        "influencer_name": existing.get("name", ""),
+        "base_price": sub.get("base_price", 0), "gst": sub.get("gst_amount", 0),
+        "total": sub.get("total", 0), "final_amount": sub.get("total", 0),
+        "razorpay_order_id": order_id, "razorpay_payment_id": payment_id,
+        "created_at": now,
+    })
+    db.influencers.update_one({"_id": oid}, {"$set": {
+        "payment_status": "PAID", "publish_status": "published",
+        "razorpay_payment_id": payment_id, "paid_at": now, "updated_at": now,
+    }})
+    return {"ok": True, "publish_status": "published", "invoice_no": invoice_no}
 
 
 @router.post("/wallet/withdraw")

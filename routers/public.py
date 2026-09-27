@@ -351,12 +351,33 @@ def _public_influencer_row(d):
         "review_count": d.get("review_count", 0),
     }
 
+def _influencer_public_visibility_filter() -> dict:
+    """Publish/payment gate for the public directory (Influencer
+    Subscription Fee + Payment + Publish feature). Deliberately additive to
+    the existing `status` field, never a replacement for it:
+      - `status` stays exactly what it always was — admin
+        moderation/visibility (untouched by this feature).
+      - `publish_status` is the NEW, separate payment-driven gate. A
+        document that never went through this feature at all has no
+        publish_status field — per the approved backward-compatibility
+        rule, that means "treat as already published", so it must match
+        here too (missing OR "published").
+      - `is_active` is the self-service enable/disable toggle, independent
+        of both of the above; missing OR True means visible.
+    All three must hold for a profile to appear/resolve publicly."""
+    return {
+        "$and": [
+            {"$or": [{"publish_status": {"$exists": False}}, {"publish_status": "published"}]},
+            {"$or": [{"is_active": {"$exists": False}}, {"is_active": True}]},
+        ]
+    }
+
 @router.get("/influencers")
 def get_influencers_public(city: str = None):
     """Public endpoint — Home Screen 'City Influencers' section.
     Same city-filter convention as /stores above (escaped regex, case-
     insensitive). Only status=active influencers are ever returned."""
-    query = {"status": "active"}
+    query = {"status": "active", **_influencer_public_visibility_filter()}
     if city and city.strip():
         import re as _re
         query["city"] = {"$regex": _re.escape(city.strip()), "$options": "i"}
@@ -365,15 +386,17 @@ def get_influencers_public(city: str = None):
 
 @router.get("/influencers/{influencer_id}")
 def get_influencer_public(influencer_id: str):
-    """Public influencer profile. Returns 404 for a missing OR inactive
-    influencer — inactive influencers are not publicly viewable at all,
-    not merely hidden from the list."""
+    """Public influencer profile. Returns 404 for a missing, inactive,
+    unpublished (payment not yet completed), or self-disabled influencer —
+    none of these are publicly viewable at all, not merely hidden from the
+    list."""
     from fastapi import HTTPException
     try:
         oid = ObjectId(influencer_id)
     except Exception:
         raise HTTPException(404, "Influencer not found")
-    d = db.influencers.find_one({"_id": oid, "status": "active"})
+    query = {"_id": oid, "status": "active", **_influencer_public_visibility_filter()}
+    d = db.influencers.find_one(query)
     if not d:
         raise HTTPException(404, "Influencer not found")
     return _public_influencer_row(d)

@@ -799,6 +799,36 @@ td[style*="sticky"]{background:#fff;}
           <small class="text-muted">Users need at least this many points to request reward redemption</small>
         </div>
       </div>
+
+      <!-- ── Influencer Subscription (one-time profile publishing fee) ── -->
+      <hr style="margin:24px 0;">
+      <div style="background:#fff0f6;border-radius:12px;padding:20px;border:1px solid #f0c6d8;">
+        <div class="fw-bold mb-3" style="color:#a1275a;font-size:15px;">🌟 Influencer Subscription <small style="color:#a1275a;font-weight:normal;">(one-time profile publishing fee)</small></div>
+        <div class="row g-3 mb-2">
+          <div class="col-md-4">
+            <label class="form-label" style="font-size:13px">Subscription Fee (₹)</label>
+            <input id="influencer_fee_input" class="form-control" type="number" min="0" step="1" placeholder="1000" oninput="recalcInfluencerTotal()">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" style="font-size:13px">GST %</label>
+            <input id="influencer_gst_input" class="form-control" type="number" min="0" step="0.5" placeholder="18" oninput="recalcInfluencerTotal()">
+          </div>
+          <div class="col-md-4 d-flex align-items-end">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="influencer_enabled_input">
+              <label class="form-check-label" for="influencer_enabled_input" style="font-size:13px;">Enabled (require payment before publish)</label>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:13px;color:#a1275a;background:#fff;border-radius:8px;padding:10px 14px;display:inline-block;">
+          GST Amount: ₹<span id="influencer_gst_amount_display">0</span>
+          &nbsp;·&nbsp; <strong>Total Payable: ₹<span id="influencer_total_display">0</span></strong>
+        </div>
+        <p style="font-size:12px;color:#a1275a;margin-top:8px;margin-bottom:0;">
+          When disabled, influencers can publish their profile without payment (admin override). Existing published influencer profiles are never retroactively charged.
+        </p>
+      </div>
+
       <button class="btn-p mt-3" onclick="savePricing()">Save All Settings</button>
       <p id="pricing_msg" class="mt-2" style="font-size:13px;color:var(--primary);"></p>
     </div>
@@ -1015,7 +1045,7 @@ td[style*="sticky"]{background:#fff;}
     </div>
     <div class="table-wrap"><table>
       <thead><tr>
-        <th>Photo</th><th>Name</th><th>Mobile</th><th>City</th><th>Category</th><th>Rating</th><th>Status</th><th>Actions</th>
+        <th>Photo</th><th>Name</th><th>Mobile</th><th>City</th><th>Category</th><th>Rating</th><th>Status</th><th>Subscription</th><th>Actions</th>
       </tr></thead>
       <tbody id="inf_body"></tbody>
     </table></div>
@@ -2049,6 +2079,20 @@ function renderInfluencers() {
     const photo = i.photo_url
       ? `<img src="${i.photo_url}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">`
       : `<div style="width:36px;height:36px;border-radius:50%;background:var(--light);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--primary);">${(i.name||'?')[0].toUpperCase()}</div>`;
+    // Subscription/publish info (Influencer Subscription Fee + Payment +
+    // Publish feature). payment_status/publish_status default to
+    // PAID/published server-side for any record that predates this feature
+    // (admin-created records included), so this column is purely informational
+    // here — it never gates admin's own Edit/Activate/Deactivate/Delete actions.
+    const payBadgeColor = {PAID:'#198754', UNPAID:'#6c757d', PAYMENT_PENDING:'#e69500', PAYMENT_FAILED:'#dc3545'}[i.payment_status] || '#6c757d';
+    const pubBadgeColor = i.publish_status === 'draft' ? '#e69500' : '#198754';
+    const subInfo = `
+      <div style="font-size:11px;line-height:1.6;">
+        <span style="color:${payBadgeColor};font-weight:600;">${i.payment_status||'PAID'}</span><br>
+        <span style="color:${pubBadgeColor};font-weight:600;">${i.publish_status||'published'}</span>
+        ${i.total_amount ? `<br><span style="color:var(--muted);">₹${i.total_amount}</span>` : ''}
+        ${i.is_active === false ? '<br><span style="color:#dc3545;">Self-disabled</span>' : ''}
+      </div>`;
     return `<tr>
       <td>${photo}</td>
       <td><b>${i.name}</b></td>
@@ -2057,13 +2101,14 @@ function renderInfluencers() {
       <td>${i.category||'—'}</td>
       <td>⭐ ${(i.rating||0).toFixed ? i.rating.toFixed(1) : i.rating} (${i.review_count||0})</td>
       <td>${st}</td>
+      <td>${subInfo}</td>
       <td>
         <button class="btn-sm-outline" onclick="editInfluencer('${i._id}')">Edit</button>
         <button class="btn-sm-outline" onclick="toggleInfluencerStatus('${i._id}','${i.status==='active'?'inactive':'active'}')">${i.status==='active'?'Deactivate':'Activate'}</button>
         <button class="btn-sm-danger" onclick="deleteInfluencerRow('${i._id}')">Delete</button>
       </td>
     </tr>`;
-  }).join("") : '<tr><td colspan="8" style="text-align:center;color:var(--muted);">No influencers yet</td></tr>';
+  }).join("") : '<tr><td colspan="9" style="text-align:center;color:var(--muted);">No influencers yet</td></tr>';
 }
 
 function infPreviewPhoto(input) {
@@ -2672,6 +2717,22 @@ async function loadPricing(){
     document.getElementById("rate_example").innerText=(100*v).toFixed(2);
   });
   renderPlans();
+  // Influencer Subscription — server is the source of truth for gst_amount/
+  // total (recomputed here on load purely for display; the actual charge is
+  // always recalculated server-side at payment time, never trusted from here).
+  let infsub=d.influencer_subscription||{};
+  document.getElementById("influencer_fee_input").value=(infsub.fee!=null?infsub.fee:0);
+  document.getElementById("influencer_gst_input").value=(infsub.gst_percent!=null?infsub.gst_percent:18);
+  document.getElementById("influencer_enabled_input").checked=!!infsub.enabled;
+  recalcInfluencerTotal();
+}
+function recalcInfluencerTotal(){
+  let fee=parseFloat(document.getElementById("influencer_fee_input").value)||0;
+  let gstPct=parseFloat(document.getElementById("influencer_gst_input").value)||0;
+  let gstAmt=Math.round(fee*gstPct/100*100)/100;
+  let total=Math.round((fee+gstAmt)*100)/100;
+  document.getElementById("influencer_gst_amount_display").innerText=gstAmt;
+  document.getElementById("influencer_total_display").innerText=total;
 }
 function renderPlans(){
   let html=currentPlans.map((p,i)=>`
@@ -2689,8 +2750,13 @@ async function savePricing(){
   let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
   const stdLimitRaw = document.getElementById("std_product_limit_input")?.value;
   const stdLimit = (stdLimitRaw === '' || stdLimitRaw == null) ? 10 : parseInt(stdLimitRaw);
+  let influencerSub={
+    fee: parseFloat(document.getElementById("influencer_fee_input").value)||0,
+    gst_percent: parseFloat(document.getElementById("influencer_gst_input").value)||0,
+    enabled: document.getElementById("influencer_enabled_input").checked,
+  };
   let r=await fetch("/admin/pricing",{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({gst_percent:gst,plans,conversion_rate:rate,min_withdraw_points:minW,standard_product_limit:stdLimit}),credentials:"include"});
+    body:JSON.stringify({gst_percent:gst,plans,conversion_rate:rate,min_withdraw_points:minW,standard_product_limit:stdLimit,influencer_subscription:influencerSub}),credentials:"include"});
   document.getElementById("pricing_msg").innerText=r.ok?"✅ All settings saved!":"❌ Error saving";
   setTimeout(()=>document.getElementById("pricing_msg").innerText="",2500);
 }

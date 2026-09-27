@@ -445,6 +445,27 @@ def _category_list():
 
 # ===================== PRICING & PLANS =====================
 
+def _influencer_subscription_block(doc: dict) -> dict:
+    """Reads the Influencer Subscription config out of the single db.pricing
+    document (same 'one config doc' pattern as gst_percent/plans/banner
+    pricing above — no separate collection). gst_amount/total are always
+    RECOMPUTED here from fee+gst_percent, never read back from storage, so
+    admin UI display and the actual charge (routers/users.py) can never
+    drift apart from a stale cached total."""
+    infsub = (doc or {}).get("influencer_subscription", {}) or {}
+    fee = float(infsub.get("fee", 0) or 0)
+    gst_percent = float(infsub.get("gst_percent", (doc or {}).get("gst_percent", 18)) or 0)
+    enabled = bool(infsub.get("enabled", False))
+    gst_amount = round(fee * gst_percent / 100, 2)
+    total = round(fee + gst_amount, 2)
+    return {
+        "fee": fee,
+        "gst_percent": gst_percent,
+        "gst_amount": gst_amount,
+        "total": total,
+        "enabled": enabled,
+    }
+
 @router.get("/pricing")
 def get_pricing(a=Depends(get_current_admin)):
     doc = db.pricing.find_one({}) or {"gst_percent": 18, "plans": []}
@@ -454,6 +475,7 @@ def get_pricing(a=Depends(get_current_admin)):
         "conversion_rate": doc.get("conversion_rate", 0.10),  # default ₹0.10 per point
         "min_withdraw_points": doc.get("min_withdraw_points", 200),
         "standard_product_limit": int(doc.get("standard_product_limit", 10)),
+        "influencer_subscription": _influencer_subscription_block(doc),
     }
 
 @router.put("/pricing")
@@ -467,6 +489,13 @@ def update_pricing(data: dict, a=Depends(get_current_admin)):
     if "conversion_rate" in data: update["conversion_rate"] = float(data["conversion_rate"])
     if "min_withdraw_points" in data: update["min_withdraw_points"] = int(data["min_withdraw_points"])
     if "standard_product_limit" in data: update["standard_product_limit"] = int(data["standard_product_limit"])
+    if "influencer_subscription" in data:
+        isub = data.get("influencer_subscription") or {}
+        update["influencer_subscription"] = {
+            "fee":         max(0.0, float(isub.get("fee", 0) or 0)),
+            "gst_percent": max(0.0, float(isub.get("gst_percent", 18) or 0)),
+            "enabled":     bool(isub.get("enabled", False)),
+        }
     if doc: db.pricing.update_one({"_id": doc["_id"]}, {"$set": update})
     else: db.pricing.insert_one(update)
     return {"message": "Pricing updated"}
@@ -1874,6 +1903,21 @@ def _influencer_row(d):
         "phone":        d.get("phone", ""),
         "created_at":   d["created_at"].strftime("%d %b %Y") if d.get("created_at") else "",
         "updated_at":   d["updated_at"].strftime("%d %b %Y") if d.get("updated_at") else "",
+        # Influencer subscription/publish feature: absent on every record
+        # created before this feature (admin-created records, and any
+        # self-service profile created before this change) — defaulted here
+        # to PAID/published/enabled so existing profiles display exactly as
+        # "already published, no payment needed" rather than looking unpaid.
+        "payment_status":   d.get("payment_status", "PAID"),
+        "publish_status":   d.get("publish_status", "published"),
+        "is_active":        d.get("is_active", True),
+        "subscription_amount": d.get("subscription_amount", 0),
+        "gst_percent_paid":    d.get("gst_percent", 0),
+        "gst_amount":       d.get("gst_amount", 0),
+        "total_amount":     d.get("total_amount", 0),
+        "razorpay_order_id":   d.get("razorpay_order_id", ""),
+        "razorpay_payment_id": d.get("razorpay_payment_id", ""),
+        "paid_at":      d["paid_at"].strftime("%d %b %Y %I:%M %p") if d.get("paid_at") else "",
     }
 
 def _validate_influencer_city(city: str) -> str:
@@ -2082,6 +2126,17 @@ def delete_influencer(influencer_id: str, a=Depends(get_current_admin)):
         if "*" not in assigned and existing.get("city") not in assigned:
             raise HTTPException(403, "Not permitted to delete influencers outside your assigned cities")
     db.influencers.delete_one({"_id": oid})
+    # Keep accounts.influencer_id from ever pointing at a now-deleted
+    # document — same "delete permanently ends the profile/payment
+    # relationship" rule as the self-service DELETE in routers/users.py.
+    # A subsequent self-service profile creation for this account will
+    # correctly be treated as brand new (fresh payment_status=UNPAID).
+    account_id = existing.get("account_id")
+    if account_id:
+        db.accounts.update_one(
+            {"_id": ObjectId(account_id), "influencer_id": influencer_id},
+            {"$unset": {"influencer_id": ""}},
+        )
     return {"ok": True}
 
 # ===================== ABOUT US =====================

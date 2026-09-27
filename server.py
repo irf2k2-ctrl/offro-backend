@@ -463,6 +463,40 @@ def _ensure_indexes():
             sparse=True,
             background=True,
         )
+        # Influencer subscription/publish feature: admin listing/public
+        # filtering both need to query by these new (optional, backward-
+        # compatible) fields — non-unique, sparse so legacy documents that
+        # never set them are simply excluded from the index, not indexed
+        # as null.
+        db.influencers.create_index(
+            [("payment_status", 1)],
+            name="influencers_payment_status",
+            sparse=True,
+            background=True,
+        )
+        db.influencers.create_index(
+            [("publish_status", 1)],
+            name="influencers_publish_status",
+            sparse=True,
+            background=True,
+        )
+        # Generalized payment/order lookup for any entity_type (store or
+        # influencer) — added for the influencer subscription feature but
+        # written so it also covers existing store subscriptions/invoices
+        # once/if they adopt entity_type; sparse so today's store-only
+        # documents (no entity_type field yet) are unaffected.
+        db.subscriptions.create_index(
+            [("entity_type", 1), ("influencer_id", 1)],
+            name="subscriptions_entity_influencer",
+            sparse=True,
+            background=True,
+        )
+        db.invoices.create_index(
+            [("entity_type", 1), ("influencer_id", 1)],
+            name="invoices_entity_influencer",
+            sparse=True,
+            background=True,
+        )
         print("✅ MongoDB indexes ensured")
     except Exception as e:
         print(f"⚠️  Index creation warning: {e}")
