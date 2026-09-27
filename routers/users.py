@@ -407,11 +407,15 @@ def create_influencer_profile(data: dict, user=Depends(get_current_user)):
         "facebook":  str(social_in.get("facebook", "")).strip(),
         "youtube":   str(social_in.get("youtube", "")).strip(),
     }
+    # Short bio/description — optional, same free-text pattern as the social
+    # fields above; capped defensively so the home-screen hero card can't be
+    # blown out by an unbounded paste.
+    bio = str(data.get("bio", "") or "").strip()[:280]
     photo_url = _resolve_influencer_photo(data.get("photo_url", ""))
     now = datetime.utcnow()
     doc = {
         "name": name, "state": state, "city": city, "category": category_str, "categories": categories_list,
-        "photo_url": photo_url, "social": social,
+        "photo_url": photo_url, "social": social, "bio": bio,
         "rating": 0, "review_count": 0, "status": "active",
         "phone": phone,
         "account_id": str(acct["_id"]),
@@ -514,6 +518,16 @@ def get_my_influencer_profile(user=Depends(get_current_user)):
     # string) — never modifies the stored document just by reading it.
     from routers.admin import _derive_influencer_categories
     d["categories"] = _derive_influencer_categories(d)
+    # Home/profile screen stats — real, computed values, never fabricated.
+    # view_count is incremented by the public single-profile GET
+    # (routers/public.py::get_influencer_public); it's simply read back here
+    # (already present on `d` if any views have happened) so it defaults to
+    # 0 for a brand-new profile rather than being absent.
+    d["view_count"] = int(d.get("view_count", 0) or 0)
+    # favorite_count is a live aggregate — how many accounts currently have
+    # this influencer in their favorite_influencer_ids — not a value stored
+    # on the influencer doc itself, so it can never drift out of sync.
+    d["favorite_count"] = db.accounts.count_documents({"favorite_influencer_ids": d["_id"]})
     return d
 
 @router.put("/influencer-profile")
@@ -565,6 +579,8 @@ def update_my_influencer_profile(data: dict, user=Depends(get_current_user)):
             "facebook":  str(social_in.get("facebook", "")).strip(),
             "youtube":   str(social_in.get("youtube", "")).strip(),
         }
+    if "bio" in data:
+        update["bio"] = str(data.get("bio", "") or "").strip()[:280]
     if "photo_url" in data:
         update["photo_url"] = _resolve_influencer_photo(data["photo_url"], existing.get("photo_url", ""))
     # Enable/Disable (rule 5): a self-service visibility toggle, deliberately
@@ -711,12 +727,32 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
             "facebook":  str(social_in.get("facebook", "")).strip(),
             "youtube":   str(social_in.get("youtube", "")).strip(),
         }
+    if "bio" in data:
+        update["bio"] = str(data.get("bio", "") or "").strip()[:280]
     if "photo_url" in data:
         update["photo_url"] = _resolve_influencer_photo(data["photo_url"], existing.get("photo_url", ""))
     if update:
         update["updated_at"] = datetime.utcnow()
         db.influencers.update_one({"_id": oid}, {"$set": update})
         existing = db.influencers.find_one({"_id": oid})  # re-read post-save state
+
+    # Step 1b — profile image is MANDATORY to publish (server-side
+    # enforcement so the requirement can't be bypassed via a direct API
+    # call, even if the Flutter-side validation is skipped/bypassed).
+    # SAVE-only (draft) is untouched — this function is only ever reached
+    # via the Save & Publish action, never plain Save.
+    #
+    # Scoped to the actual draft→published TRANSITION, not every future
+    # Save & Publish call: a profile that is ALREADY published continues
+    # to work normally on subsequent edits even if, for some legacy reason,
+    # it has no photo_url — per "editing an already published profile...
+    # should continue normally" / "do not break existing...functionality".
+    # A brand-new or still-draft profile, however, cannot cross into
+    # publish_status="published" without an image, regardless of payment
+    # status (a paid-but-still-draft profile — e.g. payment succeeded but
+    # the image was never set — is still blocked here).
+    if existing.get("publish_status") != "published" and not (existing.get("photo_url") or "").strip():
+        raise HTTPException(400, "Profile image is required to publish your influencer profile.")
 
     # Step 2 — payment/publish decision. Never trust client-supplied
     # payment/publish state; everything below is derived from the
@@ -1226,6 +1262,28 @@ def toggle_product_favorite(product_id: str, user=Depends(get_current_user)):
 def check_product_favorite(product_id: str, user=Depends(get_current_user)):
     fav_ids = [str(f) for f in user.get("favorite_product_ids", [])]
     return {"is_favorite": product_id in fav_ids}
+
+@router.get("/influencer-favorites")
+def list_influencer_favorites(user=Depends(get_current_user)):
+    """Return all influencer IDs favourited by the current user — same
+    pattern as list_product_favorites above."""
+    return [str(fid) for fid in user.get("favorite_influencer_ids", [])]
+
+@router.post("/influencer-favorites/{influencer_id}")
+def toggle_influencer_favorite(influencer_id: str, user=Depends(get_current_user)):
+    user_id  = user["_id"]
+    fav_ids  = [str(f) for f in user.get("favorite_influencer_ids", [])]
+    if influencer_id in fav_ids:
+        _persist_user_update(user_id, {"$pull":     {"favorite_influencer_ids": influencer_id}})
+    else:
+        _persist_user_update(user_id, {"$addToSet": {"favorite_influencer_ids": influencer_id}})
+    fresh_ids = _read_fresh_favorites(user_id, "favorite_influencer_ids")
+    return {"is_favorite": influencer_id in fresh_ids}
+
+@router.get("/influencer-favorites/{influencer_id}/check")
+def check_influencer_favorite(influencer_id: str, user=Depends(get_current_user)):
+    fav_ids = [str(f) for f in user.get("favorite_influencer_ids", [])]
+    return {"is_favorite": influencer_id in fav_ids}
 
 @router.post("/favorites/{store_id}")
 def toggle_favorite(store_id: str, user=Depends(get_current_user)):

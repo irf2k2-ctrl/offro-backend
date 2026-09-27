@@ -4089,8 +4089,16 @@ def list_all_invoices(a=Depends(get_current_admin)):
         fd = inv.get("from_date"); ed = inv.get("end_date")
         base = float(inv.get("base_price", inv.get("original_amount", 0)) or 0)
         gst  = float(inv.get("gst", inv.get("gst_amount", 0)) or 0)
-        tot  = float(inv.get("total", inv.get("amount", 0)) or 0)
-        if tot == 0 and base > 0: tot = base + gst
+        # BUG FIX (payment transaction amounts): this used to be
+        # `float(inv.get("total", ...) or 0)` followed by
+        # `if tot == 0 and base > 0: tot = base + gst`, which silently
+        # overwrote a LEGITIMATE ₹0 total (a fully-discounted/100%-off
+        # transaction) back up to base+gst — making a free transaction
+        # display as if no discount had been applied at all. `.get()`'s
+        # default only fires when the key is truly ABSENT, never when it's
+        # present-but-zero, so a real stored 0 is now trusted as-is; only a
+        # genuinely missing field falls back to `inv.get("amount", 0)`.
+        tot  = float(inv.get("total", inv.get("amount", 0)))
         result.append({
             "invoice_no":      inv.get("invoice_no",""),
             "merchant_name":   inv.get("merchant_name",""),
@@ -4099,10 +4107,14 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "item_label":      inv.get("item_label") or f"Store – {inv.get('plan','')}",
             "store_name":      inv.get("store_name",""),
             "base_price":      base,
-            "original_amount": float(inv.get("original_amount", base) or base),
+            "original_amount": float(inv.get("original_amount", base)),
             "discount_code":   inv.get("discount_code",""),
             "discount_amount": float(inv.get("discount_amount",0) or 0),
-            "final_amount":    float(inv.get("final_amount", base) or base),
+            # Same fix as `tot` above — `or base` was collapsing a real,
+            # correctly-stored ₹0 final_amount (100%/full discount) back to
+            # the undiscounted base price. Only a MISSING key falls back to
+            # `base` now; a stored 0 stays 0.
+            "final_amount":    float(inv.get("final_amount", base)),
             "gst":             gst,
             "total":           tot,
             "plan":            inv.get("plan",""),
@@ -4119,8 +4131,10 @@ def list_all_invoices(a=Depends(get_current_admin)):
         if ino: seen_invoice_nos.add(ino)
         base = float(b.get("base_price",0) or 0)
         gst  = float(b.get("gst_amount", b.get("gst",0)) or 0)
-        tot  = float(b.get("total",0) or 0)
-        if tot == 0 and base > 0: tot = round(base + gst, 2)
+        # Same zero-collapse fix as the invoices block above — trust a
+        # stored ₹0 total/final_amount (fully-discounted banner) instead of
+        # forcing it back up to base+gst.
+        tot  = float(b.get("total",0))
         result.append({
             "invoice_no":      ino,
             "merchant_name":   b.get("merchant_name",""),
@@ -4129,10 +4143,10 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "item_label":      f"Banner – {b.get('duration_days', b.get('duration',30))} Days",
             "store_name":      b.get("title",""),
             "base_price":      base,
-            "original_amount": float(b.get("original_amount", base) or base),
+            "original_amount": float(b.get("original_amount", base)),
             "discount_code":   b.get("discount_code",""),
             "discount_amount": float(b.get("discount_amount",0) or 0),
-            "final_amount":    float(b.get("final_amount", base) or base),
+            "final_amount":    float(b.get("final_amount", base)),
             "gst":             gst,
             "total":           tot,
             "plan":            f"{b.get('from_date','')} → {b.get('end_date','')}",
@@ -4149,8 +4163,8 @@ def list_all_invoices(a=Depends(get_current_admin)):
         if ino: seen_invoice_nos.add(ino)
         base = float(v.get("base_price",0) or 0)
         gst  = float(v.get("gst_amount", v.get("gst",0)) or 0)
-        tot  = float(v.get("total",0) or 0)
-        if tot == 0 and base > 0: tot = round(base + gst, 2)
+        # Same zero-collapse fix as the invoices block above.
+        tot  = float(v.get("total",0))
         result.append({
             "invoice_no":      ino,
             "merchant_name":   v.get("merchant_name",""),
@@ -4159,10 +4173,10 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "item_label":      f"Discover Product – {v.get('duration_days', v.get('duration',30))} Days",
             "store_name":      v.get("title",""),
             "base_price":      base,
-            "original_amount": float(v.get("original_amount", base) or base),
+            "original_amount": float(v.get("original_amount", base)),
             "discount_code":   v.get("discount_code",""),
             "discount_amount": float(v.get("discount_amount",0) or 0),
-            "final_amount":    float(v.get("final_amount", base) or base),
+            "final_amount":    float(v.get("final_amount", base)),
             "gst":             gst,
             "total":           tot,
             "plan":            f"{v.get('from_date','')} → {v.get('end_date','')}",

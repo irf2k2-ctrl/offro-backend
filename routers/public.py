@@ -347,6 +347,7 @@ def _public_influencer_row(d):
         "categories":   _derive_influencer_categories(d),
         "photo_url":    d.get("photo_url", ""),
         "social":       d.get("social", {}) or {},
+        "bio":          d.get("bio", ""),
         "rating":       d.get("rating", 0),
         "review_count": d.get("review_count", 0),
     }
@@ -399,6 +400,14 @@ def get_influencer_public(influencer_id: str):
     d = db.influencers.find_one(query)
     if not d:
         raise HTTPException(404, "Influencer not found")
+    # Real "Profile Views" counter for the owner's own home/profile screen
+    # stats section — incremented on every genuine public single-profile
+    # view (mirrors the existing store view_count concept). Best-effort:
+    # a failed increment never blocks the actual profile response.
+    try:
+        db.influencers.update_one({"_id": oid}, {"$inc": {"view_count": 1}})
+    except Exception:
+        pass
     return _public_influencer_row(d)
 
 

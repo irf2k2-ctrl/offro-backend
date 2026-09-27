@@ -801,7 +801,13 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
         "discount_value":     disc["discount_value"],
         "discount_amount":    discount_amount,
         "original_amount":    price,
-        "final_amount":       total,
+        # BUG FIX: was storing `total` (GST-INCLUSIVE) here, so "Final
+        # Amount" and "Total" always showed the identical number — masking
+        # the actual pre-tax discounted subtotal the admin dashboard is
+        # supposed to show separately (Final = Original − Discount; GST is
+        # calculated on top of Final; Total = Final + GST). `taxable_amount`
+        # is exactly that pre-tax discounted subtotal.
+        "final_amount":       taxable_amount,
         "created_at":         datetime.utcnow(),
     }
     sub_result = db.subscriptions.insert_one(sub_doc)
@@ -1510,7 +1516,10 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
         "discount_value": disc["discount_value"],
         "discount_amount": discount_amount,
         "original_amount": base_price,
-        "final_amount":   total,
+        # BUG FIX: was storing GST-inclusive `total`; final_amount must be
+        # the pre-tax discounted subtotal (Original − Discount) so it's
+        # distinct from Total in the admin dashboard.
+        "final_amount":   final_pre_tax,
         "status":         "pending",
         "approval_status": "pending",
         "created_at":     datetime.utcnow().isoformat(),
@@ -1642,6 +1651,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "gst_percent":      order.get("gst_percent", 18),
         "gst_amount":       order.get("gst_amount", 0),
         "total":            order.get("total", 0),
+        "final_amount":     order.get("final_amount", order.get("total", 0)),
         "payment_status":   "free",
         "status":           "pending",
         "approval_status":  "pending",
@@ -1670,7 +1680,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "discount_scope": order.get("discount_scope"),
         "discount_value": order.get("discount_value", 0),
         "discount_amount":order.get("discount_amount", 0),
-        "final_amount":   order.get("total", 0),
+        "final_amount":   order.get("final_amount", order.get("total", 0)),
         "gst":            order.get("gst_amount", 0),
         "gst_percent":    order.get("gst_percent", 18),
         "total":          order.get("total", 0),
@@ -1919,7 +1929,10 @@ def create_voucher_order(data: dict, m=Depends(get_merchant)):
         "gst_percent":    gst_pct,
         "gst_amount":     gst_amount,
         "total":          total,
-        "final_amount":   total,
+        # BUG FIX: was storing GST-inclusive `total`; final_amount is the
+        # pre-tax discounted subtotal (Original − Discount) so it's
+        # distinct from Total in the admin dashboard.
+        "final_amount":   discounted_base,
         "amount_paise":   amount_paise,
         "status":         "pending",
         "approval_status": "pending",
@@ -2055,7 +2068,7 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
         "discount_scope": order.get("discount_scope"),
         "discount_value": order.get("discount_value", 0),
         "discount_amount":order.get("discount_amount", 0),
-        "final_amount":   order.get("total", 0),
+        "final_amount":   order.get("final_amount", order.get("total", 0)),
         "gst_percent":    order.get("gst_percent", 18),
         "gst_amount":     order.get("gst_amount", 0),
         "total":          order.get("total", 0),
@@ -2087,7 +2100,7 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
         "discount_scope": order.get("discount_scope"),
         "discount_value": order.get("discount_value", 0),
         "discount_amount":order.get("discount_amount", 0),
-        "final_amount":   order.get("total", 0),
+        "final_amount":   order.get("final_amount", order.get("total", 0)),
         "gst":            order.get("gst_amount", 0),
         "gst_percent":    order.get("gst_percent", 18),
         "total":          order.get("total", 0),
@@ -2756,8 +2769,9 @@ def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     discount_amount = disc["discount_amount"]
     discount_msg    = disc["message"]
 
-    gst_amount = round(max(0, base_price - discount_amount) * gst_pct / 100, 2)
-    total      = round(max(0, base_price - discount_amount) + gst_amount, 2)
+    discounted_base = round(max(0, base_price - discount_amount), 2)
+    gst_amount = round(discounted_base * gst_pct / 100, 2)
+    total      = round(discounted_base + gst_amount, 2)
     amount_paise = int(total * 100)
     try:
         from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
@@ -2788,7 +2802,9 @@ def upgrade_to_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
         "discount_code": disc["code"], "discount_type": disc["type"],
         "discount_scope": disc["applies_to"], "discount_value": disc["discount_value"],
         "discount_amount": discount_amount, "original_amount": base_price,
-        "final_amount": total,
+        # BUG FIX: was storing GST-inclusive `total`; final_amount is the
+        # pre-tax discounted subtotal (Original − Discount).
+        "final_amount": discounted_base,
         "status": "created", "created_at": datetime.utcnow(),
     })
     return {"order_id": rp_order_id or "", "amount": total, "currency": "INR",
@@ -2932,8 +2948,9 @@ def renew_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
     discount_amount = disc["discount_amount"]
     discount_msg    = disc["message"]
 
-    gst_amount = round(max(0, base_price - discount_amount) * gst_pct / 100, 2)
-    total      = round(max(0, base_price - discount_amount) + gst_amount, 2)
+    discounted_base = round(max(0, base_price - discount_amount), 2)
+    gst_amount = round(discounted_base * gst_pct / 100, 2)
+    total      = round(discounted_base + gst_amount, 2)
     amount_paise = int(total * 100)
     # Compute renewal period from current end_date
     existing_end = prod.get("end_date")
@@ -2966,7 +2983,9 @@ def renew_premium_order(pid: str, data: dict, m=Depends(get_merchant)):
         "discount_code": disc["code"], "discount_type": disc["type"],
         "discount_scope": disc["applies_to"], "discount_value": disc["discount_value"],
         "discount_amount": discount_amount, "original_amount": base_price,
-        "final_amount": total,
+        # BUG FIX: was storing GST-inclusive `total`; final_amount is the
+        # pre-tax discounted subtotal (Original − Discount).
+        "final_amount": discounted_base,
         "status": "created", "created_at": datetime.utcnow(),
     })
     return {"order_id": rp_order_id or "", "amount": total, "currency": "INR",
