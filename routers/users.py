@@ -740,18 +740,57 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
         }})
         return {"ok": True, "publish_status": "published", "payment_required": False, "subscription_enabled": False}
 
-    total = pricing["total"]
+    # ── Discount code (optional) — backend-authoritative. Reuses the exact
+    # same discount resolution already used by Store/Banner/Product
+    # checkout (routers/merchant_app.py::_resolve_discount), scoped
+    # strictly to "INFLUENCER" so a Store/Banner/Product-only code can never
+    # be applied here, and an Influencer-only code can never be applied to
+    # those checkouts (checkout_scope must equal the code's applies_to,
+    # unless the code is scoped "ALL"). Raises a friendly HTTPException for
+    # an invalid/inactive/expired/exhausted/wrong-scope code — the caller
+    # (Flutter) surfaces that as the error and does NOT continue with any
+    # discounted amount, since nothing further executes past this line.
+    from routers.merchant_app import _resolve_discount, _mark_discount_used
+    discount_code_in = (data.get("discount_code") or "").strip()
+    disc = _resolve_discount(discount_code_in, "INFLUENCER", pricing["fee"])
+    discount_amount = disc["discount_amount"]
+
+    # Backend computes: base fee → minus discount → taxable amount → plus
+    # GST (on the DISCOUNTED taxable amount, same order as every other
+    # checkout in this codebase) → final total. Flutter never supplies or
+    # influences any of these numbers.
+    taxable = max(0.0, round(pricing["fee"] - discount_amount, 2))
+    gst_amount = round(taxable * pricing["gst_percent"] / 100, 2)
+    total = round(taxable + gst_amount, 2)
+
     if total <= 0:
-        # Configured fee resolves to ₹0 — mirrors the existing merchant
-        # subscription's zero-price fast path (Razorpay rejects amount=0
-        # orders): activate immediately as PAID, no Razorpay order.
+        # Configured fee (after any discount) resolves to ₹0 — mirrors the
+        # existing merchant subscription's zero-price fast path (Razorpay
+        # rejects amount=0 orders): activate immediately as PAID, no
+        # Razorpay order, but still recorded as a real (₹0) invoice for
+        # audit, same as the merchant "LS-FREE-" convention.
         now = datetime.utcnow()
         db.influencers.update_one({"_id": oid}, {"$set": {
             "payment_status": "PAID", "publish_status": "published",
             "subscription_amount": pricing["fee"], "gst_percent": pricing["gst_percent"],
-            "gst_amount": pricing["gst_amount"], "total_amount": total,
+            "gst_amount": gst_amount, "total_amount": total,
+            "discount_code": disc["code"], "discount_amount": discount_amount,
             "paid_at": now, "updated_at": now,
         }})
+        if disc["code"]:
+            _mark_discount_used(disc["code"])
+        invoice_no = f"INF-FREE-{now.strftime('%Y%m%d')}-{str(oid)[-6:].upper()}"
+        db.invoices.insert_one({
+            "invoice_no": invoice_no, "entity_type": "influencer", "influencer_id": str(oid),
+            "account_id": str(acct["_id"]), "influencer_name": existing.get("name", ""),
+            "type": "influencer", "item_label": "Influencer Subscription", "plan": "One-Time Subscription",
+            "merchant_name": existing.get("name", ""), "merchant_phone": existing.get("phone", ""),
+            "store_name": "Influencer Subscription",
+            "base_price": pricing["fee"], "original_amount": pricing["fee"],
+            "discount_code": disc["code"], "discount_amount": discount_amount,
+            "final_amount": taxable, "gst": gst_amount, "total": total,
+            "created_at": now,
+        })
         return {"ok": True, "publish_status": "published", "payment_required": False, "total": total}
 
     amount_paise = int(round(total * 100))
@@ -760,10 +799,12 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
     # ── Reuse a still-valid PAYMENT_PENDING Razorpay order instead of
     # creating a new one on every retry (e.g. the user's network dropped
     # right after Save & Publish, before they ever saw the checkout sheet,
-    # and they tap it again). Reused ONLY when the pending order's amount
-    # matches the CURRENT pricing exactly — if admin changed the fee/GST in
-    # the meantime, that match fails and a fresh order is created below, so
-    # the amount actually charged can never be stale. Never touches an
+    # or they cancelled Razorpay and pressed Save & Publish again for the
+    # SAME draft profile). Reused ONLY when the pending order's amount AND
+    # discount match the CURRENT pricing/code exactly — if admin changed
+    # the fee/GST, or the user applied a different/no discount code this
+    # time, that match fails and a fresh order is created below, so the
+    # amount actually charged can never be stale. Never touches an
     # already-PAID profile's behavior (that case already returned above).
     now = datetime.utcnow()
     existing_pending = db.subscriptions.find_one({
@@ -774,6 +815,8 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
         "razorpay_order_id": {"$ne": None},
         "base_price": pricing["fee"],
         "gst_percent": pricing["gst_percent"],
+        "discount_code": disc["code"],
+        "discount_amount": discount_amount,
         "total": total,
     }, sort=[("created_at", -1)])
 
@@ -808,7 +851,8 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
             "account_id": str(acct["_id"]),
             "razorpay_order_id": rp_order_id,
             "base_price": pricing["fee"], "gst_percent": pricing["gst_percent"],
-            "gst_amount": pricing["gst_amount"], "total": total,
+            "discount_code": disc["code"], "discount_amount": discount_amount,
+            "gst_amount": gst_amount, "total": total,
             "currency": "INR",
             "status": "pending",
             "pay_mode": pay_mode,
@@ -821,7 +865,8 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
         "payment_status": "PAYMENT_PENDING",
         "razorpay_order_id": rp_order_id,
         "subscription_amount": pricing["fee"], "gst_percent": pricing["gst_percent"],
-        "gst_amount": pricing["gst_amount"], "total_amount": total,
+        "gst_amount": gst_amount, "total_amount": total,
+        "discount_code": disc["code"], "discount_amount": discount_amount,
         "updated_at": now,
     }})
 
@@ -837,7 +882,9 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
         "amount_display": total,
         "base_price": pricing["fee"],
         "gst_percent": pricing["gst_percent"],
-        "gst_amount": pricing["gst_amount"],
+        "gst_amount": gst_amount,
+        "discount_code": disc["code"],
+        "discount_amount": discount_amount,
         "total": total,
         "currency": "INR",
     }
@@ -895,15 +942,43 @@ def verify_influencer_payment(data: dict, user=Depends(get_current_user)):
         "status": "paid", "razorpay_payment_id": payment_id, "razorpay_signature": signature,
         "updated_at": now,
     }})
+    # Discount usage is only ever counted on a VERIFIED, successful payment
+    # — never at order-creation time — matching the exact same timing the
+    # existing Store/Banner/Product checkouts use for _mark_discount_used().
+    if sub.get("discount_code"):
+        from routers.merchant_app import _mark_discount_used
+        _mark_discount_used(sub["discount_code"])
     invoice_no = f"INF-{now.strftime('%Y%m%d')}-{str(sub['_id'])[-6:].upper()}"
+    base_price = sub.get("base_price", 0)
+    discount_amount = sub.get("discount_amount", 0)
     db.invoices.insert_one({
         "invoice_no": invoice_no,
         "entity_type": "influencer",
         "influencer_id": str(oid),
         "account_id": str(acct["_id"]),
         "influencer_name": existing.get("name", ""),
-        "base_price": sub.get("base_price", 0), "gst": sub.get("gst_amount", 0),
-        "total": sub.get("total", 0), "final_amount": sub.get("total", 0),
+        # FIX: without an explicit "type"/"item_label", the shared admin
+        # Payments dashboard (routers/admin.py::list_all_invoices) defaults
+        # an untyped invoice to "store" / "Store – {plan}" — which is
+        # exactly why an influencer payment was showing up as a Store
+        # transaction. These fields are what the dashboard actually reads.
+        "type": "influencer",
+        "item_label": "Influencer Subscription",
+        "plan": "One-Time Subscription",
+        # Reuses the same "merchant_name"/"merchant_phone"/"store_name"
+        # columns the dashboard already renders for every other type —
+        # populated with the influencer's own real name/phone, never
+        # fabricated merchant/store data.
+        "merchant_name": existing.get("name", ""),
+        "merchant_phone": existing.get("phone", ""),
+        "store_name": "Influencer Subscription",
+        "base_price": base_price,
+        "original_amount": base_price,
+        "discount_code": sub.get("discount_code", ""),
+        "discount_amount": discount_amount,
+        "final_amount": round(base_price - discount_amount, 2),
+        "gst": sub.get("gst_amount", 0),
+        "total": sub.get("total", 0),
         "razorpay_order_id": order_id, "razorpay_payment_id": payment_id,
         "created_at": now,
     })
@@ -912,6 +987,44 @@ def verify_influencer_payment(data: dict, user=Depends(get_current_user)):
         "razorpay_payment_id": payment_id, "paid_at": now, "updated_at": now,
     }})
     return {"ok": True, "publish_status": "published", "invoice_no": invoice_no}
+
+
+@router.post("/influencer-profile/validate-discount")
+def validate_influencer_discount_code(data: dict, user=Depends(get_current_user)):
+    """Preview-only discount check for the Save & Publish screen's "Apply"
+    button — mirrors routers/merchant_app.py::validate_discount_code (Store/
+    Banner/Product's own preview endpoint) but scoped to INFLUENCER and
+    authenticated the same way the rest of this influencer feature is
+    (get_current_user, not get_merchant). This is a convenience preview
+    only: /influencer-profile/publish remains the sole authority at
+    order-creation time and re-validates the code itself regardless of
+    what this endpoint returned."""
+    acct = _resolve_own_account(user)
+    if not acct or not acct.get("influencer_id"):
+        raise HTTPException(404, "No influencer profile found for this account.")
+    code = (data.get("code") or data.get("discount_code") or "").strip()
+    if not code:
+        raise HTTPException(400, "Code is required")
+    pricing = _influencer_subscription_pricing()
+    from routers.merchant_app import _resolve_discount
+    disc = _resolve_discount(code, "INFLUENCER", pricing["fee"])
+    if not disc["code"]:
+        raise HTTPException(400, "Invalid or inactive discount code.")
+    taxable = max(0.0, round(pricing["fee"] - disc["discount_amount"], 2))
+    gst_amount = round(taxable * pricing["gst_percent"] / 100, 2)
+    total = round(taxable + gst_amount, 2)
+    return {
+        "ok": True,
+        "code": disc["code"],
+        "type": disc["type"],
+        "discount_value": disc["discount_value"],
+        "discount_amount": disc["discount_amount"],
+        "message": disc["message"],
+        "fee": pricing["fee"],
+        "gst_percent": pricing["gst_percent"],
+        "gst_amount": gst_amount,
+        "total": total,
+    }
 
 
 @router.post("/wallet/withdraw")

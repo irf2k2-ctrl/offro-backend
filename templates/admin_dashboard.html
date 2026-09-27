@@ -886,6 +886,7 @@ td[style*="sticky"]{background:#fff;}
           <option value="store">Store</option>
           <option value="banner">Banner</option>
           <option value="product">Product</option>
+          <option value="influencer">Influencer</option>
         </select>
         <span id="txn_total" style="font-size:13px;color:var(--muted);"></span>
         <button class="btn btn-sm" onclick="exportPaymentsPDF()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-pdf me-1"></i>PDF</button>
@@ -1003,6 +1004,7 @@ td[style*="sticky"]{background:#fff;}
           <option value="STORE">STORE (store subscription only)</option>
           <option value="BANNERS">BANNERS (banner purchase only)</option>
           <option value="PRODUCTS">PRODUCTS (premium product / upgrade / renewal)</option>
+          <option value="INFLUENCER">INFLUENCER (influencer subscription only)</option>
           <option value="ALL" selected>ALL (any supported paid checkout)</option>
         </select>
       </div>
@@ -6861,7 +6863,13 @@ async function loadMerchantTxnsFull() {
     let invoices = invR.ok ? await invR.json() : [];
     let subs     = subR.ok ? await subR.json() : [];
 
-    // Add pending store subs as rows
+    // Add pending subs (store/banner/product AND influencer) as rows —
+    // use the actual type/item_label/name/phone fields the backend now
+    // sends per-entity-type (see list_subscriptions in admin.py), instead
+    // of hardcoding every pending row as Store. An influencer pending
+    // order already carries type:'influencer' from the backend; anything
+    // else falls back to the previous Store labeling for backward
+    // compatibility with subscription docs that predate this field.
     subs.forEach(s => {
       const total = parseFloat(s.total||0);
       if (s.status === 'pending') {
@@ -6869,11 +6877,13 @@ async function loadMerchantTxnsFull() {
           invoice_no: total===0 ? 'FREE' : 'PENDING',
           merchant_name: s.merchant_name||'',
           merchant_phone: s.merchant_phone||'',
-          item_label: `Store – ${s.plan||''}`,
-          type: 'store',
+          item_label: s.item_label || `Store – ${s.plan||''}`,
+          type: s.type || 'store',
           plan: s.plan||'',
           base_price: s.base_price??0,
-          gst: s.gst_amount??0,
+          discount_code: s.discount_code||'',
+          discount_amount: s.discount_amount??0,
+          gst: s.gst??0,
           total: total,
           created_at: s.created_at||'',
           _status: total===0?'free':'pending',

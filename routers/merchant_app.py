@@ -187,8 +187,8 @@ def _log_tx(merchant_id: str, tx_type: str, description: str, amount: float = 0,
 # only the resulting dict from _resolve_discount() may be used to compute
 # the payable amount sent to Razorpay.
 
-_DISCOUNT_SCOPES = {"STORE", "BANNERS", "PRODUCTS", "ALL"}
-_CHECKOUT_SCOPES = {"STORE", "BANNERS", "PRODUCTS"}  # real checkout types (excludes "ALL", which is only a code-scope value)
+_DISCOUNT_SCOPES = {"STORE", "BANNERS", "PRODUCTS", "INFLUENCER", "ALL"}
+_CHECKOUT_SCOPES = {"STORE", "BANNERS", "PRODUCTS"}  # real checkout types (excludes "ALL", which is only a code-scope value). NOTE: influencer checkout passes the literal "INFLUENCER" scope directly into _resolve_discount from routers/users.py without going through this set — this set is merchant_app-internal only.
 _DISCOUNT_TYPES  = {"VALUE", "PERCENTAGE"}
 
 

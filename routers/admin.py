@@ -1682,6 +1682,37 @@ def admin_stats(a=Depends(get_current_admin)):
 def list_subscriptions(a=Depends(get_current_admin)):
     result = []
     for s in db.subscriptions.find({**_city_filter(a)}).sort("created_at", -1):
+        fd = s.get("from_date"); ed = s.get("end_date")
+        if s.get("entity_type") == "influencer":
+            # Influencer pending orders have no merchant_id/store_id at all —
+            # looking those up (as the branch below does for Store/Product/
+            # Banner) would always miss and render "Unknown"/blank. Pull the
+            # real influencer's own name/phone instead, and tag the row so
+            # the dashboard classifies it as "Influencer", never defaulting
+            # to "Store" the way an untagged row would (see list_all_invoices
+            # for the paid-invoice half of this same fix).
+            infl = None
+            try:
+                infl = db.influencers.find_one({"_id": ObjectId(s.get("influencer_id",""))}, {"name":1,"phone":1})
+            except: pass
+            result.append({
+                "type":           "influencer",
+                "item_label":     "Influencer Subscription",
+                "merchant_name":  infl.get("name","") if infl else "",
+                "merchant_phone": infl.get("phone","") if infl else "",
+                "store_name":     "Influencer Subscription",
+                "plan":           "One-Time Subscription",
+                "base_price":     s.get("base_price", 0),
+                "discount_code":  s.get("discount_code",""),
+                "discount_amount":s.get("discount_amount", 0),
+                "total":          s.get("total", 0),
+                "gst":            s.get("gst_amount", 0),
+                "status":         s.get("status"),
+                "from_date":      fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
+                "end_date":       ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
+                "created_at":     (s["created_at"] + __import__("datetime").timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if s.get("created_at") else "",
+            })
+            continue
         merchant = None
         try:
             merchant = (db.accounts.find_one({"_id": ObjectId(s.get("merchant_id",""))}) or db.merchants.find_one({"_id": ObjectId(s.get("merchant_id",""))}))
@@ -1690,7 +1721,6 @@ def list_subscriptions(a=Depends(get_current_admin)):
         try:
             store_doc = db.stores.find_one({"_id": ObjectId(s.get("store_id",""))}, {"store_name":1}) or {}
         except: pass
-        fd = s.get("from_date"); ed = s.get("end_date")
         result.append({
             "merchant_name":  merchant.get("name") if merchant else "Unknown",
             "merchant_phone": merchant.get("phone") if merchant else "",
@@ -1772,7 +1802,7 @@ def save_social(body: dict, a=Depends(get_current_admin)):
 # ===================== DISCOUNT CODES =====================
 
 _DISCOUNT_TYPES  = {"VALUE", "PERCENTAGE"}
-_DISCOUNT_SCOPES = {"STORE", "BANNERS", "PRODUCTS", "ALL"}
+_DISCOUNT_SCOPES = {"STORE", "BANNERS", "PRODUCTS", "INFLUENCER", "ALL"}
 
 @router.get("/discounts")
 def list_discounts(a=Depends(get_current_admin)):
@@ -1805,7 +1835,7 @@ def create_discount(body: dict, a=Depends(get_current_admin)):
     if dtype not in _DISCOUNT_TYPES:
         raise HTTPException(400, "Type of Discount must be VALUE or PERCENTAGE")
     if applies_to not in _DISCOUNT_SCOPES:
-        raise HTTPException(400, "Map With must be one of STORE, BANNERS, PRODUCTS, ALL")
+        raise HTTPException(400, "Map With must be one of STORE, BANNERS, PRODUCTS, INFLUENCER, ALL")
     if dtype == "PERCENTAGE":
         if not (0 < value <= 100):
             raise HTTPException(400, "Percentage value must be between 1 and 100")
@@ -1844,7 +1874,7 @@ def update_discount(discount_id: str, body: dict, a=Depends(get_current_admin)):
     if "applies_to" in body:
         applies_to = str(body["applies_to"]).strip().upper()
         if applies_to not in _DISCOUNT_SCOPES:
-            raise HTTPException(400, "Map With must be one of STORE, BANNERS, PRODUCTS, ALL")
+            raise HTTPException(400, "Map With must be one of STORE, BANNERS, PRODUCTS, INFLUENCER, ALL")
         update["applies_to"] = applies_to
     if "value" in body:
         value = float(body["value"])
