@@ -23,6 +23,41 @@ def _safe_end_date(p):
     # 'DD Mon YYYY' or other format — return as-is
     return s
 
+# ── Timestamp helpers (Round 4 — Bug 2 fix) ──────────────────────────────
+# Root cause of "review shows 5h ago instead of just now": created_at was
+# written as datetime.utcnow().isoformat() with NO timezone suffix. That IS
+# genuinely UTC data, but the naked string is ambiguous to a client parser —
+# Dart's DateTime.parse() treats a timezone-less ISO string as LOCAL time
+# instead of UTC, silently shifting the parsed instant by the device's own
+# UTC offset. For IST (UTC+5:30) a review created moments ago gets parsed
+# as if it happened 5.5 hours ago — exactly the reported symptom. The fix
+# is to always emit an explicit-UTC ('Z'-suffixed) timestamp from the API,
+# for both new writes (_iso_utc_now) and old, already-stored naive values
+# (_normalize_iso_utc, applied only at READ/serialization time — the
+# database itself is never rewritten).
+import re as _ts_re
+_TZ_SUFFIX_RE = _ts_re.compile(r"(Z|[+-]\d{2}:?\d{2})$")
+
+def _iso_utc_now():
+    """Use for any NEW created_at/updated_at timestamp that will be read
+    back and displayed to a user (review timestamps, etc.) — an explicit,
+    unambiguous UTC ISO-8601 string."""
+    from datetime import datetime as _dt
+    return _dt.utcnow().isoformat() + "Z"
+
+def _normalize_iso_utc(ts):
+    """Make an ISO timestamp read back from the database unambiguous before
+    it's returned in an API response — appends 'Z' only if the stored value
+    has no timezone marker at all (historical naive-UTC data). A value that
+    already carries an explicit offset (new data, or anything already
+    correct) is returned unchanged."""
+    if not ts:
+        return ts
+    s = str(ts)
+    if _TZ_SUFFIX_RE.search(s):
+        return s
+    return s + "Z"
+
 # =================== PUBLIC STORES LIST ===================
 @router.get("/stores")
 def get_stores(city: str = None, category: str = None):
@@ -456,7 +491,7 @@ def get_influencer_reviews(influencer_id: str, limit: int = 10, skip: int = 0):
             "user_name":     r.get("user_name", ""),
             "rating":        r.get("rating", 0),
             "text":          r.get("text", ""),
-            "created_at":    r.get("created_at", ""),
+            "created_at":    _normalize_iso_utc(r.get("created_at", "")),
         }
         for r in cursor
     ]
@@ -487,7 +522,6 @@ def submit_influencer_review(influencer_id: str, data: dict, request: _Req):
     user_id   = str(user["_id"])
     user_name = (user.get("name") or user.get("full_name") or "").strip() or "Anonymous"
 
-    from datetime import datetime as _dt
     db.influencer_reviews.update_one(
         {"influencer_id": influencer_id, "user_id": user_id},
         {"$set": {
@@ -496,8 +530,8 @@ def submit_influencer_review(influencer_id: str, data: dict, request: _Req):
             "user_name":     user_name,
             "rating":        rating,
             "text":          text,
-            "updated_at":    _dt.utcnow().isoformat(),
-        }, "$setOnInsert": {"created_at": _dt.utcnow().isoformat()}},
+            "updated_at":    _iso_utc_now(),
+        }, "$setOnInsert": {"created_at": _iso_utc_now()}},
         upsert=True,
     )
 
@@ -521,6 +555,10 @@ def get_my_influencer_review(influencer_id: str, request: _Req):
     if not rev:
         return {}
     rev["_id"] = str(rev["_id"])
+    if "created_at" in rev:
+        rev["created_at"] = _normalize_iso_utc(rev["created_at"])
+    if "updated_at" in rev:
+        rev["updated_at"] = _normalize_iso_utc(rev["updated_at"])
     return rev
 
 

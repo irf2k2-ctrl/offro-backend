@@ -193,6 +193,15 @@ def get_profile(user=Depends(get_current_user)):
         "terms_version":      user.get("terms_version", ""),
         "terms_accepted_at":  user.get("terms_accepted_at", ""),
         "merchant_terms_accepted": user.get("merchant_terms_accepted", False),
+        # BUG FIX (Round 4 — Bug 3): the account's live, server-authoritative
+        # role list — same field create_influencer_profile() does
+        # {"$addToSet": {"roles": "influencer"}} on. Added so the Flutter
+        # Switch Mode sheet can check "does this account currently have the
+        # Influencer role" against a fresh read on every open, instead of
+        # only the role list that was cached to local storage once at login
+        # (which never learns about a role granted later in the same
+        # session, e.g. right after creating an influencer profile).
+        "roles": user.get("roles", ["user"]),
     }
 
 
@@ -1034,10 +1043,22 @@ def validate_influencer_discount_code(data: dict, user=Depends(get_current_user)
     (get_current_user, not get_merchant). This is a convenience preview
     only: /influencer-profile/publish remains the sole authority at
     order-creation time and re-validates the code itself regardless of
-    what this endpoint returned."""
-    acct = _resolve_own_account(user)
-    if not acct or not acct.get("influencer_id"):
-        raise HTTPException(404, "No influencer profile found for this account.")
+    what this endpoint returned.
+
+    BUG FIX (Round 4 — Bug 1): this used to additionally require
+    acct.get("influencer_id") and 404 with "No influencer profile found for
+    this account." when it was missing. That's wrong for the most common
+    case: a brand-new influencer profile that hasn't been created yet has
+    no influencer_id at all, so entering a discount code on the "Add
+    Influencer Profile" screen always failed here, before the user ever got
+    a chance to Save & Publish. Discount validation only needs the code,
+    the INFLUENCER scope, and the subscription fee (all resolved below via
+    the same authoritative _resolve_discount() used everywhere else) — it
+    has nothing to do with whether this account already has an influencer
+    profile. The merchant equivalent (validate_discount_code in
+    merchant_app.py) never required an existing store/product either, for
+    the same reason. Authentication (get_current_user) is still required;
+    only the influencer-profile-existence check is removed."""
     code = (data.get("code") or data.get("discount_code") or "").strip()
     if not code:
         raise HTTPException(400, "Code is required")

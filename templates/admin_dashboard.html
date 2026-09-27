@@ -4933,12 +4933,18 @@ function _renderInfluencerReviews(reviews) {
   // NOTE: never render a phone field here even if a future backend
   // response happens to include one — this table only ever reads the
   // fields listed below.
+  // BUG FIX (Round 4 — Bug 2): this used to render r.date (the raw naive
+  // UTC created_at string from the backend) directly, with no timezone
+  // conversion at all — same root cause as the Flutter "5h ago" bug, just
+  // surfacing here as an un-converted/unformatted timestamp instead. Reuse
+  // the same _toIST() helper already used everywhere else in this
+  // dashboard for a consistent, correctly-converted IST display.
   tbody.innerHTML = rows.length ? rows.map(r => `<tr>
       <td>${r.influencer_name || ''}</td>
       <td>${r.user_name || ''}</td>
       <td>⭐ ${r.rating ?? ''}</td>
       <td>${r.text || ''}</td>
-      <td>${r.date || ''}</td>
+      <td>${_toIST(r.date)}</td>
       <td><button class="btn-sm-danger" onclick="deleteInfluencerReview('${r._id}')">Delete</button></td>
     </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>`;
 }

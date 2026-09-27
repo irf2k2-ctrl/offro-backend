@@ -5228,12 +5228,16 @@ def list_influencer_reviews(a=Depends(get_current_admin)):
         for inf in db.influencers.find({"_id": {"$in": ioids}}, {"name": 1}):
             influencer_names[str(inf["_id"])] = inf.get("name", "")
 
+    from routers.public import _normalize_iso_utc
     for r in reviews:
         r["_id"] = str(r["_id"])
         r["influencer_name"] = influencer_names.get(r.get("influencer_id", ""), "")
         # Match the field names admin_dashboard.html's _renderInfluencerReviews
-        # already expects (date display, not a raw ISO string).
-        r["date"] = r.get("created_at", "")
+        # already expects (date display, not a raw ISO string). Normalized to
+        # an explicit-UTC timestamp (Round 4 — Bug 2 fix) so the dashboard's
+        # _toIST() converts it correctly regardless of whether this record
+        # predates the fix.
+        r["date"] = _normalize_iso_utc(r.get("created_at", ""))
         r["text"] = r.get("text", "")
         r["user_name"] = r.get("user_name", "")
     return reviews
