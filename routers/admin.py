@@ -46,6 +46,48 @@ def _dedupe_roles(acct: dict) -> list:
     return deduped
 
 
+# ROUND 7 — Issue 5 (scenario C): "can an account have an influencer profile
+# in db.influencers without 'influencer' in accounts.roles?"
+#
+# Investigation: db.influencers documents come from exactly two code paths.
+#   1. routers/users.py create_influencer_profile() (self-service) — the
+#      ONLY path that ever sets a doc's account_id. It writes influencer_id
+#      onto the account AND $addToSet's "influencer" into roles in the very
+#      same db.accounts.update_one({...}, {"$set":..., "$addToSet":...})
+#      call, with a compensating delete of the influencer doc if that update
+#      fails for any reason (see that function's own comments). So under
+#      every currently-reachable app code path, an account_id-linked
+#      influencer profile and the "influencer" role are created atomically
+#      together — this state cannot occur through the app today.
+#   2. routers/admin.py add_influencer() (admin-managed directory entry) —
+#      never sets account_id at all, so it has no relationship to any
+#      account/roles to begin with; it is not "an account's" profile.
+# Conclusion: scenario C cannot be produced by current or (as far as this
+# codebase's history shows) historical code — the linkage has always been
+# atomic. The only way it could exist is data edited outside the app
+# (a manual DB fix, an import script, etc.), which no code review can rule
+# out. _sync_influencer_role() below is a defensive, no-op-by-default safety
+# net for exactly that possibility: it NEVER blanket-adds the role — it only
+# adds it where an independently-found db.influencers document's own
+# account_id genuinely points back at this account (the same
+# defense-in-depth relationship check create_influencer_profile() itself
+# already performs "in case influencer_id was ever unset on the account
+# without removing the underlying profile"). An admin-directory entry (no
+# account_id) can never match this query, so it can never grant the role to
+# an unrelated account.
+def _sync_influencer_role(acct: dict, roles: list) -> list:
+    if "influencer" in roles:
+        return roles
+    inf = db.influencers.find_one({"account_id": str(acct["_id"])})
+    if not inf:
+        return roles
+    try:
+        db.accounts.update_one({"_id": acct["_id"]}, {"$addToSet": {"roles": "influencer"}})
+    except Exception:
+        pass
+    return roles + ["influencer"]
+
+
 import os as _cld_os, hashlib as _cld_hash, time as _cld_time
 import requests as _cld_req
 
@@ -608,6 +650,7 @@ def list_accounts(a=Depends(get_current_admin)):
         try:
             phone   = str(acct.get("phone") or "")
             roles   = _dedupe_roles(acct)
+            roles   = _sync_influencer_role(acct, roles)
             acct_id = str(acct["_id"])
             mid     = str(acct.get("merchant_id") or "")
 
@@ -790,6 +833,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     mid        = acct.get("merchant_id", "")
     acct_id    = str(acct["_id"])
     roles      = _dedupe_roles(acct)
+    roles      = _sync_influencer_role(acct, roles)
     is_merchant = "merchant" in roles
 
     store_count   = 0
