@@ -150,6 +150,44 @@ def get_merchant(request: Request):
     raise HTTPException(401, "Session expired. Please log in again.")
 
 
+def _valid_store_coordinates(lat, lng):
+    """Validate a store's latitude/longitude as defense-in-depth.
+
+    Store location is mandatory and completely independent of the
+    merchant account's own city (accounts.city) — see create_merchant_store()
+    and update_merchant_store() below. This never falls back to or is
+    derived from the merchant's account location.
+    """
+    try:
+        lat_f = float(lat)
+        lng_f = float(lng)
+    except (TypeError, ValueError):
+        return None, None
+    if -90 <= lat_f <= 90 and -180 <= lng_f <= 180:
+        return lat_f, lng_f
+    return None, None
+
+
+def _require_store_location(*, lat, lng, city, state):
+    """Raise 400 unless lat, lng, city and state are all present and valid.
+
+    A store cannot be created or left with only State + City — valid
+    coordinates are mandatory (needed for distance/location-based
+    functionality). This is enforced here regardless of what Flutter sends.
+    """
+    lat_f, lng_f = _valid_store_coordinates(lat, lng)
+    city_ok  = bool(str(city or "").strip())
+    state_ok = bool(str(state or "").strip())
+    if lat_f is None or lng_f is None or not city_ok or not state_ok:
+        raise HTTPException(
+            400,
+            "A valid store location (latitude, longitude, state and city) is required. "
+            "Use \"Use Current Location\" or paste a Google Maps link to set the store's "
+            "actual location.",
+        )
+    return lat_f, lng_f
+
+
 def _mid(m: dict) -> str:
     """Return the correct merchant_id for DB queries.
 
@@ -487,13 +525,20 @@ def my_stores(m=Depends(get_merchant)):
 def create_merchant_store(data: dict, m=Depends(get_merchant)):
     store_name = data.get("store_name", "").strip()
     if not store_name: raise HTTPException(400, "Store name required")
+    # Store location is mandatory and INDEPENDENT of the merchant's account
+    # location (accounts.city/state) — never fall back to or derive from it.
+    # See _require_store_location() for the defense-in-depth rationale.
+    lat_f, lng_f = _require_store_location(
+        lat=data.get("lat"), lng=data.get("lng"),
+        city=data.get("city"), state=data.get("state"),
+    )
     store = {
         "merchant_id": _mid(m),
         "merchant_name": m.get("name"),
         "store_name":    store_name,
         "category":      data.get("category", ""),
         "state":         data.get("state", ""),
-        "city":          data.get("city") or m.get("city", ""),
+        "city":          data.get("city", ""),
         "area":          data.get("area") or m.get("area", ""),
         "address":       data.get("address", ""),
         "phone":         data.get("phone") or m.get("phone", ""),
@@ -502,7 +547,7 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "close_time":    data.get("close_time", ""),
         "status":        "draft",
         "points_per_scan": 0,
-        "lat":  data.get("lat", ""),   "lng": data.get("lng", ""),
+        "lat":  lat_f,   "lng": lng_f,
         "image_url":    _cloudinary_upload(data.get("image","") or "", folder="offro/stores"),
         "image_thumb":  _make_thumb_url(_cloudinary_upload(data.get("image","") or "", folder="offro/stores")),
         "image":        None,  # clear raw base64 after CDN upload
@@ -576,6 +621,29 @@ def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     store = db.stores.find_one({"_id": ObjectId(sid), "merchant_id": _mid(m)})
     if not store: raise HTTPException(404, "Store not found")
     upd = {f: data[f] for f in ["store_name","category","state","city","area","address","phone","lat","lng","about","open_time","close_time"] if data.get(f) is not None}
+    # Defense-in-depth: only when this update actually supplies a NEW,
+    # non-empty latitude/longitude (i.e. the merchant used "Current
+    # Location" or the Google resolver this session) do we require the
+    # store's EFFECTIVE (post-update) lat/lng/state/city to be valid. The
+    # Flutter Add/Edit Store form always resends "lat"/"lng" keys (even when
+    # blank), so we key off non-empty values here rather than mere key
+    # presence — otherwise a merchant editing an unrelated field (store
+    # name, phone, hours) on an OLDER store saved before coordinates were
+    # mandatory would be blocked from saving at all, which would auto-break
+    # existing working functionality/data rather than the intended "prevent
+    # blanking out valid coordinates on purpose". Store location stays
+    # independent of the merchant's account location (accounts.city/state)
+    # either way.
+    lat_supplied = str(upd.get("lat", "")).strip() != ""
+    lng_supplied = str(upd.get("lng", "")).strip() != ""
+    if lat_supplied or lng_supplied:
+        eff_lat   = upd.get("lat",   store.get("lat"))
+        eff_lng   = upd.get("lng",   store.get("lng"))
+        eff_city  = upd.get("city",  store.get("city"))
+        eff_state = upd.get("state", store.get("state"))
+        lat_f, lng_f = _require_store_location(lat=eff_lat, lng=eff_lng, city=eff_city, state=eff_state)
+        upd["lat"] = lat_f
+        upd["lng"] = lng_f
     # FIX (blank Edit screen root cause): create_merchant_store() uploads to
     # Cloudinary and stores the CDN URL under image_url/image2_url, clearing
     # the raw "image"/"image2" fields. This update endpoint previously just

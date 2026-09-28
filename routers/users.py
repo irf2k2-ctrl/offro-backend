@@ -345,6 +345,7 @@ def account_login(data: dict):
         "visit_points":   acct.get("visit_points", 0),
         "pool_points":    acct.get("pool_points", 0),
         "city":           acct.get("city", ""),
+        "state":          acct.get("state", ""),
     }
     response = JSONResponse(content=resp_data)
     response.set_cookie(key="user_token", value=token, httponly=True,
@@ -1176,10 +1177,20 @@ def redeem_qr(data: dict, request: Request):
 # ══════════════════════════════════════════════════════════════════════════════
 @router.put("/city")
 def update_city(data: dict, user=Depends(get_current_user)):
+    # Role-agnostic account-level location (accounts.city / accounts.state).
+    # This is completely independent of any merchant store's location —
+    # store city/lat/lng are set only via POST/PUT /merchant/stores and are
+    # never derived from or synced with this account-level value.
     city = data.get("city", "").strip()
+    state = (data.get("state") or "").strip()
+    update = {}
     if city:
-        db.accounts.update_one({"_id": user["_id"]}, {"$set": {"city": city}})
-    return {"message": "City updated", "city": city}
+        update["city"] = city
+    if state:
+        update["state"] = state
+    if update:
+        db.accounts.update_one({"_id": user["_id"]}, {"$set": update})
+    return {"message": "City updated", "city": city, "state": state}
 
 @router.get("/redemptions")
 def redemption_history(user=Depends(get_current_user)):
