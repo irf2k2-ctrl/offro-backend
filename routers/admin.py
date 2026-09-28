@@ -12,6 +12,39 @@ import time as _time
 _store_cache = {"data": None, "ts": 0.0}
 _STORE_CACHE_TTL = 15
 
+# BUG FIX (Round 6 — Issue 1, "User role appearing multiple times"):
+# every write path in this codebase already adds roles via MongoDB's
+# $addToSet (routers/users.py, routers/merchant_app.py, routers/admin.py),
+# which is duplicate-proof by construction — no code path found actually
+# stores a literal repeated value. The real cause of the reported "User,
+# User" was the admin dashboard template labeling every non-'merchant' role
+# (including the newer 'influencer' role) as "User", so a legitimate
+# ["user","influencer"] account rendered two "User" badges — fixed in
+# templates/admin_dashboard.html (roleBadgeHtml/ROLE_LABELS). This helper is
+# a second, independent, purely defensive layer: if any account's stored
+# roles array is ever found to contain an exact-duplicate value (whether
+# from data that predates the unified-accounts migration, or any future
+# bug), reading it here both returns the deduplicated list to the caller
+# AND self-heals the stored document — order-preserving, and it never
+# removes a distinct, legitimate role (user/merchant/influencer/etc all
+# survive untouched; only literal repeats of the same string collapse to one).
+def _dedupe_roles(acct: dict) -> list:
+    raw = acct.get("roles") or ["user"]
+    if not isinstance(raw, list):
+        raw = [str(raw)]
+    seen = set()
+    deduped = []
+    for r in raw:
+        if r not in seen:
+            seen.add(r)
+            deduped.append(r)
+    if len(deduped) != len(raw):
+        try:
+            db.accounts.update_one({"_id": acct["_id"]}, {"$set": {"roles": deduped}})
+        except Exception:
+            pass
+    return deduped
+
 
 import os as _cld_os, hashlib as _cld_hash, time as _cld_time
 import requests as _cld_req
@@ -574,9 +607,7 @@ def list_accounts(a=Depends(get_current_admin)):
     for acct in all_accounts:
         try:
             phone   = str(acct.get("phone") or "")
-            roles   = acct.get("roles") or ["user"]
-            if not isinstance(roles, list):
-                roles = [str(roles)]
+            roles   = _dedupe_roles(acct)
             acct_id = str(acct["_id"])
             mid     = str(acct.get("merchant_id") or "")
 
@@ -758,7 +789,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     phone      = acct.get("phone", "")
     mid        = acct.get("merchant_id", "")
     acct_id    = str(acct["_id"])
-    roles      = acct.get("roles", ["user"])
+    roles      = _dedupe_roles(acct)
     is_merchant = "merchant" in roles
 
     store_count   = 0

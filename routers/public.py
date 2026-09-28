@@ -802,22 +802,33 @@ def get_all_active_deals(city: str = ""):
     from datetime import datetime as _dt
     _now = _dt.utcnow()
 
-    # Step 1: Active subscription store IDs
-    _active_store_ids = set()
-    for _sub in db.subscriptions.find({}, {"store_id": 1, "end_date": 1}):
-        _ed = _sub.get("end_date")
-        if _ed is None:
-            # No end_date = perpetual/lifetime subscription — always active
-            _active_store_ids.add(str(_sub["store_id"]))
-            continue
-        try:
-            _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
-            if _ed_dt >= _now:
-                _active_store_ids.add(str(_sub["store_id"]))
-        except Exception:
-            pass
-
-    # Step 2: Active stores in city
+    # BUG FIX (Round 6 — Issue 3, "deal not appearing in Hot Deals"):
+    # Root cause — this endpoint used to require the store to ALSO have a
+    # fresh (non-expired) row in db.subscriptions before any of its deals
+    # would show, on top of stores.status == "active". That is a DIFFERENT,
+    # independent eligibility check from the one Today's Offers (get_store,
+    # below) and create_deal() (routers/merchant_app.py) both use, which is
+    # stores.status == "active" alone — the single authoritative field this
+    # codebase treats as the source of truth for "is this store live"
+    # (routers/admin.py's approve_store() sets it; Round 5's
+    # _require_active_store() gates Banner/Product creation on it the same
+    # way). A store approved directly by an admin (approve_store) — which is
+    # exactly how a manually-created test store, or any store an admin
+    # approves without routing it through the paid-subscribe flow, reaches
+    # "active" — has status=="active" but may have NO db.subscriptions
+    # document at all, which this endpoint's old check treated as "not
+    # active" and silently dropped every one of its deals. create_deal()
+    # itself already refuses to create a deal for a store whose status
+    # isn't "active" (see its own check), so gating read-time visibility on
+    # that same field is consistent, not a loosening of the rule — it's the
+    # same rule Today's Offers and deal creation already enforce. The
+    # subscriptions collection here was being used exactly the way the
+    # codebase's own _is_store_subscription_active() docstring warns against
+    # ("used for display purposes elsewhere, not as an authorization gate").
+    # Expired/inactive deals and non-active stores remain excluded exactly
+    # as before via deal_q's status=="active" and store_q's
+    # status=="active" below — only the redundant, inconsistent
+    # subscription-freshness pre-filter was removed.
     store_q = {"status": "active"}
     if city:
         store_q["city"] = {"$regex": city, "$options": "i"}
@@ -826,10 +837,7 @@ def get_all_active_deals(city: str = ""):
         "store_name": 1, "category": 1, "city": 1, "area": 1, "address": 1, "phone": 1,
         "image_url": 1, "image_thumb": 1, "_thumb": 1, "image": 1, "images": 1,
     }))
-    stores_map = {
-        str(s["_id"]): s for s in stores_raw
-        if str(s["_id"]) in _active_store_ids
-    }
+    stores_map = {str(s["_id"]): s for s in stores_raw}
 
     # Step 3: Active deals only (no products)
     result = []
@@ -892,7 +900,10 @@ def get_all_active_deals(city: str = ""):
             "store_city":  store.get("city",""),
             "store_address": store.get("address",""),
             "store_phone": store.get("phone",""),
-            "image_url":   _store_img(store),
+            # Item 3 (Round 5) added the deal's own uploaded image; prefer it
+            # here and only fall back to the store's image when the deal has
+            # none (matches "use fallback if no deal image exists").
+            "image_url":   d.get("image_url") or _store_img(store),
             "category":    d.get("category","") or store.get("category",""),
         })
 

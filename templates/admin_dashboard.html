@@ -7256,11 +7256,7 @@ function renderAccountsPage() {
   }
 
   tbody.innerHTML = page.map(a => {
-    const roleBadges = (a.roles || []).map(r => {
-      const isM = r === 'merchant';
-      return `<span class="badge" style="background:${isM?'var(--primary)':'#5a7fb5'};color:#fff;font-size:10px;margin-right:2px;">
-        ${isM ? '🏪 Merchant' : '👤 User'}</span>`;
-    }).join('');
+    const roleBadges = roleBadgeHtml(a.roles);
     const pts   = (a.visit_pts || 0) + (a.pool_pts || 0);
     let stBg, stLbl, stCls;
     if (a.status === 'delete_requested') { stBg='#fff3cd'; stLbl='Delete Request'; stCls='badge-delete-requested'; }
@@ -7331,6 +7327,43 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// BUG FIX (Round 6 — Issue 1, "User role appearing multiple times"):
+// investigation found the accounts API already returns each role once (the
+// backend only ever writes roles via $addToSet, which is duplicate-proof) —
+// the actual bug is here: every place that rendered role badges used a
+// binary `r === 'merchant' ? Merchant : User` check, so ANY non-merchant
+// role — including the newer 'influencer' role — fell into the "User"
+// label. An account with roles ["user","influencer"] genuinely has two
+// DISTINCT, legitimate roles, but both rendered as "👤 User", which is
+// exactly what looked like a duplicate in the screenshot. Fixed by mapping
+// each known role to its own label instead of a two-way split, so distinct
+// roles are never conflated. dedupeRoles() is kept as a second, independent
+// safety net — it removes only exact-duplicate array entries (never a
+// distinct role) — purely defensive in case legacy dirty data (or a future
+// write path) ever does store a literal duplicate; it changes nothing for
+// the accounts in this bug report, whose roles were never actually
+// duplicated in the database.
+function dedupeRoles(roles) {
+  const seen = new Set();
+  const out = [];
+  for (const r of (roles || [])) {
+    if (!seen.has(r)) { seen.add(r); out.push(r); }
+  }
+  return out;
+}
+
+const ROLE_LABELS = {
+  merchant:   { emoji: '🏪', text: 'Merchant', bg: 'var(--primary)' },
+  user:       { emoji: '👤', text: 'User',     bg: '#5a7fb5' },
+  influencer: { emoji: '🌟', text: 'Influencer', bg: '#8e5fd6' },
+};
+function roleBadgeHtml(roles) {
+  return dedupeRoles(roles).map(r => {
+    const meta = ROLE_LABELS[r] || { emoji: '🔹', text: r ? (r.charAt(0).toUpperCase() + r.slice(1)) : 'Unknown', bg: '#7a8a99' };
+    return `<span class="badge me-1" style="background:${meta.bg};color:#fff;font-size:10px;margin-right:2px;">${meta.emoji} ${meta.text}</span>`;
+  }).join('');
+}
+
 let _acctDetailModal;
 async function openAccountDetail(accountId, name) {
   if (!_acctDetailModal) {
@@ -7352,7 +7385,7 @@ async function openAccountDetail(accountId, name) {
 }
 
 function renderAccountDetailHTML(d) {
-  const roles = (d.roles||[]).map(r=>`<span class="badge me-1" style="background:${r==='merchant'?'var(--primary)':'#5a7fb5'};color:#fff;">${r==='merchant'?'🏪 Merchant':'👤 User'}</span>`).join('');
+  const roles = roleBadgeHtml(d.roles);
   const visitPts  = d.visit_pts||0;
   const poolPts   = d.pool_pts||0;
   const totalPts  = visitPts + poolPts;
