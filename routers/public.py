@@ -221,6 +221,10 @@ def get_store(store_id: str):
         "description": d.get("description"),
         "start_date":  d.get("start_date"),
         "end_date":    d.get("end_date"),
+        # Item 3: surface the deal's uploaded image so the store card can
+        # show it (falls back to "" for older deals created before this
+        # field existed — the store card treats it as optional).
+        "image_url":   d.get("image_url", ""),
     } for d in deals]
 
     # Products for this store — from merchant_vouchers + gift_vouchers (active/non-expired only)

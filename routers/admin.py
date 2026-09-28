@@ -2790,10 +2790,26 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         # VISIBLE notification with background delivery — NOT throttled.
         # content-available:1 is required for the FCM plugin to fire
         # onMessage (foreground) via didReceiveRemoteNotification:fetchCompletionHandler:
+        #
+        # BUG FIX (badge stuck / wrong count): this used to hardcode
+        # "badge": 1 on every single push. Since APNs applies whatever
+        # absolute number the payload carries the instant a push is
+        # delivered — even while the app is backgrounded, with no app code
+        # involved — every notification reset the visible badge to exactly
+        # 1, regardless of how many notifications were already unread, and
+        # nothing ever set it back to 0 on read (the OS badge is a separate
+        # system counter from anything stored in the app). There is no
+        # server-side per-device unread-count tracking in this codebase, so
+        # the backend cannot know the correct absolute number to send here.
+        # The badge key is intentionally omitted — the app now owns the
+        # real, live badge count itself (see main.dart's `_badgeChannel`/
+        # `setBadge`/`clearBadge` calls, which read the same
+        # Prefs.getUnreadCount() already used for the in-app bell badge) and
+        # asserts the true count via the existing native method channel on
+        # every receive/read/app-restart, instead of relying on this payload.
         _aps = {
             "alert": {"title": title, "body": body},
             "sound": "default",
-            "badge": 1,
             "mutable-content": 1,
             "content-available": 1,
         }

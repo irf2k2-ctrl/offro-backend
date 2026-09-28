@@ -1046,7 +1046,11 @@ def my_deals(m=Depends(get_merchant)):
             "description": d.get("description"),
             "start_date": d.get("start_date"),
             "end_date": d.get("end_date"),
-            "status": d.get("status", "active")
+            "status": d.get("status", "active"),
+            # Item 3: needed so the Edit Deal form can prefill the existing
+            # image as a preview (requirement: "editing an existing Deal
+            # should show the existing image").
+            "image_url": d.get("image_url", ""),
         })
     return result
 
@@ -1061,6 +1065,12 @@ def create_deal(data: dict, m=Depends(get_merchant)):
         raise HTTPException(403, "Store not found or not yours")
     if store.get("status") != "active":
         raise HTTPException(400, "Store must be active to add deals")
+    # Item 3 (Add Deal image upload): reuse the SAME Cloudinary upload helper
+    # already used for banners/vouchers/products — no separate image storage
+    # system. Treated as optional (the truncated requirements text never
+    # specified mandatory/optional, so this follows the existing Standard
+    # Product pattern's leniency rather than inventing a hard requirement).
+    deal_image_url = _cloudinary_upload((data.get("image_url") or "").strip(), folder="offro/deals")
     deal = {
         "merchant_id": merchant_id,
         "store_id": store_id,
@@ -1070,6 +1080,7 @@ def create_deal(data: dict, m=Depends(get_merchant)):
         "description": data.get("description", ""),
         "start_date": data.get("start_date", ""),
         "end_date": data.get("end_date", ""),
+        "image_url": deal_image_url,
         "status": "active",
         "created_at": datetime.utcnow(),
     }
@@ -1119,6 +1130,18 @@ def update_deal(deal_id: str, data: dict, m=Depends(get_merchant)):
             if sub_end_dt and end_dt and end_dt > sub_end_dt:
                 raise HTTPException(400, "Deal end date cannot exceed store subscription end date (" + sub_end_dt.strftime("%d %b %Y") + ")")
 
+    # Item 3: merchant should be able to replace the image, and editing a
+    # deal without touching the image must not wipe it. Flutter always
+    # resends the current value (existing image or newly picked one), but
+    # this falls back to the stored image if the field is ever omitted —
+    # same defensive "preserve on absence" pattern the other fields above
+    # already use for update_deal.
+    raw_image = data.get("image_url", None)
+    if raw_image is None:
+        deal_image_url = existing.get("image_url", "")
+    else:
+        deal_image_url = _cloudinary_upload((raw_image or "").strip(), folder="offro/deals")
+
     update_fields = {
         "title":       data.get("title", existing.get("title", "")),
         "discount":    data.get("discount", existing.get("discount", 0)),
@@ -1127,6 +1150,7 @@ def update_deal(deal_id: str, data: dict, m=Depends(get_merchant)):
         "start_date":  data.get("start_date", existing.get("start_date", "")),
         "end_date":    end_date or existing.get("end_date", ""),
         "store_id":     store_id,
+        "image_url":    deal_image_url,
     }
     db.deals.update_one({"_id": ObjectId(deal_id)}, {"$set": update_fields})
     # Update store discount_percent for user app display
@@ -1460,12 +1484,22 @@ def merchant_update_banner_title(bid: str, data: dict, m=Depends(get_merchant)):
 @router.post("/banners/order")
 def create_banner_order(data: dict, m=Depends(get_merchant)):
     """
-    Accepts: { "days": int, "from_date": "YYYY-MM-DD" }
+    Accepts: { "days": int, "from_date": "YYYY-MM-DD", "store_id": str (optional) }
     Returns an order summary with pricing + Razorpay order if payment needed.
     """
     merchant_id = _mid(m)
     days = int(data.get("days", 30))
     from_date_str = data.get("from_date", "")
+
+    # BUG FIX: fail fast (before even creating a pending order/Razorpay
+    # order) when the caller already knows which store this is for and
+    # that store is draft/unsubscribed. store_id is optional here since
+    # older Flutter builds don't send it at this step (it's only bound at
+    # activation, where it's still checked either way) — but when present,
+    # honor it immediately for a better error and no wasted order record.
+    early_store_id = (data.get("store_id") or "").strip()
+    if early_store_id:
+        _require_active_store(early_store_id, "banner")
 
     if days < 1:
         raise HTTPException(400, "days must be ≥ 1")
@@ -1593,14 +1627,15 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_banner or {}).get("invoice_no", "")
         return {"message": "Banner already activated.", "banner_id": existing_banner_id, "invoice_no": existing_inv_no}
 
-    disc_code = order.get("discount_code")
-    # Free activation IS the successful activation — count usage exactly once.
-    _mark_discount_used(order.get("discount_code"))
-
     # Read store/city from Flutter payload (Flutter sends these on activation)
     store_id   = (data.get("store_id")   or "").strip()
     store_name = (data.get("store_name") or "").strip()
     city       = (data.get("city")       or "").strip()
+    # BUG FIX: a draft/unsubscribed store must not be able to create a
+    # Banner via a direct API call, even if Flutter's own lock is bypassed.
+    # Checked BEFORE _mark_discount_used below so a rejected attempt never
+    # consumes the discount code's usage count.
+    _require_active_store(store_id, "banner")
     # Fallback: look up city from store record if not provided directly
     if not city and store_id:
         try:
@@ -1609,6 +1644,10 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
                 city = st.get("city", "")
         except Exception:
             pass
+
+    disc_code = order.get("discount_code")
+    # Free activation IS the successful activation — count usage exactly once.
+    _mark_discount_used(order.get("discount_code"))
 
     # CONTENT-BASED DEDUP GUARD (defense-in-depth, independent of order_id):
     # Even if a DIFFERENT banner_orders doc was created (e.g. merchant backed
@@ -1727,6 +1766,9 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     store_id   = (data.get("store_id")   or "").strip()
     store_name = (data.get("store_name") or "").strip()
     city       = (data.get("city")       or "").strip()
+    # BUG FIX: a draft/unsubscribed store must not be able to create a
+    # Banner via a direct API call, even if Flutter's own lock is bypassed.
+    _require_active_store(store_id, "banner")
     # Fallback: look up city from store record if not provided directly
     if not city and store_id:
         try:
@@ -1875,12 +1917,18 @@ def get_voucher_pricing_merchant(m=Depends(get_merchant)):
 @router.post("/vouchers/order")
 def create_voucher_order(data: dict, m=Depends(get_merchant)):
     """
-    Issue 3: accepts { "days": int, "from_date": "YYYY-MM-DD" }
+    Issue 3: accepts { "days": int, "from_date": "YYYY-MM-DD", "store_id": str (optional) }
     No fixed plan chips — merchant chooses exact number of days and start date.
     """
     merchant_id = _mid(m)
     days          = int(data.get("days", 30))
     from_date_str = data.get("from_date", "")
+
+    # BUG FIX: fail fast when the caller already knows the target store and
+    # it's draft/unsubscribed — see create_banner_order's identical comment.
+    early_store_id = (data.get("store_id") or "").strip()
+    if early_store_id:
+        _require_active_store(early_store_id, "product")
 
     if days < 1:
         raise HTTPException(400, "days must be ≥ 1")
@@ -2020,20 +2068,25 @@ def activate_free_voucher(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_voucher or {}).get("invoice_no") or order.get("invoice_no", "")
         return {"message": "Product already activated.", "voucher_id": existing_voucher_id, "invoice_no": existing_inv_no}
 
-    disc_code = order.get("discount_code")
-    # Free activation IS the successful activation — count usage exactly once.
-    _mark_discount_used(disc_code)
-
     # Read store/city from Flutter payload — CRITICAL: these must be stored
     # on the voucher so admin dashboard shows the correct store and city.
     store_id   = (data.get("store_id")   or "").strip()
     store_name = (data.get("store_name") or "").strip()
     city       = (data.get("city")       or "").strip()
+    # BUG FIX: a draft/unsubscribed store must not be able to create a
+    # (Premium) Product via a direct API call. Checked BEFORE
+    # _mark_discount_used below so a rejected attempt never consumes the
+    # discount code's usage count.
+    _require_active_store(store_id, "product")
     if not city and store_id:
         try:
             st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
             if st: city = st.get("city", "")
         except Exception: pass
+
+    disc_code = order.get("discount_code")
+    # Free activation IS the successful activation — count usage exactly once.
+    _mark_discount_used(disc_code)
 
     voucher = {
         "merchant_id":    merchant_id,
@@ -2158,6 +2211,9 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
     store_id   = (data.get("store_id")   or "").strip()
     store_name = (data.get("store_name") or "").strip()
     city       = (data.get("city")       or "").strip()
+    # BUG FIX: a draft/unsubscribed store must not be able to create a
+    # (Premium) Product via a direct API call.
+    _require_active_store(store_id, "product")
     if not city and store_id:
         try:
             st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
@@ -2455,6 +2511,38 @@ def _is_store_subscription_active(store_id: str) -> bool:
     except Exception:
         return False
 
+def _require_active_store(store_id: str, feature: str):
+    """BUG FIX — draft/unsubscribed stores must not be able to create a
+    Banner or Product. Reuses the SAME store status field/values already
+    used everywhere else in this codebase (routers/admin.py's
+    approve_store() sets stores.status = "active"; Merchant Home's
+    "X Active" count already reads stores.status == "active") — no new
+    status system. A store only reaches "active" after BOTH subscribing
+    (which moves it to "waiting_approval", see initiate_subscription /
+    verify_payment below) AND admin approval, matching the requirement
+    that Banner/Product stay locked until the store is subscribed AND
+    active. Called at the actual creation point of each feature (where the
+    banner/product document is inserted), so a direct API call cannot
+    bypass the Flutter-side lock. Returns the store document on success
+    (callers that also need the store's other fields, e.g. city/name,
+    should use the returned doc rather than looking it up again).
+    """
+    if not store_id:
+        raise HTTPException(400, "Please select a store.")
+    try:
+        oid = ObjectId(store_id)
+    except Exception:
+        raise HTTPException(400, "Invalid store ID")
+    store = db.stores.find_one({"_id": oid})
+    if not store:
+        raise HTTPException(404, "Store not found")
+    if store.get("status") != "active":
+        if feature == "banner":
+            raise HTTPException(403, "Subscribe your store to create banners.")
+        else:
+            raise HTTPException(403, "Subscribe your store to add products.")
+    return store
+
 @router.get("/products")
 def list_merchant_products(m=Depends(get_merchant)):
     """List all products for this merchant: Standard (gift_vouchers) + Premium (merchant_vouchers)."""
@@ -2575,12 +2663,9 @@ def create_standard_product(data: dict, m=Depends(get_merchant)):
     store_id = (data.get("store_id") or "").strip()
     if not store_id:
         raise HTTPException(400, "Please select a store for this product")
-    try:
-        store = db.stores.find_one({"_id": ObjectId(store_id)})
-    except Exception:
-        raise HTTPException(400, "Invalid store ID")
-    if not store:
-        raise HTTPException(404, "Store not found")
+    # BUG FIX: was only checking the store exists — never that it's
+    # actually subscribed/active. See _require_active_store above.
+    store = _require_active_store(store_id, "product")
 
     logo_raw = (data.get("logo_url") or "").strip()
     if not logo_raw:
