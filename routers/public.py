@@ -245,9 +245,22 @@ def get_store(store_id: str):
             return False
 
     def _prod_img(p):
+        # ROUND 11 FIX (Task 1): this previously only accepted values
+        # starting with "http", silently dropping any image stored as a
+        # raw base64 data URI (data:image/...;base64,...). merchant_app.py's
+        # _cloudinary_upload() passes base64 through UNCHANGED whenever
+        # Cloudinary isn't configured or the upload call fails, so many
+        # merchant_vouchers/gift_vouchers docs legitimately have a valid
+        # base64 image under logo_url/logo/image — this filter zeroed it
+        # out before it ever reached Flutter, leaving "logo_url": "" and a
+        # blank product-card image even though name/tagline/discount/price
+        # all rendered fine. `_resolve_img()` below (used for the equivalent
+        # product/deal image lookups elsewhere in this same file) already
+        # accepts both "http" and "data:" — this brings _prod_img in line
+        # with that existing, working pattern instead of inventing a new one.
         for k in ["logo_url","logo_thumb","image_url","logo","image"]:
             v = str(p.get(k,"") or "")
-            if v.startswith("http"): return v
+            if v.startswith("http") or v.startswith("data:"): return v
         return ""
 
     # 1. merchant_vouchers — approved, not expired, SCOPED TO THIS STORE
