@@ -162,6 +162,7 @@ td[style*="sticky"]{background:#fff;}
   <a href="#" onclick="showSection('product_cards',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
   <a href="#" onclick="showSection('admin_banners',this)"><i class="fas fa-ad fa-fw"></i> Admin Banners</a>
+  <a href="#" onclick="showSection('influencers',this)"><i class="fas fa-star fa-fw"></i> Influencers</a>
   <a href="#" onclick="showSection('popup_campaigns',this)"><i class="fas fa-bullhorn fa-fw"></i> Popup Campaigns</a>
   <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
   <a href="#" onclick="showSection('gift_product_requests',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
@@ -336,6 +337,10 @@ td[style*="sticky"]{background:#fff;}
       style="padding:8px 22px;border:none;background:none;font-size:13px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer;margin-bottom:-2px;">
       📦 Product Reviews
     </button>
+    <button id="rev_tab_influencers" onclick="switchReviewTab('influencers')"
+      style="padding:8px 22px;border:none;background:none;font-size:13px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer;margin-bottom:-2px;">
+      ⭐ Influencer Reviews
+    </button>
   </div>
 
   <!-- Store Reviews Panel -->
@@ -373,6 +378,32 @@ td[style*="sticky"]{background:#fff;}
         </thead>
         <tbody id="prod_reviews_table">
           <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Click Refresh to load</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Influencer Reviews Panel -->
+  <!-- No influencer review backend exists yet (see routers/public.py —
+       influencers have no review-submission endpoint). This panel is built
+       to the same structure as the two above so it can be wired to real
+       data with a one-line change to loadInfluencerReviews() once that
+       backend exists — never displays a phone number, matching every other
+       influencer-facing view. -->
+  <div id="rev_panel_influencers" style="display:none">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+      <input type="text" id="inf_reviews_filter" class="form-control"
+        placeholder="Filter by influencer name..." style="max-width:220px;font-size:13px;"
+        oninput="_infReviewsFilter=this.value;_renderInfluencerReviews(_infReviewsCache);">
+      <button class="btn-p" onclick="loadInfluencerReviews()"><i class="fas fa-sync me-1"></i> Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Influencer</th><th>User</th><th>Rating</th><th>Review</th><th>Date</th><th>Action</th></tr>
+        </thead>
+        <tbody id="inf_reviews_table">
+          <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>
         </tbody>
       </table>
     </div>
@@ -768,6 +799,36 @@ td[style*="sticky"]{background:#fff;}
           <small class="text-muted">Users need at least this many points to request reward redemption</small>
         </div>
       </div>
+
+      <!-- ── Influencer Subscription (one-time profile publishing fee) ── -->
+      <hr style="margin:24px 0;">
+      <div style="background:#fff0f6;border-radius:12px;padding:20px;border:1px solid #f0c6d8;">
+        <div class="fw-bold mb-3" style="color:#a1275a;font-size:15px;">🌟 Influencer Subscription <small style="color:#a1275a;font-weight:normal;">(one-time profile publishing fee)</small></div>
+        <div class="row g-3 mb-2">
+          <div class="col-md-4">
+            <label class="form-label" style="font-size:13px">Subscription Fee (₹)</label>
+            <input id="influencer_fee_input" class="form-control" type="number" min="0" step="1" placeholder="1000" oninput="recalcInfluencerTotal()">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" style="font-size:13px">GST %</label>
+            <input id="influencer_gst_input" class="form-control" type="number" min="0" step="0.5" placeholder="18" oninput="recalcInfluencerTotal()">
+          </div>
+          <div class="col-md-4 d-flex align-items-end">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="influencer_enabled_input">
+              <label class="form-check-label" for="influencer_enabled_input" style="font-size:13px;">Enabled (require payment before publish)</label>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:13px;color:#a1275a;background:#fff;border-radius:8px;padding:10px 14px;display:inline-block;">
+          GST Amount: ₹<span id="influencer_gst_amount_display">0</span>
+          &nbsp;·&nbsp; <strong>Total Payable: ₹<span id="influencer_total_display">0</span></strong>
+        </div>
+        <p style="font-size:12px;color:#a1275a;margin-top:8px;margin-bottom:0;">
+          When disabled, influencers can publish their profile without payment (admin override). Existing published influencer profiles are never retroactively charged.
+        </p>
+      </div>
+
       <button class="btn-p mt-3" onclick="savePricing()">Save All Settings</button>
       <p id="pricing_msg" class="mt-2" style="font-size:13px;color:var(--primary);"></p>
     </div>
@@ -825,6 +886,7 @@ td[style*="sticky"]{background:#fff;}
           <option value="store">Store</option>
           <option value="banner">Banner</option>
           <option value="product">Product</option>
+          <option value="influencer">Influencer</option>
         </select>
         <span id="txn_total" style="font-size:13px;color:var(--muted);"></span>
         <button class="btn btn-sm" onclick="exportPaymentsPDF()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-pdf me-1"></i>PDF</button>
@@ -942,6 +1004,7 @@ td[style*="sticky"]{background:#fff;}
           <option value="STORE">STORE (store subscription only)</option>
           <option value="BANNERS">BANNERS (banner purchase only)</option>
           <option value="PRODUCTS">PRODUCTS (premium product / upgrade / renewal)</option>
+          <option value="INFLUENCER">INFLUENCER (influencer subscription only)</option>
           <option value="ALL" selected>ALL (any supported paid checkout)</option>
         </select>
       </div>
@@ -964,6 +1027,77 @@ td[style*="sticky"]{background:#fff;}
         <th>Code</th><th>Type</th><th>Value</th><th>Map With</th><th>Used</th><th>Max Uses</th><th>Expiry</th><th>Status</th><th>Actions</th>
       </tr></thead>
       <tbody id="disc_body"></tbody></table>
+    </div>
+  </div>
+
+  <!-- INFLUENCERS -->
+  <div id="section-influencers" class="section">
+    <div class="section-header">
+      <div class="page-title" style="margin:0">Influencers</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="inf_search" class="form-control" style="max-width:190px;" placeholder="🔍 Search name..." oninput="renderInfluencers()">
+        <select id="inf_city_filter" class="form-select" style="max-width:150px;" onchange="renderInfluencers()"><option value="">All Cities</option></select>
+        <select id="inf_status_filter" class="form-select" style="max-width:140px;" onchange="renderInfluencers()">
+          <option value="">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <button class="btn-add-compact" onclick="openAddInfluencerForm()"><i class="fas fa-plus" style="font-size:10px"></i> Add Influencer</button>
+      </div>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Photo</th><th>Name</th><th>Mobile</th><th>City</th><th>Category</th><th>Rating</th><th>Status</th><th>Subscription</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="inf_body"></tbody>
+    </table></div>
+
+    <div id="inf_form_wrap" class="table-wrap" style="display:none;padding:20px;max-width:560px;margin-top:20px;">
+      <h6 style="color:var(--primary);font-weight:700;margin-bottom:14px;"><i class="fas fa-user-plus"></i> <span id="inf_form_title">Add Influencer</span></h6>
+      <input type="hidden" id="inf_edit_id" value="">
+      <div class="mb-2">
+        <label class="form-label">Name *</label>
+        <input id="inf_name" class="form-control" placeholder="e.g. Priya Sharma">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">State *</label>
+        <select id="inf_state" class="form-control" onchange="onInfStateChange()"><option value="">— Select State —</option></select>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">City *</label>
+        <select id="inf_city" class="form-control"><option value="">Select state first</option></select>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Category</label>
+        <select id="inf_category" class="form-control"><option value="">Select category</option></select>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Phone</label>
+        <input id="inf_phone" class="form-control" placeholder="10-digit mobile number">
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">Admin-only — never shown publicly or to merchants.</div>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Photo</label>
+        <input id="inf_photo_file" type="file" accept="image/*" class="form-control" onchange="infPreviewPhoto(this)">
+        <div id="inf_photo_preview_wrap" style="display:none;margin-top:8px;">
+          <img id="inf_photo_preview" style="width:72px;height:72px;border-radius:50%;object-fit:cover;">
+        </div>
+      </div>
+      <div class="mb-2">
+        <label class="form-label"><i class="fab fa-instagram"></i> Instagram URL</label>
+        <input id="inf_instagram" class="form-control" placeholder="https://instagram.com/...">
+      </div>
+      <div class="mb-2">
+        <label class="form-label"><i class="fab fa-youtube"></i> YouTube URL</label>
+        <input id="inf_youtube" class="form-control" placeholder="https://youtube.com/@...">
+      </div>
+      <div class="mb-3">
+        <label class="form-label"><i class="fab fa-facebook"></i> Facebook URL</label>
+        <input id="inf_facebook" class="form-control" placeholder="https://facebook.com/...">
+      </div>
+      <button class="btn-p" id="inf_save_btn" onclick="saveInfluencer()"><i class="fas fa-check"></i> <span id="inf_save_btn_label">Add Influencer</span></button>
+      <button class="btn-sm-outline" style="margin-left:8px;" id="inf_cancel_edit_btn" onclick="cancelInfluencerEdit()">Cancel</button>
+      <p id="inf_msg" class="mt-2" style="font-size:12px;color:var(--primary);"></p>
     </div>
   </div>
 
@@ -1853,6 +1987,293 @@ async function deleteDiscount(id) {
   } catch(e) { alert("Error: "+e.message); }
 }
 
+// ═══════════════════════════════════════════════════════
+// INFLUENCERS (Phase 1: Admin CRUD only — no public API yet)
+// ═══════════════════════════════════════════════════════
+let allInfluencers = [];
+let infCitiesCache = [];
+let infPhotoBase64 = "";
+
+async function loadInfluencers() {
+  try {
+    const r = await fetch('/admin/influencers', {credentials:'include'});
+    if (r.status === 403 || r.status === 401) {
+      document.getElementById("inf_body").innerHTML = _accessDeniedHtml("Influencers");
+      return;
+    }
+    if (!r.ok) {
+      document.getElementById("inf_body").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
+      return;
+    }
+    allInfluencers = await r.json();
+    renderInfluencers();
+  } catch(e) {
+    document.getElementById("inf_body").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
+  }
+  if (!infCitiesCache.length) {
+    try {
+      const r2 = await fetch('/cities', {credentials:'include'});
+      const data = await r2.json();
+      infCitiesCache = Array.isArray(data) ? data.map(c => c.name||c) : [];
+    } catch(e) { infCitiesCache = []; }
+  }
+  // The Add/Edit form's State→City selects use the same INDIA_STATES_CITIES
+  // cascading dropdown as the Store form (populateInfStateDropdown/
+  // onInfStateChange below) — NOT infCitiesCache, which stays reserved for
+  // the table's "All Cities" FILTER, matching OffrO's curated serviceable-
+  // city list (the same list influencer city authorization is checked
+  // against server-side — unchanged).
+  populateInfStateDropdown();
+  if (!categoriesList.length) {
+    try { await loadCategories(); } catch(e) {}
+  }
+  const catSel = document.getElementById('inf_category');
+  if (catSel) {
+    const cats = categoriesList.length ? categoriesList.map(c => c.name || c) : [];
+    catSel.innerHTML = '<option value="">Select category</option>' +
+      cats.map(c => `<option value="${c}">${c}</option>`).join('');
+  }
+  const filterSel = document.getElementById('inf_city_filter');
+  if (filterSel) {
+    filterSel.innerHTML = '<option value="">All Cities</option>' +
+      infCitiesCache.map(c => `<option value="${c}">${c}</option>`).join('');
+  }
+}
+
+function populateInfStateDropdown(selectedState) {
+  // Reuses the SAME INDIA_STATES_CITIES object the Store form uses — no
+  // separate influencer-specific state/city list.
+  const sel = document.getElementById("inf_state");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Select State —</option>' +
+    Object.keys(INDIA_STATES_CITIES).sort().map(s =>
+      `<option value="${s}"${s === selectedState ? ' selected' : ''}>${s}</option>`
+    ).join('');
+}
+
+function onInfStateChange(preselectCity) {
+  const state = document.getElementById("inf_state")?.value || "";
+  const citySel = document.getElementById("inf_city");
+  if (!citySel) return;
+  citySel.innerHTML = '<option value="">— Select City —</option>';
+  if (state && INDIA_STATES_CITIES[state]) {
+    INDIA_STATES_CITIES[state].sort().forEach(c => {
+      const o = document.createElement("option");
+      o.value = c; o.innerText = c;
+      if (preselectCity && c === preselectCity) o.selected = true;
+      citySel.appendChild(o);
+    });
+  }
+}
+
+function renderInfluencers() {
+  const q = (document.getElementById("inf_search")?.value||"").toLowerCase();
+  const cityF = document.getElementById("inf_city_filter")?.value || "";
+  const statusF = document.getElementById("inf_status_filter")?.value || "";
+  const rows = allInfluencers.filter(i => {
+    const nameMatch = !q || (i.name||"").toLowerCase().includes(q);
+    const cityMatch = !cityF || (i.city||"").toLowerCase() === cityF.toLowerCase();
+    const statusMatch = !statusF || (i.status||"") === statusF;
+    return nameMatch && cityMatch && statusMatch;
+  });
+  document.getElementById("inf_body").innerHTML = rows.length ? rows.map(i => {
+    const st = i.status === 'active' ? '<span class="badge-active">Active</span>' : '<span class="badge-inactive">Inactive</span>';
+    const photo = i.photo_url
+      ? `<img src="${i.photo_url}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">`
+      : `<div style="width:36px;height:36px;border-radius:50%;background:var(--light);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--primary);">${(i.name||'?')[0].toUpperCase()}</div>`;
+    // Subscription/publish info (Influencer Subscription Fee + Payment +
+    // Publish feature). payment_status/publish_status default to
+    // PAID/published server-side for any record that predates this feature
+    // (admin-created records included), so this column is purely informational
+    // here — it never gates admin's own Edit/Activate/Deactivate/Delete actions.
+    const payBadgeColor = {PAID:'#198754', UNPAID:'#6c757d', PAYMENT_PENDING:'#e69500', PAYMENT_FAILED:'#dc3545'}[i.payment_status] || '#6c757d';
+    const pubBadgeColor = i.publish_status === 'draft' ? '#e69500' : '#198754';
+    const subInfo = `
+      <div style="font-size:11px;line-height:1.6;">
+        <span style="color:${payBadgeColor};font-weight:600;">${i.payment_status||'PAID'}</span><br>
+        <span style="color:${pubBadgeColor};font-weight:600;">${i.publish_status||'published'}</span>
+        ${i.total_amount ? `<br><span style="color:var(--muted);">₹${i.total_amount}</span>` : ''}
+        ${i.is_active === false ? '<br><span style="color:#dc3545;">Self-disabled</span>' : ''}
+      </div>`;
+    return `<tr>
+      <td>${photo}</td>
+      <td><b>${i.name}</b></td>
+      <td>${i.phone || '—'}</td>
+      <td>${i.city}</td>
+      <td>${i.category||'—'}</td>
+      <td>⭐ ${(i.rating||0).toFixed ? i.rating.toFixed(1) : i.rating} (${i.review_count||0})</td>
+      <td>${st}</td>
+      <td>${subInfo}</td>
+      <td>
+        <button class="btn-sm-outline" onclick="editInfluencer('${i._id}')">Edit</button>
+        <button class="btn-sm-outline" onclick="toggleInfluencerStatus('${i._id}','${i.status==='active'?'inactive':'active'}')">${i.status==='active'?'Deactivate':'Activate'}</button>
+        <button class="btn-sm-danger" onclick="deleteInfluencerRow('${i._id}')">Delete</button>
+      </td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="9" style="text-align:center;color:var(--muted);">No influencers yet</td></tr>';
+}
+
+function infPreviewPhoto(input) {
+  if (!input.files || !input.files[0]) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    infPhotoBase64 = e.target.result;
+    document.getElementById('inf_photo_preview').src = infPhotoBase64;
+    document.getElementById('inf_photo_preview_wrap').style.display = 'block';
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+
+function cancelInfluencerEdit() {
+  document.getElementById('inf_edit_id').value = '';
+  document.getElementById('inf_form_title').innerText = 'Add Influencer';
+  document.getElementById('inf_save_btn_label').innerText = 'Add Influencer';
+  document.getElementById('inf_cancel_edit_btn').style.display = 'none';
+  document.getElementById('inf_name').value = '';
+  populateInfStateDropdown('');
+  document.getElementById('inf_city').innerHTML = '<option value="">Select state first</option>';
+  document.getElementById('inf_category').value = '';
+  document.getElementById('inf_phone').value = '';
+  document.getElementById('inf_instagram').value = '';
+  document.getElementById('inf_youtube').value = '';
+  document.getElementById('inf_facebook').value = '';
+  document.getElementById('inf_photo_file').value = '';
+  document.getElementById('inf_photo_preview_wrap').style.display = 'none';
+  infPhotoBase64 = '';
+  document.getElementById('inf_msg').innerText = '';
+  document.getElementById('inf_form_wrap').style.display = 'none';
+}
+
+function openAddInfluencerForm() {
+  cancelInfluencerEdit();
+  document.getElementById('inf_cancel_edit_btn').style.display = 'inline-block';
+  document.getElementById('inf_form_wrap').style.display = 'block';
+  document.getElementById('inf_form_wrap').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+// Reverse-lookup helper for influencers saved before the `state` field
+// existed — finds which state a given city belongs to in the same shared
+// INDIA_STATES_CITIES object, so editing an older record still preselects
+// correctly instead of leaving City blank.
+function _findStateForCity(city) {
+  if (!city) return '';
+  for (const s of Object.keys(INDIA_STATES_CITIES)) {
+    if (INDIA_STATES_CITIES[s].some(c => c.toLowerCase() === city.toLowerCase())) return s;
+  }
+  return '';
+}
+
+function editInfluencer(id) {
+  const inf = allInfluencers.find(i => i._id === id);
+  if (!inf) return;
+  document.getElementById('inf_edit_id').value = id;
+  document.getElementById('inf_form_title').innerText = 'Edit Influencer';
+  document.getElementById('inf_save_btn_label').innerText = 'Save Changes';
+  document.getElementById('inf_cancel_edit_btn').style.display = 'inline-block';
+  document.getElementById('inf_name').value = inf.name || '';
+  const state = inf.state || _findStateForCity(inf.city || '');
+  populateInfStateDropdown(state);
+  onInfStateChange(inf.city || '');
+  const catSel = document.getElementById('inf_category');
+  if (catSel) {
+    // Preserve compatibility: if this influencer's stored category isn't in
+    // the current Categories list (e.g. an older/custom value), add it as a
+    // fallback option instead of silently losing it on edit.
+    if (inf.category && !Array.from(catSel.options).some(o => o.value === inf.category)) {
+      const opt = document.createElement('option');
+      opt.value = inf.category; opt.innerText = inf.category + ' (existing)';
+      catSel.appendChild(opt);
+    }
+    catSel.value = inf.category || '';
+  }
+  document.getElementById('inf_phone').value = inf.phone || '';
+  const social = inf.social || {};
+  document.getElementById('inf_instagram').value = social.instagram || '';
+  document.getElementById('inf_youtube').value = social.youtube || '';
+  document.getElementById('inf_facebook').value = social.facebook || '';
+  infPhotoBase64 = '';
+  document.getElementById('inf_photo_file').value = '';
+  if (inf.photo_url) {
+    document.getElementById('inf_photo_preview').src = inf.photo_url;
+    document.getElementById('inf_photo_preview_wrap').style.display = 'block';
+  } else {
+    document.getElementById('inf_photo_preview_wrap').style.display = 'none';
+  }
+  document.getElementById('inf_msg').innerText = '';
+  document.getElementById('inf_form_wrap').style.display = 'block';
+  document.getElementById('inf_form_wrap').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+let _infSaving = false; // FIX (duplicate submissions): guards against rapid double-clicks
+
+async function saveInfluencer() {
+  if (_infSaving) return; // a save is already in flight — ignore this click entirely
+  const id = document.getElementById('inf_edit_id').value;
+  const name = document.getElementById('inf_name').value.trim();
+  const city = document.getElementById('inf_city').value;
+  const msg = document.getElementById('inf_msg');
+  if (!name) { msg.style.color='red'; msg.innerText='Name is required'; return; }
+  if (!city) { msg.style.color='red'; msg.innerText='City is required'; return; }
+  const body = {
+    name, city,
+    state: document.getElementById('inf_state').value,
+    category: document.getElementById('inf_category').value.trim(),
+    phone: document.getElementById('inf_phone').value.trim(),
+    social: {
+      instagram: document.getElementById('inf_instagram').value.trim(),
+      youtube: document.getElementById('inf_youtube').value.trim(),
+      facebook: document.getElementById('inf_facebook').value.trim(),
+    },
+  };
+  if (infPhotoBase64) body.photo_url = infPhotoBase64;
+  const btn = document.getElementById('inf_save_btn');
+  const label = document.getElementById('inf_save_btn_label');
+  const originalLabel = label.innerText;
+  _infSaving = true;
+  if (btn) btn.disabled = true;
+  label.innerText = id ? 'Saving...' : 'Adding...';
+  try {
+    const url = id ? `/admin/influencers/${id}` : '/admin/influencers';
+    const method = id ? 'PUT' : 'POST';
+    const r = await fetch(url, {method, credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if (!r.ok) { msg.style.color='red'; msg.innerText = d.detail || 'Error'; return; }
+    msg.style.color = 'var(--primary)'; msg.innerText = id ? '✅ Saved!' : '✅ Influencer added!';
+    cancelInfluencerEdit();
+    loadInfluencers();
+  } catch(e) { msg.style.color='red'; msg.innerText = 'Error: '+e.message; }
+  finally {
+    _infSaving = false;
+    if (btn) btn.disabled = false;
+    label.innerText = originalLabel;
+  }
+}
+
+async function toggleInfluencerStatus(id, newStatus) {
+  try {
+    const r = await fetch(`/admin/influencers/${id}`, {method:'PUT', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status:newStatus})});
+    if (!r.ok) {
+      const d = await r.json().catch(()=>({}));
+      alert('Error: ' + (d.detail || 'Could not update status.'));
+      return;
+    }
+    loadInfluencers();
+  } catch(e) { alert('Error: '+e.message); }
+}
+
+async function deleteInfluencerRow(id) {
+  if (!confirm('Delete this influencer?')) return;
+  try {
+    const r = await fetch(`/admin/influencers/${id}`, {method:'DELETE', credentials:'include'});
+    if (!r.ok) {
+      const d = await r.json().catch(()=>({}));
+      alert('Error: ' + (d.detail || 'Could not delete influencer.'));
+      return;
+    }
+    loadInfluencers();
+  } catch(e) { alert('Error: '+e.message); }
+}
+
 
 // ═══════════════════════════════════════════════════════
 // BACKDROP CLEANUP — prevents "can't click" stuck overlay
@@ -1898,6 +2319,7 @@ const RBAC_SECTION_MAP = {
   "Pricing & GST":     ["pricing"],
   "Reviews":           ["reviews"],
   "Discounts":         ["discounts"],
+  "Influencers":       ["influencers"],
   "Terms & Conditions":["terms"],
   "Policies":          ["policies"],
   "Social Media":      ["social"],
@@ -2126,6 +2548,7 @@ function showSection(name, el){
   if(name==="social") loadSocialLinks();
   // merchant_txns handled by script block 5 override
   if(name==="discounts") loadDiscounts();
+  if(name==="influencers") loadInfluencers();
   if(name==="about") loadAbout();
   if(name==="reviews") loadReviews();
   if(name==="product_cards") loadGiftCards();
@@ -2296,6 +2719,22 @@ async function loadPricing(){
     document.getElementById("rate_example").innerText=(100*v).toFixed(2);
   });
   renderPlans();
+  // Influencer Subscription — server is the source of truth for gst_amount/
+  // total (recomputed here on load purely for display; the actual charge is
+  // always recalculated server-side at payment time, never trusted from here).
+  let infsub=d.influencer_subscription||{};
+  document.getElementById("influencer_fee_input").value=(infsub.fee!=null?infsub.fee:0);
+  document.getElementById("influencer_gst_input").value=(infsub.gst_percent!=null?infsub.gst_percent:18);
+  document.getElementById("influencer_enabled_input").checked=!!infsub.enabled;
+  recalcInfluencerTotal();
+}
+function recalcInfluencerTotal(){
+  let fee=parseFloat(document.getElementById("influencer_fee_input").value)||0;
+  let gstPct=parseFloat(document.getElementById("influencer_gst_input").value)||0;
+  let gstAmt=Math.round(fee*gstPct/100*100)/100;
+  let total=Math.round((fee+gstAmt)*100)/100;
+  document.getElementById("influencer_gst_amount_display").innerText=gstAmt;
+  document.getElementById("influencer_total_display").innerText=total;
 }
 function renderPlans(){
   let html=currentPlans.map((p,i)=>`
@@ -2313,8 +2752,13 @@ async function savePricing(){
   let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
   const stdLimitRaw = document.getElementById("std_product_limit_input")?.value;
   const stdLimit = (stdLimitRaw === '' || stdLimitRaw == null) ? 10 : parseInt(stdLimitRaw);
+  let influencerSub={
+    fee: parseFloat(document.getElementById("influencer_fee_input").value)||0,
+    gst_percent: parseFloat(document.getElementById("influencer_gst_input").value)||0,
+    enabled: document.getElementById("influencer_enabled_input").checked,
+  };
   let r=await fetch("/admin/pricing",{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({gst_percent:gst,plans,conversion_rate:rate,min_withdraw_points:minW,standard_product_limit:stdLimit}),credentials:"include"});
+    body:JSON.stringify({gst_percent:gst,plans,conversion_rate:rate,min_withdraw_points:minW,standard_product_limit:stdLimit,influencer_subscription:influencerSub}),credentials:"include"});
   document.getElementById("pricing_msg").innerText=r.ok?"✅ All settings saved!":"❌ Error saving";
   setTimeout(()=>document.getElementById("pricing_msg").innerText="",2500);
 }
@@ -4433,18 +4877,84 @@ let _activeReviewTab = "stores";
 
 function switchReviewTab(tab) {
   _activeReviewTab = tab;
-  document.getElementById("rev_panel_stores").style.display   = tab === "stores"   ? "" : "none";
-  document.getElementById("rev_panel_products").style.display = tab === "products" ? "" : "none";
+  document.getElementById("rev_panel_stores").style.display      = tab === "stores"      ? "" : "none";
+  document.getElementById("rev_panel_products").style.display    = tab === "products"    ? "" : "none";
+  document.getElementById("rev_panel_influencers").style.display = tab === "influencers" ? "" : "none";
   const btnS = document.getElementById("rev_tab_stores");
   const btnP = document.getElementById("rev_tab_products");
+  const btnI = document.getElementById("rev_tab_influencers");
   btnS.style.color       = tab === "stores"   ? "var(--primary)" : "var(--muted)";
   btnS.style.borderBottomColor = tab === "stores"   ? "var(--primary)" : "transparent";
   btnS.style.fontWeight  = tab === "stores"   ? "700" : "600";
   btnP.style.color       = tab === "products" ? "var(--primary)" : "var(--muted)";
   btnP.style.borderBottomColor = tab === "products" ? "var(--primary)" : "transparent";
   btnP.style.fontWeight  = tab === "products" ? "700" : "600";
+  btnI.style.color       = tab === "influencers" ? "var(--primary)" : "var(--muted)";
+  btnI.style.borderBottomColor = tab === "influencers" ? "var(--primary)" : "transparent";
+  btnI.style.fontWeight  = tab === "influencers" ? "700" : "600";
   if (tab === "products") loadProductReviews();
   if (tab === "stores"   && !_reviewsCache.length)     loadReviews();
+  if (tab === "influencers") loadInfluencerReviews();
+}
+
+// Influencer Reviews — UI structure only; no backend endpoint exists yet
+// (routers/public.py has no influencer review-submission API). This is
+// intentionally NOT a separate review system: it's built to call the same
+// kind of endpoint (`/admin/influencer-reviews`) the moment one exists,
+// following the exact loadProductReviews()/loadReviews() shape above.
+let _infReviewsCache = [];
+let _infReviewsFilter = '';
+async function loadInfluencerReviews() {
+  const tbody = document.getElementById("inf_reviews_table");
+  if (!tbody) return;
+  try {
+    const r = await fetch("/admin/influencer-reviews", { credentials:"include" });
+    if (r.status === 404) {
+      // Expected today — no such endpoint exists yet.
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>`;
+      return;
+    }
+    if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
+    if (!r.ok) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--danger)">Failed to load. Please refresh.</td></tr>`;
+      return;
+    }
+    _infReviewsCache = await r.json();
+    _renderInfluencerReviews(_infReviewsCache);
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>`;
+  }
+}
+function _renderInfluencerReviews(reviews) {
+  const tbody = document.getElementById("inf_reviews_table");
+  if (!tbody) return;
+  const q = (_infReviewsFilter || '').toLowerCase();
+  const rows = (reviews || []).filter(r => !q || (r.influencer_name||'').toLowerCase().includes(q));
+  // NOTE: never render a phone field here even if a future backend
+  // response happens to include one — this table only ever reads the
+  // fields listed below.
+  // BUG FIX (Round 4 — Bug 2): this used to render r.date (the raw naive
+  // UTC created_at string from the backend) directly, with no timezone
+  // conversion at all — same root cause as the Flutter "5h ago" bug, just
+  // surfacing here as an un-converted/unformatted timestamp instead. Reuse
+  // the same _toIST() helper already used everywhere else in this
+  // dashboard for a consistent, correctly-converted IST display.
+  tbody.innerHTML = rows.length ? rows.map(r => `<tr>
+      <td>${r.influencer_name || ''}</td>
+      <td>${r.user_name || ''}</td>
+      <td>⭐ ${r.rating ?? ''}</td>
+      <td>${r.text || ''}</td>
+      <td>${_toIST(r.date)}</td>
+      <td><button class="btn-sm-danger" onclick="deleteInfluencerReview('${r._id}')">Delete</button></td>
+    </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>`;
+}
+async function deleteInfluencerReview(id) {
+  if (!confirm('Delete this review?')) return;
+  try {
+    const r = await fetch(`/admin/influencer-reviews/${id}`, {method:'DELETE', credentials:'include'});
+    if (!r.ok) { alert('Could not delete review.'); return; }
+    loadInfluencerReviews();
+  } catch(e) { alert('Error: '+e.message); }
 }
 
 async function loadProductReviews() {
@@ -6359,7 +6869,13 @@ async function loadMerchantTxnsFull() {
     let invoices = invR.ok ? await invR.json() : [];
     let subs     = subR.ok ? await subR.json() : [];
 
-    // Add pending store subs as rows
+    // Add pending subs (store/banner/product AND influencer) as rows —
+    // use the actual type/item_label/name/phone fields the backend now
+    // sends per-entity-type (see list_subscriptions in admin.py), instead
+    // of hardcoding every pending row as Store. An influencer pending
+    // order already carries type:'influencer' from the backend; anything
+    // else falls back to the previous Store labeling for backward
+    // compatibility with subscription docs that predate this field.
     subs.forEach(s => {
       const total = parseFloat(s.total||0);
       if (s.status === 'pending') {
@@ -6367,11 +6883,13 @@ async function loadMerchantTxnsFull() {
           invoice_no: total===0 ? 'FREE' : 'PENDING',
           merchant_name: s.merchant_name||'',
           merchant_phone: s.merchant_phone||'',
-          item_label: `Store – ${s.plan||''}`,
-          type: 'store',
+          item_label: s.item_label || `Store – ${s.plan||''}`,
+          type: s.type || 'store',
           plan: s.plan||'',
           base_price: s.base_price??0,
-          gst: s.gst_amount??0,
+          discount_code: s.discount_code||'',
+          discount_amount: s.discount_amount??0,
+          gst: s.gst??0,
           total: total,
           created_at: s.created_at||'',
           _status: total===0?'free':'pending',
@@ -6738,11 +7256,7 @@ function renderAccountsPage() {
   }
 
   tbody.innerHTML = page.map(a => {
-    const roleBadges = (a.roles || []).map(r => {
-      const isM = r === 'merchant';
-      return `<span class="badge" style="background:${isM?'var(--primary)':'#5a7fb5'};color:#fff;font-size:10px;margin-right:2px;">
-        ${isM ? '🏪 Merchant' : '👤 User'}</span>`;
-    }).join('');
+    const roleBadges = roleBadgeHtml(a.roles);
     const pts   = (a.visit_pts || 0) + (a.pool_pts || 0);
     let stBg, stLbl, stCls;
     if (a.status === 'delete_requested') { stBg='#fff3cd'; stLbl='Delete Request'; stCls='badge-delete-requested'; }
@@ -6813,6 +7327,43 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// BUG FIX (Round 6 — Issue 1, "User role appearing multiple times"):
+// investigation found the accounts API already returns each role once (the
+// backend only ever writes roles via $addToSet, which is duplicate-proof) —
+// the actual bug is here: every place that rendered role badges used a
+// binary `r === 'merchant' ? Merchant : User` check, so ANY non-merchant
+// role — including the newer 'influencer' role — fell into the "User"
+// label. An account with roles ["user","influencer"] genuinely has two
+// DISTINCT, legitimate roles, but both rendered as "👤 User", which is
+// exactly what looked like a duplicate in the screenshot. Fixed by mapping
+// each known role to its own label instead of a two-way split, so distinct
+// roles are never conflated. dedupeRoles() is kept as a second, independent
+// safety net — it removes only exact-duplicate array entries (never a
+// distinct role) — purely defensive in case legacy dirty data (or a future
+// write path) ever does store a literal duplicate; it changes nothing for
+// the accounts in this bug report, whose roles were never actually
+// duplicated in the database.
+function dedupeRoles(roles) {
+  const seen = new Set();
+  const out = [];
+  for (const r of (roles || [])) {
+    if (!seen.has(r)) { seen.add(r); out.push(r); }
+  }
+  return out;
+}
+
+const ROLE_LABELS = {
+  merchant:   { emoji: '🏪', text: 'Merchant', bg: 'var(--primary)' },
+  user:       { emoji: '👤', text: 'User',     bg: '#5a7fb5' },
+  influencer: { emoji: '🌟', text: 'Influencer', bg: '#8e5fd6' },
+};
+function roleBadgeHtml(roles) {
+  return dedupeRoles(roles).map(r => {
+    const meta = ROLE_LABELS[r] || { emoji: '🔹', text: r ? (r.charAt(0).toUpperCase() + r.slice(1)) : 'Unknown', bg: '#7a8a99' };
+    return `<span class="badge me-1" style="background:${meta.bg};color:#fff;font-size:10px;margin-right:2px;">${meta.emoji} ${meta.text}</span>`;
+  }).join('');
+}
+
 let _acctDetailModal;
 async function openAccountDetail(accountId, name) {
   if (!_acctDetailModal) {
@@ -6834,7 +7385,7 @@ async function openAccountDetail(accountId, name) {
 }
 
 function renderAccountDetailHTML(d) {
-  const roles = (d.roles||[]).map(r=>`<span class="badge me-1" style="background:${r==='merchant'?'var(--primary)':'#5a7fb5'};color:#fff;">${r==='merchant'?'🏪 Merchant':'👤 User'}</span>`).join('');
+  const roles = roleBadgeHtml(d.roles);
   const visitPts  = d.visit_pts||0;
   const poolPts   = d.pool_pts||0;
   const totalPts  = visitPts + poolPts;
@@ -8477,7 +9028,7 @@ const RBAC_MODULES = [
   "Accounts","Stores","Products","Banners","Admin Banners","Popup Campaigns",
   "Payments","Gift Vouchers","Notifications","Categories","Pricing & GST",
   "Reviews","Discounts","Terms & Conditions","Policies",
-  "Social Media","Live Chat","Default Images","User Management"
+  "Social Media","Live Chat","Default Images","User Management","Influencers"
 ];
 const RBAC_ACTIONS = ["view","add","edit","delete","approve","export"];
 const RBAC_CITIES = ["Ballari","Bengaluru","Hyderabad","Hubli","Dharwad","Mysuru"];

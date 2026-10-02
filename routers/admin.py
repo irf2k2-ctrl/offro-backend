@@ -12,6 +12,81 @@ import time as _time
 _store_cache = {"data": None, "ts": 0.0}
 _STORE_CACHE_TTL = 15
 
+# BUG FIX (Round 6 — Issue 1, "User role appearing multiple times"):
+# every write path in this codebase already adds roles via MongoDB's
+# $addToSet (routers/users.py, routers/merchant_app.py, routers/admin.py),
+# which is duplicate-proof by construction — no code path found actually
+# stores a literal repeated value. The real cause of the reported "User,
+# User" was the admin dashboard template labeling every non-'merchant' role
+# (including the newer 'influencer' role) as "User", so a legitimate
+# ["user","influencer"] account rendered two "User" badges — fixed in
+# templates/admin_dashboard.html (roleBadgeHtml/ROLE_LABELS). This helper is
+# a second, independent, purely defensive layer: if any account's stored
+# roles array is ever found to contain an exact-duplicate value (whether
+# from data that predates the unified-accounts migration, or any future
+# bug), reading it here both returns the deduplicated list to the caller
+# AND self-heals the stored document — order-preserving, and it never
+# removes a distinct, legitimate role (user/merchant/influencer/etc all
+# survive untouched; only literal repeats of the same string collapse to one).
+def _dedupe_roles(acct: dict) -> list:
+    raw = acct.get("roles") or ["user"]
+    if not isinstance(raw, list):
+        raw = [str(raw)]
+    seen = set()
+    deduped = []
+    for r in raw:
+        if r not in seen:
+            seen.add(r)
+            deduped.append(r)
+    if len(deduped) != len(raw):
+        try:
+            db.accounts.update_one({"_id": acct["_id"]}, {"$set": {"roles": deduped}})
+        except Exception:
+            pass
+    return deduped
+
+
+# ROUND 7 — Issue 5 (scenario C): "can an account have an influencer profile
+# in db.influencers without 'influencer' in accounts.roles?"
+#
+# Investigation: db.influencers documents come from exactly two code paths.
+#   1. routers/users.py create_influencer_profile() (self-service) — the
+#      ONLY path that ever sets a doc's account_id. It writes influencer_id
+#      onto the account AND $addToSet's "influencer" into roles in the very
+#      same db.accounts.update_one({...}, {"$set":..., "$addToSet":...})
+#      call, with a compensating delete of the influencer doc if that update
+#      fails for any reason (see that function's own comments). So under
+#      every currently-reachable app code path, an account_id-linked
+#      influencer profile and the "influencer" role are created atomically
+#      together — this state cannot occur through the app today.
+#   2. routers/admin.py add_influencer() (admin-managed directory entry) —
+#      never sets account_id at all, so it has no relationship to any
+#      account/roles to begin with; it is not "an account's" profile.
+# Conclusion: scenario C cannot be produced by current or (as far as this
+# codebase's history shows) historical code — the linkage has always been
+# atomic. The only way it could exist is data edited outside the app
+# (a manual DB fix, an import script, etc.), which no code review can rule
+# out. _sync_influencer_role() below is a defensive, no-op-by-default safety
+# net for exactly that possibility: it NEVER blanket-adds the role — it only
+# adds it where an independently-found db.influencers document's own
+# account_id genuinely points back at this account (the same
+# defense-in-depth relationship check create_influencer_profile() itself
+# already performs "in case influencer_id was ever unset on the account
+# without removing the underlying profile"). An admin-directory entry (no
+# account_id) can never match this query, so it can never grant the role to
+# an unrelated account.
+def _sync_influencer_role(acct: dict, roles: list) -> list:
+    if "influencer" in roles:
+        return roles
+    inf = db.influencers.find_one({"account_id": str(acct["_id"])})
+    if not inf:
+        return roles
+    try:
+        db.accounts.update_one({"_id": acct["_id"]}, {"$addToSet": {"roles": "influencer"}})
+    except Exception:
+        pass
+    return roles + ["influencer"]
+
 
 import os as _cld_os, hashlib as _cld_hash, time as _cld_time
 import requests as _cld_req
@@ -41,6 +116,12 @@ def _cloudinary_upload(b64_or_url: str, folder: str = "offro") -> str:
         )
         if resp.status_code == 200:
             return resp.json().get("secure_url", b64_or_url)
+        # FIX: a non-200 response from Cloudinary (bad signature, invalid
+        # folder, quota, etc.) previously logged NOTHING at all — worse
+        # than the exception branch below, which at least prints something.
+        # This is purely additive logging — no return-value/behavior change
+        # for any existing caller (stores, categories, sliders, etc.).
+        print(f"[CDN] upload rejected: status={resp.status_code} body={resp.text[:300]}")
     except Exception as e:
         print(f"[CDN] upload failed: {e}")
     return b64_or_url
@@ -439,6 +520,27 @@ def _category_list():
 
 # ===================== PRICING & PLANS =====================
 
+def _influencer_subscription_block(doc: dict) -> dict:
+    """Reads the Influencer Subscription config out of the single db.pricing
+    document (same 'one config doc' pattern as gst_percent/plans/banner
+    pricing above — no separate collection). gst_amount/total are always
+    RECOMPUTED here from fee+gst_percent, never read back from storage, so
+    admin UI display and the actual charge (routers/users.py) can never
+    drift apart from a stale cached total."""
+    infsub = (doc or {}).get("influencer_subscription", {}) or {}
+    fee = float(infsub.get("fee", 0) or 0)
+    gst_percent = float(infsub.get("gst_percent", (doc or {}).get("gst_percent", 18)) or 0)
+    enabled = bool(infsub.get("enabled", False))
+    gst_amount = round(fee * gst_percent / 100, 2)
+    total = round(fee + gst_amount, 2)
+    return {
+        "fee": fee,
+        "gst_percent": gst_percent,
+        "gst_amount": gst_amount,
+        "total": total,
+        "enabled": enabled,
+    }
+
 @router.get("/pricing")
 def get_pricing(a=Depends(get_current_admin)):
     doc = db.pricing.find_one({}) or {"gst_percent": 18, "plans": []}
@@ -448,6 +550,7 @@ def get_pricing(a=Depends(get_current_admin)):
         "conversion_rate": doc.get("conversion_rate", 0.10),  # default ₹0.10 per point
         "min_withdraw_points": doc.get("min_withdraw_points", 200),
         "standard_product_limit": int(doc.get("standard_product_limit", 10)),
+        "influencer_subscription": _influencer_subscription_block(doc),
     }
 
 @router.put("/pricing")
@@ -461,6 +564,13 @@ def update_pricing(data: dict, a=Depends(get_current_admin)):
     if "conversion_rate" in data: update["conversion_rate"] = float(data["conversion_rate"])
     if "min_withdraw_points" in data: update["min_withdraw_points"] = int(data["min_withdraw_points"])
     if "standard_product_limit" in data: update["standard_product_limit"] = int(data["standard_product_limit"])
+    if "influencer_subscription" in data:
+        isub = data.get("influencer_subscription") or {}
+        update["influencer_subscription"] = {
+            "fee":         max(0.0, float(isub.get("fee", 0) or 0)),
+            "gst_percent": max(0.0, float(isub.get("gst_percent", 18) or 0)),
+            "enabled":     bool(isub.get("enabled", False)),
+        }
     if doc: db.pricing.update_one({"_id": doc["_id"]}, {"$set": update})
     else: db.pricing.insert_one(update)
     return {"message": "Pricing updated"}
@@ -539,9 +649,8 @@ def list_accounts(a=Depends(get_current_admin)):
     for acct in all_accounts:
         try:
             phone   = str(acct.get("phone") or "")
-            roles   = acct.get("roles") or ["user"]
-            if not isinstance(roles, list):
-                roles = [str(roles)]
+            roles   = _dedupe_roles(acct)
+            roles   = _sync_influencer_role(acct, roles)
             acct_id = str(acct["_id"])
             mid     = str(acct.get("merchant_id") or "")
 
@@ -723,7 +832,8 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
     phone      = acct.get("phone", "")
     mid        = acct.get("merchant_id", "")
     acct_id    = str(acct["_id"])
-    roles      = acct.get("roles", ["user"])
+    roles      = _dedupe_roles(acct)
+    roles      = _sync_influencer_role(acct, roles)
     is_merchant = "merchant" in roles
 
     store_count   = 0
@@ -1647,6 +1757,37 @@ def admin_stats(a=Depends(get_current_admin)):
 def list_subscriptions(a=Depends(get_current_admin)):
     result = []
     for s in db.subscriptions.find({**_city_filter(a)}).sort("created_at", -1):
+        fd = s.get("from_date"); ed = s.get("end_date")
+        if s.get("entity_type") == "influencer":
+            # Influencer pending orders have no merchant_id/store_id at all —
+            # looking those up (as the branch below does for Store/Product/
+            # Banner) would always miss and render "Unknown"/blank. Pull the
+            # real influencer's own name/phone instead, and tag the row so
+            # the dashboard classifies it as "Influencer", never defaulting
+            # to "Store" the way an untagged row would (see list_all_invoices
+            # for the paid-invoice half of this same fix).
+            infl = None
+            try:
+                infl = db.influencers.find_one({"_id": ObjectId(s.get("influencer_id",""))}, {"name":1,"phone":1})
+            except: pass
+            result.append({
+                "type":           "influencer",
+                "item_label":     "Influencer Subscription",
+                "merchant_name":  infl.get("name","") if infl else "",
+                "merchant_phone": infl.get("phone","") if infl else "",
+                "store_name":     "Influencer Subscription",
+                "plan":           "One-Time Subscription",
+                "base_price":     s.get("base_price", 0),
+                "discount_code":  s.get("discount_code",""),
+                "discount_amount":s.get("discount_amount", 0),
+                "total":          s.get("total", 0),
+                "gst":            s.get("gst_amount", 0),
+                "status":         s.get("status"),
+                "from_date":      fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
+                "end_date":       ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
+                "created_at":     (s["created_at"] + __import__("datetime").timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if s.get("created_at") else "",
+            })
+            continue
         merchant = None
         try:
             merchant = (db.accounts.find_one({"_id": ObjectId(s.get("merchant_id",""))}) or db.merchants.find_one({"_id": ObjectId(s.get("merchant_id",""))}))
@@ -1655,7 +1796,6 @@ def list_subscriptions(a=Depends(get_current_admin)):
         try:
             store_doc = db.stores.find_one({"_id": ObjectId(s.get("store_id",""))}, {"store_name":1}) or {}
         except: pass
-        fd = s.get("from_date"); ed = s.get("end_date")
         result.append({
             "merchant_name":  merchant.get("name") if merchant else "Unknown",
             "merchant_phone": merchant.get("phone") if merchant else "",
@@ -1737,7 +1877,7 @@ def save_social(body: dict, a=Depends(get_current_admin)):
 # ===================== DISCOUNT CODES =====================
 
 _DISCOUNT_TYPES  = {"VALUE", "PERCENTAGE"}
-_DISCOUNT_SCOPES = {"STORE", "BANNERS", "PRODUCTS", "ALL"}
+_DISCOUNT_SCOPES = {"STORE", "BANNERS", "PRODUCTS", "INFLUENCER", "ALL"}
 
 @router.get("/discounts")
 def list_discounts(a=Depends(get_current_admin)):
@@ -1770,7 +1910,7 @@ def create_discount(body: dict, a=Depends(get_current_admin)):
     if dtype not in _DISCOUNT_TYPES:
         raise HTTPException(400, "Type of Discount must be VALUE or PERCENTAGE")
     if applies_to not in _DISCOUNT_SCOPES:
-        raise HTTPException(400, "Map With must be one of STORE, BANNERS, PRODUCTS, ALL")
+        raise HTTPException(400, "Map With must be one of STORE, BANNERS, PRODUCTS, INFLUENCER, ALL")
     if dtype == "PERCENTAGE":
         if not (0 < value <= 100):
             raise HTTPException(400, "Percentage value must be between 1 and 100")
@@ -1809,7 +1949,7 @@ def update_discount(discount_id: str, body: dict, a=Depends(get_current_admin)):
     if "applies_to" in body:
         applies_to = str(body["applies_to"]).strip().upper()
         if applies_to not in _DISCOUNT_SCOPES:
-            raise HTTPException(400, "Map With must be one of STORE, BANNERS, PRODUCTS, ALL")
+            raise HTTPException(400, "Map With must be one of STORE, BANNERS, PRODUCTS, INFLUENCER, ALL")
         update["applies_to"] = applies_to
     if "value" in body:
         value = float(body["value"])
@@ -1841,6 +1981,267 @@ def update_discount(discount_id: str, body: dict, a=Depends(get_current_admin)):
 def delete_discount(discount_id: str, a=Depends(get_current_admin)):
     _check_perm(a, "Deals", "delete")
     db.discounts.delete_one({"_id": ObjectId(discount_id)})
+    return {"ok": True}
+
+# ===================== INFLUENCERS (Phase 1: Admin CRUD only) =====================
+# PRIVACY: `phone` is stored for future promotion-request functionality but is
+# never included in any response here — the admin list/get responses below
+# deliberately omit it, same discipline as the eventual public API will need.
+# No public-facing endpoint is added in this phase.
+
+def _influencer_row(d):
+    """Admin-facing influencer representation. Phone is intentionally
+    included here (admin-only view) but this shape must never be reused
+    for a public/merchant-facing endpoint."""
+    return {
+        "_id":          str(d["_id"]),
+        "name":         d.get("name", ""),
+        "state":        d.get("state", ""),
+        "city":         d.get("city", ""),
+        "category":     d.get("category", ""),
+        "categories":   _derive_influencer_categories(d),
+        "photo_url":    d.get("photo_url", ""),
+        "social":       d.get("social", {}) or {},
+        "rating":       d.get("rating", 0),
+        "review_count": d.get("review_count", 0),
+        "status":       d.get("status", "active"),
+        "phone":        d.get("phone", ""),
+        "created_at":   d["created_at"].strftime("%d %b %Y") if d.get("created_at") else "",
+        "updated_at":   d["updated_at"].strftime("%d %b %Y") if d.get("updated_at") else "",
+        # Influencer subscription/publish feature: absent on every record
+        # created before this feature (admin-created records, and any
+        # self-service profile created before this change) — defaulted here
+        # to PAID/published/enabled so existing profiles display exactly as
+        # "already published, no payment needed" rather than looking unpaid.
+        "payment_status":   d.get("payment_status", "PAID"),
+        "publish_status":   d.get("publish_status", "published"),
+        "is_active":        d.get("is_active", True),
+        "subscription_amount": d.get("subscription_amount", 0),
+        "gst_percent_paid":    d.get("gst_percent", 0),
+        "gst_amount":       d.get("gst_amount", 0),
+        "total_amount":     d.get("total_amount", 0),
+        "razorpay_order_id":   d.get("razorpay_order_id", ""),
+        "razorpay_payment_id": d.get("razorpay_payment_id", ""),
+        "paid_at":      d["paid_at"].strftime("%d %b %Y %I:%M %p") if d.get("paid_at") else "",
+    }
+
+def _validate_influencer_city(city: str) -> str:
+    """Validate against the existing db.cities collection (single source of
+    truth for city names — same pattern used for stores) and return the
+    CANONICAL name/casing as stored there, not whatever case the admin typed."""
+    city = (city or "").strip()
+    if not city:
+        raise HTTPException(400, "City is required")
+    existing = db.cities.find_one({"name": {"$regex": f"^{city}$", "$options": "i"}})
+    if not existing:
+        raise HTTPException(400, f"'{city}' is not a recognized city. Add it under Cities first.")
+    return existing["name"]
+
+def _normalize_influencer_categories(raw_categories, raw_category_str):
+    """Issue 3 (multi-category support): accepts either a new-style
+    `categories` list or the legacy single `category` string, and returns
+    (category_str, categories_list) always kept in sync — category_str is
+    ", ".join(categories_list), so every EXISTING reader that expects a
+    single string (admin dashboard JS, Flutter's public listing/profile/
+    share-card) keeps working completely unchanged, while `categories_list`
+    is the new canonical field for anything that wants real multi-select
+    (the C2 authenticated influencer profile form). One consistent
+    representation is always written to the document; nothing reads a
+    stale/inconsistent pairing of the two fields."""
+    if isinstance(raw_categories, list) and raw_categories:
+        cats = [str(c).strip() for c in raw_categories if str(c).strip()]
+    elif raw_category_str:
+        cats = [str(raw_category_str).strip()]
+    else:
+        cats = []
+    return ", ".join(cats), cats
+
+def _derive_influencer_categories(d):
+    """Read-path helper: for a document written before this change (only
+    has the legacy `category` string, no `categories` list at all), derive
+    a sensible categories list on the fly rather than requiring a
+    migration. Existing records are never modified just by being read."""
+    if isinstance(d.get("categories"), list) and d["categories"]:
+        return d["categories"]
+    legacy = str(d.get("category", "") or "").strip()
+    return [legacy] if legacy else []
+
+def _resolve_influencer_photo(raw: str, existing_url: str = "") -> str:
+    """Same idiom used throughout admin.py for other entities' photos:
+    if it's already a URL, keep it as-is (no re-upload); if it's new
+    base64 data, upload it; if empty, keep whatever existed before.
+
+    FIX (Item 2 — photos not appearing): this previously fell back to
+    `existing_url` SILENTLY whenever the Cloudinary upload failed, so a
+    save would report success while actually storing no photo at all —
+    with nothing anywhere (server logs the admin can see, or the API
+    response) indicating a photo was even attempted. That silent-fallback
+    is the confirmed, reproducible bug: every other layer (storage field,
+    both API responses, Flutter rendering) reads/returns whatever is
+    actually in `photo_url` correctly — there was simply nothing valid
+    there to read. Now a genuine upload failure raises a clear error
+    instead, so it can be caught, reported here, and reproduced with
+    real evidence in Railway logs.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return existing_url
+    if raw.startswith("http"):
+        return raw
+    cdn = _cloudinary_upload(raw, folder="offro/influencers")
+    if cdn and cdn.startswith("http"):
+        return cdn
+    raise HTTPException(502, "Photo upload to Cloudinary failed — the influencer was not saved with a new photo. Please try again or use a smaller image.")
+
+@router.get("/influencers")
+def list_influencers(a=Depends(get_current_admin)):
+    query = _city_filter(a)
+    docs = list(db.influencers.find(query).sort("created_at", -1))
+    return [_influencer_row(d) for d in docs]
+
+@router.post("/influencers")
+def create_influencer(body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Influencers", "add")
+    name = (body.get("name", "")).strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+    city = _validate_influencer_city(body.get("city", ""))
+    category_str, categories_list = _normalize_influencer_categories(body.get("categories"), body.get("category", ""))
+    status = str(body.get("status", "active")).strip().lower()
+    if status not in ("active", "inactive"):
+        raise HTTPException(400, "Status must be 'active' or 'inactive'")
+    social_in = body.get("social") or {}
+    social = {
+        "instagram": str(social_in.get("instagram", "")).strip(),
+        "facebook":  str(social_in.get("facebook", "")).strip(),
+        "youtube":   str(social_in.get("youtube", "")).strip(),
+    }
+    photo_url = _resolve_influencer_photo(body.get("photo_url", ""))
+    now = datetime.utcnow()
+
+    # FIX (duplicate submissions): backend-level safety net behind the
+    # frontend's disable-button guard. If an influencer with the exact same
+    # name+city was created by ANY admin in the last 10 seconds, treat this
+    # as a duplicate double-submit (e.g. a slow network + repeated click
+    # racing past the disabled button) and return that existing record
+    # instead of creating a second one. The window is intentionally short —
+    # long enough to absorb a rapid double-click, far too short to ever
+    # block two genuinely different admins legitimately adding two
+    # different influencers who simply happen to share a name and city.
+    _dedup_window_start = now - timedelta(seconds=10)
+    _recent_dup = db.influencers.find_one({
+        "name": {"$regex": f"^{name}$", "$options": "i"},
+        "city": city,
+        "created_at": {"$gte": _dedup_window_start},
+    })
+    if _recent_dup:
+        return {"ok": True, "_id": str(_recent_dup["_id"])}
+
+    doc = {
+        "name": name,
+        "state": (body.get("state", "") or "").strip(),
+        "city": city,
+        "category": category_str,
+        "categories": categories_list,
+        "photo_url": photo_url,
+        "social": social,
+        "rating": 0,
+        "review_count": 0,
+        "status": status,
+        "phone": (body.get("phone", "")).strip(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    res = db.influencers.insert_one(doc)
+    return {"ok": True, "_id": str(res.inserted_id)}
+
+@router.put("/influencers/{influencer_id}")
+def update_influencer(influencer_id: str, body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Influencers", "edit")
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        raise HTTPException(400, "Invalid influencer id")
+    existing = db.influencers.find_one({"_id": oid})
+    if not existing:
+        raise HTTPException(404, "Influencer not found")
+    is_super_admin = a.get("role_name") == "Super Admin"
+    assigned = a.get("assigned_cities", [])
+    if not is_super_admin:
+        if "*" not in assigned and existing.get("city") not in assigned:
+            raise HTTPException(403, "Not permitted to edit influencers outside your assigned cities")
+
+    update = {}
+    if "name" in body:
+        name = (body["name"] or "").strip()
+        if not name:
+            raise HTTPException(400, "Name cannot be empty")
+        update["name"] = name
+    if "state" in body:
+        update["state"] = (body["state"] or "").strip()
+    if "city" in body:
+        new_city = _validate_influencer_city(body["city"])
+        # FIX: validating that the city exists is not the same as validating
+        # that THIS admin is allowed to move an influencer there. Without
+        # this check, a city-scoped admin who legitimately owns an
+        # influencer (per the check above) could move it to any other real
+        # city, escaping their assigned_cities scope. Super Admin is
+        # unaffected, matching the existing check above exactly.
+        if not is_super_admin and "*" not in assigned and new_city not in assigned:
+            raise HTTPException(403, "Not permitted to move an influencer to a city outside your assigned cities")
+        update["city"] = new_city
+    if "category" in body or "categories" in body:
+        category_str, categories_list = _normalize_influencer_categories(body.get("categories"), body.get("category", ""))
+        update["category"] = category_str
+        update["categories"] = categories_list
+    if "status" in body:
+        status = str(body["status"]).strip().lower()
+        if status not in ("active", "inactive"):
+            raise HTTPException(400, "Status must be 'active' or 'inactive'")
+        update["status"] = status
+    if "phone" in body:
+        update["phone"] = (body["phone"] or "").strip()
+    if "social" in body:
+        social_in = body.get("social") or {}
+        update["social"] = {
+            "instagram": str(social_in.get("instagram", "")).strip(),
+            "facebook":  str(social_in.get("facebook", "")).strip(),
+            "youtube":   str(social_in.get("youtube", "")).strip(),
+        }
+    if "photo_url" in body:
+        update["photo_url"] = _resolve_influencer_photo(body["photo_url"], existing.get("photo_url", ""))
+    if not update:
+        raise HTTPException(400, "Nothing to update")
+    update["updated_at"] = datetime.utcnow()
+    db.influencers.update_one({"_id": oid}, {"$set": update})
+    return {"ok": True}
+
+@router.delete("/influencers/{influencer_id}")
+def delete_influencer(influencer_id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Influencers", "delete")
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        raise HTTPException(400, "Invalid influencer id")
+    existing = db.influencers.find_one({"_id": oid})
+    if not existing:
+        raise HTTPException(404, "Influencer not found")
+    if a.get("role_name") != "Super Admin":
+        assigned = a.get("assigned_cities", [])
+        if "*" not in assigned and existing.get("city") not in assigned:
+            raise HTTPException(403, "Not permitted to delete influencers outside your assigned cities")
+    db.influencers.delete_one({"_id": oid})
+    # Keep accounts.influencer_id from ever pointing at a now-deleted
+    # document — same "delete permanently ends the profile/payment
+    # relationship" rule as the self-service DELETE in routers/users.py.
+    # A subsequent self-service profile creation for this account will
+    # correctly be treated as brand new (fresh payment_status=UNPAID).
+    account_id = existing.get("account_id")
+    if account_id:
+        db.accounts.update_one(
+            {"_id": ObjectId(account_id), "influencer_id": influencer_id},
+            {"$unset": {"influencer_id": ""}},
+        )
     return {"ok": True}
 
 # ===================== ABOUT US =====================
@@ -2464,10 +2865,26 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         # VISIBLE notification with background delivery — NOT throttled.
         # content-available:1 is required for the FCM plugin to fire
         # onMessage (foreground) via didReceiveRemoteNotification:fetchCompletionHandler:
+        #
+        # BUG FIX (badge stuck / wrong count): this used to hardcode
+        # "badge": 1 on every single push. Since APNs applies whatever
+        # absolute number the payload carries the instant a push is
+        # delivered — even while the app is backgrounded, with no app code
+        # involved — every notification reset the visible badge to exactly
+        # 1, regardless of how many notifications were already unread, and
+        # nothing ever set it back to 0 on read (the OS badge is a separate
+        # system counter from anything stored in the app). There is no
+        # server-side per-device unread-count tracking in this codebase, so
+        # the backend cannot know the correct absolute number to send here.
+        # The badge key is intentionally omitted — the app now owns the
+        # real, live badge count itself (see main.dart's `_badgeChannel`/
+        # `setBadge`/`clearBadge` calls, which read the same
+        # Prefs.getUnreadCount() already used for the in-app bell badge) and
+        # asserts the true count via the existing native method channel on
+        # every receive/read/app-restart, instead of relying on this payload.
         _aps = {
             "alert": {"title": title, "body": body},
             "sound": "default",
-            "badge": 1,
             "mutable-content": 1,
             "content-available": 1,
         }
@@ -3763,8 +4180,16 @@ def list_all_invoices(a=Depends(get_current_admin)):
         fd = inv.get("from_date"); ed = inv.get("end_date")
         base = float(inv.get("base_price", inv.get("original_amount", 0)) or 0)
         gst  = float(inv.get("gst", inv.get("gst_amount", 0)) or 0)
-        tot  = float(inv.get("total", inv.get("amount", 0)) or 0)
-        if tot == 0 and base > 0: tot = base + gst
+        # BUG FIX (payment transaction amounts): this used to be
+        # `float(inv.get("total", ...) or 0)` followed by
+        # `if tot == 0 and base > 0: tot = base + gst`, which silently
+        # overwrote a LEGITIMATE ₹0 total (a fully-discounted/100%-off
+        # transaction) back up to base+gst — making a free transaction
+        # display as if no discount had been applied at all. `.get()`'s
+        # default only fires when the key is truly ABSENT, never when it's
+        # present-but-zero, so a real stored 0 is now trusted as-is; only a
+        # genuinely missing field falls back to `inv.get("amount", 0)`.
+        tot  = float(inv.get("total", inv.get("amount", 0)))
         result.append({
             "invoice_no":      inv.get("invoice_no",""),
             "merchant_name":   inv.get("merchant_name",""),
@@ -3773,10 +4198,14 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "item_label":      inv.get("item_label") or f"Store – {inv.get('plan','')}",
             "store_name":      inv.get("store_name",""),
             "base_price":      base,
-            "original_amount": float(inv.get("original_amount", base) or base),
+            "original_amount": float(inv.get("original_amount", base)),
             "discount_code":   inv.get("discount_code",""),
             "discount_amount": float(inv.get("discount_amount",0) or 0),
-            "final_amount":    float(inv.get("final_amount", base) or base),
+            # Same fix as `tot` above — `or base` was collapsing a real,
+            # correctly-stored ₹0 final_amount (100%/full discount) back to
+            # the undiscounted base price. Only a MISSING key falls back to
+            # `base` now; a stored 0 stays 0.
+            "final_amount":    float(inv.get("final_amount", base)),
             "gst":             gst,
             "total":           tot,
             "plan":            inv.get("plan",""),
@@ -3793,8 +4222,10 @@ def list_all_invoices(a=Depends(get_current_admin)):
         if ino: seen_invoice_nos.add(ino)
         base = float(b.get("base_price",0) or 0)
         gst  = float(b.get("gst_amount", b.get("gst",0)) or 0)
-        tot  = float(b.get("total",0) or 0)
-        if tot == 0 and base > 0: tot = round(base + gst, 2)
+        # Same zero-collapse fix as the invoices block above — trust a
+        # stored ₹0 total/final_amount (fully-discounted banner) instead of
+        # forcing it back up to base+gst.
+        tot  = float(b.get("total",0))
         result.append({
             "invoice_no":      ino,
             "merchant_name":   b.get("merchant_name",""),
@@ -3803,10 +4234,10 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "item_label":      f"Banner – {b.get('duration_days', b.get('duration',30))} Days",
             "store_name":      b.get("title",""),
             "base_price":      base,
-            "original_amount": float(b.get("original_amount", base) or base),
+            "original_amount": float(b.get("original_amount", base)),
             "discount_code":   b.get("discount_code",""),
             "discount_amount": float(b.get("discount_amount",0) or 0),
-            "final_amount":    float(b.get("final_amount", base) or base),
+            "final_amount":    float(b.get("final_amount", base)),
             "gst":             gst,
             "total":           tot,
             "plan":            f"{b.get('from_date','')} → {b.get('end_date','')}",
@@ -3823,8 +4254,8 @@ def list_all_invoices(a=Depends(get_current_admin)):
         if ino: seen_invoice_nos.add(ino)
         base = float(v.get("base_price",0) or 0)
         gst  = float(v.get("gst_amount", v.get("gst",0)) or 0)
-        tot  = float(v.get("total",0) or 0)
-        if tot == 0 and base > 0: tot = round(base + gst, 2)
+        # Same zero-collapse fix as the invoices block above.
+        tot  = float(v.get("total",0))
         result.append({
             "invoice_no":      ino,
             "merchant_name":   v.get("merchant_name",""),
@@ -3833,10 +4264,10 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "item_label":      f"Discover Product – {v.get('duration_days', v.get('duration',30))} Days",
             "store_name":      v.get("title",""),
             "base_price":      base,
-            "original_amount": float(v.get("original_amount", base) or base),
+            "original_amount": float(v.get("original_amount", base)),
             "discount_code":   v.get("discount_code",""),
             "discount_amount": float(v.get("discount_amount",0) or 0),
-            "final_amount":    float(v.get("final_amount", base) or base),
+            "final_amount":    float(v.get("final_amount", base)),
             "gst":             gst,
             "total":           tot,
             "plan":            f"{v.get('from_date','')} → {v.get('end_date','')}",
@@ -4862,3 +5293,86 @@ def delete_product_review(review_id: str, a=Depends(get_current_admin)):
     except Exception:
         raise HTTPException(400, "Invalid review ID")
     return {"ok": True}
+
+
+# ===================== INFLUENCER REVIEWS (Item 4) =====================
+# Same shape as list_product_reviews above — resolves the referenced
+# entity's name so the dashboard doesn't show a raw ObjectId, and follows
+# the same visibility/delete moderation pattern. Uses the "Influencers"
+# permission module (not "Reports") for consistency with every other
+# influencer admin endpoint in this file.
+
+@router.get("/influencer-reviews")
+def list_influencer_reviews(a=Depends(get_current_admin)):
+    """Admin: list all influencer reviews across all influencers."""
+    reviews = list(db.influencer_reviews.find().sort("created_at", -1))
+
+    iids = {r.get("influencer_id") for r in reviews if r.get("influencer_id")}
+    ioids = []
+    for iid in iids:
+        try:
+            ioids.append(ObjectId(iid))
+        except Exception:
+            pass
+    influencer_names = {}
+    if ioids:
+        for inf in db.influencers.find({"_id": {"$in": ioids}}, {"name": 1}):
+            influencer_names[str(inf["_id"])] = inf.get("name", "")
+
+    from routers.public import _normalize_iso_utc
+    for r in reviews:
+        r["_id"] = str(r["_id"])
+        r["influencer_name"] = influencer_names.get(r.get("influencer_id", ""), "")
+        # Match the field names admin_dashboard.html's _renderInfluencerReviews
+        # already expects (date display, not a raw ISO string). Normalized to
+        # an explicit-UTC timestamp (Round 4 — Bug 2 fix) so the dashboard's
+        # _toIST() converts it correctly regardless of whether this record
+        # predates the fix.
+        r["date"] = _normalize_iso_utc(r.get("created_at", ""))
+        r["text"] = r.get("text", "")
+        r["user_name"] = r.get("user_name", "")
+    return reviews
+
+@router.delete("/influencer-reviews/{review_id}")
+def delete_influencer_review(review_id: str, a=Depends(get_current_admin)):
+    """Admin: delete an influencer review, then recompute that influencer's
+    rating/review_count from whatever reviews remain.
+
+    FIX (item 3): this used to delete the review document only — the
+    influencer's rating/review_count were left exactly as they were
+    computed at the time of the LAST submission, so a deleted review still
+    counted toward the displayed aggregate everywhere (Flutter, admin list)
+    even though it no longer existed. Now the aggregate is recomputed the
+    same way submit_influencer_review computes it (simple average over
+    db.influencer_reviews), including the case where the deleted review was
+    the influencer's only one — that correctly resets rating/review_count
+    to 0 rather than leaving a stale non-zero value with nothing behind it.
+    """
+    _check_perm(a, "Influencers", "delete")
+    try:
+        oid = ObjectId(review_id)
+    except Exception:
+        raise HTTPException(400, "Invalid review ID")
+
+    review = db.influencer_reviews.find_one({"_id": oid})
+    if not review:
+        raise HTTPException(404, "Influencer review not found")
+    influencer_id = review.get("influencer_id", "")
+
+    db.influencer_reviews.delete_one({"_id": oid})
+
+    # Recompute from whatever remains, then update the influencer doc — if
+    # the influencer_id doesn't resolve to a real influencer anymore (e.g.
+    # it was itself deleted), skip the aggregate update cleanly rather than
+    # raising, since the review deletion itself already succeeded.
+    try:
+        inf_oid = ObjectId(influencer_id)
+    except Exception:
+        return {"ok": True}
+    remaining = list(db.influencer_reviews.find({"influencer_id": influencer_id}, {"rating": 1}))
+    new_rating = round(sum(r["rating"] for r in remaining) / len(remaining), 1) if remaining else 0
+    db.influencers.update_one(
+        {"_id": inf_oid},
+        {"$set": {"rating": new_rating, "review_count": len(remaining)}},
+    )
+    return {"ok": True, "rating": new_rating, "review_count": len(remaining)}

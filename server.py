@@ -439,6 +439,64 @@ def _ensure_indexes():
             partialFilterExpression={"approval_status": "pending"},
             background=True,
         )
+        # Influencers — city+status lookup (Home Screen city query), category filter
+        db.influencers.create_index(
+            [("city", 1), ("status", 1)],
+            name="influencers_city_status",
+            background=True,
+        )
+        db.influencers.create_index([("category", 1)], name="influencers_category", background=True)
+        # One-influencer-per-account enforcement (works on a standalone
+        # deployment, no transaction/replica-set needed): a sparse unique
+        # index on account_id. Sparse means documents where account_id
+        # doesn't exist at all (every admin-created influencer — confirmed
+        # via inspection that create_influencer()/update_influencer() never
+        # set this field) are excluded from the uniqueness constraint
+        # entirely, so this cannot affect existing/admin-created records.
+        # Only C1's self-service create/update ever sets account_id, and
+        # for those, MongoDB itself now guarantees at most one document per
+        # account_id, atomically, even under concurrent requests.
+        db.influencers.create_index(
+            [("account_id", 1)],
+            name="influencers_account_id_unique",
+            unique=True,
+            sparse=True,
+            background=True,
+        )
+        # Influencer subscription/publish feature: admin listing/public
+        # filtering both need to query by these new (optional, backward-
+        # compatible) fields — non-unique, sparse so legacy documents that
+        # never set them are simply excluded from the index, not indexed
+        # as null.
+        db.influencers.create_index(
+            [("payment_status", 1)],
+            name="influencers_payment_status",
+            sparse=True,
+            background=True,
+        )
+        db.influencers.create_index(
+            [("publish_status", 1)],
+            name="influencers_publish_status",
+            sparse=True,
+            background=True,
+        )
+        # Generalized payment/order lookup for any entity_type (store or
+        # influencer) — added for the influencer subscription feature but
+        # written so it also covers existing store subscriptions/invoices
+        # once/if they adopt entity_type; sparse so today's store-only
+        # documents (no entity_type field yet) are unaffected.
+        db.subscriptions.create_index(
+            [("entity_type", 1), ("influencer_id", 1)],
+            name="subscriptions_entity_influencer",
+            sparse=True,
+            background=True,
+        )
+        db.invoices.create_index(
+            [("entity_type", 1), ("influencer_id", 1)],
+            name="invoices_entity_influencer",
+            sparse=True,
+            background=True,
+        )
         print("✅ MongoDB indexes ensured")
     except Exception as e:
         print(f"⚠️  Index creation warning: {e}")

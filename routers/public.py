@@ -23,13 +23,55 @@ def _safe_end_date(p):
     # 'DD Mon YYYY' or other format — return as-is
     return s
 
+# ── Timestamp helpers (Round 4 — Bug 2 fix) ──────────────────────────────
+# Root cause of "review shows 5h ago instead of just now": created_at was
+# written as datetime.utcnow().isoformat() with NO timezone suffix. That IS
+# genuinely UTC data, but the naked string is ambiguous to a client parser —
+# Dart's DateTime.parse() treats a timezone-less ISO string as LOCAL time
+# instead of UTC, silently shifting the parsed instant by the device's own
+# UTC offset. For IST (UTC+5:30) a review created moments ago gets parsed
+# as if it happened 5.5 hours ago — exactly the reported symptom. The fix
+# is to always emit an explicit-UTC ('Z'-suffixed) timestamp from the API,
+# for both new writes (_iso_utc_now) and old, already-stored naive values
+# (_normalize_iso_utc, applied only at READ/serialization time — the
+# database itself is never rewritten).
+import re as _ts_re
+_TZ_SUFFIX_RE = _ts_re.compile(r"(Z|[+-]\d{2}:?\d{2})$")
+
+def _iso_utc_now():
+    """Use for any NEW created_at/updated_at timestamp that will be read
+    back and displayed to a user (review timestamps, etc.) — an explicit,
+    unambiguous UTC ISO-8601 string."""
+    from datetime import datetime as _dt
+    return _dt.utcnow().isoformat() + "Z"
+
+def _normalize_iso_utc(ts):
+    """Make an ISO timestamp read back from the database unambiguous before
+    it's returned in an API response — appends 'Z' only if the stored value
+    has no timezone marker at all (historical naive-UTC data). A value that
+    already carries an explicit offset (new data, or anything already
+    correct) is returned unchanged."""
+    if not ts:
+        return ts
+    s = str(ts)
+    if _TZ_SUFFIX_RE.search(s):
+        return s
+    return s + "Z"
+
 # =================== PUBLIC STORES LIST ===================
 @router.get("/stores")
 def get_stores(city: str = None, category: str = None):
     """Public endpoint - Flutter app fetches this"""
     query = {"status": "active"}
     if city:
-        query["city"] = {"$regex": city, "$options": "i"}
+        # FIX: escape the city string before using it in $regex — city comes
+        # from live GPS reverse-geocoding on the client and is not curated
+        # like a picked value, so it can contain regex-special characters
+        # (parentheses, periods, etc.) that would otherwise break the query
+        # or raise an unhandled error. Mirrors the same protection already
+        # applied to `category` below.
+        import re as _re
+        query["city"] = {"$regex": _re.escape(city.strip()), "$options": "i"}
     if category and category.strip() and category.strip() != "All":
         # Flexible case-insensitive contains match:
         # "Restaurant" matches "Restaurant", "Restaurants", "Indian Restaurant", "Restaurant / Bar"
@@ -179,6 +221,10 @@ def get_store(store_id: str):
         "description": d.get("description"),
         "start_date":  d.get("start_date"),
         "end_date":    d.get("end_date"),
+        # Item 3: surface the deal's uploaded image so the store card can
+        # show it (falls back to "" for older deals created before this
+        # field existed — the store card treats it as optional).
+        "image_url":   d.get("image_url", ""),
     } for d in deals]
 
     # Products for this store — from merchant_vouchers + gift_vouchers (active/non-expired only)
@@ -199,9 +245,22 @@ def get_store(store_id: str):
             return False
 
     def _prod_img(p):
+        # ROUND 11 FIX (Task 1): this previously only accepted values
+        # starting with "http", silently dropping any image stored as a
+        # raw base64 data URI (data:image/...;base64,...). merchant_app.py's
+        # _cloudinary_upload() passes base64 through UNCHANGED whenever
+        # Cloudinary isn't configured or the upload call fails, so many
+        # merchant_vouchers/gift_vouchers docs legitimately have a valid
+        # base64 image under logo_url/logo/image — this filter zeroed it
+        # out before it ever reached Flutter, leaving "logo_url": "" and a
+        # blank product-card image even though name/tagline/discount/price
+        # all rendered fine. `_resolve_img()` below (used for the equivalent
+        # product/deal image lookups elsewhere in this same file) already
+        # accepts both "http" and "data:" — this brings _prod_img in line
+        # with that existing, working pattern instead of inventing a new one.
         for k in ["logo_url","logo_thumb","image_url","logo","image"]:
             v = str(p.get(k,"") or "")
-            if v.startswith("http"): return v
+            if v.startswith("http") or v.startswith("data:"): return v
         return ""
 
     # 1. merchant_vouchers — approved, not expired, SCOPED TO THIS STORE
@@ -321,6 +380,203 @@ def get_store(store_id: str):
         "deals":        deals_list,
         "products":     products_list,
     }
+
+
+# =================== INFLUENCERS (Phase 2: public, read-only) ===================
+# PRIVACY: `phone` is never included in this response shape — the admin-only
+# shape (with phone) lives exclusively in routers/admin.py and is never
+# reused here. Only active influencers are ever returned; inactive/deleted
+# influencers and any city with no active influencers correctly return [],
+# never another city's data (no fallback of any kind).
+
+def _public_influencer_row(d):
+    from routers.admin import _derive_influencer_categories
+    return {
+        "_id":          str(d["_id"]),
+        "name":         d.get("name", ""),
+        "city":         d.get("city", ""),
+        "category":     d.get("category", ""),
+        "categories":   _derive_influencer_categories(d),
+        "photo_url":    d.get("photo_url", ""),
+        "social":       d.get("social", {}) or {},
+        "bio":          d.get("bio", ""),
+        "rating":       d.get("rating", 0),
+        "review_count": d.get("review_count", 0),
+    }
+
+def _influencer_public_visibility_filter() -> dict:
+    """Publish/payment gate for the public directory (Influencer
+    Subscription Fee + Payment + Publish feature). Deliberately additive to
+    the existing `status` field, never a replacement for it:
+      - `status` stays exactly what it always was — admin
+        moderation/visibility (untouched by this feature).
+      - `publish_status` is the NEW, separate payment-driven gate. A
+        document that never went through this feature at all has no
+        publish_status field — per the approved backward-compatibility
+        rule, that means "treat as already published", so it must match
+        here too (missing OR "published").
+      - `is_active` is the self-service enable/disable toggle, independent
+        of both of the above; missing OR True means visible.
+    All three must hold for a profile to appear/resolve publicly."""
+    return {
+        "$and": [
+            {"$or": [{"publish_status": {"$exists": False}}, {"publish_status": "published"}]},
+            {"$or": [{"is_active": {"$exists": False}}, {"is_active": True}]},
+        ]
+    }
+
+@router.get("/influencers")
+def get_influencers_public(city: str = None):
+    """Public endpoint — Home Screen 'City Influencers' section.
+    Same city-filter convention as /stores above (escaped regex, case-
+    insensitive). Only status=active influencers are ever returned."""
+    query = {"status": "active", **_influencer_public_visibility_filter()}
+    if city and city.strip():
+        import re as _re
+        query["city"] = {"$regex": _re.escape(city.strip()), "$options": "i"}
+    docs = list(db.influencers.find(query).sort("created_at", -1))
+    return [_public_influencer_row(d) for d in docs]
+
+@router.get("/influencers/{influencer_id}")
+def get_influencer_public(influencer_id: str):
+    """Public influencer profile. Returns 404 for a missing, inactive,
+    unpublished (payment not yet completed), or self-disabled influencer —
+    none of these are publicly viewable at all, not merely hidden from the
+    list."""
+    from fastapi import HTTPException
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        raise HTTPException(404, "Influencer not found")
+    query = {"_id": oid, "status": "active", **_influencer_public_visibility_filter()}
+    d = db.influencers.find_one(query)
+    if not d:
+        raise HTTPException(404, "Influencer not found")
+    # Real "Profile Views" counter for the owner's own home/profile screen
+    # stats section — incremented on every genuine public single-profile
+    # view (mirrors the existing store view_count concept). Best-effort:
+    # a failed increment never blocks the actual profile response.
+    try:
+        db.influencers.update_one({"_id": oid}, {"$inc": {"view_count": 1}})
+    except Exception:
+        pass
+    return _public_influencer_row(d)
+
+
+# =================== INFLUENCER REVIEWS (Item 4: real persistence) ===================
+# Follows the exact same pattern as submit_product_review/get_my_product_review
+# above — one review per (influencer_id, user_id) via upsert, aggregate
+# recomputed from db.influencer_reviews and written onto the influencer doc.
+# Uses the SAME _get_user_optional() helper (already fixed to check both
+# db.accounts and the legacy db.users collection) — reusing it means this
+# never regresses into the exact "review disappears on reopen" bug that
+# helper's own fix comment describes for products, since an accounts-based
+# login (the primary login path today) is already correctly recognized.
+
+@router.get("/influencers/{influencer_id}/reviews")
+def get_influencer_reviews(influencer_id: str, limit: int = 10, skip: int = 0):
+    """Public: paginated reviews for an influencer.
+
+    FIX (items 1 & 2): this used to (a) return the raw MongoDB review
+    document — including user_id, a private/internal field never meant to
+    be public — and (b) never checked whether the influencer itself exists
+    or is active, so reviews for an inactive/deleted influencer were still
+    publicly fetchable even though the influencer's own profile (404 via
+    get_influencer_public above) was correctly hidden. Both are fixed here:
+    the influencer is validated the exact same way get_influencer_public
+    does (same 404 on invalid/missing/inactive), and only an explicit,
+    public-safe field list is ever returned per review.
+    """
+    from fastapi import HTTPException
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        raise HTTPException(404, "Influencer not found")
+    influencer = db.influencers.find_one({"_id": oid, "status": "active"})
+    if not influencer:
+        raise HTTPException(404, "Influencer not found")
+
+    total = db.influencer_reviews.count_documents({"influencer_id": influencer_id})
+    cursor = (
+        db.influencer_reviews.find({"influencer_id": influencer_id})
+        .sort("created_at", -1).skip(skip).limit(limit)
+    )
+    reviews = [
+        {
+            "_id":           str(r["_id"]),
+            "influencer_id": r.get("influencer_id", influencer_id),
+            "user_name":     r.get("user_name", ""),
+            "rating":        r.get("rating", 0),
+            "text":          r.get("text", ""),
+            "created_at":    _normalize_iso_utc(r.get("created_at", "")),
+        }
+        for r in cursor
+    ]
+    return {"reviews": reviews, "total": total}
+
+@router.post("/influencers/{influencer_id}/review")
+def submit_influencer_review(influencer_id: str, data: dict, request: _Req):
+    """Authenticated: submit or update an influencer review (one per user)."""
+    from fastapi import HTTPException as _HTTPEx
+    try:
+        oid = ObjectId(influencer_id)
+    except Exception:
+        raise _HTTPEx(400, "Invalid influencer id")
+    influencer = db.influencers.find_one({"_id": oid, "status": "active"})
+    if not influencer:
+        raise _HTTPEx(404, "Influencer not found")
+
+    rating = float(data.get("rating", 0))
+    text   = (data.get("text", "") or "").strip()
+    if not (1 <= rating <= 5):
+        raise _HTTPEx(400, "Rating must be 1–5")
+    if len(text) < 3:
+        raise _HTTPEx(400, "Review text too short (min 3 chars)")
+
+    user = _get_user_optional(request)
+    if not user:
+        raise _HTTPEx(401, "Session expired")
+    user_id   = str(user["_id"])
+    user_name = (user.get("name") or user.get("full_name") or "").strip() or "Anonymous"
+
+    db.influencer_reviews.update_one(
+        {"influencer_id": influencer_id, "user_id": user_id},
+        {"$set": {
+            "influencer_id": influencer_id,
+            "user_id":       user_id,
+            "user_name":     user_name,
+            "rating":        rating,
+            "text":          text,
+            "updated_at":    _iso_utc_now(),
+        }, "$setOnInsert": {"created_at": _iso_utc_now()}},
+        upsert=True,
+    )
+
+    all_revs = list(db.influencer_reviews.find({"influencer_id": influencer_id}, {"rating": 1}))
+    avg = round(sum(r["rating"] for r in all_revs) / len(all_revs), 1) if all_revs else rating
+    db.influencers.update_one({"_id": oid}, {"$set": {"rating": avg, "review_count": len(all_revs)}})
+    return {"ok": True, "message": "Review submitted!", "avg_rating": avg, "review_count": len(all_revs)}
+
+@router.get("/influencers/{influencer_id}/my-review")
+def get_my_influencer_review(influencer_id: str, request: _Req):
+    """Authenticated: the current user's own review for this influencer, if any."""
+    user = _get_user_optional(request)
+    if not user:
+        return {}
+    user_id = str(user["_id"])
+    try:
+        ObjectId(influencer_id)
+    except Exception:
+        return {}
+    rev = db.influencer_reviews.find_one({"influencer_id": influencer_id, "user_id": user_id})
+    if not rev:
+        return {}
+    rev["_id"] = str(rev["_id"])
+    if "created_at" in rev:
+        rev["created_at"] = _normalize_iso_utc(rev["created_at"])
+    if "updated_at" in rev:
+        rev["updated_at"] = _normalize_iso_utc(rev["updated_at"])
+    return rev
 
 
 # =================== STORE REVIEWS ===================
@@ -559,22 +815,33 @@ def get_all_active_deals(city: str = ""):
     from datetime import datetime as _dt
     _now = _dt.utcnow()
 
-    # Step 1: Active subscription store IDs
-    _active_store_ids = set()
-    for _sub in db.subscriptions.find({}, {"store_id": 1, "end_date": 1}):
-        _ed = _sub.get("end_date")
-        if _ed is None:
-            # No end_date = perpetual/lifetime subscription — always active
-            _active_store_ids.add(str(_sub["store_id"]))
-            continue
-        try:
-            _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
-            if _ed_dt >= _now:
-                _active_store_ids.add(str(_sub["store_id"]))
-        except Exception:
-            pass
-
-    # Step 2: Active stores in city
+    # BUG FIX (Round 6 — Issue 3, "deal not appearing in Hot Deals"):
+    # Root cause — this endpoint used to require the store to ALSO have a
+    # fresh (non-expired) row in db.subscriptions before any of its deals
+    # would show, on top of stores.status == "active". That is a DIFFERENT,
+    # independent eligibility check from the one Today's Offers (get_store,
+    # below) and create_deal() (routers/merchant_app.py) both use, which is
+    # stores.status == "active" alone — the single authoritative field this
+    # codebase treats as the source of truth for "is this store live"
+    # (routers/admin.py's approve_store() sets it; Round 5's
+    # _require_active_store() gates Banner/Product creation on it the same
+    # way). A store approved directly by an admin (approve_store) — which is
+    # exactly how a manually-created test store, or any store an admin
+    # approves without routing it through the paid-subscribe flow, reaches
+    # "active" — has status=="active" but may have NO db.subscriptions
+    # document at all, which this endpoint's old check treated as "not
+    # active" and silently dropped every one of its deals. create_deal()
+    # itself already refuses to create a deal for a store whose status
+    # isn't "active" (see its own check), so gating read-time visibility on
+    # that same field is consistent, not a loosening of the rule — it's the
+    # same rule Today's Offers and deal creation already enforce. The
+    # subscriptions collection here was being used exactly the way the
+    # codebase's own _is_store_subscription_active() docstring warns against
+    # ("used for display purposes elsewhere, not as an authorization gate").
+    # Expired/inactive deals and non-active stores remain excluded exactly
+    # as before via deal_q's status=="active" and store_q's
+    # status=="active" below — only the redundant, inconsistent
+    # subscription-freshness pre-filter was removed.
     store_q = {"status": "active"}
     if city:
         store_q["city"] = {"$regex": city, "$options": "i"}
@@ -583,10 +850,7 @@ def get_all_active_deals(city: str = ""):
         "store_name": 1, "category": 1, "city": 1, "area": 1, "address": 1, "phone": 1,
         "image_url": 1, "image_thumb": 1, "_thumb": 1, "image": 1, "images": 1,
     }))
-    stores_map = {
-        str(s["_id"]): s for s in stores_raw
-        if str(s["_id"]) in _active_store_ids
-    }
+    stores_map = {str(s["_id"]): s for s in stores_raw}
 
     # Step 3: Active deals only (no products)
     result = []
@@ -649,7 +913,10 @@ def get_all_active_deals(city: str = ""):
             "store_city":  store.get("city",""),
             "store_address": store.get("address",""),
             "store_phone": store.get("phone",""),
-            "image_url":   _store_img(store),
+            # Item 3 (Round 5) added the deal's own uploaded image; prefer it
+            # here and only fall back to the store's image when the deal has
+            # none (matches "use fallback if no deal image exists").
+            "image_url":   d.get("image_url") or _store_img(store),
             "category":    d.get("category","") or store.get("category",""),
         })
 
