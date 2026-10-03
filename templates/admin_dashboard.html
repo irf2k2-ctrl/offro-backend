@@ -8566,7 +8566,10 @@ async function loadWaChats() {
     console.log('[WA-Chat] Customers received:', d.customers ? d.customers.length : 0);
     _waAllCustomers = d.customers || [];
     renderWaCustomerList(_waAllCustomers);
-    if (_waCurrentCustomerId) refreshConversation();
+    // NOTE: previously this called refreshConversation() here, which created an
+    // unbounded mutual-recursion loop with refreshConversation() (see below) —
+    // removed. The open conversation's own 8s setInterval is solely responsible
+    // for refreshing messages; loadWaChats() only ever refreshes the left-hand list.
   } catch(e) {
     console.error('[WA-Chat] loadWaChats error:', e);
     const el = document.getElementById('wa_customer_list');
@@ -8674,8 +8677,23 @@ async function refreshConversation() {
     }
     if (wasAtBottom || msgs.length < 5) el.scrollTop = el.scrollHeight;
 
-    // Also refresh unread counts in list
-    loadWaChats();
+    // NOTE: previously this called loadWaChats() here, which created an unbounded
+    // mutual-recursion loop with loadWaChats() (see above) — removed. Refreshing
+    // this conversation's messages no longer triggers a full customer-list reload;
+    // the only thing driving repeated calls to this function is the single 8s
+    // setInterval started in openWaConversation().
+    const curInList = _waAllCustomers.find(x => x.customer_id === _waCurrentCustomerId);
+    if (curInList) {
+      // Keep the left-hand list's preview/unread badge for the open conversation
+      // in sync locally, without a network round-trip.
+      curInList.unread_count = 0;
+      if (msgs.length) {
+        const lastMsg = msgs[msgs.length - 1];
+        curInList.last_message = lastMsg.message || curInList.last_message;
+        curInList.last_message_time = lastMsg.timestamp || curInList.last_message_time;
+      }
+      renderWaCustomerList(_waAllCustomers);
+    }
   } catch(e) {
     console.error('[WA-Chat] refreshConversation error:', e);
     const el = document.getElementById('wa_messages');
