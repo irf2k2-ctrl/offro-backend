@@ -395,8 +395,18 @@ def create_influencer_profile(data: dict, user=Depends(get_current_user)):
     name = (data.get("name", "") or "").strip()
     if not name:
         raise HTTPException(400, "Name is required")
-    from routers.admin import _validate_influencer_city, _resolve_influencer_photo, _normalize_influencer_categories
-    city = _validate_influencer_city(data.get("city", ""))
+    from routers.admin import _resolve_influencer_photo, _normalize_influencer_categories
+    # City handling matches Store and the Admin Dashboard influencer endpoints
+    # (create_store/update_store, create_influencer/update_influencer in
+    # routers/admin.py): trust the submitted value — it already comes from
+    # the shared INDIA_STATES_CITIES State->City dropdown — rather than
+    # re-validating against the separate, unmaintained db.cities collection
+    # via _validate_influencer_city (still defined in routers/admin.py but
+    # no longer called from here). Only a simple required/non-empty check
+    # remains.
+    city = (data.get("city", "") or "").strip()
+    if not city:
+        raise HTTPException(400, "City is required")
     category_str, categories_list = _normalize_influencer_categories(data.get("categories"), data.get("category", ""))
     state = (data.get("state", "") or "").strip()
     # FIX (Issue 2): validate only when the caller actually supplied a
@@ -560,7 +570,7 @@ def update_my_influencer_profile(data: dict, user=Depends(get_current_user)):
     if existing.get("account_id") != str(acct["_id"]):
         raise HTTPException(403, "You do not have permission to edit this influencer profile.")
 
-    from routers.admin import _validate_influencer_city, _resolve_influencer_photo, _normalize_influencer_categories
+    from routers.admin import _resolve_influencer_photo, _normalize_influencer_categories
     update = {}
     if "name" in data:
         name = (data["name"] or "").strip()
@@ -570,7 +580,13 @@ def update_my_influencer_profile(data: dict, user=Depends(get_current_user)):
     if "state" in data:
         update["state"] = (data["state"] or "").strip()
     if "city" in data:
-        update["city"] = _validate_influencer_city(data["city"])
+        # Matches create_influencer_profile() above / Store / Admin Dashboard —
+        # trust the submitted value instead of re-validating against the
+        # unmaintained db.cities collection via _validate_influencer_city.
+        new_city = (data["city"] or "").strip()
+        if not new_city:
+            raise HTTPException(400, "City cannot be empty")
+        update["city"] = new_city
     if "category" in data or "categories" in data:
         category_str, categories_list = _normalize_influencer_categories(data.get("categories"), data.get("category", ""))
         update["category"] = category_str
@@ -708,7 +724,7 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
 
     # Step 1 — validate/save (reuses the same field handling as PUT, minus
     # is_active, which has nothing to do with publishing).
-    from routers.admin import _validate_influencer_city, _resolve_influencer_photo, _normalize_influencer_categories
+    from routers.admin import _resolve_influencer_photo, _normalize_influencer_categories
     update = {}
     if "name" in data:
         name = (data["name"] or "").strip()
@@ -718,7 +734,14 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
     if "state" in data:
         update["state"] = (data["state"] or "").strip()
     if "city" in data:
-        update["city"] = _validate_influencer_city(data["city"])
+        # Matches create_influencer_profile()/update_my_influencer_profile()
+        # above / Store / Admin Dashboard — trust the submitted value instead
+        # of re-validating against the unmaintained db.cities collection via
+        # _validate_influencer_city.
+        new_city = (data["city"] or "").strip()
+        if not new_city:
+            raise HTTPException(400, "City cannot be empty")
+        update["city"] = new_city
     if "category" in data or "categories" in data:
         category_str, categories_list = _normalize_influencer_categories(data.get("categories"), data.get("category", ""))
         update["category"] = category_str
