@@ -2105,7 +2105,20 @@ def create_influencer(body: dict, a=Depends(get_current_admin)):
     name = (body.get("name", "")).strip()
     if not name:
         raise HTTPException(400, "Name is required")
-    city = _validate_influencer_city(body.get("city", ""))
+    # City handling matches Store create/update (create_store / update_store
+    # above): the submitted value already comes from the shared
+    # INDIA_STATES_CITIES State->City dropdown (same one the Store form
+    # uses), so it is trusted as-is here rather than re-validated against
+    # the separate, unmaintained db.cities collection (_validate_influencer_city,
+    # defined above but no longer called here — that collection has no admin
+    # UI to manage it, which is why real OffrO cities like "Ballari" were
+    # being rejected even though Store accepts them with the same check-free
+    # handling). Only a simple required/non-empty check remains, exactly
+    # like Store performs no city validation at all beyond what the form itself
+    # already constrains.
+    city = (body.get("city", "") or "").strip()
+    if not city:
+        raise HTTPException(400, "City is required")
     category_str, categories_list = _normalize_influencer_categories(body.get("categories"), body.get("category", ""))
     status = str(body.get("status", "active")).strip().lower()
     if status not in ("active", "inactive"):
@@ -2180,7 +2193,13 @@ def update_influencer(influencer_id: str, body: dict, a=Depends(get_current_admi
     if "state" in body:
         update["state"] = (body["state"] or "").strip()
     if "city" in body:
-        new_city = _validate_influencer_city(body["city"])
+        # Matches create_influencer() above: trust the submitted value (it
+        # already comes from the shared INDIA_STATES_CITIES dropdown, same
+        # as Store) instead of re-validating against the unmaintained
+        # db.cities collection via _validate_influencer_city.
+        new_city = (body["city"] or "").strip()
+        if not new_city:
+            raise HTTPException(400, "City cannot be empty")
         # FIX: validating that the city exists is not the same as validating
         # that THIS admin is allowed to move an influencer there. Without
         # this check, a city-scoped admin who legitimately owns an
