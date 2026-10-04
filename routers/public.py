@@ -1775,7 +1775,7 @@ def get_default_images():
 
     return {
         "store":            _first(doc.get("store", "")),
-        "product":          _first(doc.get("product", "")),
+        "product":          _all_urls(doc.get("product", "")),
         "offer":            _first(doc.get("offer", "")),
         "city":             _all_urls(doc.get("city", "")),
         "merchant_banner":  _all_urls(doc.get("merchant_banner", "")),  # array — same pattern as city
