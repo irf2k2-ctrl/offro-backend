@@ -1881,9 +1881,19 @@ _DISCOUNT_SCOPES = {"STORE", "BANNERS", "PRODUCTS", "INFLUENCER", "ALL"}
 
 @router.get("/discounts")
 def list_discounts(a=Depends(get_current_admin)):
+    # BUG FIX (QA): `active` was a stored boolean set once at creation and
+    # never recomputed, so a code whose expiry_date had already passed kept
+    # showing "Active" forever. Status is now derived at read time from the
+    # real expiry_date (same real-time-status pattern used elsewhere, e.g.
+    # admin.py's _compute_voucher_status for merchant vouchers), without
+    # touching the stored `active` flag itself — an admin can still
+    # manually deactivate/reactivate a non-expired code as before.
     docs = list(db.discounts.find().sort("created_at", -1))
+    now = datetime.utcnow()
     result = []
     for d in docs:
+        expiry_dt = d.get("expiry_date")
+        is_expired = bool(expiry_dt and expiry_dt < now)
         result.append({
             "_id":         str(d["_id"]),
             "code":        d.get("code",""),
@@ -1893,7 +1903,8 @@ def list_discounts(a=Depends(get_current_admin)):
             "max_uses":    d.get("max_uses",0),
             "used_count":  d.get("used_count",0),
             "active":      d.get("active",True),
-            "expiry_date": d["expiry_date"].strftime("%Y-%m-%d") if d.get("expiry_date") else None,
+            "is_expired":  is_expired,
+            "expiry_date": expiry_dt.strftime("%Y-%m-%d") if expiry_dt else None,
             "created_at":  d["created_at"].strftime("%d %b %Y") if d.get("created_at") else "",
         })
     return result

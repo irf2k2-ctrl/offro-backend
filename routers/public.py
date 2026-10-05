@@ -1478,25 +1478,64 @@ def get_gift_vouchers_public(city: str = ""):
     def _is_active(doc):
         return doc.get("is_active", True) not in (False, "false", "0", 0)
 
+    def _parse_flex_date(raw):
+        """Parse a date that may be a datetime, an ISO string, or one of the
+        human-entered formats admin/merchant forms actually write to end_date
+        (e.g. "11 Aug 2026" from merchant_app.py's `strftime("%d %b %Y")`).
+        Mirrors the multi-format parser already used by admin.py's
+        _compute_voucher_status() / admin_dashboard.html's _parseFlexDate(),
+        so a product that the Admin dashboard already shows as Expired is
+        recognized the same way here. Returns a naive datetime or None —
+        BUG FIX: the previous version only tried datetime.fromisoformat(),
+        which raises (and is silently swallowed) for "11 Aug 2026"-style
+        strings, so such products were never detected as expired."""
+        from datetime import datetime as _dt2
+        if raw is None or raw == "":
+            return None
+        if hasattr(raw, "strftime"):
+            return raw
+        s = str(raw).strip()
+        if not s or s in ("null", "None"):
+            return None
+        for fmt in ("%Y-%m-%d", "%d %b %Y", "%d/%m/%Y", "%d-%m-%Y"):
+            try:
+                return _dt2.strptime(s[:19].replace("Z", ""), fmt)
+            except ValueError:
+                continue
+        try:
+            return _dt2.fromisoformat(s[:19].replace("Z", "").replace(" ", "T"))
+        except ValueError:
+            return None
+
+    def _validity_end_fallback(doc):
+        """Some products only carry a free-text `validity` string (e.g.
+        "11 Aug 2026" or "20 Jan 2026 → 10 Feb 2026") with no structured
+        end_date/expiry/valid_till field at all — same fallback the admin
+        dashboard UI already uses to compute its Expired badge."""
+        validity_raw = str(doc.get("validity", "") or "").strip()
+        if not validity_raw:
+            return None
+        end_part = validity_raw
+        if "→" in validity_raw:
+            end_part = validity_raw.split("→")[-1].strip()
+        elif "->" in validity_raw:
+            end_part = validity_raw.split("->")[-1].strip()
+        return _parse_flex_date(end_part)
+
     def _is_expired(doc) -> bool:
         from datetime import datetime as _dt2
         _now2 = _dt2.utcnow()
         for k in ("end_date", "validity_end", "expiry", "valid_till"):
-            v = doc.get(k)
-            if not v:
-                continue
-            try:
-                if isinstance(v, _dt2):
-                    if v < _now2:
-                        return True
-                else:
-                    vs = str(v).strip()
-                    if vs and vs not in ("", "null", "None"):
-                        vdt = _dt2.fromisoformat(vs[:19].replace(" ", "T"))
-                        if vdt < _now2:
-                            return True
-            except Exception:
-                pass
+            vdt = _parse_flex_date(doc.get(k))
+            if vdt is not None:
+                # End-of-day comparison: "11 Aug 2026" means valid through
+                # 23:59:59 that day — matches admin.py's _compute_voucher_status.
+                return vdt.replace(hour=23, minute=59, second=59) < _now2
+        # No structured end-date field present — fall back to the free-text
+        # `validity` string (same as admin_dashboard.html's Products tab).
+        vdt = _validity_end_fallback(doc)
+        if vdt is not None:
+            return vdt.replace(hour=23, minute=59, second=59) < _now2
         return False
 
     def _not_started(doc) -> bool:
@@ -1504,21 +1543,9 @@ def get_gift_vouchers_public(city: str = ""):
         from datetime import datetime as _dt3
         _now3 = _dt3.utcnow()
         for k in ("from_date", "start_date", "valid_from"):
-            v = doc.get(k)
-            if not v:
-                continue
-            try:
-                if isinstance(v, _dt3):
-                    if v > _now3:
-                        return True
-                else:
-                    vs = str(v).strip()
-                    if vs and vs not in ("", "null", "None"):
-                        vdt = _dt3.fromisoformat(vs[:19].replace(" ", "T"))
-                        if vdt > _now3:
-                            return True
-            except Exception:
-                pass
+            vdt = _parse_flex_date(doc.get(k))
+            if vdt is not None:
+                return vdt > _now3
         return False
 
     def _resolve_img(doc):

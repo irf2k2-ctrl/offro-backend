@@ -1908,7 +1908,10 @@ async function loadDiscounts() {
     if (!r.ok) { console.error('loadDiscounts error', r.status); return; }
     allDiscounts = await r.json();
     document.getElementById("disc_total_count").innerText = allDiscounts.length;
-    document.getElementById("disc_active_count").innerText = allDiscounts.filter(d=>d.active).length;
+    // BUG FIX (QA): an expired code is no longer counted as active, even
+    // though its stored `active` flag is still true — backend now sends
+    // `is_expired` computed from the real expiry_date on every load.
+    document.getElementById("disc_active_count").innerText = allDiscounts.filter(d=>d.active && !d.is_expired).length;
     document.getElementById("disc_redeemed_count").innerText = allDiscounts.reduce((a,d)=>a+(d.used_count||0),0);
     renderDiscounts();
   } catch(e) { console.error(e); }
@@ -1917,7 +1920,11 @@ function renderDiscounts() {
   const q = (document.getElementById("disc_search")?.value||"").toLowerCase();
   const rows = allDiscounts.filter(d=>(d.code||"").toLowerCase().includes(q));
   document.getElementById("disc_body").innerHTML = rows.length ? rows.map(d => {
-    const st = d.active ? '<span class="badge-active">Active</span>' : '<span class="badge-inactive">Inactive</span>';
+    // BUG FIX (QA): show "Expired" distinctly once expiry_date has passed,
+    // instead of always trusting the stale stored `active` flag.
+    const st = d.is_expired ? '<span class="badge-inactive">Expired</span>'
+             : d.active ? '<span class="badge-active">Active</span>'
+             : '<span class="badge-inactive">Inactive</span>';
     const expiry = d.expiry_date ? d.expiry_date.substring(0,10) : '—';
     const maxU = d.max_uses > 0 ? d.max_uses : '∞';
     const dtype = d.type || 'VALUE';
