@@ -1802,6 +1802,31 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
             amount=0, meta={"banner_id": str(res.inserted_id)})
     return {"message": "Banner submitted for review", "banner_id": str(res.inserted_id), "invoice_no": invoice_no}
 
+def _require_valid_razorpay_payment(order, rp_order_id, rp_payment_id, rp_signature):
+    """Fail-closed Razorpay check for banner / premium-product orders.
+    Orders with a stored razorpay_order_id and amount > 0 MUST present a matching
+    order id, a payment id and a valid signature. Zero-amount / manual orders
+    (no stored razorpay_order_id) keep their existing exemption."""
+    stored_oid = (order or {}).get("razorpay_order_id")
+    try:
+        paise = float((order or {}).get("amount_paise") or 0)
+    except (TypeError, ValueError):
+        paise = 0
+    if not stored_oid or paise <= 0:
+        return
+    if not RAZORPAY_KEY_SECRET:
+        raise HTTPException(503, "Payment verification unavailable")
+    if not (isinstance(rp_order_id, str) and isinstance(rp_payment_id, str)
+            and isinstance(rp_signature, str)
+            and rp_order_id and rp_payment_id and rp_signature):
+        raise HTTPException(400, "Payment verification failed")
+    if not hmac.compare_digest(rp_order_id.encode(), str(stored_oid).encode()):
+        raise HTTPException(400, "Payment verification failed")
+    expected = hmac.new(RAZORPAY_KEY_SECRET.encode(),
+                        f"{rp_order_id}|{rp_payment_id}".encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected.encode(), rp_signature.encode()):
+        raise HTTPException(400, "Payment verification failed")
+
 # ── POST /merchant/banners/verify  ─────────────────────────────────────────
 @router.post("/banners/verify")
 def verify_banner_payment(data: dict, m=Depends(get_merchant)):
@@ -1824,11 +1849,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_banner or {}).get("invoice_no") or order.get("invoice_no", "")
         return {"message": "Payment already verified.", "banner_id": order.get("banner_id", ""), "invoice_no": existing_inv_no}
 
-    if RAZORPAY_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
-        msg = f"{razorpay_order_id}|{razorpay_payment_id}"
-        expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-        if expected != razorpay_signature:
-            raise HTTPException(400, "Payment verification failed")
+    _require_valid_razorpay_payment(order, razorpay_order_id, razorpay_payment_id, razorpay_signature)
 
     # Read store/city from Flutter payload (Flutter sends these on payment verification)
     store_id   = (data.get("store_id")   or "").strip()
@@ -2269,11 +2290,7 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_vch or {}).get("invoice_no") or order.get("invoice_no", "")
         return {"message": "Payment already verified.", "voucher_id": order.get("voucher_id", ""), "invoice_no": existing_inv_no}
 
-    if RAZORPAY_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
-        msg = f"{razorpay_order_id}|{razorpay_payment_id}"
-        expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-        if expected != razorpay_signature:
-            raise HTTPException(400, "Payment verification failed")
+    _require_valid_razorpay_payment(order, razorpay_order_id, razorpay_payment_id, razorpay_signature)
 
     # Read store/city from Flutter payload — CRITICAL: must be stored on voucher
     store_id   = (data.get("store_id")   or "").strip()

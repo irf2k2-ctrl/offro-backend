@@ -361,7 +361,11 @@ def admin_get_areas(city: str = ""):
 
 @router.post("/login")
 def admin_login(data: dict):
-    a = db.admins.find_one({"username": data.get("username"), "password": data.get("password")})
+    _u, _p = data.get("username"), data.get("password")
+    # Reject non-string values (blocks MongoDB operator injection such as {"$ne": null})
+    if not isinstance(_u, str) or not isinstance(_p, str):
+        raise HTTPException(401, "Invalid credentials")
+    a = db.admins.find_one({"username": _u, "password": _p})
     if not a: raise HTTPException(401, "Invalid credentials")
     token = create_token()
     db.admins.update_one({"_id": a["_id"]}, {"$set": {"token": token}})
