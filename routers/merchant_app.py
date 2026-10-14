@@ -3280,19 +3280,55 @@ def check_product_expiry(m=Depends(get_merchant)):
 
 @router.get("/products/{pid}/analytics")
 def get_product_analytics(pid: str, m=Depends(get_merchant)):
-    """Return view/share/open event counts for a product."""
+    """Return view/share/open counts and last-viewed time for a product.
+
+    Counts are computed database-side ($group) — events are never loaded into
+    Python. Authorization: the product must belong to the calling merchant
+    (looked up in merchant_vouchers / gift_vouchers), otherwise 404.
+
+    Historical events: before the tracking fix, events were saved with an empty
+    merchant_id. Because ownership of THIS product is verified above, events
+    for this product_id with an empty/missing merchant_id are safely counted
+    too; events stamped with a DIFFERENT merchant's id are never counted."""
     merchant_id = _mid(m)
     try:
-        ObjectId(pid)
+        oid = ObjectId(pid)
     except Exception:
         raise HTTPException(400, "Invalid product ID")
-    events = list(db.product_events.find({"product_id": pid, "merchant_id": merchant_id}, {"event": 1}))
+    owned = (db.merchant_vouchers.find_one({"_id": oid, "merchant_id": merchant_id}, {"_id": 1})
+             or db.gift_vouchers.find_one({"_id": oid, "merchant_id": merchant_id}, {"_id": 1}))
+    if not owned:
+        raise HTTPException(404, "Product not found")
+
+    pipeline = [
+        {"$match": {"product_id": pid, "merchant_id": {"$in": [merchant_id, "", None]}}},
+        {"$group": {"_id": "$event", "count": {"$sum": 1}, "last": {"$max": "$created_at"}}},
+    ]
     counts = {"view": 0, "share": 0, "open": 0}
-    for e in events:
-        ev = e.get("event", "")
+    last_view = None
+    last_any = None
+    for row in db.product_events.aggregate(pipeline):
+        ev = row.get("_id")
         if ev in counts:
-            counts[ev] += 1
-    return {"product_id": pid, **counts, "total": sum(counts.values())}
+            counts[ev] = int(row.get("count", 0))
+        ts = row.get("last")
+        if isinstance(ts, datetime):
+            if last_any is None or ts > last_any:
+                last_any = ts
+            if ev == "view" and (last_view is None or ts > last_view):
+                last_view = ts
+    last = last_view or last_any
+    last_iso = last.strftime("%Y-%m-%dT%H:%M:%SZ") if last else ""
+    return {
+        "product_id": pid,
+        # plural keys — what the app reads
+        "views": counts["view"], "shares": counts["share"], "opens": counts["open"],
+        # singular keys kept for backward compatibility
+        **counts,
+        "total": sum(counts.values()),
+        "last_viewed": last_iso,
+        "last_seen": last_iso,
+    }
 
 
 @router.get("/products/{pid}/history")

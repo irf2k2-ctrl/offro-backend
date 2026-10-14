@@ -313,6 +313,15 @@ def _ensure_indexes():
             name="deals_store_status",
             background=True,
         )
+        # Product analytics — match (product_id, merchant_id), group by event, max(created_at)
+        try:
+            db.product_events.create_index(
+                [("product_id", 1), ("merchant_id", 1), ("event", 1), ("created_at", -1)],
+                name="product_events_pid_mid_event_created",
+                background=True,
+            )
+        except Exception as _pe_err:
+            print(f"⚠️  product_events index warning: {_pe_err}")
         # Accounts — phone lookup (unified login)
         db.accounts.create_index([("phone", 1)], name="accounts_phone", background=True)
         db.accounts.create_index([("token", 1)], name="accounts_token", background=True)
