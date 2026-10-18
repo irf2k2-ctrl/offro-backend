@@ -51,6 +51,40 @@ def _make_thumb_url(cdn_url: str, w: int = 300) -> str:
         return cdn_url.replace("/upload/", f"/upload/w_{w},c_fill,q_auto,f_auto/")
     return ""
 
+# ── Banner media: image (default) or short video ─────────────────────────────
+# Existing banners have no media_type and are treated as images everywhere.
+BANNER_VIDEO_MAX_BYTES = 10 * 1024 * 1024   # 10 MB
+BANNER_VIDEO_TOO_LARGE = "Video is too large. Please select a video up to 10 MB."
+
+def _b64_decoded_size(data_uri: str) -> int:
+    """Decoded byte size of a base64 string / data URI, without decoding it."""
+    b64 = data_uri.split(",", 1)[-1] if "," in data_uri else data_uri
+    b64 = b64.strip()
+    return (len(b64) * 3) // 4 - b64[-2:].count("=")
+
+def _video_poster_url(cdn_url: str, w: int = 300) -> str:
+    """Cloudinary still frame (first frame, .jpg) of a video URL, else ''."""
+    if "cloudinary.com" in str(cdn_url) and "/video/upload/" in str(cdn_url):
+        return re.sub(r"\.\w+$", ".jpg",
+                      cdn_url.replace("/upload/", f"/upload/so_0,w_{w},c_fill,q_auto/"))
+    return ""
+
+def _banner_media(data: dict):
+    """(media_url, thumb_url, media_type) for a banner create/activate payload.
+    Images behave exactly as before. A video arrives either as an already-uploaded
+    CDN URL (normal path, see /banners/upload-video) or, as a fallback, as a
+    data:video URI that is size-checked and uploaded here."""
+    raw = data.get("image_url", "") or ""
+    if str(data.get("media_type", "")).strip().lower() == "video":
+        if raw.startswith("data:"):
+            if _b64_decoded_size(raw) > BANNER_VIDEO_MAX_BYTES:
+                raise HTTPException(400, BANNER_VIDEO_TOO_LARGE)
+            from routers.admin import _cloudinary_upload_video
+            raw = _cloudinary_upload_video(raw, folder="offro/banners")
+        return raw, _video_poster_url(raw), "video"
+    url = _cloudinary_upload(raw, folder="offro/banners")
+    return url, _make_thumb_url(url), "image"
+
 router = APIRouter(tags=["MerchantApp"])
 
 import os as _os
@@ -1393,6 +1427,7 @@ def get_my_banners(m=Depends(get_merchant)):
                 "_id":             _bid_str,
                 "title":           b.get("title", ""),
                 "image_url":       b.get("image_url", ""),
+                "media_type":      b.get("media_type") or "image",
                 "duration":        b.get("duration_days", 0),
                 "from_date":       b.get("from_date", ""),
                 "end_date":        b.get("end_date", ""),
@@ -1554,6 +1589,25 @@ def merchant_update_banner_title(bid: str, data: dict, m=Depends(get_merchant)):
     return {"ok": True, "title": new_title}
 
 # ── POST /merchant/banners/order  ──────────────────────────────────────────
+@router.post("/banners/upload-video")
+def upload_banner_video(data: dict, m=Depends(get_merchant)):
+    """Upload a banner video BEFORE payment so an invalid/failed upload never
+    costs the merchant anything. The app validates length (<= 15 s) and size
+    (<= 10 MB); size is enforced here again. Returns the CDN URL the app then
+    sends as the banner's image_url with media_type="video"."""
+    raw = (data.get("video") or "").strip()
+    if not raw.startswith("data:video"):
+        raise HTTPException(400, "Please select a video.")
+    if _b64_decoded_size(raw) > BANNER_VIDEO_MAX_BYTES:
+        raise HTTPException(400, BANNER_VIDEO_TOO_LARGE)
+    from routers.admin import _cloudinary_upload_video
+    url = _cloudinary_upload_video(raw, folder="offro/banners")
+    cdn_configured = all(_cld_os.getenv(k) for k in
+                         ("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"))
+    if cdn_configured and not url.startswith("http"):
+        raise HTTPException(502, "Video upload failed. Please try again.")
+    return {"url": url, "media_type": "video", "thumb": _video_poster_url(url)}
+
 @router.post("/banners/order")
 def create_banner_order(data: dict, m=Depends(get_merchant)):
     """
@@ -1683,8 +1737,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id    = data.get("order_id", "")
     title       = data.get("title", "")
-    image_url   = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
-    image_thumb = _make_thumb_url(image_url)
+    image_url, image_thumb, media_type = _banner_media(data)
 
     order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
     if not order:
@@ -1750,6 +1803,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "title":            title,
         "image_url":        image_url,
         "image_thumb":      image_thumb,
+        "media_type":       media_type,
         "store_id":         store_id,
         "store_name":       store_name,
         "city":             city,
@@ -1838,8 +1892,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id          = data.get("order_id", "")
     title             = data.get("title", "")
-    image_url         = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
-    image_thumb       = _make_thumb_url(image_url)
+    image_url, image_thumb, media_type = _banner_media(data)
     razorpay_payment_id = data.get("razorpay_payment_id", "")
     razorpay_order_id   = data.get("razorpay_order_id", "")
     razorpay_signature  = data.get("razorpay_signature", "")
@@ -1898,6 +1951,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "title":            title,
         "image_url":        image_url,
         "image_thumb":      image_thumb,
+        "media_type":       media_type,
         "store_id":         store_id,
         "store_name":       store_name,
         "city":             city,

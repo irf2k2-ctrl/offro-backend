@@ -3741,6 +3741,7 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     _promo_set_fields = {
         "title":         b.get("title",""),
         "image_url":     b.get("image_url",""),
+        "media_type":    b.get("media_type") or "image",
         "is_active":     True,
         "sort_order":    50,
         "source":        "merchant",

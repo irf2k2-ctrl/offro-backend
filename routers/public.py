@@ -1499,6 +1499,8 @@ def get_promo_sliders_public():
             "subtitle":   d.get("subtitle", "") or d.get("text", ""),
             "image":      img,
             "image_url":  img,
+            # "image" for every banner created before video support existed
+            "media_type": d.get("media_type") or ("video" if ("/video/upload/" in str(img) or str(img).startswith("data:video") or str(img).lower().split("?")[0].endswith(".mp4")) else "image"),
             "link_url":   d.get("link_url", ""),
             "bg_color":   d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
