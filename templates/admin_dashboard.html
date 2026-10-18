@@ -629,7 +629,7 @@ td[style*="sticky"]{background:#fff;}
         <th>Created On</th>
         <th>Actions</th>
       </tr></thead>
-      <tbody id="bn_unified_body"><tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+      <tbody id="bn_unified_body"><tr><td colspan="10" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
     </table>
   </div>
   <div style="margin-top:10px;font-size:12px;color:var(--muted)" id="bn_showing"></div>
@@ -3648,7 +3648,7 @@ let _allBannerRows = [];
 async function loadSliders() {
   const tbody = document.getElementById('bn_unified_body');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr>';
   // Pre-load stores and merchants for enrichment
   if (!window.allStoresList) {
     try { const _sr = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = _sr.ok ? await _sr.json() : []; } catch(e) { window.allStoresList = []; }
@@ -3692,6 +3692,7 @@ async function loadSliders() {
         is_active:     s.is_active !== false,
         deleted_by_admin: !!(s.deleted_by_admin),
         image_url:     s.image_url || '',
+        media_type:    s.media_type || '',
         title:         s.title || '',
         subtitle:      s.link_url || '',
         merchant_name: s.merchant_name || (isMerchantBanner ? '—' : 'Offro (Admin)'),
@@ -3721,6 +3722,8 @@ async function loadSliders() {
         _id:        b._id,
         _source:    'merchant',
         image_url:  b.image_url || '',
+        media_type: b.media_type || '',
+        amount:     b.amount,
         title:      b.title || '',
         subtitle:   '',
         merchant_name: b.merchant_name || '',
@@ -3818,19 +3821,47 @@ function filterBanners() {
   renderBanners(rows);
 }
 
+function _bnIsVideo(r) {
+  const mt = String(r.media_type || (r._raw && r._raw.media_type) || '').toLowerCase();
+  if (mt === 'video') return true;
+  if (mt === 'image') return false;
+  const u = String(r.image_url || '').toLowerCase();
+  return u.startsWith('data:video') || u.includes('/video/upload/') || /\.(mp4|webm|mov)(\?|#|$)/.test(u);
+}
+function bnVideoFail(v) {
+  const box = v.closest('.bn-vthumb') || v.parentElement;
+  if (box) box.outerHTML = '<div style="width:100px;height:50px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center" title="Video could not be loaded"><i class="fas fa-video-slash" style="color:var(--muted)"></i></div>';
+}
+function bnToggleVideo(box) {
+  const v = box.querySelector('video'); if (!v) return;
+  const icon = box.querySelector('.bn-vplay');
+  if (v.paused) {
+    document.querySelectorAll('.bn-vthumb video').forEach(o => { if (o !== v) { o.pause(); const i = o.parentElement.querySelector('.bn-vplay'); if (i) i.style.display = 'flex'; } });
+    v.muted = true;
+    const pr = v.play();
+    if (pr && pr.catch) pr.catch(() => bnVideoFail(v));
+    if (icon) icon.style.display = 'none';
+  } else {
+    v.pause();
+    if (icon) icon.style.display = 'flex';
+  }
+}
+
 function renderBanners(rows) {
   const tbody   = document.getElementById('bn_unified_body');
   const showing = document.getElementById('bn_showing');
   if (!tbody) return;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:28px;color:var(--muted)">No banners found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:28px;color:var(--muted)">No banners found.</td></tr>';
     if(showing) showing.textContent='';
     return;
   }
   if(showing) showing.textContent=`Showing 1 to ${rows.length} of ${rows.length} results`;
 
   tbody.innerHTML = rows.map(r => {
-    const thumb = r.image_url
+    const thumb = (r.image_url && _bnIsVideo(r))
+      ? `<div class="bn-vthumb" onclick="bnToggleVideo(this)" title="Click to play / pause" style="position:relative;width:100px;height:50px;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:#000;cursor:pointer"><video src="${r.image_url}#t=0.1" muted loop playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;display:block" onerror="bnVideoFail(this)"></video><i class="fas fa-play bn-vplay" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;background:rgba(0,0,0,.5);border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;pointer-events:none"></i></div>`
+      : r.image_url
       ? `<img src="${r.image_url}" style="width:100px;height:50px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=0.2">`
       : `<div style="width:100px;height:50px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center"><i class="fas fa-image" style="color:var(--muted)"></i></div>`;
 
@@ -3926,14 +3957,15 @@ function renderBanners(rows) {
       : `<span style="color:var(--muted);font-size:11px">—</span>`;
     return `<tr>
       <td>${thumb}</td>
+      <td>${creatorBadge}</td>
       <td>
         <div style="font-weight:700;font-size:13px">${r.title||'—'}</div>
         ${r.subtitle?`<div style="font-size:11px;color:var(--muted)">${r.subtitle}</div>`:''}
       </td>
-      <td>${creatorBadge}</td>
       <td>${_bnStore}</td>
       <td>${_bnCity}</td>
       <td>${durationHtml}</td>
+      <td style="font-size:12px;white-space:nowrap">${(r.amount===undefined||r.amount===null||r.amount==='')?'<span style="color:var(--muted)">—</span>':'₹'+Number(r.amount).toLocaleString('en-IN')}</td>
       <td>${statusBadge}</td>
       <td style="font-size:12px;color:var(--muted);white-space:nowrap">${createdFmt}</td>
       <td>
@@ -3952,6 +3984,11 @@ function openBnViewModal(r) {
   const isAdmin = r._source==='admin';
   const isPending = (r.status==='pending'||r.status==='pending_approval');
   const el = id => document.getElementById(id);
+  { const _mv = el('bn_modal_video'); if (_mv) { _mv.pause(); _mv.removeAttribute('src'); _mv.style.display='none'; } }
+  if (r.image_url && _bnIsVideo(r) && el('bn_modal_video')) {
+    const _mv = el('bn_modal_video'); _mv.src = r.image_url; _mv.muted = true; _mv.style.display = 'inline-block';
+    if(el('bn_modal_img')) el('bn_modal_img').style.display='none';
+  } else
   if(el('bn_modal_img'))   { el('bn_modal_img').src=r.image_url||''; el('bn_modal_img').style.display=r.image_url?'block':'none'; }
   if(el('bn_modal_title')) el('bn_modal_title').textContent = r.title||'—';
   if(el('bn_modal_merchant')) el('bn_modal_merchant').textContent = isAdmin?'Offro (Admin)':r.merchant_name||'—';
@@ -7133,6 +7170,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="modal-body">
         <div style="margin-bottom:16px;text-align:center">
           <img id="bn_modal_img" src="" style="max-width:100%;max-height:180px;border-radius:10px;object-fit:cover;border:1px solid var(--border)" onerror="this.style.display='none'">
+          <video id="bn_modal_video" controls muted playsinline preload="metadata" style="display:none;max-width:100%;max-height:180px;border-radius:10px;border:1px solid var(--border);background:#000" onerror="this.style.display='none'"></video>
         </div>
         <table style="width:100%;font-size:13px;border-collapse:collapse">
           <tr><td style="padding:7px 0;color:var(--muted);font-weight:600;width:120px">Title</td><td id="bn_modal_title" style="font-weight:700;color:var(--text)"></td></tr>
