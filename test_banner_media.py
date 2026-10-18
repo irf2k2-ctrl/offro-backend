@@ -60,3 +60,24 @@ check("upload >10MB -> 400 message", r.status_code == 400 and r.json()["detail"]
 check("upload non-video -> 400", c.post("/merchant/banners/upload-video", json={"video": uri(10, "image/png")}).status_code == 400)
 check("upload empty -> 400", c.post("/merchant/banners/upload-video", json={}).status_code == 400)
 print(f"\n{n} checks passed")
+
+
+# ---- Cloudinary signature regression (root cause of "Video upload failed") ----
+def _test_video_signature():
+    import os, hashlib, re
+    from unittest import mock
+    import routers.admin as adm
+    os.environ.update(CLOUDINARY_CLOUD_NAME="c", CLOUDINARY_API_KEY="k", CLOUDINARY_API_SECRET="s3cr3t")
+    seen = {}
+    class R:  status_code = 200; text = ""; 
+    R.json = lambda self: {"secure_url": "https://res.cloudinary.com/c/video/upload/v1/x.mp4"}
+    def fake_post(url, data=None, timeout=None):
+        seen.update(url=url, data=data); return R()
+    with mock.patch("requests.post", fake_post):
+        out = adm._cloudinary_upload_video("data:video/mp4;base64,AAAA", folder="offro/banners")
+    d = seen["data"]
+    expect = hashlib.sha1(f"folder=offro/banners&timestamp={d['timestamp']}s3cr3t".encode()).hexdigest()
+    assert d["signature"] == expect, "signature must not include resource_type"
+    assert seen["url"].endswith("/c/video/upload") and out.startswith("https://")
+    print("ok video signature signs only folder+timestamp")
+_test_video_signature()

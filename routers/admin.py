@@ -143,7 +143,10 @@ def _cloudinary_upload_video(b64_data: str, folder: str = "offro") -> str:
         return b64_data
     data_str  = b64_data.split(",", 1)[-1] if "," in b64_data else b64_data
     timestamp = str(int(_cld_time2.time()))
-    sig_str   = "folder=" + folder + "&resource_type=video&timestamp=" + timestamp + secret
+    # Cloudinary signs only the upload params (sorted) - NOT file, api_key,
+    # cloud_name or resource_type. Including resource_type=video made every
+    # video upload fail with "Invalid Signature" (silently swallowed below).
+    sig_str   = "folder=" + folder + "&timestamp=" + timestamp + secret
     signature = _cld_hash2.sha1(sig_str.encode()).hexdigest()
     try:
         resp = _cld_req2.post(
@@ -160,8 +163,9 @@ def _cloudinary_upload_video(b64_data: str, folder: str = "offro") -> str:
         )
         if resp.status_code == 200:
             return resp.json().get("secure_url", b64_data)
-    except Exception:
-        pass
+        print(f"[CDN] video upload rejected: status={resp.status_code} body={resp.text[:300]}")
+    except Exception as e:
+        print(f"[CDN] video upload failed: {e}")
     return b64_data
 
 
