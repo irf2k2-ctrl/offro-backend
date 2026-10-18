@@ -554,6 +554,11 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "is_new_in_town": False,
         "created_at":   datetime.utcnow(),
     }
+    # Optional Store Logo ("Upload Logo") picked on the Add Store screen — same
+    # field the edit endpoint writes (image2_url); omitted when none was chosen.
+    _logo2 = data.get("image2")
+    if _logo2 and isinstance(_logo2, str):
+        store["image2_url"] = _cloudinary_upload(_logo2, folder="offro/stores")
     result = db.stores.insert_one(store)
     sid = str(result.inserted_id)
     qr_b64 = _qr(sid)

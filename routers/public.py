@@ -432,7 +432,9 @@ def get_store(store_id: str):
         "image":        store.get("image") or None,
         "image_url":    image_url,
         "image_thumb":  image_thumb,
-        "image2":       store.get("store_image2") or store.get("image2") or None,
+        # Store Logo: merchant app saves image2_url (CDN), admin saves store_image2.
+        # image2_url first so a logo the merchant just uploaded is not hidden by an older store_image2.
+        "image2":       store.get("image2_url") or store.get("store_image2") or store.get("image2") or None,
         "images":       store.get("images", []),
         "latitude":     store.get("lat") or None,
         "longitude":    store.get("lng") or None,
