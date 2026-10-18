@@ -25,10 +25,10 @@ check("play store button", sl.PLAY_STORE_URL in t)
 check("app store button", sl.APP_STORE_URL in t)
 check("android intent has package + play fallback",
       "package=com.offro.app" in t and "S.browser_fallback_url=https%3A%2F%2Fplay.google.com" in t
-      and "intent://offro.app/open#Intent;scheme=https" in t)
+      and "intent://theoffro.com/open#Intent;scheme=https" in t)
 check("android script redirects to intent", "/Android/i.test(ua)" in t)
 check("ios script redirects to app store", "/iPhone|iPad|iPod/i.test(ua)" in t)
-check("no product/store specifics", "offro.app/p/" not in t and "offro.app/store/" not in t)
+check("no product/store specifics", "theoffro.com/p/" not in t and "theoffro.com/store/" not in t)
 check("/open ignores query", c.get("/open?x=1").status_code == 200)
 check("/p/<id> gone", c.get("/p/6ac74822399939d9d31a98f8").status_code == 404)
 check("/store/<id> gone", c.get("/store/6ac74822399939d9d31a98f8").status_code == 404)

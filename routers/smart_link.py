@@ -1,5 +1,5 @@
 """
-OffrO Smart Link — https://offro.app/open
+OffrO Smart Link — https://theoffro.com/open
 
 One generic link that only opens the OffrO app (no product / store routing):
 
@@ -41,7 +41,7 @@ ANDROID_PACKAGE = "com.offro.app"
 IOS_BUNDLE_ID = "com.mibtech.offro"
 PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.offro.app"
 APP_STORE_URL = "https://apps.apple.com/il/app/offro/id6798829235"
-LINK_HOST = "offro.app"
+LINK_HOST = "theoffro.com"
 OPEN_PATH = "/open"
 
 _HEX64 = re.compile(r"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){31}$")
