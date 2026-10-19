@@ -51,6 +51,40 @@ def _make_thumb_url(cdn_url: str, w: int = 300) -> str:
         return cdn_url.replace("/upload/", f"/upload/w_{w},c_fill,q_auto,f_auto/")
     return ""
 
+# ── Banner media: image (default) or short video ─────────────────────────────
+# Existing banners have no media_type and are treated as images everywhere.
+BANNER_VIDEO_MAX_BYTES = 10 * 1024 * 1024   # 10 MB
+BANNER_VIDEO_TOO_LARGE = "Video is too large. Please select a video up to 10 MB."
+
+def _b64_decoded_size(data_uri: str) -> int:
+    """Decoded byte size of a base64 string / data URI, without decoding it."""
+    b64 = data_uri.split(",", 1)[-1] if "," in data_uri else data_uri
+    b64 = b64.strip()
+    return (len(b64) * 3) // 4 - b64[-2:].count("=")
+
+def _video_poster_url(cdn_url: str, w: int = 300) -> str:
+    """Cloudinary still frame (first frame, .jpg) of a video URL, else ''."""
+    if "cloudinary.com" in str(cdn_url) and "/video/upload/" in str(cdn_url):
+        return re.sub(r"\.\w+$", ".jpg",
+                      cdn_url.replace("/upload/", f"/upload/so_0,w_{w},c_fill,q_auto/"))
+    return ""
+
+def _banner_media(data: dict):
+    """(media_url, thumb_url, media_type) for a banner create/activate payload.
+    Images behave exactly as before. A video arrives either as an already-uploaded
+    CDN URL (normal path, see /banners/upload-video) or, as a fallback, as a
+    data:video URI that is size-checked and uploaded here."""
+    raw = data.get("image_url", "") or ""
+    if str(data.get("media_type", "")).strip().lower() == "video":
+        if raw.startswith("data:"):
+            if _b64_decoded_size(raw) > BANNER_VIDEO_MAX_BYTES:
+                raise HTTPException(400, BANNER_VIDEO_TOO_LARGE)
+            from routers.admin import _cloudinary_upload_video
+            raw = _cloudinary_upload_video(raw, folder="offro/banners")
+        return raw, _video_poster_url(raw), "video"
+    url = _cloudinary_upload(raw, folder="offro/banners")
+    return url, _make_thumb_url(url), "image"
+
 router = APIRouter(tags=["MerchantApp"])
 
 import os as _os
@@ -554,6 +588,11 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "is_new_in_town": False,
         "created_at":   datetime.utcnow(),
     }
+    # Optional Store Logo ("Upload Logo") picked on the Add Store screen — same
+    # field the edit endpoint writes (image2_url); omitted when none was chosen.
+    _logo2 = data.get("image2")
+    if _logo2 and isinstance(_logo2, str):
+        store["image2_url"] = _cloudinary_upload(_logo2, folder="offro/stores")
     result = db.stores.insert_one(store)
     sid = str(result.inserted_id)
     qr_b64 = _qr(sid)
@@ -1388,6 +1427,7 @@ def get_my_banners(m=Depends(get_merchant)):
                 "_id":             _bid_str,
                 "title":           b.get("title", ""),
                 "image_url":       b.get("image_url", ""),
+                "media_type":      b.get("media_type") or "image",
                 "duration":        b.get("duration_days", 0),
                 "from_date":       b.get("from_date", ""),
                 "end_date":        b.get("end_date", ""),
@@ -1549,6 +1589,25 @@ def merchant_update_banner_title(bid: str, data: dict, m=Depends(get_merchant)):
     return {"ok": True, "title": new_title}
 
 # ── POST /merchant/banners/order  ──────────────────────────────────────────
+@router.post("/banners/upload-video")
+def upload_banner_video(data: dict, m=Depends(get_merchant)):
+    """Upload a banner video BEFORE payment so an invalid/failed upload never
+    costs the merchant anything. The app validates length (<= 15 s) and size
+    (<= 10 MB); size is enforced here again. Returns the CDN URL the app then
+    sends as the banner's image_url with media_type="video"."""
+    raw = (data.get("video") or "").strip()
+    if not raw.startswith("data:video"):
+        raise HTTPException(400, "Please select a video.")
+    if _b64_decoded_size(raw) > BANNER_VIDEO_MAX_BYTES:
+        raise HTTPException(400, BANNER_VIDEO_TOO_LARGE)
+    from routers.admin import _cloudinary_upload_video
+    url = _cloudinary_upload_video(raw, folder="offro/banners")
+    cdn_configured = all(_cld_os.getenv(k) for k in
+                         ("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"))
+    if cdn_configured and not url.startswith("http"):
+        raise HTTPException(502, "Video upload failed. Please try again.")
+    return {"url": url, "media_type": "video", "thumb": _video_poster_url(url)}
+
 @router.post("/banners/order")
 def create_banner_order(data: dict, m=Depends(get_merchant)):
     """
@@ -1678,8 +1737,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id    = data.get("order_id", "")
     title       = data.get("title", "")
-    image_url   = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
-    image_thumb = _make_thumb_url(image_url)
+    image_url, image_thumb, media_type = _banner_media(data)
 
     order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
     if not order:
@@ -1745,6 +1803,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "title":            title,
         "image_url":        image_url,
         "image_thumb":      image_thumb,
+        "media_type":       media_type,
         "store_id":         store_id,
         "store_name":       store_name,
         "city":             city,
@@ -1802,14 +1861,38 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
             amount=0, meta={"banner_id": str(res.inserted_id)})
     return {"message": "Banner submitted for review", "banner_id": str(res.inserted_id), "invoice_no": invoice_no}
 
+def _require_valid_razorpay_payment(order, rp_order_id, rp_payment_id, rp_signature):
+    """Fail-closed Razorpay check for banner / premium-product orders.
+    Orders with a stored razorpay_order_id and amount > 0 MUST present a matching
+    order id, a payment id and a valid signature. Zero-amount / manual orders
+    (no stored razorpay_order_id) keep their existing exemption."""
+    stored_oid = (order or {}).get("razorpay_order_id")
+    try:
+        paise = float((order or {}).get("amount_paise") or 0)
+    except (TypeError, ValueError):
+        paise = 0
+    if not stored_oid or paise <= 0:
+        return
+    if not RAZORPAY_KEY_SECRET:
+        raise HTTPException(503, "Payment verification unavailable")
+    if not (isinstance(rp_order_id, str) and isinstance(rp_payment_id, str)
+            and isinstance(rp_signature, str)
+            and rp_order_id and rp_payment_id and rp_signature):
+        raise HTTPException(400, "Payment verification failed")
+    if not hmac.compare_digest(rp_order_id.encode(), str(stored_oid).encode()):
+        raise HTTPException(400, "Payment verification failed")
+    expected = hmac.new(RAZORPAY_KEY_SECRET.encode(),
+                        f"{rp_order_id}|{rp_payment_id}".encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected.encode(), rp_signature.encode()):
+        raise HTTPException(400, "Payment verification failed")
+
 # ── POST /merchant/banners/verify  ─────────────────────────────────────────
 @router.post("/banners/verify")
 def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     merchant_id = _mid(m)
     order_id          = data.get("order_id", "")
     title             = data.get("title", "")
-    image_url         = _cloudinary_upload(data.get("image_url",""), folder="offro/banners")
-    image_thumb       = _make_thumb_url(image_url)
+    image_url, image_thumb, media_type = _banner_media(data)
     razorpay_payment_id = data.get("razorpay_payment_id", "")
     razorpay_order_id   = data.get("razorpay_order_id", "")
     razorpay_signature  = data.get("razorpay_signature", "")
@@ -1824,11 +1907,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_banner or {}).get("invoice_no") or order.get("invoice_no", "")
         return {"message": "Payment already verified.", "banner_id": order.get("banner_id", ""), "invoice_no": existing_inv_no}
 
-    if RAZORPAY_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
-        msg = f"{razorpay_order_id}|{razorpay_payment_id}"
-        expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-        if expected != razorpay_signature:
-            raise HTTPException(400, "Payment verification failed")
+    _require_valid_razorpay_payment(order, razorpay_order_id, razorpay_payment_id, razorpay_signature)
 
     # Read store/city from Flutter payload (Flutter sends these on payment verification)
     store_id   = (data.get("store_id")   or "").strip()
@@ -1872,6 +1951,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "title":            title,
         "image_url":        image_url,
         "image_thumb":      image_thumb,
+        "media_type":       media_type,
         "store_id":         store_id,
         "store_name":       store_name,
         "city":             city,
@@ -2269,11 +2349,7 @@ def verify_voucher_payment(data: dict, m=Depends(get_merchant)):
         existing_inv_no = (existing_vch or {}).get("invoice_no") or order.get("invoice_no", "")
         return {"message": "Payment already verified.", "voucher_id": order.get("voucher_id", ""), "invoice_no": existing_inv_no}
 
-    if RAZORPAY_KEY_SECRET and razorpay_order_id and razorpay_payment_id:
-        msg = f"{razorpay_order_id}|{razorpay_payment_id}"
-        expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-        if expected != razorpay_signature:
-            raise HTTPException(400, "Payment verification failed")
+    _require_valid_razorpay_payment(order, razorpay_order_id, razorpay_payment_id, razorpay_signature)
 
     # Read store/city from Flutter payload — CRITICAL: must be stored on voucher
     store_id   = (data.get("store_id")   or "").strip()
@@ -3263,19 +3339,55 @@ def check_product_expiry(m=Depends(get_merchant)):
 
 @router.get("/products/{pid}/analytics")
 def get_product_analytics(pid: str, m=Depends(get_merchant)):
-    """Return view/share/open event counts for a product."""
+    """Return view/share/open counts and last-viewed time for a product.
+
+    Counts are computed database-side ($group) — events are never loaded into
+    Python. Authorization: the product must belong to the calling merchant
+    (looked up in merchant_vouchers / gift_vouchers), otherwise 404.
+
+    Historical events: before the tracking fix, events were saved with an empty
+    merchant_id. Because ownership of THIS product is verified above, events
+    for this product_id with an empty/missing merchant_id are safely counted
+    too; events stamped with a DIFFERENT merchant's id are never counted."""
     merchant_id = _mid(m)
     try:
-        ObjectId(pid)
+        oid = ObjectId(pid)
     except Exception:
         raise HTTPException(400, "Invalid product ID")
-    events = list(db.product_events.find({"product_id": pid, "merchant_id": merchant_id}, {"event": 1}))
+    owned = (db.merchant_vouchers.find_one({"_id": oid, "merchant_id": merchant_id}, {"_id": 1})
+             or db.gift_vouchers.find_one({"_id": oid, "merchant_id": merchant_id}, {"_id": 1}))
+    if not owned:
+        raise HTTPException(404, "Product not found")
+
+    pipeline = [
+        {"$match": {"product_id": pid, "merchant_id": {"$in": [merchant_id, "", None]}}},
+        {"$group": {"_id": "$event", "count": {"$sum": 1}, "last": {"$max": "$created_at"}}},
+    ]
     counts = {"view": 0, "share": 0, "open": 0}
-    for e in events:
-        ev = e.get("event", "")
+    last_view = None
+    last_any = None
+    for row in db.product_events.aggregate(pipeline):
+        ev = row.get("_id")
         if ev in counts:
-            counts[ev] += 1
-    return {"product_id": pid, **counts, "total": sum(counts.values())}
+            counts[ev] = int(row.get("count", 0))
+        ts = row.get("last")
+        if isinstance(ts, datetime):
+            if last_any is None or ts > last_any:
+                last_any = ts
+            if ev == "view" and (last_view is None or ts > last_view):
+                last_view = ts
+    last = last_view or last_any
+    last_iso = last.strftime("%Y-%m-%dT%H:%M:%SZ") if last else ""
+    return {
+        "product_id": pid,
+        # plural keys — what the app reads
+        "views": counts["view"], "shares": counts["share"], "opens": counts["open"],
+        # singular keys kept for backward compatibility
+        **counts,
+        "total": sum(counts.values()),
+        "last_viewed": last_iso,
+        "last_seen": last_iso,
+    }
 
 
 @router.get("/products/{pid}/history")

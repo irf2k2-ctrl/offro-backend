@@ -143,7 +143,10 @@ def _cloudinary_upload_video(b64_data: str, folder: str = "offro") -> str:
         return b64_data
     data_str  = b64_data.split(",", 1)[-1] if "," in b64_data else b64_data
     timestamp = str(int(_cld_time2.time()))
-    sig_str   = "folder=" + folder + "&resource_type=video&timestamp=" + timestamp + secret
+    # Cloudinary signs only the upload params (sorted) - NOT file, api_key,
+    # cloud_name or resource_type. Including resource_type=video made every
+    # video upload fail with "Invalid Signature" (silently swallowed below).
+    sig_str   = "folder=" + folder + "&timestamp=" + timestamp + secret
     signature = _cld_hash2.sha1(sig_str.encode()).hexdigest()
     try:
         resp = _cld_req2.post(
@@ -160,8 +163,9 @@ def _cloudinary_upload_video(b64_data: str, folder: str = "offro") -> str:
         )
         if resp.status_code == 200:
             return resp.json().get("secure_url", b64_data)
-    except Exception:
-        pass
+        print(f"[CDN] video upload rejected: status={resp.status_code} body={resp.text[:300]}")
+    except Exception as e:
+        print(f"[CDN] video upload failed: {e}")
     return b64_data
 
 
@@ -361,7 +365,11 @@ def admin_get_areas(city: str = ""):
 
 @router.post("/login")
 def admin_login(data: dict):
-    a = db.admins.find_one({"username": data.get("username"), "password": data.get("password")})
+    _u, _p = data.get("username"), data.get("password")
+    # Reject non-string values (blocks MongoDB operator injection such as {"$ne": null})
+    if not isinstance(_u, str) or not isinstance(_p, str):
+        raise HTTPException(401, "Invalid credentials")
+    a = db.admins.find_one({"username": _u, "password": _p})
     if not a: raise HTTPException(401, "Invalid credentials")
     token = create_token()
     db.admins.update_one({"_id": a["_id"]}, {"$set": {"token": token}})
@@ -1881,9 +1889,19 @@ _DISCOUNT_SCOPES = {"STORE", "BANNERS", "PRODUCTS", "INFLUENCER", "ALL"}
 
 @router.get("/discounts")
 def list_discounts(a=Depends(get_current_admin)):
+    # BUG FIX (QA): `active` was a stored boolean set once at creation and
+    # never recomputed, so a code whose expiry_date had already passed kept
+    # showing "Active" forever. Status is now derived at read time from the
+    # real expiry_date (same real-time-status pattern used elsewhere, e.g.
+    # admin.py's _compute_voucher_status for merchant vouchers), without
+    # touching the stored `active` flag itself — an admin can still
+    # manually deactivate/reactivate a non-expired code as before.
     docs = list(db.discounts.find().sort("created_at", -1))
+    now = datetime.utcnow()
     result = []
     for d in docs:
+        expiry_dt = d.get("expiry_date")
+        is_expired = bool(expiry_dt and expiry_dt < now)
         result.append({
             "_id":         str(d["_id"]),
             "code":        d.get("code",""),
@@ -1893,7 +1911,8 @@ def list_discounts(a=Depends(get_current_admin)):
             "max_uses":    d.get("max_uses",0),
             "used_count":  d.get("used_count",0),
             "active":      d.get("active",True),
-            "expiry_date": d["expiry_date"].strftime("%Y-%m-%d") if d.get("expiry_date") else None,
+            "is_expired":  is_expired,
+            "expiry_date": expiry_dt.strftime("%Y-%m-%d") if expiry_dt else None,
             "created_at":  d["created_at"].strftime("%d %b %Y") if d.get("created_at") else "",
         })
     return result
@@ -2591,6 +2610,7 @@ def list_promo_sliders(a=Depends(get_current_admin)):
             "_id":           str(d["_id"]),
             "title":         d.get("title", ""),
             "image_url":     d.get("image_url", ""),
+            "media_type":    d.get("media_type") or "image",
             "link_url":      d.get("link_url", ""),
             "sort_order":    d.get("sort_order", 0),
             "is_active":     d.get("is_active", True),
@@ -3364,6 +3384,7 @@ def list_merchant_banners(a=Depends(get_current_admin)):
             "merchant_phone":  merchant_phone,
             "title":           b.get("title", ""),
             "image_url":       b.get("image_url", ""),
+            "media_type":      b.get("media_type") or "image",
             "duration_days":   b.get("duration_days", b.get("duration", 30)),
             "duration":        b.get("duration_days", b.get("duration", 30)),
             "plan":            b.get("plan", ""),
@@ -3726,6 +3747,7 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     _promo_set_fields = {
         "title":         b.get("title",""),
         "image_url":     b.get("image_url",""),
+        "media_type":    b.get("media_type") or "image",
         "is_active":     True,
         "sort_order":    50,
         "source":        "merchant",

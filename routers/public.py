@@ -23,6 +23,70 @@ def _safe_end_date(p):
     # 'DD Mon YYYY' or other format — return as-is
     return s
 
+# ── Shared date parsing + deal expiry ────────────────────────────────────
+def _parse_flex_date_value(raw):
+    """Parse a date that may be a datetime, an ISO string, or one of the
+    human-entered formats admin/merchant forms write to end_date (e.g.
+    "11 Aug 2026"). Returns a naive datetime, or None when empty/unparseable.
+    Single shared implementation: the product-expiry code in
+    get_public_products() delegates here, and deal expiry uses it too."""
+    from datetime import datetime as _dt2
+    if raw is None or raw == "":
+        return None
+    if hasattr(raw, "strftime"):
+        return raw
+    s = str(raw).strip()
+    if not s or s in ("null", "None"):
+        return None
+    for fmt in ("%Y-%m-%d", "%d %b %Y", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return _dt2.strptime(s[:19].replace("Z", ""), fmt)
+        except ValueError:
+            continue
+    try:
+        return _dt2.fromisoformat(s[:19].replace("Z", "").replace(" ", "T"))
+    except ValueError:
+        return None
+
+
+def _ist_now():
+    """Current time on the India business clock (IST, UTC+05:30) as a naive
+    datetime. Offer/product validity is a business-day rule in India: an
+    end date of 2026-10-14 runs through 2026-10-14 23:59:59 IST."""
+    from datetime import datetime as _dt2, timedelta as _td2
+    return _dt2.utcnow() + _td2(hours=5, minutes=30)
+
+
+def _end_date_passed(raw, now=None):
+    """True/False when [raw] is a parseable end date, None when it is empty or
+    cannot be parsed. Valid THROUGH the end date: expired only once the end of
+    that calendar day (23:59:59, IST) has passed. [now] is a naive IST
+    datetime (defaults to _ist_now())."""
+    dt = _parse_flex_date_value(raw)
+    if dt is None:
+        return None
+    return dt.replace(hour=23, minute=59, second=59, microsecond=0) < (now or _ist_now())
+
+
+def _is_deal_expired(deal, now=None):
+    """True only when the deal has a parseable end date that is in the past.
+
+    A deal is valid THROUGH its end date on the IST business day:
+    end_date 2026-10-14 is live until 2026-10-14 23:59:59 IST and expired from
+    2026-10-15 00:00 IST. No end date, or an end date that cannot be parsed,
+    means NOT expired — a bad/missing date never hides a deal.
+    [now] is a naive IST datetime (defaults to _ist_now())."""
+    for k in ("end_date", "valid_until", "expiry"):
+        raw = deal.get(k)
+        if raw is None or raw == "":
+            continue
+        passed = _end_date_passed(raw, now)
+        if passed is None:
+            continue  # unparseable → try the next field, else treat as valid
+        return passed
+    return False
+
+
 # ── Timestamp helpers (Round 4 — Bug 2 fix) ──────────────────────────────
 # Root cause of "review shows 5h ago instead of just now": created_at was
 # written as datetime.utcnow().isoformat() with NO timezone suffix. That IS
@@ -85,7 +149,9 @@ def get_stores(city: str = None, category: str = None):
         "image":1,"image_url":1,"image_thumb":1,"_thumb":1,"store_image":1,"store_image2":1,"images":1,"status":1,"points_per_scan":1,
         "lat":1,"lng":1,"rating":1,"admin_rating":1,"is_new_in_town":1,"is_trending":1,"is_popular":1,"badge":1,"merchant_id":1,
         "tags":1,"favorite_count":1,"favorites":1,"view_count":1,"views":1,
-        "created_at":1,"late_night":1
+        "created_at":1,"late_night":1,
+        # Needed by the Home Main Store Card's Open/Closed + hours row.
+        "open_time":1,"close_time":1
     }))
     if not stores:
         return []
@@ -192,6 +258,9 @@ def get_stores(city: str = None, category: str = None):
             "view_count":     int(s.get("view_count") or s.get("views") or 0),
             "created_at":     str(s.get("created_at", "") or ""),
             "late_night":     bool(s.get("late_night", False)),
+            # Store hours — additive; empty string when not configured.
+            "open_time":      s.get("open_time", "") or "",
+            "close_time":     s.get("close_time", "") or "",
         })
     return result
 
@@ -214,6 +283,10 @@ def get_store(store_id: str):
     # Deals
     deals = list(db.deals.find({"store_id": store_id, "status": "active"})) \
         if "deals" in cols else []
+    # Customer Store Detail must not show expired offers: `status` stays
+    # "active" after end_date passes, so check the end date (valid through the
+    # end of that day; missing/unparseable date → still shown).
+    deals = [d for d in deals if not _is_deal_expired(d)]
     deals_list = [{
         "title":       d.get("title"),
         "discount":    d.get("discount"),
@@ -229,20 +302,20 @@ def get_store(store_id: str):
 
     # Products for this store — from merchant_vouchers + gift_vouchers (active/non-expired only)
     from datetime import datetime as _dt
-    _pnow = _dt.utcnow()
     products_list = []
     seen_product_ids = set()
 
     def _prod_expired(p):
-        """Return True if the product's end_date has passed."""
-        ed = p.get("end_date") or p.get("validity_end") or ""
-        if not ed:
-            return False
-        try:
-            ed_dt = ed if isinstance(ed, _dt) else _dt.fromisoformat(str(ed)[:19].replace(" ","T"))
-            return ed_dt < _pnow
-        except Exception:
-            return False
+        """Return True if the product's end date has passed (valid through the
+        end of that day, IST — same rule as deals)."""
+        for k in ("end_date", "validity_end"):
+            raw = p.get(k)
+            if raw is None or raw == "":
+                continue
+            passed = _end_date_passed(raw)
+            if passed is not None:
+                return passed
+        return False
 
     def _prod_img(p):
         # ROUND 11 FIX (Task 1): this previously only accepted values
@@ -359,7 +432,9 @@ def get_store(store_id: str):
         "image":        store.get("image") or None,
         "image_url":    image_url,
         "image_thumb":  image_thumb,
-        "image2":       store.get("store_image2") or store.get("image2") or None,
+        # Store Logo: merchant app saves image2_url (CDN), admin saves store_image2.
+        # image2_url first so a logo the merchant just uploaded is not hidden by an older store_image2.
+        "image2":       store.get("image2_url") or store.get("store_image2") or store.get("image2") or None,
         "images":       store.get("images", []),
         "latitude":     store.get("lat") or None,
         "longitude":    store.get("lng") or None,
@@ -813,7 +888,6 @@ def get_all_active_deals(city: str = ""):
     Products are excluded. Each deal includes store image, name, area, validity.
     """
     from datetime import datetime as _dt
-    _now = _dt.utcnow()
 
     # BUG FIX (Round 6 — Issue 3, "deal not appearing in Hot Deals"):
     # Root cause — this endpoint used to require the store to ALSO have a
@@ -872,14 +946,11 @@ def get_all_active_deals(city: str = ""):
             continue
 
         # Validity check — skip expired deals
+        # Shared rule (same helper as Store Detail): valid through the end of
+        # the end date, IST; missing/unparseable date → kept.
         end_date = d.get("end_date") or d.get("valid_until") or d.get("expiry") or ""
-        if end_date:
-            try:
-                end_dt = end_date if isinstance(end_date, _dt) else _dt.fromisoformat(str(end_date).replace("Z",""))
-                if end_dt < _now:
-                    continue
-            except Exception:
-                pass
+        if _is_deal_expired(d):
+            continue
 
         # Resolve store image
         def _store_img(s):
@@ -1428,6 +1499,8 @@ def get_promo_sliders_public():
             "subtitle":   d.get("subtitle", "") or d.get("text", ""),
             "image":      img,
             "image_url":  img,
+            # "image" for every banner created before video support existed
+            "media_type": d.get("media_type") or ("video" if ("/video/upload/" in str(img) or str(img).startswith("data:video") or str(img).lower().split("?")[0].endswith(".mp4")) else "image"),
             "link_url":   d.get("link_url", ""),
             "bg_color":   d.get("bg_color", ""),
             "sort_order": d.get("sort_order", 0),
@@ -1478,47 +1551,47 @@ def get_gift_vouchers_public(city: str = ""):
     def _is_active(doc):
         return doc.get("is_active", True) not in (False, "false", "0", 0)
 
+    def _parse_flex_date(raw):
+        """Delegates to the module-level shared parser (_parse_flex_date_value)."""
+        return _parse_flex_date_value(raw)
+
+    def _validity_end_fallback(doc):
+        """Some products only carry a free-text `validity` string (e.g.
+        "11 Aug 2026" or "20 Jan 2026 → 10 Feb 2026") with no structured
+        end_date/expiry/valid_till field at all — same fallback the admin
+        dashboard UI already uses to compute its Expired badge."""
+        validity_raw = str(doc.get("validity", "") or "").strip()
+        if not validity_raw:
+            return None
+        end_part = validity_raw
+        if "→" in validity_raw:
+            end_part = validity_raw.split("→")[-1].strip()
+        elif "->" in validity_raw:
+            end_part = validity_raw.split("->")[-1].strip()
+        return _parse_flex_date(end_part)
+
     def _is_expired(doc) -> bool:
-        from datetime import datetime as _dt2
-        _now2 = _dt2.utcnow()
+        _now2 = _ist_now()  # IST business day (shared with deals)
         for k in ("end_date", "validity_end", "expiry", "valid_till"):
-            v = doc.get(k)
-            if not v:
-                continue
-            try:
-                if isinstance(v, _dt2):
-                    if v < _now2:
-                        return True
-                else:
-                    vs = str(v).strip()
-                    if vs and vs not in ("", "null", "None"):
-                        vdt = _dt2.fromisoformat(vs[:19].replace(" ", "T"))
-                        if vdt < _now2:
-                            return True
-            except Exception:
-                pass
+            vdt = _parse_flex_date(doc.get(k))
+            if vdt is not None:
+                # End-of-day comparison: "11 Aug 2026" means valid through
+                # 23:59:59 that day — matches admin.py's _compute_voucher_status.
+                return vdt.replace(hour=23, minute=59, second=59) < _now2
+        # No structured end-date field present — fall back to the free-text
+        # `validity` string (same as admin_dashboard.html's Products tab).
+        vdt = _validity_end_fallback(doc)
+        if vdt is not None:
+            return vdt.replace(hour=23, minute=59, second=59) < _now2
         return False
 
     def _not_started(doc) -> bool:
         """True if the product's from_date/start_date is still in the future — hide until then."""
-        from datetime import datetime as _dt3
-        _now3 = _dt3.utcnow()
+        _now3 = _ist_now()  # IST business day
         for k in ("from_date", "start_date", "valid_from"):
-            v = doc.get(k)
-            if not v:
-                continue
-            try:
-                if isinstance(v, _dt3):
-                    if v > _now3:
-                        return True
-                else:
-                    vs = str(v).strip()
-                    if vs and vs not in ("", "null", "None"):
-                        vdt = _dt3.fromisoformat(vs[:19].replace(" ", "T"))
-                        if vdt > _now3:
-                            return True
-            except Exception:
-                pass
+            vdt = _parse_flex_date(doc.get(k))
+            if vdt is not None:
+                return vdt > _now3
         return False
 
     def _resolve_img(doc):
@@ -1775,7 +1848,7 @@ def get_default_images():
 
     return {
         "store":            _first(doc.get("store", "")),
-        "product":          _first(doc.get("product", "")),
+        "product":          _all_urls(doc.get("product", "")),
         "offer":            _first(doc.get("offer", "")),
         "city":             _all_urls(doc.get("city", "")),
         "merchant_banner":  _all_urls(doc.get("merchant_banner", "")),  # array — same pattern as city
@@ -1791,22 +1864,43 @@ def get_default_images():
 
 @router.post("/products/{pid}/track")
 def track_product_event(pid: str, data: dict):
-    """Track a product event (view, share, open) from the Flutter app."""
+    """Track a product event (view, share, open) from the Flutter app.
+
+    The owning merchant is resolved SERVER-SIDE from the product document —
+    any merchant_id sent by the client is ignored (it cannot be trusted, and
+    the app does not send one). Events for an unknown product are not stored
+    (no fabricated ownership)."""
     from bson import ObjectId as _OId4
     from datetime import datetime as _dtt
     event = data.get("event", "view")
     if event not in ("view", "share", "open"):
         event = "view"
-    merchant_id = data.get("merchant_id", "")
-    db.product_events.insert_one({
-        "product_id": pid, "merchant_id": merchant_id,
-        "event": event, "created_at": _dtt.utcnow(),
-    })
-    for col in [db.merchant_vouchers, db.gift_vouchers]:
+    try:
+        oid = _OId4(pid)
+    except Exception:
+        return {"ok": True}
+    owner = ""
+    found = False
+    for col in (db.merchant_vouchers, db.gift_vouchers):
         try:
-            col.update_one({"_id": _OId4(pid)}, {"$inc": {f"{event}_count": 1}})
+            doc = col.find_one({"_id": oid}, {"merchant_id": 1})
+        except Exception:
+            doc = None
+        if not doc:
+            continue
+        if not found:
+            found = True
+            owner = str(doc.get("merchant_id") or "")
+        try:
+            col.update_one({"_id": oid}, {"$inc": {f"{event}_count": 1}})
         except Exception:
             pass
+    if not found:
+        return {"ok": True}
+    db.product_events.insert_one({
+        "product_id": pid, "merchant_id": owner,
+        "event": event, "created_at": _dtt.utcnow(),
+    })
     return {"ok": True}
 
 
