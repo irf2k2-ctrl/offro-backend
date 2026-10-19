@@ -1551,6 +1551,248 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
     if upd: db.stores.update_one({"_id": ObjectId(id)}, {"$set": upd})
     return {"message": "Updated"}
 
+# ===================== SUBSCRIPTION RENEWAL (admin) =====================
+# "Renew" for a store whose newest subscription has expired. Uses the SAME
+# subscription document / invoice / store-field conventions as the merchant
+# payment flow (routers/merchant_app.py) and the SAME plan durations
+# (merchant_app.plan_days). History is never touched: a renewal INSERTS a new
+# subscription (newest created_at wins in the Stores list); old rows stay.
+_RENEW_PAY_MODES = ("cash", "upi", "bank_transfer", "cheque", "free")
+_KNOWN_PLANS = ("1month", "3months", "6months", "12months")
+
+
+def _to_naive_dt(v):
+    """datetime | 'YYYY-MM-DD' / ISO / 'DD Mon YYYY' string -> naive datetime, else None."""
+    if isinstance(v, datetime):
+        return v.replace(tzinfo=None) if v.tzinfo else v
+    if isinstance(v, str) and v.strip():
+        t = v.strip().replace("Z", "")
+        try:
+            d = datetime.fromisoformat(t)
+            return d.replace(tzinfo=None) if d.tzinfo else d
+        except Exception:
+            pass
+        for fmt in ("%d %b %Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(t, fmt)
+            except Exception:
+                pass
+    return None
+
+
+def _newest_store_subscription(store_id: str):
+    """Newest subscription for a store - same ordering the Stores list uses."""
+    ids = [store_id]
+    try:
+        ids.append(ObjectId(store_id))
+    except Exception:
+        pass
+    return db.subscriptions.find_one({"store_id": {"$in": ids}}, sort=[("created_at", -1)])
+
+
+def _renewal_store(a, id):
+    try:
+        oid = ObjectId(id)
+    except Exception:
+        raise HTTPException(404, "Store not found")
+    store = db.stores.find_one({"_id": oid, **_city_filter(a)})
+    if not store:
+        raise HTTPException(404, "Store not found")
+    return store
+
+
+@router.get("/stores/{id}/renewal-info")
+def store_renewal_info(id: str, a=Depends(get_current_admin)):
+    """Latest subscription details + suggested renewal dates for the Renew dialog."""
+    _check_perm(a, "Stores", "edit")
+    store = _renewal_store(a, id)
+    prev = _newest_store_subscription(id)
+    if not prev:
+        raise HTTPException(404, "This store has no subscription to renew.")
+    from routers.merchant_app import plan_days
+
+    now = datetime.utcnow()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    prev_from = _to_naive_dt(prev.get("from_date"))
+    prev_end = _to_naive_dt(prev.get("end_date"))
+    # Same test the Stores list uses: active while end_date >= now.
+    expired = prev_end is None or prev_end < now
+    # Expired -> start today. Still active -> day after the current end date.
+    start = today if expired else prev_end.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+
+    plan = str(prev.get("plan") or "")
+    if plan in _KNOWN_PLANS:
+        days = plan_days(plan)
+    elif prev_from and prev_end and prev_end > prev_from:
+        days = max(1, (prev_end - prev_from).days)  # custom plan: repeat the previous term length
+    else:
+        days = 30
+    end = start + timedelta(days=days)
+
+    pricing = db.pricing.find_one({}) or {}
+    price = prev.get("price", prev.get("amount", prev.get("base_price", 0))) or 0
+    gst_pct = prev.get("gst_percent")
+    if gst_pct is None:
+        gst_pct = pricing.get("gst_percent", 18)
+    pay_mode = prev.get("pay_mode") if prev.get("pay_mode") in _RENEW_PAY_MODES else "cash"
+    return {
+        "store_id": id,
+        "store_name": store.get("store_name", ""),
+        "subscription_id": str(prev["_id"]),
+        "expired": bool(expired),
+        "plan": plan,
+        "amount": price,
+        "gst_percent": gst_pct,
+        "pay_mode": pay_mode,
+        "prev_from_date": prev_from.strftime("%Y-%m-%d") if prev_from else "",
+        "prev_end_date": prev_end.strftime("%Y-%m-%d") if prev_end else "",
+        "suggested_from_date": start.strftime("%Y-%m-%d"),
+        "suggested_end_date": end.strftime("%Y-%m-%d"),
+        "plan_days": {p: plan_days(p) for p in _KNOWN_PLANS},
+    }
+
+
+@router.post("/stores/{id}/renew-subscription")
+def renew_store_subscription(id: str, data: dict, a=Depends(get_current_admin)):
+    """Create the renewal subscription for a store (history is preserved)."""
+    _check_perm(a, "Stores", "edit")
+    global _store_cache
+    store = _renewal_store(a, id)
+    prev = _newest_store_subscription(id)
+    if not prev:
+        raise HTTPException(404, "This store has no subscription to renew.")
+
+    from_dt = _to_naive_dt(data.get("from_date"))
+    end_dt = _to_naive_dt(data.get("end_date"))
+    if not from_dt or not end_dt:
+        raise HTTPException(400, "Please enter a valid start date and end date.")
+    from_dt = from_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_dt = end_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    if end_dt <= from_dt:
+        raise HTTPException(400, "End date must be after the start date.")
+    if end_dt < datetime.utcnow():
+        raise HTTPException(400, "End date must be in the future, otherwise the subscription would still be expired.")
+
+    try:
+        price = round(float(data.get("amount") or 0), 2)
+        gst_pct = float(data.get("gst_percent") if data.get("gst_percent") not in (None, "") else 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Amount and GST % must be numbers.")
+    if price < 0 or not (0 <= gst_pct <= 100):
+        raise HTTPException(400, "Amount must be 0 or more and GST % between 0 and 100.")
+    pay_mode = str(data.get("pay_mode") or "cash").strip().lower()
+    if pay_mode not in _RENEW_PAY_MODES:
+        raise HTTPException(400, "Invalid payment mode.")
+    plan = str(data.get("plan") or prev.get("plan") or "custom").strip() or "custom"
+    pay_ref = str(data.get("payment_ref") or "").strip()[:200]
+
+    # Guard against an accidental double submit of the same renewal.
+    if _to_naive_dt(prev.get("from_date")) == from_dt and _to_naive_dt(prev.get("end_date")) == end_dt:
+        raise HTTPException(409, "A subscription with these dates already exists for this store.")
+
+    is_free = pay_mode == "free"
+    gst_amt = 0.0 if is_free else round(price * gst_pct / 100, 2)
+    total = 0.0 if is_free else round(price + gst_amt, 2)
+    now = datetime.utcnow()
+    merchant_id = str(store.get("merchant_id") or prev.get("merchant_id") or "")
+    admin_name = str(a.get("full_name") or a.get("name") or a.get("email") or "admin")
+
+    sub_doc = {
+        "store_id":        id,
+        "merchant_id":     merchant_id,
+        "plan":            plan,
+        "from_date":       from_dt,
+        "end_date":        end_dt,
+        "price":           price,
+        "gst":             gst_amt,
+        "gst_percent":     gst_pct,
+        "total":           total,
+        "status":          "paid",
+        "pay_mode":        pay_mode,
+        "payment_ref":     pay_ref,
+        "discount_code":   "",
+        "discount_type":   None,
+        "discount_scope":  None,
+        "discount_value":  0,
+        "discount_amount": 0,
+        "original_amount": price,
+        "final_amount":    0 if is_free else price,
+        "created_at":      now,     # newest created_at => the Stores list picks this one
+        "paid_at":         now,
+        "renewal":         True,
+        "renewal_of":      str(prev["_id"]),
+        "renewed_by":      admin_name,
+    }
+    if is_free:
+        sub_doc["free_activation"] = True
+    res = db.subscriptions.insert_one(sub_doc)
+    sub_id = str(res.inserted_id)
+    stamp = now.strftime("%Y%m%d")
+    invoice_no = f"LS-FREE-{stamp}-{sub_id[-6:].upper()}" if is_free else f"LS-{stamp}-{sub_id[-6:].upper()}"
+    db.subscriptions.update_one({"_id": res.inserted_id}, {"$set": {"invoice_no": invoice_no}})
+
+    # Same store fields the merchant payment flow maintains. Store "status"
+    # is deliberately NOT touched (an expired store is still status "active").
+    db.stores.update_one({"_id": store["_id"]}, {"$set": {
+        "subscription_plan":  plan,
+        "subscription_start": from_dt,
+        "subscription_end":   end_dt,
+    }})
+    _store_cache["data"] = None
+
+    m_name, m_phone = "", ""
+    try:
+        mdoc = (db.accounts.find_one({"_id": ObjectId(merchant_id)}) or
+                db.merchants.find_one({"_id": ObjectId(merchant_id)}) or {})
+        m_name, m_phone = mdoc.get("name", ""), str(mdoc.get("phone", ""))
+    except Exception:
+        pass
+    try:
+        db.invoices.insert_one({
+            "invoice_no":      invoice_no,
+            "merchant_id":     merchant_id,
+            "merchant_name":   m_name,
+            "merchant_phone":  m_phone,
+            "store_id":        id,
+            "store_name":      store.get("store_name", ""),
+            "plan":            plan,
+            "base_price":      price,
+            "original_amount": price,
+            "discount_code":   "",
+            "discount_type":   None,
+            "discount_scope":  None,
+            "discount_value":  0,
+            "discount_amount": 0,
+            "final_amount":    0 if is_free else price,
+            "gst":             gst_amt,
+            "total":           total,
+            "from_date":       from_dt,
+            "end_date":        end_dt,
+            "created_at":      now,
+        })
+    except Exception as e:
+        print(f"[RENEW] invoice insert failed (subscription saved): {e}")
+    try:
+        db.activity_logs.insert_one({
+            "user_id":   str(a.get("_id", "")),
+            "user_name": admin_name,
+            "module":    "Stores",
+            "action":    "edit",
+            "detail":    f"Renewed subscription for store {id} ({plan}) {from_dt:%Y-%m-%d} to {end_dt:%Y-%m-%d}",
+            "timestamp": now,
+        })
+    except Exception:
+        pass
+    return {
+        "ok":              True,
+        "message":         "Subscription renewed successfully",
+        "subscription_id": sub_id,
+        "invoice_no":      invoice_no,
+        "from_date":       from_dt.strftime("%Y-%m-%d"),
+        "end_date":        end_dt.strftime("%Y-%m-%d"),
+    }
+
+
 @router.put("/stores/{id}/rating")
 def set_store_rating(id: str, data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Stores", "edit")
