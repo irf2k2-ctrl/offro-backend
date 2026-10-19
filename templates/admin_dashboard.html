@@ -1576,6 +1576,48 @@ td[style*="sticky"]{background:#fff;}
 
 </div>
 
+<!-- RENEW SUBSCRIPTION MODAL -->
+<div class="modal fade" id="renewSubModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Renew Subscription</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="renew_store_id">
+        <div style="font-weight:600" id="renew_store_name"></div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px" id="renew_prev_info"></div>
+        <div class="row g-2">
+          <div class="col-6"><label class="form-label">Plan</label>
+            <select id="renew_plan" class="form-select" onchange="renewAutoEnd()">
+              <option value="1month">1 Month</option><option value="3months">3 Months</option>
+              <option value="6months">6 Months</option><option value="12months">12 Months</option>
+              <option value="custom">Custom</option></select></div>
+          <div class="col-6"><label class="form-label">Amount (excl. GST) ₹</label>
+            <input type="number" min="0" step="0.01" id="renew_amount" class="form-control"></div>
+          <div class="col-6"><label class="form-label">GST %</label>
+            <input type="number" min="0" max="100" step="0.01" id="renew_gst" class="form-control"></div>
+          <div class="col-6"><label class="form-label">Payment Mode</label>
+            <select id="renew_pay_mode" class="form-select">
+              <option value="cash">Cash</option><option value="upi">UPI</option>
+              <option value="bank_transfer">Bank Transfer</option><option value="cheque">Cheque</option>
+              <option value="free">Free</option></select></div>
+          <div class="col-6"><label class="form-label">New Start Date</label>
+            <input type="date" id="renew_from" class="form-control" onchange="renewAutoEnd()"></div>
+          <div class="col-6"><label class="form-label">New End Date</label>
+            <input type="date" id="renew_end" class="form-control"></div>
+          <div class="col-12"><label class="form-label">Payment Reference (optional)</label>
+            <input type="text" id="renew_ref" class="form-control" maxlength="200"></div>
+        </div>
+        <div id="renew_msg" style="color:#ff6b6b;font-size:13px;margin-top:10px;display:none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-o" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn-approve" id="renew_submit_btn" onclick="submitRenewSub()">Renew Subscription</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- STORE MODAL -->
 <div class="modal fade" id="storeModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
@@ -1873,7 +1915,8 @@ window.addEventListener('unhandledrejection', (e) => {
 let accountsList=[], _filteredAccounts=[], _acctPage=1;
 var _adminBannersList = [];  // Admin Banners
 let merchantsList=[], allStores=[], categoriesList=[], allUsers=[];
-let storeModal, qrModal, userHistoryModal, adjustModal_inst;
+let storeModal, qrModal, userHistoryModal, adjustModal_inst, renewSubModal;
+let _renewPlanDays = {"1month":30,"3months":90,"6months":180,"12months":365};
 // Ratings module removed
 let editingStore=false;
 
@@ -2437,6 +2480,7 @@ window.onload = () => {
     return el ? new bootstrap.Modal(el) : null;
   }
   storeModal        = safeModal("storeModal");
+  renewSubModal     = safeModal("renewSubModal");
   userHistoryModal  = safeModal("userHistoryModal");
   adjustModal_inst  = safeModal("adjustModal");
   qrModal           = safeModal("qrModal");
@@ -3027,6 +3071,7 @@ function renderStoresPage(){
       <td>
         ${approveBtn}
         <button class="btn-o me-1" onclick="openEditStore('${s._id}')">Edit</button>
+        ${(s.sub_status||"").toLowerCase()==='expired'?`<button class="btn-approve me-1" onclick="openRenewSub('${s._id}')">Renew</button>`:''}
         <button class="btn-o me-1" onclick="showQR('${s._id}',\`${s.store_name}\`,'')"><i class="fas fa-qrcode"></i></button>
         <button class="btn-w me-1" onclick="toggleStore('${s._id}')">${s.status==="active"?"Off":"On"}</button>
         <button class="btn-d" onclick="deleteStore('${s._id}')">Del</button>
@@ -3184,6 +3229,59 @@ async function openCreateStore(){
   populateCategoryDropdown("");
   if (storeModal) storeModal.show();
 }
+function _renewErr(m){const e=document.getElementById("renew_msg");e.innerText=m||"";e.style.display=m?"block":"none";}
+function _renewAddDays(v,n){const d=new Date(v+"T00:00:00");d.setDate(d.getDate()+n);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function renewAutoEnd(){
+  const p=document.getElementById("renew_plan").value,f=document.getElementById("renew_from").value;
+  if(f&&_renewPlanDays[p])document.getElementById("renew_end").value=_renewAddDays(f,_renewPlanDays[p]);
+}
+async function openRenewSub(id){
+  _renewErr("");
+  document.getElementById("renew_store_id").value=id;
+  const s=allStores.find(x=>x._id===id)||{};
+  document.getElementById("renew_store_name").innerText=s.store_name||"";
+  document.getElementById("renew_prev_info").innerText="Loading latest subscription...";
+  try{
+    const r=await fetch(`/admin/stores/${id}/renewal-info`,{credentials:"include"});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){showToast(d.detail||"Could not load subscription info","error");return;}
+    _renewPlanDays=d.plan_days||_renewPlanDays;
+    const sel=document.getElementById("renew_plan");
+    if(![...sel.options].some(o=>o.value===d.plan)){const o=document.createElement("option");o.value=d.plan;o.innerText=d.plan;sel.appendChild(o);}
+    sel.value=d.plan||"custom";
+    document.getElementById("renew_amount").value=d.amount;
+    document.getElementById("renew_gst").value=d.gst_percent;
+    document.getElementById("renew_pay_mode").value=d.pay_mode;
+    document.getElementById("renew_ref").value="";
+    document.getElementById("renew_from").value=d.suggested_from_date;
+    document.getElementById("renew_end").value=d.suggested_end_date;
+    document.getElementById("renew_prev_info").innerText=`Previous term: ${d.prev_from_date||"-"} to ${d.prev_end_date||"-"} (${d.expired?"expired":"still active"})`;
+    renewSubModal.show();
+  }catch(e){showToast("Could not load subscription info: "+e.message,"error");}
+}
+async function submitRenewSub(){
+  const id=document.getElementById("renew_store_id").value,btn=document.getElementById("renew_submit_btn");
+  _renewErr("");btn.disabled=true;
+  try{
+    const r=await fetch(`/admin/stores/${id}/renew-subscription`,{method:"POST",credentials:"include",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({plan:document.getElementById("renew_plan").value,
+        amount:document.getElementById("renew_amount").value,
+        gst_percent:document.getElementById("renew_gst").value,
+        pay_mode:document.getElementById("renew_pay_mode").value,
+        payment_ref:document.getElementById("renew_ref").value,
+        from_date:document.getElementById("renew_from").value,
+        end_date:document.getElementById("renew_end").value})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){_renewErr(typeof d.detail==="string"?d.detail:"Renewal failed (HTTP "+r.status+")");return;}
+    renewSubModal.hide();
+    showToast("Subscription renewed successfully");
+    await loadStores();await loadStats();
+  }catch(e){_renewErr("Renewal failed: "+e.message);}
+  finally{btn.disabled=false;}
+}
+
 async function openEditStore(id){
   let s=allStores.find(x=>x._id===id);if(!s)return;
   editingStore=true;
