@@ -1367,6 +1367,43 @@ def _banner_parse_any_date(val):
         pass
     return None
 
+# ── Banner CTA destination (Product → Deal → Store) ─────────────────────────
+# A banner links the customer to a Product, a Deal or the Store. The chosen
+# record must exist and belong to this merchant; otherwise the destination
+# falls back to the banner's own (already validated) store, so a banner
+# never carries an invalid destination.
+_BANNER_CTA_TYPES = ("store", "deal", "product")
+
+def _resolve_banner_cta(merchant_id: str, store_id: str, cta_type, cta_id):
+    """Return a VALID (cta_type, cta_id); falls back to ("store", store_id)."""
+    fallback = ("store", str(store_id or ""))
+    ct = str(cta_type or "").strip().lower()
+    ci = str(cta_id or "").strip()
+    if ct not in _BANNER_CTA_TYPES or not ci:
+        return fallback
+    if ct == "store":
+        return ("store", str(store_id or ci))
+    try:
+        oid = ObjectId(ci)
+    except Exception:
+        return fallback
+    try:
+        mids = [merchant_id]
+        try: mids.append(ObjectId(merchant_id))
+        except Exception: pass
+        if ct == "deal":
+            ok = db.deals.find_one({"_id": oid, "merchant_id": {"$in": mids}, "status": "active"}, {"_id": 1})
+            return ("deal", ci) if ok else fallback
+        ok = (db.gift_vouchers.find_one(
+                  {"_id": oid, "product_type": "standard", "merchant_id": {"$in": mids},
+                   "is_active": {"$ne": False}}, {"_id": 1})
+              or db.merchant_vouchers.find_one(
+                  {"_id": oid, "merchant_id": {"$in": mids},
+                   "status": {"$ne": "deleted"}, "is_deleted": {"$ne": True}}, {"_id": 1}))
+        return ("product", ci) if ok else fallback
+    except Exception:
+        return fallback
+
 @router.get("/banners")
 def get_my_banners(m=Depends(get_merchant)):
     from datetime import datetime as dt
@@ -1439,6 +1476,9 @@ def get_my_banners(m=Depends(get_merchant)):
                 "is_expired":      is_expired,
                 "is_active":       bool(b.get("is_active", True)),
                 "deleted_by_admin": bool(b.get("deleted_by_admin", False)),
+                "store_id":        str(b.get("store_id", "") or ""),
+                "cta_type":        b.get("cta_type") or "store",
+                "cta_id":          b.get("cta_id") or str(b.get("store_id", "") or ""),
             })
     except Exception as e:
         print(f"[BANNERS] merchant_banners query error: {e}")
@@ -1557,7 +1597,8 @@ def merchant_update_banner_title(bid: str, data: dict, m=Depends(get_merchant)):
         raise HTTPException(400, "Invalid banner id")
 
     new_title = str(data.get("title", "")).strip()
-    if not new_title:
+    has_cta = "cta_type" in data
+    if not new_title and not has_cta:
         raise HTTPException(400, "Title is required")
 
     ts = datetime.utcnow().isoformat()
@@ -1575,18 +1616,27 @@ def merchant_update_banner_title(bid: str, data: dict, m=Depends(get_merchant)):
     if str(b.get("merchant_id","")) != merchant_id and (not m_phone or b_phone != m_phone):
         raise HTTPException(403, "Not your banner")
 
+    upd = {"updated_at": ts}
+    if new_title:
+        upd["title"] = new_title
+    if has_cta:
+        _ct, _ci = _resolve_banner_cta(merchant_id, str(b.get("store_id", "") or ""),
+                                       data.get("cta_type"), data.get("cta_id"))
+        upd["cta_type"] = _ct
+        upd["cta_id"] = _ci
     if found_in == "merchant_banners":
-        db.merchant_banners.update_one({"_id": oid}, {"$set": {"title": new_title, "updated_at": ts}})
-        db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": {"title": new_title, "updated_at": ts}})
+        db.merchant_banners.update_one({"_id": oid}, {"$set": upd})
+        db.promo_sliders.update_many({"source_banner_id": bid}, {"$set": upd})
     else:
-        db.promo_sliders.update_one({"_id": oid}, {"$set": {"title": new_title, "updated_at": ts}})
+        db.promo_sliders.update_one({"_id": oid}, {"$set": upd})
         src_bid = b.get("source_banner_id", "")
         if src_bid:
             try:
-                db.merchant_banners.update_one({"_id": ObjectId(src_bid)}, {"$set": {"title": new_title, "updated_at": ts}})
+                db.merchant_banners.update_one({"_id": ObjectId(src_bid)}, {"$set": upd})
             except Exception:
                 pass
-    return {"ok": True, "title": new_title}
+    return {"ok": True, "title": new_title or b.get("title", ""),
+            "cta_type": upd.get("cta_type"), "cta_id": upd.get("cta_id")}
 
 # ── POST /merchant/banners/order  ──────────────────────────────────────────
 @router.post("/banners/upload-video")
@@ -1796,6 +1846,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         return {"message": "Banner already submitted for review.",
                 "banner_id": str(_dup["_id"]), "invoice_no": _dup.get("invoice_no", "")}
 
+    cta_type, cta_id = _resolve_banner_cta(merchant_id, store_id, data.get("cta_type"), data.get("cta_id"))
     banner = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
@@ -1805,6 +1856,8 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "image_thumb":      image_thumb,
         "media_type":       media_type,
         "store_id":         store_id,
+        "cta_type":         cta_type,
+        "cta_id":           cta_id,
         "store_name":       store_name,
         "city":             city,
         "duration_days":    order.get("days", 30),
@@ -1944,6 +1997,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         return {"message": "Payment already verified.",
                 "banner_id": str(_dup["_id"]), "invoice_no": _dup.get("invoice_no", "")}
 
+    cta_type, cta_id = _resolve_banner_cta(merchant_id, store_id, data.get("cta_type"), data.get("cta_id"))
     banner = {
         "merchant_id":      merchant_id,
         "merchant_name":    m.get("name", ""),
@@ -1953,6 +2007,8 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "image_thumb":      image_thumb,
         "media_type":       media_type,
         "store_id":         store_id,
+        "cta_type":         cta_type,
+        "cta_id":           cta_id,
         "store_name":       store_name,
         "city":             city,
         "duration_days":    order.get("days", 30),

@@ -4004,6 +4004,9 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
         "city":          _approve_city,
         "store_id":      _approve_store_id,
         "store_name":    _approve_store_name,
+        # CTA destination chosen by the merchant (older banners default to the store)
+        "cta_type":      b.get("cta_type") or "store",
+        "cta_id":        b.get("cta_id") or _approve_store_id,
         "updated_at":    datetime.utcnow().isoformat(),
     }
     # DB-LEVEL SAFETY NET (PERMANENT DUPLICATE-BANNER FIX): promo_sliders now

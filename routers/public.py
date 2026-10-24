@@ -1455,6 +1455,28 @@ def get_about_public():
     return {"content": doc.get("content", "")}
 
 # =================== PROMO SLIDERS (public - for Flutter app) ===================
+def _public_banner_cta(d, store_id):
+    """Final (cta_type, cta_id, cta_store_id) for a live banner. A Product/Deal
+    destination that no longer exists / is inactive falls back to the Store,
+    so the customer app never receives a dead destination."""
+    ct = str(d.get("cta_type") or "store").strip().lower()
+    ci = str(d.get("cta_id") or "").strip()
+    try:
+        if ct == "deal" and ci:
+            deal = db.deals.find_one({"_id": ObjectId(ci), "status": "active"}, {"store_id": 1})
+            if deal:
+                return ("deal", ci, str(deal.get("store_id", "") or store_id))
+        elif ct == "product" and ci:
+            oid = ObjectId(ci)
+            prod = (db.gift_vouchers.find_one({"_id": oid, "is_active": {"$ne": False}}, {"store_id": 1})
+                    or db.merchant_vouchers.find_one(
+                        {"_id": oid, "status": {"$ne": "deleted"}, "is_deleted": {"$ne": True}}, {"store_id": 1}))
+            if prod:
+                return ("product", ci, str(prod.get("store_id", "") or store_id))
+    except Exception:
+        pass
+    return ("store", store_id, store_id)
+
 @router.get("/promo-sliders")
 def get_promo_sliders_public():
     """Returns active, non-expired merchant banners (promo sliders) for the home screen."""
@@ -1493,8 +1515,14 @@ def get_promo_sliders_public():
             except Exception:
                 pass
         img = d.get("image_url", "") or d.get("image", "")
+        _sid = str(d.get("store_id", "") or "")
+        _ct, _ci, _cs = _public_banner_cta(d, _sid)
         result.append({
             "id":         str(d["_id"]),
+            "store_id":   _sid,
+            "cta_type":   _ct,
+            "cta_id":     _ci,
+            "cta_store_id": _cs,
             "title":      d.get("title", ""),
             "subtitle":   d.get("subtitle", "") or d.get("text", ""),
             "image":      img,
