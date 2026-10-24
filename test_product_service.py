@@ -1,0 +1,67 @@
+"""Tests for services/products.py (shared mongomock DB from conftest.py).
+Run:  python -m pytest test_product_service.py -q -W ignore"""
+import sys, threading
+from datetime import datetime, timedelta
+from bson import ObjectId
+from services import products as P
+db = sys.modules["database"].db
+
+def reset(limit=10, price=100):
+    for c in db.list_collection_names(): db[c].drop()
+    db.pricing.insert_one({"free_product_limit": limit, "additional_product_price": price,
+                           "product_max_validity_days": 365, "gst_percent": 18})
+M = {"_id": ObjectId(), "name": "M", "phone": "1"}
+END = (datetime.utcnow() + timedelta(days=30)).strftime("%Y-%m-%d")
+def seed(n, status="approved", active=True, end_days=30, merchant=M):
+    for i in range(n):
+        db.merchant_products.insert_one({"merchant_id": str(merchant["_id"]), "status": status,
+            "is_active": active, "end_date": P.ist_today() + timedelta(days=end_days)})
+def f(t="x"): return {"title": t}
+def tier(): return P.decide(str(M["_id"]))["tier"]
+
+def test_product_service():
+    reset(); seed(7); assert tier()=="free"; d=P.admin_create(merchant=M, fields=f(), end_raw=END); assert d["pricing_tier"]=="free"
+    reset(); seed(10); assert tier()=="paid"
+    try: P.admin_create(merchant=M, fields=f(), end_raw=END); assert 0
+    except P.ProductError as e: assert e.status_code==409 and "100" in e.detail, e.detail
+    d=P.admin_create(merchant=M, fields=f(), end_raw=END, payment={"payment_mode":"cash","amount":118}); assert d["pricing_tier"]=="paid" and d["charged_amount"]==118
+    reset(); seed(15); assert tier()=="paid"
+    # statuses
+    reset(); seed(3,"deleted"); seed(3,"expired"); seed(3,"rejected"); seed(2,"approved",end_days=-1); assert P.qualifying_count(str(M["_id"]))==0
+    seed(4,active=False); assert P.qualifying_count(str(M["_id"]))==4   # deactivated counts
+    # limit change 10->15 takes effect immediately, no code change
+    reset(10); seed(10); assert tier()=="paid"; db.pricing.update_one({}, {"$set":{"free_product_limit":15}}); assert tier()=="free"
+    db.pricing.update_one({}, {"$set":{"free_product_limit":5}}); assert tier()=="paid"
+    # missing setting -> clear error, no silent default
+    db.pricing.update_one({}, {"$unset":{"free_product_limit":""}})
+    try: P.decide(str(M["_id"])); assert 0
+    except P.ProductError as e: assert "free_product_limit" in e.detail
+    assert P.ensure_settings()==["free_product_limit"]; assert db.pricing.find_one()["additional_product_price"]==100
+    # admin-owned: no quota
+    reset(); seed(10); d=P.admin_create(merchant=None, fields=f(), end_raw=END); assert d["pricing_tier"]=="admin" and d["merchant_id"]==""
+    assert tier()=="paid" and P.qualifying_count(str(M["_id"]))==10
+    # delete frees slot; renewal
+    reset(); seed(10); first=db.merchant_products.find_one(); P.soft_delete(first); assert tier()=="free"
+    first=db.merchant_products.find_one({"_id":first["_id"]})
+    try: P.apply_renewal(first, END); assert 0
+    except P.ProductError: pass
+    reset(); seed(10); ex=db.merchant_products.find_one(); db.merchant_products.update_one({"_id":ex["_id"]},{"$set":{"status":"expired","end_date":P.ist_today()-timedelta(days=2)}})
+    ex=db.merchant_products.find_one({"_id":ex["_id"]}); assert P.renew_decision(ex)["tier"]=="free"   # 9 other qualify
+    r=P.apply_renewal(ex, END); assert r["status"]=="approved"
+    seed(1); ex2=db.merchant_products.find_one({"_id":r["_id"]}); assert P.renew_decision(ex2)["tier"]=="paid"  # 10 OTHER qualifying products now
+    # race: 12 concurrent free creations with 5 slots
+    reset(5); res=[]
+    def go():
+        try: P.create_free(merchant=M, fields=f(), end_raw=END); res.append("ok")
+        except P.ProductError as e: res.append(e.status_code)
+    ts=[threading.Thread(target=go) for _ in range(12)]; [t.start() for t in ts]; [t.join() for t in ts]
+    assert res.count("ok")==5, res; assert db.merchant_products.count_documents({})==5
+    # Pending counts toward quota (no bypass by piling up pending products)
+    reset(); seed(10,"pending"); assert tier()=="paid" and P.qualifying_count(str(M["_id"]))==10
+    reset(); seed(6,"pending"); seed(4); assert tier()=="paid"
+    # Historical pricing never changes: settings change + renewal leave original record intact
+    reset(); seed(10); d=P.admin_create(merchant=M, fields=f(), end_raw=END, payment={"payment_mode":"cash","amount":118})
+    db.pricing.update_one({},{"$set":{"additional_product_price":999,"free_product_limit":50}})
+    x=db.merchant_products.find_one({"_id":d["_id"]}); assert (x["pricing_tier"],x["unit_price"],x["charged_amount"],x["expected_amount"])==("paid",100.0,118.0,118.0)
+    r=P.apply_renewal(x, (datetime.utcnow()+timedelta(days=60)).strftime("%Y-%m-%d"))
+    assert (r["pricing_tier"],r["unit_price"],r["charged_amount"])==("paid",100.0,118.0) and len(r["renewals"])==1 and r["renewals"][0]["pricing_tier"]=="free"

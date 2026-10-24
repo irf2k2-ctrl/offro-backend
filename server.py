@@ -6,6 +6,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, dashboard_auth, maps, smart_link
+from routers import merchant_products, admin_products, public_products
 from database import db
 import base64, io, re
 
@@ -27,6 +28,9 @@ app.include_router(merchant_app.router,    prefix="/merchant")
 app.include_router(admin.router,          prefix="/admin")
 app.include_router(users.router,          prefix="/user")
 app.include_router(public.router)
+app.include_router(public_products.router)   # /products-public, /products/{id}/reviews ... (merchant_products)
+app.include_router(merchant_products.router) # /merchant/products/...
+app.include_router(admin_products.router)    # /admin/products/...
 app.include_router(popup_campaigns.router)
 app.include_router(webhook.router)          # WhatsApp Cloud API webhook — no prefix
 app.include_router(wa_chat.router, prefix="/admin")  # WhatsApp Live Chat admin API
@@ -86,63 +90,6 @@ def download_admin_dashboard():
         headers={"Content-Disposition": "attachment; filename=admin_dashboard.html"}
     )
 
-# ── Public gift-voucher endpoint ──
-@app.get("/gift-vouchers")
-def public_gift_vouchers():
-    # Phase 1: Only Premium products shown in Discover Products (exclude standard/subscription-linked)
-    docs = list(db.gift_vouchers.find(
-        {"is_active": True, "product_type": {"$ne": "standard"}}
-    ).sort("_id", -1))
-    result = []
-    for v in docs:
-        # Voucher image: proxy if base64
-        logo = v.get("logo","") or ""
-        vid  = str(v["_id"])
-        if logo.startswith("data:image"):
-            logo_out = f"/voucher-image/{vid}"
-        elif logo.startswith("http"):
-            logo_out = logo
-        else:
-            logo_out = ""
-        result.append({
-            "id":       vid,
-            "title":    v.get("title", ""),
-            "price":    str(v.get("price", v.get("value", ""))),
-            "text":     v.get("text", ""),
-            "validity": v.get("validity", ""),
-            "logo":     logo_out,
-        })
-    return result
-
-
-# ── Voucher image proxy ──
-@app.get("/voucher-image/{vid}")
-def get_voucher_image(vid: str):
-    from fastapi.responses import Response
-    from fastapi import HTTPException
-    from bson import ObjectId
-    try:
-        doc = db.gift_vouchers.find_one({"_id": ObjectId(vid)}, {"logo": 1})
-    except Exception:
-        raise HTTPException(400, "Bad id")
-    if not doc:
-        raise HTTPException(404, "Not found")
-    raw = doc.get("logo","") or ""
-    if not raw.startswith("data:image"):
-        raise HTTPException(404, "No image")
-    match = re.match(r"data:([^;]+);base64,(.+)", raw, re.DOTALL)
-    if not match:
-        raise HTTPException(400, "Bad image data")
-    mime    = match.group(1)
-    b64data = match.group(2)
-    try:
-        img_bytes = base64.b64decode(b64data)
-    except Exception:
-        raise HTTPException(500, "Decode error")
-    return Response(content=img_bytes, media_type=mime,
-        headers={"Cache-Control": "public, max-age=86400", "Content-Length": str(len(img_bytes))})
-
-
 # ── Combined home-data endpoint — single call replaces 5 parallel calls ──
 @app.get("/home-data")
 def get_home_data(
@@ -157,26 +104,6 @@ def get_home_data(
     stores_resp = get_stores(city=city, category=category, limit=limit, skip=skip)
     cats = get_categories()
 
-    # Gift vouchers — lightweight (no base64, just proxy URLs)
-    gv_docs = list(db.gift_vouchers.find({"is_active": True}).sort("_id", -1))
-    gift_vouchers = []
-    for v in gv_docs:
-        logo = v.get("logo","") or ""
-        vid  = str(v["_id"])
-        if logo.startswith("data:image"):
-            logo_out = f"/voucher-image/{vid}"
-        elif logo.startswith("http"):
-            logo_out = logo
-        else:
-            logo_out = ""
-        gift_vouchers.append({
-            "id":       vid,
-            "title":    v.get("title",""),
-            "text":     v.get("text",""),
-            "validity": v.get("validity",""),
-            "logo":     logo_out,
-        })
-
     # Promo sliders
     ps_docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
     promo_sliders = [{"id":str(p["_id"]),"title":p.get("title",""),"image_url":p.get("image_url",""),
@@ -187,7 +114,6 @@ def get_home_data(
         "total":        stores_resp.get("total", 0),
         "has_more":     stores_resp.get("has_more", False),
         "categories":   cats,
-        "gift_vouchers": gift_vouchers,
         "promo_sliders": promo_sliders,
     }
 
@@ -279,6 +205,16 @@ def startup():
         _ensure_indexes()
     except Exception as e:
         print(f"⚠️  index creation skipped (DB unreachable at startup): {e}")
+    # Product settings (free_product_limit, additional_product_price, ...) — creates only
+    # MISSING keys; never overwrites a value the Admin set. Plus product indexes.
+    try:
+        from services import products as _products_svc
+        _created = _products_svc.ensure_settings()
+        if _created:
+            print(f"[products] seeded missing settings: {_created}")
+        _products_svc.ensure_indexes()
+    except Exception as e:
+        print(f"⚠️  product settings/indexes skipped: {e}")
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
         from routers.otp_service import _ensure_otp_indexes
