@@ -148,3 +148,31 @@ def test_renewal_without_store_fails_closed():
     # OffrO-owned products are exempt (no merchant, no quota)
     o = P.admin_create(merchant=None, fields={"title": "o"}, end_raw=END)
     assert P.renew_decision(db.merchant_products.find_one({"_id": o["_id"]}), 3)["tier"] == "admin"
+
+
+def test_one_day_validity():
+    """1 day = start and end on the same date; 2 days = start+1; 3 days = start+2 (inclusive)."""
+    reset(limit=10)
+    today = P.ist_today()
+    ymd = lambda n: (today + timedelta(days=n)).strftime("%Y-%m-%d")
+    for off, days in ((0, 1), (1, 2), (2, 3), (29, 30)):
+        s_, e_, n = P.validate_period(None, ymd(off)); assert (s_, e_, n) == (today, today + timedelta(days=off), days)
+    # explicit start == end is a valid 1-day product, also for a future start date
+    s_, e_, n = P.validate_period(ymd(5), ymd(5)); assert n == 1 and s_ == e_
+    # end BEFORE start is still rejected
+    try: P.validate_period(ymd(5), ymd(4)); assert 0
+    except P.ProductError as e: assert e.status_code == 400
+    # free 1-day product, then a paid 1-day product (price = per-day x 1 + GST)
+    d = P.create_free(merchant=M, fields=f(), end_raw=ymd(0), from_raw=ymd(0))
+    assert d["duration_days"] == 1 and d["start_date"] == d["end_date"] == today
+    reset(limit=10); seed(10)
+    assert P.decide(S1, days=1)["total"] == 11.8
+    p = P.admin_create(merchant=M, fields=f(), end_raw=ymd(0), payment={"payment_mode": "cash", "amount": 11.8})
+    assert p["pricing_tier"] == "paid" and p["duration_days"] == 1 and p["charged_amount"] == 11.8
+    # renewal of exactly 1 day: live product ends today -> new end tomorrow bills 1 day; expired -> today..today
+    live = db.merchant_products.find_one({"_id": p["_id"]})
+    assert P.renewal_period(live, ymd(1))[1] == 1
+    live["end_date"], live["status"] = today - timedelta(days=3), "expired"
+    assert P.renewal_period(live, ymd(0))[1] == 1                      # expired: restart today, 1 day
+    try: P.renewal_period(live, ymd(-1)); assert 0
+    except P.ProductError as e: assert e.status_code == 400

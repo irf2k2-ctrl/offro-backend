@@ -114,7 +114,7 @@ def test_products_api():
         "start_date": P.ist_today()-timedelta(days=40), "end_date": P.ist_today()-timedelta(days=2)}).inserted_id
     ro = c.post(f"/merchant/products/{e}/renew", json={"end_date": END}, headers=H).json(); assert ro["pricing_tier"] == "paid" and ro["amount_display"] == 354
     # 10 ADMIN create for merchant: 7 -> free, 10 -> 409 w/o payment, paid w/ payment, 15 -> paid
-    ab = lambda **k: {"title": "AdminP", "text": "t", "price": 10, "store_id": SID, "end_date": END, **k}
+    ab = lambda **k: {"title": "AdminP", "text": "t", "price": 10, "logo": "data:image/png;base64,xx", "store_id": SID, "end_date": END, **k}
     wipe(); seed(7); r = c.post("/admin/products", json=ab(), headers=A); assert r.status_code == 200 and r.json()["pricing_tier"] == "free", r.text
     wipe(); seed(10); r = c.post("/admin/products", json=ab(), headers=A); assert r.status_code == 409 and "₹10/day" in r.json()["detail"], r.text
     r = c.post("/admin/products", json=ab(pay_mode="cash", pay_amount=354, pay_ref="R1"), headers=A); assert r.status_code == 200 and r.json()["pricing_tier"] == "paid" and r.json()["charged_amount"] == 354, r.text
@@ -151,7 +151,7 @@ def test_products_api():
     wipe(); seed(9); assert c.post("/admin/products", json=ab(), headers=A).status_code == 200
     assert c.get("/merchant/products/slots", headers=H).json()["next_is_free"] is False
     # admin-owned (no store/merchant) consumes no quota
-    wipe(); seed(10); r = c.post("/admin/products", json={"title": "OffrO", "price": 1, "end_date": END}, headers=A); assert r.status_code == 200 and r.json()["pricing_tier"] == "admin", r.text
+    wipe(); seed(10); r = c.post("/admin/products", json={"title": "OffrO", "price": 1, "end_date": END, "logo": "data:image/png;base64,xx"}, headers=A); assert r.status_code == 200 and r.json()["pricing_tier"] == "admin", r.text
     assert c.get("/merchant/products/slots", headers=H).json()["used"] == 10
     # 11 admin delete = soft + frees slot; deactivate keeps slot; approve/reject
     wipe(); seed(10); pid = str(fake.merchant_products.find_one()["_id"])
@@ -241,7 +241,7 @@ def test_duration_pricing_and_dashboard_fields():
     assert pl["duration_days"] == 20
     # admin dashboard row: duration + paid status/amount
     wipe(); seed(10)
-    ab = lambda **k: {"title": "A", "text": "t", "price": 5, "store_id": SID, "from_date": ymd(0), "end_date": ymd(29), **k}
+    ab = lambda **k: {"title": "A", "text": "t", "price": 5, "logo": "data:image/png;base64,xx", "store_id": SID, "from_date": ymd(0), "end_date": ymd(29), **k}
     r = c.post("/admin/products", json=ab(pay_mode="UPI", pay_amount=354, pay_ref="U"), headers=A); assert r.status_code == 200, r.text
     wipe(); seed(3); assert c.post("/admin/products", json=ab(), headers=A).status_code == 200
     rows = {x["pricing_tier"]: x for x in c.get("/admin/products", headers=A).json() if x["title"] == "A"}
@@ -255,7 +255,7 @@ def test_duration_pricing_and_dashboard_fields():
     pid = row["_id"]
     assert c.put(f"/admin/products/{pid}", json={"from_date": ymd(0), "end_date": ymd(9)}, headers=A).status_code == 200
     assert fake.merchant_products.find_one({"_id": ObjectId(pid)})["duration_days"] == 10
-    ex = str(fake.merchant_products.insert_one({"merchant_id": MID, "store_id": SID, "status": "expired", "title": "E", "start_date": P.ist_today() - timedelta(days=20),
+    ex = str(fake.merchant_products.insert_one({"merchant_id": MID, "store_id": SID, "status": "expired", "title": "E", "image_url": "http://img/e.png", "start_date": P.ist_today() - timedelta(days=20),
         "end_date": P.ist_today() - timedelta(days=5), "duration_days": 16}).inserted_id)
     assert c.put(f"/admin/products/{ex}", json={"title": "E2", "from_date": ymd(-20), "end_date": ymd(-5)}, headers=A).status_code == 200
 
@@ -318,3 +318,35 @@ def test_store_quota_via_api():
     own = fake.merchant_products.find_one({"_id": ObjectId(r.json()["id"])})
     assert own["pricing_tier"] == "admin" and own["merchant_id"] is None and own["source"] == "admin"
     assert g(store_id=SID)["used"] == 11 and g(store_id=S2)["used"] == 2             # OffrO-owned consumed nothing
+
+
+def test_one_day_validity_and_admin_image_api():
+    settings(); wipe()
+    ymd = lambda n: (P.ist_today() + timedelta(days=n)).strftime("%Y-%m-%d")
+    # Add Product (merchant): 1 / 2 / 3 days
+    for off, days in ((0, 1), (1, 2), (2, 3)):
+        o = c.post("/merchant/products/order", json={"store_id": SID, "end_date": ymd(off)}, headers=H)
+        assert o.status_code == 200 and o.json()["days"] == days, o.text
+    o = c.post("/merchant/products/order", json={"store_id": SID, "from_date": ymd(0), "end_date": ymd(0)}, headers=H).json()
+    r = c.post("/merchant/products/activate-free", json={**body("One"), "order_id": o["order_id"], "end_date": ymd(0)}, headers=H)
+    assert r.status_code == 200, r.text
+    one = fake.merchant_products.find_one({"title": "One"}); assert one["duration_days"] == 1 and one["start_date"] == one["end_date"]
+    # Renewal: exactly 1 day added
+    ro = c.post(f"/merchant/products/{one['_id']}/renew", json={"end_date": ymd(1)}, headers=H); assert ro.status_code == 200, ro.text
+    assert ro.json()["days"] == 1
+    # Admin Add with a 1-day validity, image required
+    ab = lambda **k: {"title": "A", "text": "t", "store_id": SID, "from_date": ymd(0), "end_date": ymd(0), "logo": "data:image/png;base64,xx", **k}
+    r = c.post("/admin/products", json=ab(), headers=A); assert r.status_code == 200, r.text
+    pid = r.json()["id"]; assert fake.merchant_products.find_one({"_id": ObjectId(pid)})["duration_days"] == 1
+    r = c.post("/admin/products", json=ab(logo=""), headers=A); assert r.status_code == 400 and "image is required" in r.json()["detail"]
+    r = c.post("/admin/products", json={k: v for k, v in ab().items() if k not in ("logo",)}, headers=A); assert r.status_code == 400
+    # Admin Edit: existing image counts; dates can be changed to 1 day / 2 days / 3 days
+    for end, days in ((ymd(1), 2), (ymd(2), 3), (ymd(0), 1)):
+        r = c.put(f"/admin/products/{pid}", json={"title": "A2", "end_date": end}, headers=A); assert r.status_code == 200, r.text
+        assert fake.merchant_products.find_one({"_id": ObjectId(pid)})["duration_days"] == days
+    assert c.put(f"/admin/products/{pid}", json={"end_date": ymd(-1)}, headers=A).status_code == 400   # before start
+    # Edit a product that has no image at all: refused until one is provided
+    bare = fake.merchant_products.insert_one({"merchant_id": MID, "store_id": SID, "status": "approved", "is_active": True, "title": "B",
+        "image_url": "", "pricing_tier": "free", "start_date": P.ist_today(), "end_date": P.ist_today() + timedelta(days=5)}).inserted_id
+    r = c.put(f"/admin/products/{bare}", json={"title": "B2"}, headers=A); assert r.status_code == 400 and "image is required" in r.json()["detail"]
+    assert c.put(f"/admin/products/{bare}", json={"title": "B2", "logo": "data:image/png;base64,xx"}, headers=A).status_code == 200

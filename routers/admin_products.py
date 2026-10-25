@@ -105,6 +105,8 @@ def _admin_fields(data: dict, store):
     title = (data.get("title") or "").strip()
     if not title:
         raise HTTPException(400, "Product title is required")
+    if not img:
+        raise HTTPException(400, "Product image is required. Please upload an image before saving.")
     price, orig = str(data.get("price", "") or ""), str(data.get("original_price", "") or "")
     return {
         "store_id": str(data.get("store_id") or ""),
@@ -171,6 +173,9 @@ def update_product(vid: str, data: dict, a=Depends(get_current_admin)):
     if data.get("logo") or data.get("logo_url"):
         img = _cloudinary_upload(data.get("logo") or data.get("logo_url"), folder="offro/products")
         upd["image_url"], upd["image_thumb"] = img, _make_thumb_url(img)
+    if not (upd.get("image_url") or doc.get("image_url")):
+        # an existing image counts as valid; a product can never be saved without one
+        raise HTTPException(400, "Product image is required. Please upload an image before saving.")
     if data.get("end_date") or data.get("from_date"):
         cur_s, cur_e = P.parse_date(doc.get("start_date")), P.parse_date(doc.get("end_date"))
         new_s = P.parse_date(data["from_date"]) if data.get("from_date") else cur_s

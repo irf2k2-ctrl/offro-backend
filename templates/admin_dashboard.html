@@ -6214,7 +6214,9 @@ function _gcUpdateValidity() {
     const startD = new Date(from + 'T00:00:00');
     const endD   = new Date(from + 'T00:00:00');
     endD.setDate(endD.getDate() + days - 1);   // inclusive: 30 days from 1 Nov ends 30 Nov
-    const endISO = endD.toISOString().split('T')[0];
+    // Local calendar date (toISOString() is UTC and shifts the day back by one in IST).
+    const _p2 = n => String(n).padStart(2, '0');
+    const endISO = `${endD.getFullYear()}-${_p2(endD.getMonth()+1)}-${_p2(endD.getDate())}`;
     if (toEl)    toEl.value = endISO;   // store computed end_date
     const opts = {day:'numeric', month:'short', year:'numeric'};
     const fmtStart = startD.toLocaleDateString('en-IN', opts);
@@ -6232,6 +6234,11 @@ async function saveGiftCard() {
   const vid  = (document.getElementById("gc_id").value || _gcEditingId).trim();
   const text = document.getElementById("gc_text").value.trim();
   if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
+  // Product image is mandatory (an existing image counts when editing; removing it re-requires one).
+  if (!(document.getElementById("gc_logo").value || "").trim()) {
+    document.getElementById("gc_msg").innerText = "Product image is required. Please upload an image before saving.";
+    return;
+  }
   const _gcFrom = document.getElementById("gc_from_date")?.value  || '';
   const _gcTo   = document.getElementById("gc_to_date")?.value    || ''; // computed by _gcUpdateValidity
   const _gcDays = parseInt(document.getElementById("gc_duration_days")?.value) || 0;
