@@ -52,11 +52,15 @@ def _row(p: dict) -> dict:
         "approval_status": status, "status": status,
         "source": p.get("source", "merchant"), "pricing_tier": p.get("pricing_tier", ""),
         "charged_amount": p.get("charged_amount", 0), "unit_price": p.get("unit_price", 0),
-        "merchant_id": p.get("merchant_id", ""), "merchant_name": p.get("merchant_name", ""),
+        "merchant_id": p.get("merchant_id") or "", "merchant_name": p.get("merchant_name", ""),
         "merchant_phone": p.get("merchant_phone", ""), "store_id": p.get("store_id", ""),
         "store_name": p.get("store_name", ""), "city": p.get("city", ""),
-        "duration_days": max(0, ((P.parse_date(p.get("end_date")) or P.ist_today())
-                                 - (P.parse_date(p.get("start_date")) or P.ist_today())).days),
+        "duration_days": int(p.get("duration_days") or 0) or P.inclusive_days(
+            P.parse_date(p.get("start_date")) or P.ist_today(), P.parse_date(p.get("end_date")) or P.ist_today()),
+        "paid_status": {"free": "free", "paid": "paid"}.get(p.get("pricing_tier"), "admin"),
+        "paid_amount": float(p.get("charged_amount") or 0),        # actual amount recorded at purchase
+        "expected_amount": float(p.get("expected_amount") or 0),
+        "price_per_day": float(p.get("price_per_day") or 0),
         "payment_mode": p.get("payment_mode", ""), "payment_ref": p.get("payment_ref", ""),
         "created_at": str(p.get("created_at", ""))[:19],
     }
@@ -134,7 +138,8 @@ def create_product(data: dict, a=Depends(get_current_admin)):
             raise HTTPException(400, "Amount paid must be a number")
         payment = {"payment_mode": data.get("pay_mode", ""), "payment_ref": data.get("pay_ref", ""),
                    "amount": _amt}
-    prod = _guard(P.admin_create, merchant=merchant, fields=fields, end_raw=data.get("end_date"), payment=payment)
+    prod = _guard(P.admin_create, merchant=merchant, fields=fields, end_raw=data.get("end_date"),
+                  from_raw=data.get("from_date"), payment=payment)
     if data.get("is_active") is False:
         db[PRODUCTS].update_one({"_id": prod["_id"]}, {"$set": {"is_active": False}})
     return {"ok": True, "id": str(prod["_id"]), "pricing_tier": prod["pricing_tier"],
@@ -166,12 +171,22 @@ def update_product(vid: str, data: dict, a=Depends(get_current_admin)):
     if data.get("logo") or data.get("logo_url"):
         img = _cloudinary_upload(data.get("logo") or data.get("logo_url"), folder="offro/products")
         upd["image_url"], upd["image_thumb"] = img, _make_thumb_url(img)
-    if data.get("end_date"):
-        new_end = P.parse_date(data["end_date"])
-        if new_end is None:
-            raise HTTPException(400, "Invalid end date")
-        if new_end != P.parse_date(doc.get("end_date")):       # only validate a CHANGED date
-            upd["end_date"] = _guard(P.validate_end_date, data["end_date"])
+    if data.get("end_date") or data.get("from_date"):
+        cur_s, cur_e = P.parse_date(doc.get("start_date")), P.parse_date(doc.get("end_date"))
+        new_s = P.parse_date(data["from_date"]) if data.get("from_date") else cur_s
+        new_e = P.parse_date(data["end_date"]) if data.get("end_date") else cur_e
+        if new_s is None or new_e is None:
+            raise HTTPException(400, "Invalid start or end date")
+        if (new_s, new_e) != (cur_s, cur_e):                    # only validate CHANGED dates
+            if new_e < new_s:
+                raise HTTPException(400, "End date cannot be before the start date")
+            if new_s != cur_s and new_s < P.ist_today():
+                raise HTTPException(400, "Start date cannot be in the past")
+            mx = _guard(P.get_settings)["product_max_validity_days"]
+            if P.inclusive_days(new_s, new_e) > mx:
+                raise HTTPException(400, f"A product can run for at most {mx} days")
+            upd.update({"start_date": new_s, "end_date": new_e,
+                        "duration_days": P.inclusive_days(new_s, new_e)})
     if "is_active" in data:
         upd["is_active"] = bool(data["is_active"])
     if upd:
@@ -288,7 +303,7 @@ def expiring(days: int = 7, a=Depends(get_current_admin)):
 @router.get("/products/top-merchants")
 def top_merchants(limit: int = 10, a=Depends(get_current_admin)):
     rows = db[PRODUCTS].aggregate([
-        {"$match": {"status": "approved", "merchant_id": {"$ne": ""}}},
+        {"$match": {"status": "approved", "merchant_id": {"$nin": ["", None]}}},
         {"$group": {"_id": "$merchant_id", "merchant_name": {"$first": "$merchant_name"},
                     "merchant_phone": {"$first": "$merchant_phone"}, "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}, {"$limit": limit}])

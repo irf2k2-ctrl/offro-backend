@@ -558,7 +558,6 @@ def get_pricing(a=Depends(get_current_admin)):
         "conversion_rate": doc.get("conversion_rate", 0.10),  # default ₹0.10 per point
         "min_withdraw_points": doc.get("min_withdraw_points", 200),
         "free_product_limit": doc.get("free_product_limit"),
-        "additional_product_price": doc.get("additional_product_price"),
         "product_max_validity_days": doc.get("product_max_validity_days"),
         "influencer_subscription": _influencer_subscription_block(doc),
     }
@@ -573,8 +572,7 @@ def update_pricing(data: dict, a=Depends(get_current_admin)):
     if "plans" in data: update["plans"] = data["plans"]
     if "conversion_rate" in data: update["conversion_rate"] = float(data["conversion_rate"])
     if "min_withdraw_points" in data: update["min_withdraw_points"] = int(data["min_withdraw_points"])
-    for _k, _fn, _min in (("free_product_limit", int, 0), ("additional_product_price", float, 0),
-                          ("product_max_validity_days", int, 1)):
+    for _k, _fn, _min in (("free_product_limit", int, 0), ("product_max_validity_days", int, 1)):
         if _k in data and data[_k] not in (None, ""):
             try:
                 _v = _fn(data[_k])
@@ -4149,7 +4147,7 @@ def get_banner_pricing(a=Depends(get_current_admin)):
     return {
         # Per-day pricing (Issue 4)
         "banner_price_per_day":  float(doc.get("banner_price_per_day",  15)),
-        "voucher_price_per_day": float(doc.get("voucher_price_per_day", 10)),
+        "product_price_per_day": float(doc.get("product_price_per_day", doc.get("voucher_price_per_day", 10))),
         "gst_percent": gst,
         # Legacy fields kept for backward compat
         "banner_price_7":   doc.get("banner_price_7",  149),
@@ -4163,10 +4161,15 @@ def get_banner_pricing(a=Depends(get_current_admin)):
 @router.put("/banner-pricing")
 def update_banner_pricing(data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Settings", "edit")
-    fields = ["banner_price_per_day","voucher_price_per_day",
+    fields = ["banner_price_per_day","product_price_per_day",
               "banner_price_7","banner_price_14","banner_price_30",
               "voucher_price_30","voucher_price_60","voucher_price_90"]
-    upd = {f: float(data[f]) for f in fields if f in data}
+    try:
+        upd = {f: float(data[f]) for f in fields if f in data}
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Prices must be numbers")
+    if any(v < 0 for v in upd.values()):
+        raise HTTPException(400, "Prices cannot be negative")
     doc = db.pricing.find_one({})
     if doc: db.pricing.update_one({"_id":doc["_id"]},{"$set":upd})
     else: db.pricing.insert_one(upd)

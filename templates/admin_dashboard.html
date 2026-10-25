@@ -776,18 +776,17 @@ td[style*="sticky"]{background:#fff;}
         <label class="form-label fw-bold">GST Percentage (%)</label>
         <input id="gst_input" class="form-control" type="number" style="max-width:160px;" placeholder="18">
       </div>
+      <div class="mb-4" style="border:1px solid #c3dfc6;border-radius:12px;padding:16px 18px;background:#f7fbf8;">
+      <div style="font-size:13px;font-weight:800;letter-spacing:.8px;color:#3E5F55;margin-bottom:14px;">PRODUCT SETTINGS</div>
       <div class="mb-4">
         <label class="form-label fw-bold">Free Product Slots <small style="color:#6b8c7e;font-weight:normal;">(free products per merchant)</small></label>
         <input id="free_product_limit_input" class="form-control" type="number" min="0" style="max-width:160px;">
         <small class="text-muted">Every merchant gets this many free products. Active, pending and deactivated-but-not-expired products use a slot; expired, deleted and rejected ones do not. Takes effect on the next save/renewal.</small>
       </div>
-      <div class="mb-4">
-        <label class="form-label fw-bold">Additional Product Price (₹) <small style="color:#6b8c7e;font-weight:normal;">(before GST, per product past the free slots)</small></label>
-        <input id="additional_product_price_input" class="form-control" type="number" min="0" style="max-width:160px;">
-      </div>
-      <div class="mb-4">
-        <label class="form-label fw-bold">Maximum Product Validity (days)</label>
+      <div class="mb-1">
+        <label class="form-label fw-bold">Maximum Product Validity (Days)</label>
         <input id="product_max_validity_days_input" class="form-control" type="number" min="1" style="max-width:160px;">
+      </div>
       </div>
       <div id="plans_editor"></div>
       <hr style="margin:24px 0;">
@@ -856,11 +855,11 @@ td[style*="sticky"]{background:#fff;}
     </div>
 
     <div style="margin-top:16px;background:#f0f8ff;border-radius:12px;padding:20px;border:1px solid #c0d8f0;max-width:640px;">
-      <div class="fw-bold mb-3" style="color:#0d47a1;font-size:15px;">🎁 Product Pricing — Per Day</div>
-      <p style="font-size:12px;color:#0d47a1;margin-bottom:14px;">Merchant selects number of days + start date. Total = days × rate + GST</p>
+      <div class="fw-bold mb-3" style="color:#0d47a1;font-size:13px;letter-spacing:.8px;">PRODUCT PRICING BY DURATION</div>
+      <p style="font-size:12px;color:#0d47a1;margin-bottom:14px;">Used only for products beyond the free slots. Merchant selects the number of days. Price = days × rate per day, plus GST. Free products cost ₹0.</p>
       <div class="row g-3 mb-2">
         <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">Product Price per Day (₹)</label>
+          <label class="form-label" style="font-size:13px">Price per Day (₹)</label>
           <input id="product_price_per_day" class="form-control" type="number" min="0" step="0.50" placeholder="10">
           <small class="text-muted">e.g. 45 days × ₹10 = ₹450 base</small>
         </div>
@@ -2767,7 +2766,7 @@ async function loadPricing(){
   let r=await fetch("/admin/pricing",{credentials:"include"});
   let d=await r.json();
   document.getElementById("gst_input").value=(d.gst_percent!=null?d.gst_percent:18);
-  [["free_product_limit_input","free_product_limit"],["additional_product_price_input","additional_product_price"],
+  [["free_product_limit_input","free_product_limit"],
    ["product_max_validity_days_input","product_max_validity_days"]].forEach(([id,k])=>{
     const el=document.getElementById(id); if(el) el.value=(d[k]!=null?d[k]:"");
   });
@@ -2813,7 +2812,7 @@ async function savePricing(){
   let minW=parseInt(document.getElementById("min_withdraw_input").value)||200;
   let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
   const productSettings = {};
-  [["free_product_limit_input","free_product_limit"],["additional_product_price_input","additional_product_price"],
+  [["free_product_limit_input","free_product_limit"],
    ["product_max_validity_days_input","product_max_validity_days"]].forEach(([id,k])=>{
     const v=document.getElementById(id)?.value; if(v!==''&&v!=null) productSettings[k]=Number(v);
   });
@@ -5289,7 +5288,12 @@ window.addEventListener("DOMContentLoaded", function() {
   };
   gcModalInst      = _safeModal("giftCardModal");
   // NOTE: storeModalInst / vzViewModalInst / bnViewModalInst initialized in window.onload above — do NOT re-init here or Bootstrap creates duplicate instances causing stuck backdrops.
-  productModalInst = _safeModal("giftCardModal"); // product edit reuses gcModal
+  productModalInst = gcModalInst;   // SAME instance: a second Modal on one element made Cancel/X hide() a modal that was never shown
+  const _gcEl = document.getElementById("giftCardModal");
+  if (_gcEl) _gcEl.addEventListener("hidden.bs.modal", function() {   // closing always discards unsaved edits
+    _gcEditingId = ""; const i = document.getElementById("gc_id"); if (i) i.value = "";
+    const m = document.getElementById("gc_msg"); if (m) m.innerText = "";
+  });
   accountDetailModalInst = _safeModal("accountDetailModal");
 });
 
@@ -5455,7 +5459,7 @@ async function loadGiftCards() {
         validity:     validityDisplay,
         from_date:    fromD,
         end_date:     toD,
-        is_active:    computedStatus === 'approved' && v.is_active !== false,
+        is_active:    v.is_active !== false,
         status:       computedStatus,
         approval_status: st,
         merchant_name:  v.merchant_name || '',
@@ -5466,7 +5470,10 @@ async function loadGiftCards() {
         store_name:   v.store_name || '',
         product_type: v.pricing_tier || 'free',
         duration_days:v.duration_days || '',
-        amount:       v.amount || 0,
+        amount:       v.paid_amount || 0,
+        paid_status:  v.paid_status || '',
+        paid_amount:  v.paid_amount || 0,
+        expected_amount: v.expected_amount || 0,
         _raw: v,
         // product-specific fields for edit modal
         sale_price:     v.sale_price ?? v.price ?? '',
@@ -5632,6 +5639,15 @@ function renderProductCards() {
       : st==='expired'
       ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Expired</span>`
       : `<span style="background:#f8f9fa;color:#6c757d;padding:3px 10px;border-radius:20px;font-size:11px">○ Hidden</span>`;
+    // OFF indicator sits BELOW the existing status badge (never replaces it)
+    const offTag = (r.is_active === false && (st==='approved'||st==='pending'||st==='pending_approval'))
+      ? `<div style="font-size:11px;font-weight:700;color:#c0392b;margin-top:4px;letter-spacing:.4px">OFF</div>` : '';
+    // Paid column: actual recorded amount for paid products, Free / ₹0 for free ones
+    const paidCell = r.paid_status === 'paid'
+      ? `<span style="font-weight:700;color:#6b21a8">Paid</span><div style="font-size:12px;color:var(--text)">₹${Number(r.paid_amount||0).toLocaleString('en-IN')}</div>`
+      : r.paid_status === 'free'
+      ? `<span style="font-weight:700;color:#1a6640">Free</span><div style="font-size:12px;color:var(--muted)">₹0</div>`
+      : `<span style="color:var(--muted)">OffrO-owned</span>`;
 
     const isPending = (st==='pending'||st==='pending_approval');
     const approveBtn = (!isAdmin && isPending)
@@ -5666,9 +5682,9 @@ function renderProductCards() {
       <td>${_pcStore}</td>
       <td>${_pcCity}</td>
       <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
-      <td>${statusBadge}</td>
-      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${_prodType==='premium' && r.duration_days ? r.duration_days+' days' : '—'}</td>
-      <td style="font-size:12px;color:var(--text);white-space:nowrap">${_prodType==='premium' && r.amount ? '₹'+Number(r.amount).toLocaleString('en-IN') : '—'}</td>
+      <td>${statusBadge}${offTag}</td>
+      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${r.duration_days ? r.duration_days+' days' : '—'}</td>
+      <td style="font-size:12px;white-space:nowrap">${paidCell}</td>
       <td>
         <button class="btn-o me-1" onclick='openVZViewModal(${viewJson})'>View</button>
         ${approveBtn}
@@ -6105,8 +6121,6 @@ async function openGiftCardModal() {
   document.getElementById("gc_from_date").value    = "";
   document.getElementById("gc_duration_days").value= "";
   if(document.getElementById("gc_to_date")) document.getElementById("gc_to_date").value = "";
-  if(document.getElementById("gc_pay_from"))   document.getElementById("gc_pay_from").value   = "";
-  if(document.getElementById("gc_pay_to"))     document.getElementById("gc_pay_to").value     = "";
   if(document.getElementById("gc_pay_amount")) document.getElementById("gc_pay_amount").value = "";
   if(document.getElementById("gc_pay_gst"))    document.getElementById("gc_pay_gst").value    = "18";
   if(document.getElementById("gc_pay_mode"))   document.getElementById("gc_pay_mode").value   = "";
@@ -6154,12 +6168,10 @@ async function editGiftCard(v) {
   _populateGcMerchants(v.merchant_id||"");
   if (document.getElementById("gc_city")) document.getElementById("gc_city").value = v.city || '';
   // Populate payment fields if stored on the record
-  if (document.getElementById("gc_pay_from"))   document.getElementById("gc_pay_from").value   = v.pay_from_date || v.from_date || '';
-  if (document.getElementById("gc_pay_to"))     document.getElementById("gc_pay_to").value     = v.pay_to_date   || v.end_date  || '';
-  if (document.getElementById("gc_pay_amount")) document.getElementById("gc_pay_amount").value = v.pay_amount    || '';
-  if (document.getElementById("gc_pay_gst"))    document.getElementById("gc_pay_gst").value    = v.pay_gst       || '18';
-  if (document.getElementById("gc_pay_mode"))   document.getElementById("gc_pay_mode").value   = v.pay_mode      || '';
-  if (document.getElementById("gc_pay_ref"))    document.getElementById("gc_pay_ref").value    = v.pay_ref       || '';
+  if (document.getElementById("gc_pay_amount")) document.getElementById("gc_pay_amount").value = v.paid_amount || '';
+  if (document.getElementById("gc_pay_gst"))    document.getElementById("gc_pay_gst").value    = '18';
+  if (document.getElementById("gc_pay_mode"))   document.getElementById("gc_pay_mode").value   = v.payment_mode || '';
+  if (document.getElementById("gc_pay_ref"))    document.getElementById("gc_pay_ref").value    = v.payment_ref  || '';
   gcModalInst.show();
 }
 
@@ -6189,6 +6201,8 @@ function clearProductLogo() {
   document.getElementById("gc_logo_preview").style.display = "none";
   document.getElementById("gc_logo_img").src = "";
 }
+function closeGiftCardModal() { if (gcModalInst) gcModalInst.hide(); }
+
 function _gcUpdateValidity() {
   // ISSUE 2 FIX: From Date + Number of Days → compute end_date + validity string
   const from = document.getElementById('gc_from_date')?.value;
@@ -6199,7 +6213,7 @@ function _gcUpdateValidity() {
   if (from && days > 0) {
     const startD = new Date(from + 'T00:00:00');
     const endD   = new Date(from + 'T00:00:00');
-    endD.setDate(endD.getDate() + days);
+    endD.setDate(endD.getDate() + days - 1);   // inclusive: 30 days from 1 Nov ends 30 Nov
     const endISO = endD.toISOString().split('T')[0];
     if (toEl)    toEl.value = endISO;   // store computed end_date
     const opts = {day:'numeric', month:'short', year:'numeric'};
@@ -6228,8 +6242,6 @@ async function saveGiftCard() {
   const _gcStoreSel  = document.getElementById("gc_store_sel");
   const _gcStoreName = (_gcStoreSel && _gcStoreSel.selectedIndex > 0)
     ? (_gcStoreSel.options[_gcStoreSel.selectedIndex]?.text || '') : '';
-  const _gcPayFrom   = document.getElementById("gc_pay_from")?.value  || '';
-  const _gcPayTo     = document.getElementById("gc_pay_to")?.value    || '';
   const _gcPayAmt    = parseFloat(document.getElementById("gc_pay_amount")?.value) || 0;
   const _gcPayGst    = parseFloat(document.getElementById("gc_pay_gst")?.value) || 18;
   const _gcPayMode   = (document.getElementById("gc_pay_mode")?.value  || '').trim();
@@ -6252,8 +6264,6 @@ async function saveGiftCard() {
     price:          isNaN(_salePriceRaw) ? undefined : _salePriceRaw,   // merchant-product field
     sale_price:     isNaN(_salePriceRaw) ? undefined : _salePriceRaw,
     original_price: isNaN(_origPriceRaw) ? undefined : _origPriceRaw,
-    pay_from_date:  _gcPayFrom || undefined,
-    pay_to_date:    _gcPayTo   || undefined,
     pay_amount:     _gcPayAmt  || undefined,
     pay_gst:        _gcPayGst  !== 18 ? _gcPayGst : undefined,
     pay_mode:       _gcPayMode || undefined,
@@ -6698,16 +6708,6 @@ async function saveStore() {
         <div style="font-size:12px;font-weight:600;color:var(--primary);margin-bottom:10px">Payment Information</div>
         <div class="row mb-3">
           <div class="col-6">
-            <label class="form-label fw-semibold">From Date</label>
-            <input type="date" id="gc_pay_from" class="form-control">
-          </div>
-          <div class="col-6">
-            <label class="form-label fw-semibold">To Date</label>
-            <input type="date" id="gc_pay_to" class="form-control">
-          </div>
-        </div>
-        <div class="row mb-3">
-          <div class="col-6">
             <label class="form-label fw-semibold">Amount Paid (₹)</label>
             <input type="number" id="gc_pay_amount" class="form-control" placeholder="0" min="0" step="0.01">
           </div>
@@ -6741,7 +6741,7 @@ async function saveStore() {
         <p id="gc_msg" style="color:var(--danger);font-size:13px;"></p>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="closeGiftCardModal()">Cancel</button>
         <button class="btn-p btn-sm" onclick="saveGiftCard()">Save</button>
       </div>
     </div>

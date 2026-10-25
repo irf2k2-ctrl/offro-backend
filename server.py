@@ -205,7 +205,7 @@ def startup():
         _ensure_indexes()
     except Exception as e:
         print(f"⚠️  index creation skipped (DB unreachable at startup): {e}")
-    # Product settings (free_product_limit, additional_product_price, ...) — creates only
+    # Product settings (free_product_limit, product_price_per_day, ...) — creates only
     # MISSING keys; never overwrites a value the Admin set. Plus product indexes.
     try:
         from services import products as _products_svc

@@ -30,11 +30,11 @@ def _api_fixtures():
     yield
 
 H = {"Authorization": "Bearer mt"}; A = {"Authorization": "Bearer at"}
-END = (datetime.utcnow() + timedelta(days=30)).strftime("%Y-%m-%d")
+END = (P.ist_today() + timedelta(days=29)).strftime("%Y-%m-%d")   # today..END = 30 days
 
 def settings(**kw):
     fake.pricing.delete_many({})
-    fake.pricing.insert_one({"gst_percent": 18, "free_product_limit": 10, "additional_product_price": 100,
+    fake.pricing.insert_one({"gst_percent": 18, "free_product_limit": 10, "product_price_per_day": 10,
                              "product_max_validity_days": 365, **kw})
 def wipe(): 
     for col in ("merchant_products","product_orders","merchant_locks","invoices"): fake[col].delete_many({})
@@ -70,11 +70,11 @@ def test_products_api():
     # 4 10 qualifying -> paid, price from settings
     wipe(); seed(10)
     o = c.post("/merchant/products/order", json={"store_id": SID, "end_date": END}, headers=H).json()
-    assert o["pricing_tier"] == "paid" and o["base_price"] == 100 and o["amount_display"] == 118, o
+    assert o["pricing_tier"] == "paid" and o["base_price"] == 300 and o["amount_display"] == 354 and o["days"] == 30 and o["price_per_day"] == 10, o
     # 5 Admin changes price / limit -> the very next decision follows, no code change
-    settings(additional_product_price=250)
+    settings(product_price_per_day=25)
     o = c.post("/merchant/products/order", json={"store_id": SID, "end_date": END}, headers=H).json()
-    assert o["pricing_tier"] == "paid" and o["base_price"] == 250 and o["amount_display"] == 295, o
+    assert o["pricing_tier"] == "paid" and o["base_price"] == 750 and o["amount_display"] == 885, o
     settings(free_product_limit=15)
     o = c.post("/merchant/products/order", json={"store_id": SID, "end_date": END}, headers=H).json()
     assert o["pricing_tier"] == "free" and o["amount_paise"] == 0, o
@@ -82,8 +82,8 @@ def test_products_api():
     settings(); wipe(); seed(10)
     o, r = merchant_create("Paid1"); assert r.status_code == 200, r.text
     p = fake.merchant_products.find_one({"title": "Paid1"})
-    assert p["pricing_tier"] == "paid" and p["charged_amount"] == 118 and p["unit_price"] == 100
-    fake.pricing.update_one({}, {"$set": {"additional_product_price": 999}}); assert fake.merchant_products.find_one({"title": "Paid1"})["charged_amount"] == 118
+    assert p["pricing_tier"] == "paid" and p["charged_amount"] == 354 and p["unit_price"] == 300 and p["duration_days"] == 30 and p["price_per_day"] == 10
+    fake.pricing.update_one({}, {"$set": {"product_price_per_day": 99}}); assert fake.merchant_products.find_one({"title": "Paid1"})["charged_amount"] == 354
     settings()
     # 7 free activation of a PAID-tier order is refused
     o = c.post("/merchant/products/order", json={"store_id": SID, "end_date": END}, headers=H).json()
@@ -112,35 +112,35 @@ def test_products_api():
     wipe(); seed(10)
     e = fake.merchant_products.insert_one({"merchant_id": MID, "status": "expired", "is_active": False, "title": "E2",
         "start_date": P.ist_today()-timedelta(days=40), "end_date": P.ist_today()-timedelta(days=2)}).inserted_id
-    ro = c.post(f"/merchant/products/{e}/renew", json={"end_date": END}, headers=H).json(); assert ro["pricing_tier"] == "paid" and ro["amount_display"] == 118
+    ro = c.post(f"/merchant/products/{e}/renew", json={"end_date": END}, headers=H).json(); assert ro["pricing_tier"] == "paid" and ro["amount_display"] == 354
     # 10 ADMIN create for merchant: 7 -> free, 10 -> 409 w/o payment, paid w/ payment, 15 -> paid
     ab = lambda **k: {"title": "AdminP", "text": "t", "price": 10, "store_id": SID, "end_date": END, **k}
     wipe(); seed(7); r = c.post("/admin/products", json=ab(), headers=A); assert r.status_code == 200 and r.json()["pricing_tier"] == "free", r.text
-    wipe(); seed(10); r = c.post("/admin/products", json=ab(), headers=A); assert r.status_code == 409 and "100" in r.json()["detail"], r.text
-    r = c.post("/admin/products", json=ab(pay_mode="cash", pay_amount=118, pay_ref="R1"), headers=A); assert r.status_code == 200 and r.json()["pricing_tier"] == "paid" and r.json()["charged_amount"] == 118, r.text
+    wipe(); seed(10); r = c.post("/admin/products", json=ab(), headers=A); assert r.status_code == 409 and "₹10/day" in r.json()["detail"], r.text
+    r = c.post("/admin/products", json=ab(pay_mode="cash", pay_amount=354, pay_ref="R1"), headers=A); assert r.status_code == 200 and r.json()["pricing_tier"] == "paid" and r.json()["charged_amount"] == 354, r.text
     wipe(); seed(15); r = c.post("/admin/products", json=ab(), headers=A); assert r.status_code == 409
     # 10b admin-recorded paid product: validation, order, invoice, revenue, no Razorpay
     wipe(); seed(10); fake.invoices.delete_many({})
-    for bad in (100, 50, 117.99):
-        r = c.post("/admin/products", json=ab(pay_mode="UPI", pay_amount=bad), headers=A); assert r.status_code == 400 and "118" in r.json()["detail"], (bad, r.text)
+    for bad in (300, 50, 353.99):
+        r = c.post("/admin/products", json=ab(pay_mode="UPI", pay_amount=bad), headers=A); assert r.status_code == 400 and "354" in r.json()["detail"], (bad, r.text)
     assert fake.merchant_products.count_documents({}) == 10 and fake.product_orders.count_documents({}) == 0
     r = c.post("/admin/products", json=ab(pay_mode="UPI", pay_amount=0), headers=A); assert r.status_code == 409
-    r = c.post("/admin/products", json=ab(pay_amount=118), headers=A); assert r.status_code == 409          # mode missing
-    r = c.post("/admin/products", json=ab(pay_mode="UPI", pay_amount=118, pay_ref="U1"), headers=A); assert r.status_code == 200, r.text
-    r2 = c.post("/admin/products", json=ab(pay_mode="Cash", pay_amount=130.5, pay_ref="C2"), headers=A); assert r2.status_code == 200, r2.text
-    assert r2.json()["charged_amount"] == 130.5 and r2.json()["expected_amount"] == 118
+    r = c.post("/admin/products", json=ab(pay_amount=354), headers=A); assert r.status_code == 409          # mode missing
+    r = c.post("/admin/products", json=ab(pay_mode="UPI", pay_amount=354, pay_ref="U1"), headers=A); assert r.status_code == 200, r.text
+    r2 = c.post("/admin/products", json=ab(pay_mode="Cash", pay_amount=400.5, pay_ref="C2"), headers=A); assert r2.status_code == 200, r2.text
+    assert r2.json()["charged_amount"] == 400.5 and r2.json()["expected_amount"] == 354
     pr = fake.merchant_products.find_one({"_id": ObjectId(r2.json()["id"])})
-    assert (pr["pricing_tier"], pr["unit_price"], pr["charged_amount"], pr["expected_amount"], pr["payment_mode"], pr["payment_ref"], pr["merchant_id"]) == ("paid", 100.0, 130.5, 118.0, "Cash", "C2", MID)
+    assert (pr["pricing_tier"], pr["unit_price"], pr["charged_amount"], pr["expected_amount"], pr["payment_mode"], pr["payment_ref"], pr["merchant_id"]) == ("paid", 300.0, 400.5, 354.0, "Cash", "C2", MID)
     od = fake.product_orders.find_one({"product_id": str(pr["_id"])})
     assert od["kind"] == "create" and od["status"] == "paid" and od["pay_mode"] == "admin_recorded" and od["razorpay_order_id"] is None
-    assert (od["unit_price"], od["gst_amount"], od["expected_amount"], od["amount_paid"], od["payment_mode"], od["payment_ref"], od["merchant_id"]) == (100.0, 18.0, 118.0, 130.5, "Cash", "C2", MID)
-    inv = fake.invoices.find_one({"invoice_no": pr["invoice_no"]}); assert inv["type"] == "product" and inv["total"] == 130.5 and inv["gst"] == 18.0 and inv["expected_amount"] == 118
+    assert (od["unit_price"], od["gst_amount"], od["expected_amount"], od["amount_paid"], od["payment_mode"], od["payment_ref"], od["merchant_id"]) == (300.0, 54.0, 354.0, 400.5, "Cash", "C2", MID)
+    inv = fake.invoices.find_one({"invoice_no": pr["invoice_no"]}); assert inv["type"] == "product" and inv["total"] == 400.5 and inv["gst"] == 54.0 and inv["expected_amount"] == 354
     assert fake.product_orders.count_documents({}) == 2 and fake.invoices.count_documents({}) == 2
-    assert c.get("/admin/products/revenue", headers=A).json()["lifetime"] == 118 + 130.5
+    assert c.get("/admin/products/revenue", headers=A).json()["lifetime"] == 354 + 400.5
     assert any(i["invoice_no"] == pr["invoice_no"] for i in c.get("/admin/invoices/full", headers=A).json())
     # later settings change leaves the recorded payment untouched
-    fake.pricing.update_one({}, {"$set": {"additional_product_price": 999}})
-    pr2 = fake.merchant_products.find_one({"_id": pr["_id"]}); assert (pr2["unit_price"], pr2["charged_amount"], pr2["expected_amount"]) == (100.0, 130.5, 118.0)
+    fake.pricing.update_one({}, {"$set": {"product_price_per_day": 99}})
+    pr2 = fake.merchant_products.find_one({"_id": pr["_id"]}); assert (pr2["unit_price"], pr2["charged_amount"], pr2["expected_amount"]) == (300.0, 400.5, 354.0)
     settings()
     # free admin product: no order, no invoice
     wipe(); fake.invoices.delete_many({}); seed(3); assert c.post("/admin/products", json=ab(pay_mode="UPI", pay_amount=5), headers=A).status_code == 200
@@ -198,3 +198,78 @@ def test_products_api():
     fake.pricing.delete_many({}); fake.pricing.insert_one({"gst_percent": 18, "standard_product_limit": 12})
     assert "free_product_limit" in P.ensure_settings() and fake.pricing.find_one()["free_product_limit"] == 12
     assert P.ensure_settings() == []
+
+
+def test_duration_pricing_and_dashboard_fields():
+    fake = sys.modules["database"].db
+    ymd = lambda n: (P.ist_today() + timedelta(days=n)).strftime("%Y-%m-%d")
+    settings(); wipe(); seed(10)
+    # price = price_per_day x days (inclusive), GST on top
+    for end_off, days, base, total in ((0, 1, 10, 11.8), (6, 7, 70, 82.6), (44, 45, 450, 531)):
+        o = c.post("/merchant/products/order", json={"store_id": SID, "end_date": ymd(end_off)}, headers=H).json()
+        assert (o["days"], o["pricing_tier"], o["base_price"], o["amount_display"]) == (days, "paid", base, total), o
+    # slots endpoint previews price for N days
+    s = c.get("/merchant/products/slots", params={"days": 10}, headers=H).json()
+    assert s["price_per_day"] == 10 and s["total"] == 118 and s["days"] == 10 and "additional_price" not in s
+    # max validity enforced (366 days > 365)
+    assert c.post("/merchant/products/order", json={"store_id": SID, "end_date": ymd(365)}, headers=H).status_code == 400
+    assert c.post("/merchant/products/order", json={"store_id": SID, "end_date": ymd(364)}, headers=H).status_code == 200
+    # free product: price 0 whatever the duration
+    wipe(); seed(2)
+    o = c.post("/merchant/products/order", json={"store_id": SID, "end_date": ymd(100)}, headers=H).json()
+    assert o["pricing_tier"] == "free" and o["amount_paise"] == 0 and o["days"] == 101
+    # future start date is honoured: days counted from the start, product hidden until it starts
+    o = c.post("/merchant/products/order", json={"store_id": SID, "from_date": ymd(5), "end_date": ymd(14)}, headers=H).json()
+    assert o["days"] == 10
+    r = c.post("/merchant/products/activate-free", json={**body("Future"), "order_id": o["order_id"]}, headers=H); assert r.status_code == 200
+    pf = fake.merchant_products.find_one({"title": "Future"}); assert pf["duration_days"] == 10 and pf["start_date"] == P.ist_today() + timedelta(days=5)
+    assert c.post("/merchant/products/order", json={"store_id": SID, "from_date": ymd(-1), "end_date": ymd(5)}, headers=H).status_code == 400
+    # renewal bills only the ADDED days
+    wipe(); seed(10)
+    live = fake.merchant_products.insert_one({"merchant_id": MID, "status": "approved", "is_active": True, "title": "L",
+        "start_date": P.ist_today(), "end_date": P.ist_today() + timedelta(days=9), "duration_days": 10}).inserted_id
+    ro = c.post(f"/merchant/products/{live}/renew", json={"end_date": ymd(19)}, headers=H).json()
+    assert ro["days"] == 10 and ro["base_price"] == 100 and ro["amount_display"] == 118, ro                   # +10 days
+    assert c.post(f"/merchant/products/{live}/renew", json={"end_date": ymd(9)}, headers=H).status_code == 400  # not after current end
+    exp = fake.merchant_products.insert_one({"merchant_id": MID, "status": "expired", "is_active": False, "title": "X",
+        "start_date": P.ist_today() - timedelta(days=40), "end_date": P.ist_today() - timedelta(days=3)}).inserted_id
+    ro = c.post(f"/merchant/products/{exp}/renew", json={"end_date": ymd(6)}, headers=H).json()
+    assert ro["days"] == 7 and ro["base_price"] == 70, ro                                                      # today..+6 = 7 days
+    # rate stored per renewal; later rate change does not touch history
+    rv = c.post(f"/merchant/products/{live}/renew/verify", json={}, headers=H); assert rv.status_code == 200, rv.text
+    pl = fake.merchant_products.find_one({"_id": live}); assert pl["renewals"][0]["unit_price"] == 100 and pl["renewals"][0]["added_days"] == 10
+    assert pl["duration_days"] == 20
+    # admin dashboard row: duration + paid status/amount
+    wipe(); seed(10)
+    ab = lambda **k: {"title": "A", "text": "t", "price": 5, "store_id": SID, "from_date": ymd(0), "end_date": ymd(29), **k}
+    r = c.post("/admin/products", json=ab(pay_mode="UPI", pay_amount=354, pay_ref="U"), headers=A); assert r.status_code == 200, r.text
+    wipe(); seed(3); assert c.post("/admin/products", json=ab(), headers=A).status_code == 200
+    rows = {x["pricing_tier"]: x for x in c.get("/admin/products", headers=A).json() if x["title"] == "A"}
+    assert rows["free"]["duration_days"] == 30 and rows["free"]["paid_status"] == "free" and rows["free"]["paid_amount"] == 0
+    wipe(); seed(10); c.post("/admin/products", json=ab(pay_mode="UPI", pay_amount=400, pay_ref="U"), headers=A)
+    row = [x for x in c.get("/admin/products", headers=A).json() if x["title"] == "A"][0]
+    assert (row["paid_status"], row["paid_amount"], row["expected_amount"], row["duration_days"]) == ("paid", 400.0, 354.0, 30)
+    fake.pricing.update_one({}, {"$set": {"product_price_per_day": 77}})                                       # history unchanged
+    row = [x for x in c.get("/admin/products", headers=A).json() if x["title"] == "A"][0]; assert row["paid_amount"] == 400.0
+    # admin edit: changing dates recomputes duration; unchanged past dates on an expired product do not block edits
+    pid = row["_id"]
+    assert c.put(f"/admin/products/{pid}", json={"from_date": ymd(0), "end_date": ymd(9)}, headers=A).status_code == 200
+    assert fake.merchant_products.find_one({"_id": ObjectId(pid)})["duration_days"] == 10
+    ex = str(fake.merchant_products.insert_one({"merchant_id": MID, "status": "expired", "title": "E", "start_date": P.ist_today() - timedelta(days=20),
+        "end_date": P.ist_today() - timedelta(days=5), "duration_days": 16}).inserted_id)
+    assert c.put(f"/admin/products/{ex}", json={"title": "E2", "from_date": ymd(-20), "end_date": ymd(-5)}, headers=A).status_code == 200
+
+
+def test_product_price_per_day_setting():
+    fake = sys.modules["database"].db
+    settings(); fake.pricing.update_one({}, {"$unset": {"product_price_per_day": ""}, "$set": {"voucher_price_per_day": 12}})
+    assert P.get_settings()["product_price_per_day"] == 12                       # existing configured value is reused
+    assert P.ensure_settings() == ["product_price_per_day"] and fake.pricing.find_one()["product_price_per_day"] == 12
+    # the dashboard's "Product Price per Day" now actually persists (it used to be silently dropped)
+    assert c.put("/admin/banner-pricing", json={"banner_price_per_day": 15, "product_price_per_day": 8}, headers=A).status_code == 200
+    assert c.get("/admin/banner-pricing", headers=A).json()["product_price_per_day"] == 8
+    assert P.get_settings()["product_price_per_day"] == 8
+    assert c.put("/admin/banner-pricing", json={"product_price_per_day": -1}, headers=A).status_code == 400
+    # additional_product_price is gone from the settings API
+    g = c.get("/admin/pricing", headers=A).json(); assert "additional_product_price" not in g and "free_product_limit" in g
+    c.put("/admin/pricing", json={"additional_product_price": 500}, headers=A); assert "additional_product_price" not in fake.pricing.find_one()

@@ -15,7 +15,7 @@ What it does
   2. removes data that only pointed at those old products:
        product_events, product_reviews, product_history, merchant_locks,
        and users.favorite_product_ids
-  3. creates MISSING product settings (free_product_limit, additional_product_price,
+  3. creates MISSING product settings (free_product_limit, product_price_per_day,
      product_max_validity_days) — never overwrites a value the Admin already set
   4. creates the indexes for merchant_products / product_orders
 

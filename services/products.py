@@ -8,11 +8,15 @@ Nothing in here hard-codes the free limit or the price. Both are read from the
 Admin-editable settings document (db.pricing) on EVERY decision:
 
     free_product_limit        number of free qualifying products per merchant
-    additional_product_price  flat price (before GST) of each product past the limit
-    product_max_validity_days longest allowed validity from today
+    product_price_per_day     price (before GST) of ONE day of a paid product;
+                              a paid product costs  price_per_day x days
+    product_max_validity_days longest allowed validity
     gst_percent               (existing setting) GST applied to the paid price
 
-The numbers 10 / 100 / 365 appear only in SEED_DEFAULTS, which is used by
+Days are INCLUSIVE: a product is live THROUGH its end date, so start 1 Nov and end
+30 Nov is 30 days.
+
+The numbers 10 / 10 / 365 appear only in SEED_DEFAULTS, which is used by
 ensure_settings() to create a missing key once (startup / reset script). They
 are never consulted when deciding free vs paid.
 """
@@ -37,7 +41,7 @@ NON_QUALIFYING_STATUSES = ("deleted", "expired", "rejected")
 # Seed data ONLY (see module docstring) — never read by business logic.
 SEED_DEFAULTS = {
     "free_product_limit": 10,
-    "additional_product_price": 100,
+    "product_price_per_day": 10,
     "product_max_validity_days": 365,
 }
 
@@ -95,24 +99,47 @@ def is_expired_by_date(doc) -> bool:
     return bool(end and end < ist_today())
 
 
-def validate_end_date(raw) -> datetime:
-    end = parse_date(raw)
+def inclusive_days(start: datetime, end: datetime) -> int:
+    """Live days, counting both the start and the end date."""
+    return (end - start).days + 1
+
+
+def validate_period(from_raw, end_raw):
+    """Merchant/Admin supplied validity -> (start, end, days). Start defaults to today and
+    may not be in the past; end may not be before start; days may not exceed the
+    Admin-configured maximum."""
+    today = ist_today()
+    start = parse_date(from_raw) if from_raw not in (None, "") else today
+    if start is None:
+        raise ProductError(400, "Please choose a valid start date for the product")
+    if start < today:
+        raise ProductError(400, "Start date cannot be in the past")
+    end = parse_date(end_raw)
     if end is None:
         raise ProductError(400, "Please choose a valid end date for the product")
-    if end < ist_today():
-        raise ProductError(400, "End date cannot be in the past")
+    if end < start:
+        raise ProductError(400, "End date cannot be before the start date")
+    days = inclusive_days(start, end)
     max_days = get_settings()["product_max_validity_days"]
-    if end > ist_today() + timedelta(days=max_days):
-        raise ProductError(400, f"End date cannot be more than {max_days} days from today")
-    return end
+    if days > max_days:
+        raise ProductError(400, f"A product can run for at most {max_days} days")
+    return start, end, days
+
+
+def validate_end_date(raw) -> datetime:
+    return validate_period(None, raw)[1]
 
 
 # ── settings (Admin-configured) ────────────────────────────────────────────────
 def get_settings() -> dict:
     """Read the Admin-configured product settings. Raises a clear error if the
-    free limit or price has not been configured — it never falls back to a
+    free limit or the per-day price has not been configured — it never falls back to a
     hard-coded number."""
     doc = db.pricing.find_one({}) or {}
+    ppd = doc.get("product_price_per_day")
+    if ppd is None:
+        ppd = doc.get("voucher_price_per_day")   # value the Admin already configured before the rename
+    doc = dict(doc, product_price_per_day=ppd)
     missing = [k for k in SEED_DEFAULTS if doc.get(k) is None]
     if missing:
         raise ProductError(
@@ -123,7 +150,7 @@ def get_settings() -> dict:
     try:
         out = {
             "free_product_limit": max(0, int(doc["free_product_limit"])),
-            "additional_product_price": max(0.0, float(doc["additional_product_price"])),
+            "product_price_per_day": max(0.0, float(doc["product_price_per_day"])),
             "product_max_validity_days": max(1, int(doc["product_max_validity_days"])),
             "gst_percent": max(0.0, float(doc.get("gst_percent", 18) or 0)),
         }
@@ -145,6 +172,11 @@ def ensure_settings() -> list:
     if "free_product_limit" in add and doc.get("standard_product_limit") is not None:
         try:
             add["free_product_limit"] = int(doc["standard_product_limit"])
+        except (TypeError, ValueError):
+            pass
+    if "product_price_per_day" in add and doc.get("voucher_price_per_day") is not None:
+        try:
+            add["product_price_per_day"] = float(doc["voucher_price_per_day"])
         except (TypeError, ValueError):
             pass
     if add:
@@ -182,34 +214,37 @@ def qualifying_count(merchant_id, exclude_id=None) -> int:
 
 
 # ── THE decision ───────────────────────────────────────────────────────────────
-def decide(merchant_id, exclude_id=None) -> dict:
+def decide(merchant_id, exclude_id=None, days: int = 0) -> dict:
     """Free or paid? One function, three callers (create, admin-create, renew).
 
     tier "admin"  – product has no merchant (OffrO-owned): no quota, no charge.
     tier "free"   – qualifying count  <  free_product_limit
-    tier "paid"   – qualifying count  >= free_product_limit
+    tier "paid"   – qualifying count  >= free_product_limit; price = price_per_day x days
+    `days` is the number of billable days of THIS purchase (0 = just report the tier).
     """
     s = get_settings()
+    ppd = round(s["product_price_per_day"], 4)
+    base = {"price_per_day": ppd, "days": int(days or 0), "free_limit": s["free_product_limit"],
+            "gst_percent": s["gst_percent"]}
     if not merchant_id:
-        return {"tier": "admin", "used": 0, "free_limit": s["free_product_limit"],
-                "unit_price": 0.0, "gst_percent": s["gst_percent"], "gst_amount": 0.0, "total": 0.0}
+        return {**base, "tier": "admin", "used": 0, "unit_price": 0.0, "gst_amount": 0.0, "total": 0.0}
     used = qualifying_count(merchant_id, exclude_id)
-    limit = s["free_product_limit"]
-    if used < limit:
+    if used < s["free_product_limit"]:
         tier, price = "free", 0.0
     else:
-        tier, price = "paid", round(s["additional_product_price"], 2)
+        tier, price = "paid", round(ppd * int(days or 0), 2)
     gst = round(price * s["gst_percent"] / 100.0, 2)
-    return {"tier": tier, "used": used, "free_limit": limit, "unit_price": price,
-            "gst_percent": s["gst_percent"], "gst_amount": gst, "total": round(price + gst, 2)}
+    return {**base, "tier": tier, "used": used, "unit_price": price,
+            "gst_amount": gst, "total": round(price + gst, 2)}
 
 
-def slots_summary(merchant_id, exclude_id=None) -> dict:
-    d = decide(merchant_id, exclude_id)
+def slots_summary(merchant_id, exclude_id=None, days: int = 0) -> dict:
+    d = decide(merchant_id, exclude_id, days)
     return {"used": d["used"], "free_limit": d["free_limit"],
             "free_remaining": max(0, d["free_limit"] - d["used"]),
             "next_is_free": d["tier"] == "free", "tier": d["tier"],
-            "additional_price": d["unit_price"], "gst_percent": d["gst_percent"],
+            "price_per_day": d["price_per_day"], "days": d["days"],
+            "unit_price": d["unit_price"], "gst_percent": d["gst_percent"],
             "gst_amount": d["gst_amount"], "total": d["total"]}
 
 
@@ -240,15 +275,16 @@ def merchant_lock(merchant_id):
 # ── create / renew / delete ────────────────────────────────────────────────────
 def _paid_message(d: dict) -> str:
     return (f"All {d['free_limit']} free product slots are used. An additional product "
-            f"costs ₹{d['unit_price']:g} + GST (₹{d['total']:g} total).")
+            f"costs ₹{d['price_per_day']:g}/day × {d['days']} days = ₹{d['unit_price']:g} "
+            f"+ GST (₹{d['total']:g} total).")
 
 
-def build_doc(*, merchant: dict, fields: dict, end_date: datetime, source: str,
-              decision: dict, charged_amount: float = 0.0, payment: dict = None) -> dict:
+def build_doc(*, merchant: dict, fields: dict, start_date: datetime, end_date: datetime,
+              source: str, decision: dict, charged_amount: float = 0.0, payment: dict = None) -> dict:
     now = datetime.utcnow()
     approved = source == "admin"
     doc = {
-        "merchant_id": merchant_key(merchant),
+        "merchant_id": merchant_key(merchant) or None,   # None = OffrO-owned (no merchant, no quota)
         "merchant_name": merchant.get("name") or merchant.get("merchant_name") or "",
         "merchant_phone": merchant.get("phone") or merchant.get("merchant_phone") or "",
         "store_id": str(fields.get("store_id") or ""),
@@ -261,14 +297,16 @@ def build_doc(*, merchant: dict, fields: dict, end_date: datetime, source: str,
         "price": fields.get("price") or "",
         "original_price": fields.get("original_price") or "",
         "discount_label": fields.get("discount_label") or "",
-        "start_date": ist_today(),
+        "start_date": start_date,
         "end_date": end_date,
+        "duration_days": inclusive_days(start_date, end_date),
         "status": "approved" if approved else "pending",
         "is_active": True,
         "source": source,
         "pricing_tier": decision["tier"],
-        "unit_price": decision["unit_price"],        # price recorded at purchase
-        "charged_amount": round(charged_amount, 2),   # what was actually paid (incl. GST)
+        "price_per_day": decision["price_per_day"] if decision["tier"] == "paid" else 0.0,
+        "unit_price": decision["unit_price"],        # base price of THIS purchase (rate x days), fixed forever
+        "charged_amount": round(charged_amount, 2),   # what was actually paid (incl. GST), fixed forever
         "gst_percent": decision["gst_percent"],
         "gst_amount": decision["gst_amount"] if charged_amount else 0.0,
         "rating": 0.0, "rating_count": 0,
@@ -279,74 +317,66 @@ def build_doc(*, merchant: dict, fields: dict, end_date: datetime, source: str,
     return doc
 
 
-def create_free(*, merchant: dict, fields: dict, end_raw, source: str = "merchant") -> dict:
+def create_free(*, merchant: dict, fields: dict, end_raw, from_raw=None, source: str = "merchant") -> dict:
     """Free creation. Re-decides under the merchant lock so two simultaneous
     requests cannot both take the last free slot."""
     mid = merchant_key(merchant)
-    end = validate_end_date(end_raw)
+    start, end, days = validate_period(from_raw, end_raw)
     with merchant_lock(mid):
-        d = decide(mid)
+        d = decide(mid, days=days)
         if d["tier"] != "free":
             raise ProductError(409, _paid_message(d))
-        doc = build_doc(merchant=merchant, fields=fields, end_date=end, source=source, decision=d)
+        doc = build_doc(merchant=merchant, fields=fields, start_date=start, end_date=end,
+                        source=source, decision=d)
         doc["_id"] = db[PRODUCTS].insert_one(doc).inserted_id
     return doc
 
 
-def quote_paid(merchant_id) -> dict:
-    """Decision + price for a PAID create (used to build the Razorpay order)."""
-    d = decide(merchant_id)
-    if d["tier"] == "free":
-        raise ProductError(409, "A free slot is available — no payment is needed")
-    return d
-
-
-def create_paid(*, merchant: dict, fields: dict, end_raw, source: str, paid_total: float,
-                payment: dict) -> dict:
-    """Insert a paid product after payment was verified (merchant) or recorded
-    by the Admin. paid_total must be >= the configured price+GST at this moment
-    (or a discount-reduced amount decided by the caller)."""
+def create_paid(*, merchant: dict, fields: dict, end_raw, from_raw=None, source: str, paid_total: float,
+                payment: dict, price: dict) -> dict:
+    """Insert a paid product after the merchant's payment was verified. `price` is what the
+    ORDER quoted (unit_price, price_per_day, gst_percent, gst_amount) - the merchant is
+    recorded at the price they were shown and paid, even if the Admin changed the rate since."""
     mid = merchant_key(merchant)
-    end = validate_end_date(end_raw)
+    start, end, days = validate_period(from_raw, end_raw)
     with merchant_lock(mid):
-        d = decide(mid)
-        # A free slot may have opened since the order was made; the merchant
-        # still paid, so the recorded tier stays "paid" with the amount charged.
-        d = dict(d, tier="paid")
-        doc = build_doc(merchant=merchant, fields=fields, end_date=end, source=source,
-                        decision=d, charged_amount=paid_total, payment=payment)
+        d = {"tier": "paid", "price_per_day": price["price_per_day"], "unit_price": price["unit_price"],
+             "gst_percent": price["gst_percent"], "gst_amount": price["gst_amount"]}
+        doc = build_doc(merchant=merchant, fields=fields, start_date=start, end_date=end,
+                        source=source, decision=d, charged_amount=paid_total, payment=payment)
         doc["_id"] = db[PRODUCTS].insert_one(doc).inserted_id
     return doc
 
 
-def admin_create(*, merchant: dict, fields: dict, end_raw, payment: dict = None) -> dict:
+def admin_create(*, merchant: dict, fields: dict, end_raw, from_raw=None, payment: dict = None) -> dict:
     """Admin creates a product FOR a merchant. Same rule as the merchant path:
     it consumes that merchant's quota. Free if a slot is left; otherwise the
-    Admin must supply the payment details (mode + amount) of the paid product."""
+    Admin must record the manual payment (mode + amount >= price x days + GST)."""
     mid = merchant_key(merchant)
+    start, end, days = validate_period(from_raw, end_raw)
     if not mid:
         # OffrO-owned product: no merchant, no quota, no charge.
-        end = validate_end_date(end_raw)
-        d = decide("")
-        doc = build_doc(merchant={}, fields=fields, end_date=end, source="admin", decision=d)
+        d = decide("", days=days)
+        doc = build_doc(merchant={}, fields=fields, start_date=start, end_date=end, source="admin", decision=d)
         doc["_id"] = db[PRODUCTS].insert_one(doc).inserted_id
         return doc
-    end = validate_end_date(end_raw)
     with merchant_lock(mid):
-        d = decide(mid)
+        d = decide(mid, days=days)
         if d["tier"] == "free":
-            doc = build_doc(merchant=merchant, fields=fields, end_date=end, source="admin", decision=d)
+            doc = build_doc(merchant=merchant, fields=fields, start_date=start, end_date=end,
+                            source="admin", decision=d)
         else:
-            expected = d["total"]                          # configured price + GST
+            expected = d["total"]                          # price_per_day x days + GST
             amt = round(float((payment or {}).get("amount") or 0), 2)
             mode = ((payment or {}).get("payment_mode") or "").strip()
             if not payment or not mode or amt <= 0:
                 raise ProductError(409, _paid_message(d) + " Enter the payment mode and amount paid to create it.")
             if amt + 0.005 < expected:                      # >= expected is accepted, lower is not
                 raise ProductError(400, f"Amount paid (₹{amt:g}) is less than the expected ₹{expected:g} "
-                                        f"(₹{d['unit_price']:g} + GST). Enter at least ₹{expected:g}.")
-            doc = build_doc(merchant=merchant, fields=fields, end_date=end, source="admin",
-                            decision=d, charged_amount=amt,
+                                        f"(₹{d['price_per_day']:g}/day × {days} days + GST). "
+                                        f"Enter at least ₹{expected:g}.")
+            doc = build_doc(merchant=merchant, fields=fields, start_date=start, end_date=end,
+                            source="admin", decision=d, charged_amount=amt,
                             payment={"expected_amount": expected, "payment_mode": mode,
                                      "payment_ref": (payment.get("payment_ref") or "").strip(),
                                      "payment_status": "paid", "recorded_by_admin": True})
@@ -367,6 +397,7 @@ def _record_admin_paid_order(merchant: dict, doc: dict, d: dict) -> None:
         "kind": "create", "merchant_id": mid, "merchant_name": doc["merchant_name"],
         "merchant_phone": doc["merchant_phone"], "product_id": str(doc["_id"]),
         "pricing_tier": "paid", "unit_price": d["unit_price"], "base_price": d["unit_price"],
+        "price_per_day": d["price_per_day"], "days": doc["duration_days"],
         "gst_percent": d["gst_percent"], "gst_amount": d["gst_amount"],
         "expected_amount": doc["expected_amount"], "total": doc["charged_amount"],
         "amount_paid": doc["charged_amount"], "final_amount": d["unit_price"],
@@ -381,7 +412,7 @@ def _record_admin_paid_order(merchant: dict, doc: dict, d: dict) -> None:
     db.invoices.insert_one({
         "invoice_no": inv_no, "type": "product", "merchant_id": mid,
         "merchant_name": doc["merchant_name"], "merchant_phone": doc["merchant_phone"],
-        "item_label": "Discover Product", "store_name": doc["title"],
+        "item_label": f"Discover Product – {doc['duration_days']} Days", "store_name": doc["title"],
         "plan": f"{doc['start_date']:%d %b %Y} \u2192 {doc['end_date']:%d %b %Y}",
         "base_price": d["unit_price"], "original_amount": d["unit_price"],
         "discount_code": "", "discount_amount": 0, "final_amount": d["unit_price"],
@@ -414,37 +445,61 @@ def soft_delete(doc: dict, by: str = "merchant") -> None:
         "deleted_by": by, "updated_at": now}})
 
 
-def renew_decision(doc: dict) -> dict:
+def renewal_period(doc: dict, end_raw):
+    """New end date -> (end, billable_days) for a renewal. You only pay for the days you ADD:
+    from the day after the current end date while the product is still live, or from today
+    once it has expired."""
+    ensure_editable(doc)
+    end = parse_date(end_raw)
+    if end is None:
+        raise ProductError(400, "Please choose a valid end date for the product")
+    cur = parse_date(doc.get("end_date"))
+    base = max(cur, ist_today() - timedelta(days=1)) if cur else ist_today() - timedelta(days=1)
+    days = (end - base).days
+    if days < 1:
+        raise ProductError(400, "The new end date must be after the current end date")
+    max_days = get_settings()["product_max_validity_days"]
+    if (end - ist_today()).days + 1 > max_days:           # remaining live time from today
+        raise ProductError(400, f"A product can run for at most {max_days} days from today")
+    return end, days
+
+
+def renew_decision(doc: dict, days: int = 0) -> dict:
     """Free/paid for renewing `doc`. The product itself is excluded from the
     count so renewing an expired product is judged like a fresh slot and a
     live one is not counted twice."""
     ensure_editable(doc)
-    return decide(doc.get("merchant_id"), exclude_id=doc["_id"])
+    return decide(doc.get("merchant_id"), exclude_id=doc["_id"], days=days)
 
 
-def apply_renewal(doc: dict, end_raw, *, charged_amount: float = 0.0, payment: dict = None) -> dict:
+def apply_renewal(doc: dict, end_raw, *, charged_amount: float = 0.0, payment: dict = None,
+                  price: dict = None) -> dict:
     """Extend/reactivate. Free renewals re-check under the lock; paid renewals
-    are applied after the caller verified payment."""
-    end = validate_end_date(end_raw)
-    ensure_editable(doc)
+    are applied after the caller verified payment. `price` = what the renewal ORDER quoted."""
+    end, days = renewal_period(doc, end_raw)
     mid = str(doc.get("merchant_id") or "")
     with merchant_lock(mid):
-        d = renew_decision(doc)
+        d = renew_decision(doc, days)
         if charged_amount <= 0 and d["tier"] == "paid":
             raise ProductError(409, _paid_message(d))
         # Purchase history is permanent: pricing_tier / unit_price / charged_amount of the
         # ORIGINAL purchase are never rewritten. Each renewal is appended instead.
         now = datetime.utcnow()
-        upd = {"end_date": end, "is_active": True, "updated_at": now, "renewed_at": now}
+        start = parse_date(doc.get("start_date")) or ist_today()
+        upd = {"end_date": end, "is_active": True, "updated_at": now, "renewed_at": now,
+               "duration_days": inclusive_days(min(start, end), end)}
         if doc.get("status") == "expired":
             upd["status"] = "approved"
         if payment:
             upd.update(payment)
-        entry = {"at": now, "new_end_date": end, "pricing_tier": d["tier"],
-                 "unit_price": d["unit_price"], "charged_amount": round(float(charged_amount or 0), 2),
-                 "gst_percent": d["gst_percent"]}
+        q = price or d
+        entry = {"at": now, "new_end_date": end, "added_days": days,
+                 "pricing_tier": "paid" if charged_amount > 0 else d["tier"],
+                 "price_per_day": q.get("price_per_day", d["price_per_day"]),
+                 "unit_price": q.get("unit_price", d["unit_price"]),
+                 "charged_amount": round(float(charged_amount or 0), 2),
+                 "gst_percent": q.get("gst_percent", d["gst_percent"])}
         db[PRODUCTS].update_one({"_id": doc["_id"]}, {"$set": upd, "$push": {"renewals": entry}})
-        return db[PRODUCTS].find_one({"_id": doc["_id"]})
     return db[PRODUCTS].find_one({"_id": doc["_id"]})
 
 

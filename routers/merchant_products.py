@@ -61,8 +61,10 @@ def _row(p: dict) -> dict:
         "store_id": p.get("store_id", ""), "store_name": p.get("store_name", ""), "city": p.get("city", ""),
         "is_active": bool(p.get("is_active", True)),
         "from_date": _dstr(p.get("start_date")), "end_date": _dstr(p.get("end_date")),
-        "duration_days": max(0, ((P.parse_date(p.get("end_date")) or P.ist_today())
-                                 - (P.parse_date(p.get("start_date")) or P.ist_today())).days),
+        "duration_days": int(p.get("duration_days") or 0) or P.inclusive_days(
+            P.parse_date(p.get("start_date")) or P.ist_today(), P.parse_date(p.get("end_date")) or P.ist_today()),
+        "pricing_tier_label": "Free" if p.get("pricing_tier") == "free" else
+                              (f"Paid ₹{float(p.get('charged_amount') or 0):g}" if p.get("pricing_tier") == "paid" else ""),
         "approval_status": status, "status": status,
         "amount": p.get("charged_amount", 0), "pricing_tier": p.get("pricing_tier", "free"),
         "source": p.get("source", "merchant"), "is_expired": expired,
@@ -142,13 +144,10 @@ def _invoice(m, prod, order, paid: bool, rp_payment_id=""):
     return no
 
 
-def _slot_payload(merchant_id, exclude_id=None):
-    s = _guard(P.slots_summary, merchant_id, exclude_id)
+def _slot_payload(merchant_id, exclude_id=None, days=0):
+    s = _guard(P.slots_summary, merchant_id, exclude_id, days)
     st = P.get_settings()
-    return {**s, "additional_total": s["total"] if not s["next_is_free"] else
-            round(st["additional_product_price"] * (1 + st["gst_percent"] / 100), 2),
-            "gst_pct": s["gst_percent"], "additional_price": st["additional_product_price"],
-            "max_validity_days": st["product_max_validity_days"]}
+    return {**s, "gst_pct": s["gst_percent"], "max_validity_days": st["product_max_validity_days"]}
 
 
 # ── list / slots ───────────────────────────────────────────────────────────────
@@ -161,11 +160,11 @@ def list_products(m=Depends(get_merchant)):
 
 
 @router.get("/products/slots")
-def product_slots(exclude_id: str = "", m=Depends(get_merchant)):
-    """'N / limit free product slots used' + the current additional-product price.
+def product_slots(exclude_id: str = "", days: int = 0, m=Depends(get_merchant)):
+    """'N / limit free product slots used' + the current price per day (x days = price).
     Display only — the decision is re-made server-side on save / renew.
     `exclude_id` previews a renewal of that product."""
-    return _slot_payload(_mid(m), exclude_id or None)
+    return _slot_payload(_mid(m), exclude_id or None, max(0, int(days or 0)))
 
 
 # ── create ─────────────────────────────────────────────────────────────────────
@@ -174,14 +173,14 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
     mid = _mid(m)
     if (data.get("store_id") or "").strip():
         _require_active_store(data["store_id"].strip(), "product")
-    end = _guard(P.validate_end_date, data.get("end_date"))
-    d = _guard(P.decide, mid)
+    start, end, days = _guard(P.validate_period, data.get("from_date"), data.get("end_date"))
+    d = _guard(P.decide, mid, None, days)
     pb = _price_block(d, data.get("discount_code") if d["tier"] == "paid" else None)
     disc = pb["disc"]
     order = {
         "kind": "create", "merchant_id": mid, "merchant_phone": str(m.get("phone", "")),
         "merchant_name": str(m.get("name", "")), "pricing_tier": d["tier"], "unit_price": d["unit_price"],
-        "from_date": P.ist_today(), "end_date": end,
+        "from_date": start, "end_date": end, "days": days, "price_per_day": d["price_per_day"],
         "base_price": pb["base"], "discount_code": disc["code"] or None, "discount_type": disc["type"],
         "discount_scope": disc["applies_to"], "discount_value": disc["discount_value"],
         "discount_amount": pb["discount_amount"], "final_amount": pb["sub"],
@@ -193,8 +192,8 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
     db[ORDERS].update_one({"_id": oid}, {"$set": {"razorpay_order_id": rp_id, "pay_mode": pay_mode}})
     return {
         "order_id": str(oid), "plan_label": "Free product" if d["tier"] == "free" else "Additional product",
-        "pricing_tier": d["tier"], "from_date": _dstr(order["from_date"]), "end_date": _dstr(end),
-        "days": (end - order["from_date"]).days, "base_price": pb["base"], "gst_percent": pb["gst_pct"],
+        "pricing_tier": d["tier"], "from_date": _dstr(start), "end_date": _dstr(end),
+        "days": days, "price_per_day": d["price_per_day"], "base_price": pb["base"], "gst_percent": pb["gst_pct"],
         "gst_amount": pb["gst"], "discount_code": disc["code"], "discount_type": disc["type"],
         "discount_value": disc["discount_value"], "discount_amount": pb["discount_amount"],
         "discount_msg": disc["message"], "amount_display": pb["total"], "amount_paise": pb["paise"],
@@ -211,6 +210,12 @@ def _order(data, m, kind="create"):
     return o
 
 
+def _order_price(order: dict) -> dict:
+    """The price the order QUOTED - recorded on the product so a later rate change never rewrites it."""
+    return {"price_per_day": order.get("price_per_day", 0), "unit_price": order.get("unit_price", 0),
+            "gst_percent": order.get("gst_percent", 0), "gst_amount": order.get("gst_amount", 0)}
+
+
 @router.post("/products/activate-free")
 def activate_free_product(data: dict, m=Depends(get_merchant)):
     """Submit a product that needs no payment (free slot, or fully discounted)."""
@@ -222,10 +227,12 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
         raise HTTPException(400, "Payment is required for this product.")
     fields = _fields(data, m)
     if order["pricing_tier"] == "free":
-        prod = _guard(P.create_free, merchant=m, fields=fields, end_raw=order["end_date"])
+        prod = _guard(P.create_free, merchant=m, fields=fields, end_raw=order["end_date"],
+                      from_raw=order.get("from_date"))
     else:   # paid tier, discounted to 0
         prod = _guard(P.create_paid, merchant=m, fields=fields, end_raw=order["end_date"],
-                      source="merchant", paid_total=0.0, payment={"payment_status": "free_after_discount"})
+                      from_raw=order.get("from_date"), source="merchant", paid_total=0.0,
+                      payment={"payment_status": "free_after_discount"}, price=_order_price(order))
     _mark_discount_used(order.get("discount_code"))
     inv = _invoice(m, prod, order, paid=False)
     db[ORDERS].update_one({"_id": order["_id"]}, {"$set": {"status": "submitted", "product_id": str(prod["_id"]),
@@ -247,7 +254,8 @@ def verify_product_payment(data: dict, m=Depends(get_merchant)):
                            data.get("razorpay_signature", ""))
     _require_valid_razorpay_payment(order, rp_oid, rp_pid, sig)
     fields = _fields(data, m)
-    prod = _guard(P.create_paid, merchant=m, fields=fields, end_raw=order["end_date"], source="merchant",
+    prod = _guard(P.create_paid, merchant=m, fields=fields, end_raw=order["end_date"],
+                  from_raw=order.get("from_date"), source="merchant", price=_order_price(order),
                   paid_total=float(order["total"]),
                   payment={"razorpay_payment_id": rp_pid, "razorpay_order_id": rp_oid, "payment_status": "paid",
                            "discount_code": order.get("discount_code") or "",
@@ -337,16 +345,14 @@ def renew_order(pid: str, data: dict, m=Depends(get_merchant)):
     itself is excluded from the count."""
     mid = _mid(m)
     prod = _own(pid, m)
-    end = _guard(P.validate_end_date, data.get("end_date"))
-    cur_end = P.parse_date(prod.get("end_date"))
-    if cur_end and end <= cur_end and prod.get("status") != "expired":
-        raise HTTPException(400, "The new end date must be after the current end date")
-    d = _guard(P.renew_decision, prod)
+    end, days = _guard(P.renewal_period, prod, data.get("end_date"))
+    d = _guard(P.renew_decision, prod, days)
     pb = _price_block(d, data.get("discount_code") if d["tier"] == "paid" else None)
     disc = pb["disc"]
     order = {
         "kind": "renew", "product_id": pid, "merchant_id": mid, "pricing_tier": d["tier"],
-        "unit_price": d["unit_price"], "end_date": end, "base_price": pb["base"],
+        "unit_price": d["unit_price"], "end_date": end, "days": days, "price_per_day": d["price_per_day"],
+        "base_price": pb["base"],
         "discount_code": disc["code"] or None, "discount_type": disc["type"],
         "discount_scope": disc["applies_to"], "discount_value": disc["discount_value"],
         "discount_amount": pb["discount_amount"], "final_amount": pb["sub"],
@@ -357,7 +363,7 @@ def renew_order(pid: str, data: dict, m=Depends(get_merchant)):
     rp_id, pay_mode = _razorpay_order(pb["paise"], f"ren_{pid[:8]}", {"product_id": pid, "type": "renew"})
     db[ORDERS].update_one({"_id": oid}, {"$set": {"razorpay_order_id": rp_id, "pay_mode": pay_mode}})
     return {"order_id": rp_id or "", "product_order_id": str(oid), "amount": pb["total"], "currency": "INR",
-            "key": RAZORPAY_KEY_ID, "gst": pb["gst"], "end_date": _dstr(end), "pricing_tier": d["tier"],
+            "key": RAZORPAY_KEY_ID, "gst": pb["gst"], "end_date": _dstr(end), "days": days, "price_per_day": d["price_per_day"], "pricing_tier": d["tier"],
             "free_remaining": max(0, d["free_limit"] - d["used"]), "base_price": pb["base"],
             "gst_percent": pb["gst_pct"], "gst_amount": pb["gst"], "discount_code": disc["code"],
             "discount_type": disc["type"], "discount_value": disc["discount_value"],
@@ -384,7 +390,8 @@ def verify_renewal(pid: str, data: dict, m=Depends(get_merchant)):
     payment = {"razorpay_renewal_order_id": rp_oid, "last_renewal_payment_id": rp_pid,
                "discount_code": order.get("discount_code") or ""} if total > 0 else None
     # Free renewals are re-validated inside apply_renewal (lock + fresh decision).
-    new = _guard(P.apply_renewal, prod, order["end_date"], charged_amount=total, payment=payment)
+    new = _guard(P.apply_renewal, prod, order["end_date"], charged_amount=total, payment=payment,
+                 price=_order_price(order))
     db[ORDERS].update_one({"_id": order["_id"]}, {"$set": {"status": "paid", "payment_id": rp_pid,
                                                           "paid_at": datetime.utcnow()}})
     _mark_discount_used(order.get("discount_code"))
