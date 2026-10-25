@@ -1280,6 +1280,17 @@ def get_promo_sliders_public():
     from datetime import datetime as _dt
     _now = _dt.utcnow()
     docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
+    # Store names for the Home hero strip (one query for all slides).
+    from bson import ObjectId as _OID
+    _oids = []
+    for d in docs:
+        try:
+            if d.get("store_id"):
+                _oids.append(_OID(str(d["store_id"])))
+        except Exception:
+            pass
+    _store_names = {str(s["_id"]): s.get("store_name", "") for s in
+                    db.stores.find({"_id": {"$in": _oids}}, {"store_name": 1})} if _oids else {}
     result = []
     for d in docs:
         # Expiry check — approved merchant banners store expiry in "expires_at";
@@ -1317,6 +1328,7 @@ def get_promo_sliders_public():
         result.append({
             "id":         str(d["_id"]),
             "store_id":   _sid,
+            "store_name": d.get("store_name") or _store_names.get(_sid, ""),
             "cta_type":   _ct,
             "cta_id":     _ci,
             "cta_store_id": _cs,
