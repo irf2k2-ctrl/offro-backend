@@ -72,9 +72,28 @@ def _row(p: dict) -> dict:
     }
 
 
+def _own_store(store_id: str, m: dict, active: bool = True):
+    """The store must exist, (optionally) be active and belong to THIS merchant -
+    the free-product quota is counted per store, so a merchant must not be able to
+    create products under, or read the quota of, someone else's store."""
+    store_id = (store_id or "").strip()
+    store = _require_active_store(store_id, "product") if active else None
+    if store is None:
+        try:
+            store = db.stores.find_one({"_id": ObjectId(store_id)})
+        except Exception:
+            raise HTTPException(400, "Invalid store ID")
+        if not store:
+            raise HTTPException(404, "Store not found")
+    owner = str(store.get("merchant_id") or "")
+    if owner and owner != _mid(m):
+        raise HTTPException(403, "This store does not belong to your account.")
+    return store
+
+
 def _fields(data: dict, m: dict) -> dict:
     store_id = (data.get("store_id") or "").strip()
-    store = _require_active_store(store_id, "product")
+    store = _own_store(store_id, m)
     price = str(data.get("price", "") or "").strip()
     orig = str(data.get("original_price", "") or "").strip()
     label = ""
@@ -144,10 +163,42 @@ def _invoice(m, prod, order, paid: bool, rp_payment_id=""):
     return no
 
 
-def _slot_payload(merchant_id, exclude_id=None, days=0):
-    s = _guard(P.slots_summary, merchant_id, exclude_id, days)
+def _slot_payload(store_id, exclude_id=None, days=0):
+    """Quota of ONE store."""
+    s = _guard(P.slots_summary, store_id, exclude_id, days)
     st = P.get_settings()
-    return {**s, "gst_pct": s["gst_percent"], "max_validity_days": st["product_max_validity_days"]}
+    return {**s, "scope": "store", "store_id": str(store_id), "per_store_limit": s["free_limit"],
+            "gst_pct": s["gst_percent"], "max_validity_days": st["product_max_validity_days"]}
+
+
+def _merchant_overview(m, days=0):
+    """No store chosen yet: one summary per active store of the merchant plus a combined
+    total for the Products home banner. Each store still has its OWN quota - the combined
+    numbers are display only."""
+    mid = _mid(m)
+    owners = [mid]
+    try:
+        owners.append(ObjectId(mid))
+    except Exception:
+        pass
+    stores = list(db.stores.find({"merchant_id": {"$in": owners}, "status": "active"}))
+    per = []
+    for st in stores:
+        sid = str(st["_id"])
+        sm = _guard(P.slots_summary, sid, None, days)
+        per.append({"store_id": sid, "store_name": st.get("store_name", ""), "used": sm["used"],
+                    "free_limit": sm["free_limit"], "free_remaining": sm["free_remaining"],
+                    "next_is_free": sm["next_is_free"]})
+    base = _guard(P.slots_summary, "", None, days)       # settings only (price/gst), no store
+    stg = P.get_settings()
+    n = max(1, len(per))
+    limit = stg["free_product_limit"]
+    used = sum(x["used"] for x in per)
+    nxt = True if not per else any(x["next_is_free"] for x in per)
+    return {**base, "scope": "merchant", "stores": per, "per_store_limit": limit,
+            "free_limit": limit * n, "used": used, "free_remaining": sum(x["free_remaining"] for x in per) if per else limit,
+            "next_is_free": nxt, "tier": "free" if nxt else "paid",
+            "gst_pct": stg["gst_percent"], "max_validity_days": stg["product_max_validity_days"]}
 
 
 # ── list / slots ───────────────────────────────────────────────────────────────
@@ -160,25 +211,34 @@ def list_products(m=Depends(get_merchant)):
 
 
 @router.get("/products/slots")
-def product_slots(exclude_id: str = "", days: int = 0, m=Depends(get_merchant)):
+def product_slots(exclude_id: str = "", store_id: str = "", days: int = 0, m=Depends(get_merchant)):
     """'N / limit free product slots used' + the current price per day (x days = price).
-    Display only — the decision is re-made server-side on save / renew.
-    `exclude_id` previews a renewal of that product."""
-    return _slot_payload(_mid(m), exclude_id or None, max(0, int(days or 0)))
+    The quota is PER STORE: pass `store_id` for that store's numbers, or `exclude_id`
+    (renewal preview - the store is taken from that product). With neither, a combined
+    overview of the merchant's stores is returned. Display only — the decision is
+    re-made server-side on save / renew."""
+    days = max(0, int(days or 0))
+    if exclude_id:
+        prod = _own(exclude_id, m)
+        return _slot_payload(prod.get("store_id"), exclude_id, days)
+    if (store_id or "").strip():
+        _own_store(store_id, m, active=False)
+        return _slot_payload(store_id.strip(), None, days)
+    return _merchant_overview(m, days)
 
 
 # ── create ─────────────────────────────────────────────────────────────────────
 @router.post("/products/order")
 def create_product_order(data: dict, m=Depends(get_merchant)):
     mid = _mid(m)
-    if (data.get("store_id") or "").strip():
-        _require_active_store(data["store_id"].strip(), "product")
+    store_id = (data.get("store_id") or "").strip()
+    _own_store(store_id, m)                    # required: the free quota is counted per store
     start, end, days = _guard(P.validate_period, data.get("from_date"), data.get("end_date"))
-    d = _guard(P.decide, mid, None, days)
+    d = _guard(P.decide, store_id, None, days)
     pb = _price_block(d, data.get("discount_code") if d["tier"] == "paid" else None)
     disc = pb["disc"]
     order = {
-        "kind": "create", "merchant_id": mid, "merchant_phone": str(m.get("phone", "")),
+        "kind": "create", "merchant_id": mid, "store_id": store_id, "merchant_phone": str(m.get("phone", "")),
         "merchant_name": str(m.get("name", "")), "pricing_tier": d["tier"], "unit_price": d["unit_price"],
         "from_date": start, "end_date": end, "days": days, "price_per_day": d["price_per_day"],
         "base_price": pb["base"], "discount_code": disc["code"] or None, "discount_type": disc["type"],
@@ -192,7 +252,7 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
     db[ORDERS].update_one({"_id": oid}, {"$set": {"razorpay_order_id": rp_id, "pay_mode": pay_mode}})
     return {
         "order_id": str(oid), "plan_label": "Free product" if d["tier"] == "free" else "Additional product",
-        "pricing_tier": d["tier"], "from_date": _dstr(start), "end_date": _dstr(end),
+        "pricing_tier": d["tier"], "store_id": store_id, "from_date": _dstr(start), "end_date": _dstr(end),
         "days": days, "price_per_day": d["price_per_day"], "base_price": pb["base"], "gst_percent": pb["gst_pct"],
         "gst_amount": pb["gst"], "discount_code": disc["code"], "discount_type": disc["type"],
         "discount_value": disc["discount_value"], "discount_amount": pb["discount_amount"],
@@ -216,6 +276,12 @@ def _order_price(order: dict) -> dict:
             "gst_percent": order.get("gst_percent", 0), "gst_amount": order.get("gst_amount", 0)}
 
 
+def _same_store(order: dict, fields: dict):
+    """The order was quoted for one store's quota; it can only create a product in that store."""
+    if order.get("store_id") and order["store_id"] != fields.get("store_id"):
+        raise HTTPException(400, "This order was created for a different store. Please start again.")
+
+
 @router.post("/products/activate-free")
 def activate_free_product(data: dict, m=Depends(get_merchant)):
     """Submit a product that needs no payment (free slot, or fully discounted)."""
@@ -226,6 +292,7 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
     if float(order.get("total", 0) or 0) > 0:
         raise HTTPException(400, "Payment is required for this product.")
     fields = _fields(data, m)
+    _same_store(order, fields)
     if order["pricing_tier"] == "free":
         prod = _guard(P.create_free, merchant=m, fields=fields, end_raw=order["end_date"],
                       from_raw=order.get("from_date"))
@@ -254,6 +321,7 @@ def verify_product_payment(data: dict, m=Depends(get_merchant)):
                            data.get("razorpay_signature", ""))
     _require_valid_razorpay_payment(order, rp_oid, rp_pid, sig)
     fields = _fields(data, m)
+    _same_store(order, fields)
     prod = _guard(P.create_paid, merchant=m, fields=fields, end_raw=order["end_date"],
                   from_raw=order.get("from_date"), source="merchant", price=_order_price(order),
                   paid_total=float(order["total"]),
@@ -350,7 +418,7 @@ def renew_order(pid: str, data: dict, m=Depends(get_merchant)):
     pb = _price_block(d, data.get("discount_code") if d["tier"] == "paid" else None)
     disc = pb["disc"]
     order = {
-        "kind": "renew", "product_id": pid, "merchant_id": mid, "pricing_tier": d["tier"],
+        "kind": "renew", "product_id": pid, "merchant_id": mid, "store_id": prod.get("store_id", ""), "pricing_tier": d["tier"],
         "unit_price": d["unit_price"], "end_date": end, "days": days, "price_per_day": d["price_per_day"],
         "base_price": pb["base"],
         "discount_code": disc["code"] or None, "discount_type": disc["type"],

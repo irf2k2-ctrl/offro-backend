@@ -40,7 +40,7 @@ def wipe():
     for col in ("merchant_products","product_orders","merchant_locks","invoices"): fake[col].delete_many({})
 def seed(n, status="approved"):
     for _ in range(n):
-        fake.merchant_products.insert_one({"merchant_id": MID, "status": status, "is_active": True,
+        fake.merchant_products.insert_one({"merchant_id": MID, "store_id": SID, "status": status, "is_active": True,
             "end_date": P.ist_today()+timedelta(days=20), "start_date": P.ist_today(), "title": "s"})
 body = lambda t="P": {"title": t, "offer_text": "o", "price": "50", "original_price": "80", "store_id": SID,
                       "store_name": "S", "city": "Pune", "logo_url": "data:image/png;base64,xx"}
@@ -100,7 +100,7 @@ def test_products_api():
     assert all(r["_id"] != pid for r in c.get("/merchant/products", headers=H).json())
     # 9 renewal re-checks free/paid; expired product renewed free when slot available
     wipe(); seed(3)
-    e = fake.merchant_products.insert_one({"merchant_id": MID, "status": "approved", "is_active": True, "title": "E",
+    e = fake.merchant_products.insert_one({"merchant_id": MID, "store_id": SID, "status": "approved", "is_active": True, "title": "E",
         "start_date": P.ist_today()-timedelta(days=40), "end_date": P.ist_today()-timedelta(days=2)}).inserted_id
     rows = {r["_id"]: r for r in c.get("/merchant/products", headers=H).json()}; assert rows[str(e)]["status"] == "expired"
     assert c.get("/merchant/products/slots", params={"exclude_id": str(e)}, headers=H).json()["next_is_free"]
@@ -110,7 +110,7 @@ def test_products_api():
     assert fake.merchant_products.find_one({"_id": e})["status"] == "approved"
     # paid renewal when merchant is full
     wipe(); seed(10)
-    e = fake.merchant_products.insert_one({"merchant_id": MID, "status": "expired", "is_active": False, "title": "E2",
+    e = fake.merchant_products.insert_one({"merchant_id": MID, "store_id": SID, "status": "expired", "is_active": False, "title": "E2",
         "start_date": P.ist_today()-timedelta(days=40), "end_date": P.ist_today()-timedelta(days=2)}).inserted_id
     ro = c.post(f"/merchant/products/{e}/renew", json={"end_date": END}, headers=H).json(); assert ro["pricing_tier"] == "paid" and ro["amount_display"] == 354
     # 10 ADMIN create for merchant: 7 -> free, 10 -> 409 w/o payment, paid w/ payment, 15 -> paid
@@ -209,7 +209,7 @@ def test_duration_pricing_and_dashboard_fields():
         o = c.post("/merchant/products/order", json={"store_id": SID, "end_date": ymd(end_off)}, headers=H).json()
         assert (o["days"], o["pricing_tier"], o["base_price"], o["amount_display"]) == (days, "paid", base, total), o
     # slots endpoint previews price for N days
-    s = c.get("/merchant/products/slots", params={"days": 10}, headers=H).json()
+    s = c.get("/merchant/products/slots", params={"days": 10, "store_id": SID}, headers=H).json()
     assert s["price_per_day"] == 10 and s["total"] == 118 and s["days"] == 10 and "additional_price" not in s
     # max validity enforced (366 days > 365)
     assert c.post("/merchant/products/order", json={"store_id": SID, "end_date": ymd(365)}, headers=H).status_code == 400
@@ -226,12 +226,12 @@ def test_duration_pricing_and_dashboard_fields():
     assert c.post("/merchant/products/order", json={"store_id": SID, "from_date": ymd(-1), "end_date": ymd(5)}, headers=H).status_code == 400
     # renewal bills only the ADDED days
     wipe(); seed(10)
-    live = fake.merchant_products.insert_one({"merchant_id": MID, "status": "approved", "is_active": True, "title": "L",
+    live = fake.merchant_products.insert_one({"merchant_id": MID, "store_id": SID, "status": "approved", "is_active": True, "title": "L",
         "start_date": P.ist_today(), "end_date": P.ist_today() + timedelta(days=9), "duration_days": 10}).inserted_id
     ro = c.post(f"/merchant/products/{live}/renew", json={"end_date": ymd(19)}, headers=H).json()
     assert ro["days"] == 10 and ro["base_price"] == 100 and ro["amount_display"] == 118, ro                   # +10 days
     assert c.post(f"/merchant/products/{live}/renew", json={"end_date": ymd(9)}, headers=H).status_code == 400  # not after current end
-    exp = fake.merchant_products.insert_one({"merchant_id": MID, "status": "expired", "is_active": False, "title": "X",
+    exp = fake.merchant_products.insert_one({"merchant_id": MID, "store_id": SID, "status": "expired", "is_active": False, "title": "X",
         "start_date": P.ist_today() - timedelta(days=40), "end_date": P.ist_today() - timedelta(days=3)}).inserted_id
     ro = c.post(f"/merchant/products/{exp}/renew", json={"end_date": ymd(6)}, headers=H).json()
     assert ro["days"] == 7 and ro["base_price"] == 70, ro                                                      # today..+6 = 7 days
@@ -255,7 +255,7 @@ def test_duration_pricing_and_dashboard_fields():
     pid = row["_id"]
     assert c.put(f"/admin/products/{pid}", json={"from_date": ymd(0), "end_date": ymd(9)}, headers=A).status_code == 200
     assert fake.merchant_products.find_one({"_id": ObjectId(pid)})["duration_days"] == 10
-    ex = str(fake.merchant_products.insert_one({"merchant_id": MID, "status": "expired", "title": "E", "start_date": P.ist_today() - timedelta(days=20),
+    ex = str(fake.merchant_products.insert_one({"merchant_id": MID, "store_id": SID, "status": "expired", "title": "E", "start_date": P.ist_today() - timedelta(days=20),
         "end_date": P.ist_today() - timedelta(days=5), "duration_days": 16}).inserted_id)
     assert c.put(f"/admin/products/{ex}", json={"title": "E2", "from_date": ymd(-20), "end_date": ymd(-5)}, headers=A).status_code == 200
 
@@ -273,3 +273,48 @@ def test_product_price_per_day_setting():
     # additional_product_price is gone from the settings API
     g = c.get("/admin/pricing", headers=A).json(); assert "additional_product_price" not in g and "free_product_limit" in g
     c.put("/admin/pricing", json={"additional_product_price": 500}, headers=A); assert "additional_product_price" not in fake.pricing.find_one()
+
+
+def test_store_quota_via_api():
+    """Per-store quota end to end: two stores of one merchant, ownership checks, admin create for a store."""
+    settings(); wipe()
+    S2 = str(fake.stores.insert_one({"store_name": "S2", "city": "Pune", "status": "active", "merchant_id": MID}).inserted_id)
+    OTHER = str(fake.stores.insert_one({"store_name": "X", "city": "Pune", "status": "active", "merchant_id": "someone-else"}).inserted_id)
+    for _ in range(10):
+        fake.merchant_products.insert_one({"merchant_id": MID, "store_id": SID, "status": "approved", "is_active": True,
+            "end_date": P.ist_today()+timedelta(days=20), "start_date": P.ist_today(), "title": "s"})
+    g = lambda **q: c.get("/merchant/products/slots", params=q, headers=H).json()
+    s1, s2 = g(store_id=SID), g(store_id=S2)
+    assert (s1["used"], s1["next_is_free"], s1["scope"]) == (10, False, "store")      # store 1 full
+    assert (s2["used"], s2["next_is_free"], s2["free_remaining"]) == (0, True, 10)    # store 2 untouched
+    ov = g()                                                                          # no store -> combined overview
+    assert ov["scope"] == "merchant" and ov["used"] == 10 and ov["free_limit"] == 20 and ov["per_store_limit"] == 10
+    assert {x["store_id"]: x["used"] for x in ov["stores"]} == {SID: 10, S2: 0}
+    # orders: store 1 #11 paid, store 2 free; a store is mandatory; someone else's store is refused
+    o1 = c.post("/merchant/products/order", json={"store_id": SID, "end_date": END}, headers=H).json()
+    o2 = c.post("/merchant/products/order", json={"store_id": S2, "end_date": END}, headers=H).json()
+    assert (o1["pricing_tier"], o1["amount_display"], o1["store_id"]) == ("paid", 354, SID)
+    assert (o2["pricing_tier"], o2["amount_display"], o2["store_id"]) == ("free", 0, S2)
+    assert c.post("/merchant/products/order", json={"end_date": END}, headers=H).status_code == 400
+    assert c.post("/merchant/products/order", json={"store_id": OTHER, "end_date": END}, headers=H).status_code == 403
+    assert c.get("/merchant/products/slots", params={"store_id": OTHER}, headers=H).status_code == 403
+    # an order quoted for store 2 cannot be used to create a product in store 1 (and vice versa)
+    pl = {**body("mix"), "order_id": o2["order_id"], "end_date": END}              # body() carries store 1
+    assert c.post("/merchant/products/activate-free", json=pl, headers=H).status_code == 400
+    # creating in store 2 through the normal flow stores both merchant_id and store_id
+    pl2 = {**body("ok"), "store_id": S2, "order_id": o2["order_id"], "end_date": END}
+    r = c.post("/merchant/products/activate-free", json=pl2, headers=H); assert r.status_code == 200, r.text
+    doc = fake.merchant_products.find_one({"_id": ObjectId(r.json()["product_id"])})
+    assert doc["store_id"] == S2 and doc["merchant_id"] == MID and doc["pricing_tier"] == "free"
+    # admin: for store 2 (1 used) -> free; for store 1 (full) -> needs payment; no merchant/store -> OffrO-owned
+    ab = lambda **k: {"title": "A", "text": "t", "end_date": END, "logo": "data:image/png;base64,xx", **k}
+    r = c.post("/admin/products", json=ab(store_id=S2), headers=A); assert r.status_code == 200, r.text
+    assert r.json()["pricing_tier"] == "free"
+    assert c.post("/admin/products", json=ab(store_id=SID), headers=A).status_code == 409
+    r = c.post("/admin/products", json=ab(store_id=SID, pay_mode="cash", pay_amount=354), headers=A); assert r.status_code == 200, r.text
+    assert r.json()["pricing_tier"] == "paid" and r.json()["charged_amount"] == 354
+    assert c.post("/admin/products", json=ab(merchant_id=MID), headers=A).status_code == 400   # merchant but no store
+    r = c.post("/admin/products", json=ab(), headers=A); assert r.status_code == 200, r.text
+    own = fake.merchant_products.find_one({"_id": ObjectId(r.json()["id"])})
+    assert own["pricing_tier"] == "admin" and own["merchant_id"] is None and own["source"] == "admin"
+    assert g(store_id=SID)["used"] == 11 and g(store_id=S2)["used"] == 2             # OffrO-owned consumed nothing

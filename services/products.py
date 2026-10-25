@@ -7,7 +7,8 @@ Merchant create, Admin create-for-merchant and Renewal all go through it.
 Nothing in here hard-codes the free limit or the price. Both are read from the
 Admin-editable settings document (db.pricing) on EVERY decision:
 
-    free_product_limit        number of free qualifying products per merchant
+    free_product_limit        number of free qualifying products PER STORE (a merchant with
+                              two stores gets that many free products in each store)
     product_price_per_day     price (before GST) of ONE day of a paid product;
                               a paid product costs  price_per_day x days
     product_max_validity_days longest allowed validity
@@ -189,15 +190,17 @@ def _merchant_clause(merchant_id):
     return {"merchant_id": str(merchant_id)}
 
 
-def qualifying_query(merchant_id, exclude_id=None) -> dict:
-    """Products that occupy one of the merchant's slots:
-       - belongs to the merchant (admin-created ones included — they carry the
-         merchant's id),
+def qualifying_query(store_id, exclude_id=None) -> dict:
+    """Products that occupy one of a STORE's free slots (quota is per store, never
+    per merchant - two stores of one merchant do not share it):
+       - belongs to the store (admin-created ones included - they carry the store's id),
+       - not OffrO-owned (pricing_tier "admin" never consumes a slot),
        - status not deleted / expired / rejected,
        - end date not yet passed (valid through the end date).
        Deactivated products (is_active False) are deliberately NOT excluded."""
     q = {
-        **_merchant_clause(merchant_id),
+        "store_id": str(store_id),
+        "pricing_tier": {"$ne": "admin"},
         "status": {"$nin": list(NON_QUALIFYING_STATUSES)},
         "end_date": {"$gte": ist_today()},
     }
@@ -209,26 +212,27 @@ def qualifying_query(merchant_id, exclude_id=None) -> dict:
     return q
 
 
-def qualifying_count(merchant_id, exclude_id=None) -> int:
-    return db[PRODUCTS].count_documents(qualifying_query(merchant_id, exclude_id))
+def qualifying_count(store_id, exclude_id=None) -> int:
+    return db[PRODUCTS].count_documents(qualifying_query(store_id, exclude_id))
 
 
 # ── THE decision ───────────────────────────────────────────────────────────────
-def decide(merchant_id, exclude_id=None, days: int = 0) -> dict:
+def decide(store_id, exclude_id=None, days: int = 0) -> dict:
     """Free or paid? One function, three callers (create, admin-create, renew).
+    The quota is PER STORE: `store_id` is the store the product belongs to.
 
-    tier "admin"  – product has no merchant (OffrO-owned): no quota, no charge.
-    tier "free"   – qualifying count  <  free_product_limit
-    tier "paid"   – qualifying count  >= free_product_limit; price = price_per_day x days
+    tier "admin"  – no store given (OffrO-owned product): no quota, no charge.
+    tier "free"   – the store's qualifying count  <  free_product_limit
+    tier "paid"   – the store's qualifying count  >= free_product_limit; price = price_per_day x days
     `days` is the number of billable days of THIS purchase (0 = just report the tier).
     """
     s = get_settings()
     ppd = round(s["product_price_per_day"], 4)
     base = {"price_per_day": ppd, "days": int(days or 0), "free_limit": s["free_product_limit"],
             "gst_percent": s["gst_percent"]}
-    if not merchant_id:
+    if not store_id:
         return {**base, "tier": "admin", "used": 0, "unit_price": 0.0, "gst_amount": 0.0, "total": 0.0}
-    used = qualifying_count(merchant_id, exclude_id)
+    used = qualifying_count(store_id, exclude_id)
     if used < s["free_product_limit"]:
         tier, price = "free", 0.0
     else:
@@ -238,8 +242,8 @@ def decide(merchant_id, exclude_id=None, days: int = 0) -> dict:
             "gst_amount": gst, "total": round(price + gst, 2)}
 
 
-def slots_summary(merchant_id, exclude_id=None, days: int = 0) -> dict:
-    d = decide(merchant_id, exclude_id, days)
+def slots_summary(store_id, exclude_id=None, days: int = 0) -> dict:
+    d = decide(store_id, exclude_id, days)
     return {"used": d["used"], "free_limit": d["free_limit"],
             "free_remaining": max(0, d["free_limit"] - d["used"]),
             "next_is_free": d["tier"] == "free", "tier": d["tier"],
@@ -248,10 +252,10 @@ def slots_summary(merchant_id, exclude_id=None, days: int = 0) -> dict:
             "gst_amount": d["gst_amount"], "total": d["total"]}
 
 
-# ── per-merchant lock (count + insert must be atomic per merchant) ─────────────
+# ── per-store lock (count + insert must be atomic per store) ───────────────────
 @contextmanager
-def merchant_lock(merchant_id):
-    key = str(merchant_id or "_admin_")
+def store_lock(store_id):
+    key = str(store_id or "_admin_")
     token = uuid.uuid4().hex
     deadline = time.time() + _LOCK_WAIT_SECONDS
     while True:
@@ -270,6 +274,21 @@ def merchant_lock(merchant_id):
         yield
     finally:
         db[LOCKS].delete_one({"_id": key, "token": token})
+
+
+merchant_lock = store_lock      # backwards-compatible alias (the lock is per store now)
+
+
+def store_key(fields: dict) -> str:
+    return str((fields or {}).get("store_id") or "").strip()
+
+
+def _need_store(fields: dict) -> str:
+    sid = store_key(fields)
+    if not sid:
+        raise ProductError(400, "Please select the store this product is for "
+                                "(free product slots are counted per store).")
+    return sid
 
 
 # ── create / renew / delete ────────────────────────────────────────────────────
@@ -318,12 +337,12 @@ def build_doc(*, merchant: dict, fields: dict, start_date: datetime, end_date: d
 
 
 def create_free(*, merchant: dict, fields: dict, end_raw, from_raw=None, source: str = "merchant") -> dict:
-    """Free creation. Re-decides under the merchant lock so two simultaneous
-    requests cannot both take the last free slot."""
-    mid = merchant_key(merchant)
+    """Free creation. Re-decides under the STORE lock so two simultaneous
+    requests cannot both take the store's last free slot."""
+    sid = _need_store(fields)
     start, end, days = validate_period(from_raw, end_raw)
-    with merchant_lock(mid):
-        d = decide(mid, days=days)
+    with store_lock(sid):
+        d = decide(sid, days=days)
         if d["tier"] != "free":
             raise ProductError(409, _paid_message(d))
         doc = build_doc(merchant=merchant, fields=fields, start_date=start, end_date=end,
@@ -337,9 +356,9 @@ def create_paid(*, merchant: dict, fields: dict, end_raw, from_raw=None, source:
     """Insert a paid product after the merchant's payment was verified. `price` is what the
     ORDER quoted (unit_price, price_per_day, gst_percent, gst_amount) - the merchant is
     recorded at the price they were shown and paid, even if the Admin changed the rate since."""
-    mid = merchant_key(merchant)
+    sid = _need_store(fields)
     start, end, days = validate_period(from_raw, end_raw)
-    with merchant_lock(mid):
+    with store_lock(sid):
         d = {"tier": "paid", "price_per_day": price["price_per_day"], "unit_price": price["unit_price"],
              "gst_percent": price["gst_percent"], "gst_amount": price["gst_amount"]}
         doc = build_doc(merchant=merchant, fields=fields, start_date=start, end_date=end,
@@ -349,9 +368,10 @@ def create_paid(*, merchant: dict, fields: dict, end_raw, from_raw=None, source:
 
 
 def admin_create(*, merchant: dict, fields: dict, end_raw, from_raw=None, payment: dict = None) -> dict:
-    """Admin creates a product FOR a merchant. Same rule as the merchant path:
-    it consumes that merchant's quota. Free if a slot is left; otherwise the
-    Admin must record the manual payment (mode + amount >= price x days + GST)."""
+    """Admin creates a product FOR a merchant's store. Same rule as the merchant path:
+    it consumes THAT STORE's quota. Free if the store has a slot left; otherwise the
+    Admin must record the manual payment (mode + amount >= price x days + GST).
+    With no merchant it is OffrO-owned: no quota, no charge (source stays "admin")."""
     mid = merchant_key(merchant)
     start, end, days = validate_period(from_raw, end_raw)
     if not mid:
@@ -360,8 +380,9 @@ def admin_create(*, merchant: dict, fields: dict, end_raw, from_raw=None, paymen
         doc = build_doc(merchant={}, fields=fields, start_date=start, end_date=end, source="admin", decision=d)
         doc["_id"] = db[PRODUCTS].insert_one(doc).inserted_id
         return doc
-    with merchant_lock(mid):
-        d = decide(mid, days=days)
+    sid = _need_store(fields)
+    with store_lock(sid):
+        d = decide(sid, days=days)
         if d["tier"] == "free":
             doc = build_doc(merchant=merchant, fields=fields, start_date=start, end_date=end,
                             source="admin", decision=d)
@@ -469,7 +490,12 @@ def renew_decision(doc: dict, days: int = 0) -> dict:
     count so renewing an expired product is judged like a fresh slot and a
     live one is not counted twice."""
     ensure_editable(doc)
-    return decide(doc.get("merchant_id"), exclude_id=doc["_id"], days=days)
+    sid = str(doc.get("store_id") or "").strip()
+    if not sid and doc.get("merchant_id") and doc.get("pricing_tier") != "admin":
+        # Quota is per store - never guess one (that would renew for free). Fail closed.
+        raise ProductError(409, "This product is not linked to a store, so it cannot be renewed. "
+                                "Please contact OffrO support.")
+    return decide(sid, exclude_id=doc["_id"], days=days)
 
 
 def apply_renewal(doc: dict, end_raw, *, charged_amount: float = 0.0, payment: dict = None,
@@ -477,8 +503,7 @@ def apply_renewal(doc: dict, end_raw, *, charged_amount: float = 0.0, payment: d
     """Extend/reactivate. Free renewals re-check under the lock; paid renewals
     are applied after the caller verified payment. `price` = what the renewal ORDER quoted."""
     end, days = renewal_period(doc, end_raw)
-    mid = str(doc.get("merchant_id") or "")
-    with merchant_lock(mid):
+    with store_lock(doc.get("store_id")):
         d = renew_decision(doc, days)
         if charged_amount <= 0 and d["tier"] == "paid":
             raise ProductError(409, _paid_message(d))
@@ -516,6 +541,6 @@ def expire_due(merchant_id=None) -> int:
 
 def ensure_indexes():
     db[PRODUCTS].create_index([("merchant_id", 1), ("status", 1), ("end_date", 1)])
-    db[PRODUCTS].create_index([("store_id", 1), ("status", 1)])
+    db[PRODUCTS].create_index([("store_id", 1), ("status", 1), ("end_date", 1)])
     db[ORDERS].create_index([("merchant_id", 1), ("created_at", -1)])
     db[ORDERS].create_index("razorpay_order_id")
