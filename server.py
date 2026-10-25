@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, dashboard_auth, maps, smart_link
-from routers import merchant_products, admin_products, public_products
+from routers import merchant_products, admin_products, public_products, collaborations
 from database import db
 import base64, io, re
 
@@ -31,6 +31,8 @@ app.include_router(public.router)
 app.include_router(public_products.router)   # /products-public, /products/{id}/reviews ... (merchant_products)
 app.include_router(merchant_products.router) # /merchant/products/...
 app.include_router(admin_products.router)    # /admin/products/...
+app.include_router(collaborations.merchant_router)    # /merchant/collab/...
+app.include_router(collaborations.influencer_router)  # /influencer/opportunities/...
 app.include_router(popup_campaigns.router)
 app.include_router(webhook.router)          # WhatsApp Cloud API webhook — no prefix
 app.include_router(wa_chat.router, prefix="/admin")  # WhatsApp Live Chat admin API
@@ -215,6 +217,10 @@ def startup():
         _products_svc.ensure_indexes()
     except Exception as e:
         print(f"⚠️  product settings/indexes skipped: {e}")
+    try:
+        collaborations.ensure_indexes()
+    except Exception as e:
+        print(f"⚠️  collaboration indexes skipped: {e}")
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
         from routers.otp_service import _ensure_otp_indexes
