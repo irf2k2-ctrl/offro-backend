@@ -183,7 +183,9 @@ def _own_campaign(cid: str, m) -> dict:
 
 @merchant_router.get("/campaigns/{cid}/proposals")
 def campaign_proposals(cid: str, m=Depends(get_merchant)):
-    """Creators who accepted. Public creator details only - NEVER the influencer's phone number."""
+    """Creators who accepted. A creator's mobile number is included ONLY here, i.e. only for
+    creators who accepted THIS merchant's campaign (never before acceptance, never in the
+    influencer-facing / opportunities responses)."""
     c = _own_campaign(cid, m)
     out = []
     for r in db[RESPONSES].find({"campaign_id": str(c["_id"]), "status": "accepted"}).sort("responded_at", -1):
@@ -196,7 +198,8 @@ def campaign_proposals(cid: str, m=Depends(get_merchant)):
         social = inf.get("social") or {}
         out.append({"influencer_id": r["influencer_id"], "name": inf.get("name", "Creator"),
                     "city": inf.get("city", ""), "categories": cats, "photo_url": inf.get("photo_url", ""),
-                    "instagram": social.get("instagram", ""), "accepted_at": str(r.get("responded_at", ""))[:19]})
+                    "instagram": social.get("instagram", ""), "phone": str(inf.get("phone") or ""),
+                    "accepted_at": str(r.get("responded_at", ""))[:19]})
     return {"campaign": _merchant_row(c, len(out)), "proposals": out}
 
 
@@ -212,7 +215,8 @@ def close_campaign(cid: str, m=Depends(get_merchant)):
 # INFLUENCER
 # ══════════════════════════════════════════════════════════════════════════════
 def _my_influencer(user: dict) -> dict:
-    """The caller's own influencer profile, only if it is live (same gate as the public directory)."""
+    """The caller's own influencer profile. A profile that is not yet paid/published can still SEE
+    campaigns (it just cannot accept - see _can_accept); only a disabled profile is shut out."""
     acct = _resolve_own_account(user)
     iid = (acct or {}).get("influencer_id")
     inf = None
@@ -223,9 +227,18 @@ def _my_influencer(user: dict) -> dict:
             inf = None
     if not inf:
         raise HTTPException(403, "Create your creator profile to receive collaboration requests.")
-    if inf.get("publish_status", "published") != "published" or inf.get("is_active", True) is False:
-        raise HTTPException(403, "Publish your creator profile to receive collaboration requests.")
+    if inf.get("is_active", True) is False:
+        raise HTTPException(403, "Your creator profile is disabled. Enable it to receive collaboration requests.")
     return inf
+
+
+NEEDS_SUBSCRIPTION_MSG = "Complete your profile subscription to accept collaborations."
+
+
+def _can_accept(inf: dict) -> bool:
+    """Same 'live' rule the app uses everywhere: payment_status PAID and publish_status published
+    (a missing field counts as PAID/published - older profiles predate those fields)."""
+    return inf.get("payment_status", "PAID") == "PAID" and inf.get("publish_status", "published") == "published"
 
 
 def _speciality_match(c: dict, inf: dict) -> bool:
@@ -264,7 +277,8 @@ def opportunities(user=Depends(get_current_user)):
     order = {"new": 0, "accepted": 1, "declined": 2}
     rows.sort(key=lambda r: r["created_at"], reverse=True)                       # newest first ...
     rows.sort(key=lambda r: (order.get(r["my_status"], 3), not r["speciality_match"]))   # ... new, then accepted, then declined
-    return {"opportunities": rows, "new_count": sum(1 for r in rows if r["my_status"] == "new")}
+    return {"opportunities": rows, "new_count": sum(1 for r in rows if r["my_status"] == "new"),
+            "can_accept": _can_accept(inf)}
 
 
 def _visible_campaign(cid: str, inf: dict) -> tuple:
@@ -290,6 +304,7 @@ def opportunity_detail(cid: str, user=Depends(get_current_user)):
            "store": {"name": c.get("store_name", ""), "city": c.get("city", ""),
                      "area": c.get("area", ""), "address": c.get("address", "")},
            "can_respond": _campaign_state(c) == "active" and status != "accepted",
+           "can_accept": _can_accept(inf), "accept_blocked_message": "" if _can_accept(inf) else NEEDS_SUBSCRIPTION_MSG,
            "merchant_phone": ""}
     if status == "accepted":                     # contact is revealed ONLY after the influencer accepts
         out["merchant_phone"] = str(c.get("merchant_phone") or "")
@@ -301,6 +316,8 @@ def _respond(cid: str, user: dict, status: str) -> dict:
     c, mine = _visible_campaign(cid, inf)
     if _campaign_state(c) != "active":
         raise HTTPException(409, "This collaboration is no longer open.")
+    if status == "accepted" and not _can_accept(inf):       # enforced here, not only in the app
+        raise HTTPException(403, NEEDS_SUBSCRIPTION_MSG)
     if mine and mine.get("status") == "accepted":
         raise HTTPException(409, "You have already accepted this collaboration.")
     now = datetime.utcnow()
