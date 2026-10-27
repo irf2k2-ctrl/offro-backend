@@ -80,7 +80,11 @@ def ensure_indexes():
 # ══════════════════════════════════════════════════════════════════════════════
 # MERCHANT
 # ══════════════════════════════════════════════════════════════════════════════
-def _merchant_row(c: dict, accepted: int = 0) -> dict:
+def _store_image(s: dict) -> str:
+    return str((s or {}).get("image_thumb") or (s or {}).get("image_url") or (s or {}).get("image") or "")
+
+
+def _merchant_row(c: dict, accepted: int = 0, store_image: str = "") -> dict:
     return {
         "id": str(c["_id"]), "title": c.get("title", ""), "store_id": c.get("store_id", ""),
         "store_name": c.get("store_name", ""), "city": c.get("city", ""),
@@ -89,7 +93,7 @@ def _merchant_row(c: dict, accepted: int = 0) -> dict:
         "visit_date": _ymd(c.get("visit_date")), "publish_by": _ymd(c.get("publish_by")),
         "speciality": c.get("speciality", ANY_SPECIALITY),
         "status": _campaign_state(c), "proposals": accepted,
-        "created_at": str(c.get("created_at", ""))[:19],
+        "created_at": str(c.get("created_at", ""))[:19], "store_image": store_image,
     }
 
 
@@ -157,7 +161,7 @@ def create_campaign(data: dict, m=Depends(get_merchant)):
         "status": "published", "published_at": now, "created_at": now, "updated_at": now,
     }
     doc["_id"] = db[CAMPAIGNS].insert_one(doc).inserted_id
-    return {"ok": True, "message": "Campaign published", "campaign": _merchant_row(doc, 0)}
+    return {"ok": True, "message": "Campaign published", "campaign": _merchant_row(doc, 0, _store_image(store))}
 
 
 @merchant_router.get("/campaigns")
@@ -170,7 +174,17 @@ def my_campaigns(m=Depends(get_merchant)):
                 {"$match": {"campaign_id": {"$in": [str(d["_id"]) for d in docs]}, "status": "accepted"}},
                 {"$group": {"_id": "$campaign_id", "n": {"$sum": 1}}}]):
             counts[r["_id"]] = r["n"]
-    rows = [_merchant_row(d, counts.get(str(d["_id"]), 0)) for d in docs]
+    imgs = {}
+    sids = []
+    for d in docs:
+        try:
+            sids.append(ObjectId(str(d.get("store_id"))))
+        except Exception:
+            pass
+    if sids:
+        for st in db.stores.find({"_id": {"$in": sids}}, {"image_thumb": 1, "image_url": 1, "image": 1}):
+            imgs[str(st["_id"])] = _store_image(st)
+    rows = [_merchant_row(d, counts.get(str(d["_id"]), 0), imgs.get(str(d.get("store_id")), "")) for d in docs]
     return {"campaigns": rows, "active_count": sum(1 for r in rows if r["status"] == "active")}
 
 
@@ -181,6 +195,45 @@ def _own_campaign(cid: str, m) -> dict:
     return c
 
 
+def _snapshot(inf: dict, phone: str = "") -> dict:
+    """Creator details as they were when they accepted (kept on the response so the merchant
+    still sees WHO accepted even if the profile is later edited, disabled or deleted)."""
+    cats = inf.get("categories") or ([inf["category"]] if inf.get("category") else [])
+    social = inf.get("social") or {}
+    return {"name": str(inf.get("name") or "").strip(), "city": str(inf.get("city") or ""),
+            "categories": list(cats), "photo_url": str(inf.get("photo_url") or ""),
+            "instagram": str(social.get("instagram") or ""), "phone": str(inf.get("phone") or phone or "")}
+
+
+def _creator_info(r: dict) -> dict:
+    """Real creator details for an accepted response: live profile by id, else the account's
+    current profile, else the snapshot saved at acceptance. Phone falls back to the account's
+    login number. 'Creator' is used only when nothing at all is known."""
+    inf = {}
+    try:
+        inf = db.influencers.find_one({"_id": ObjectId(str(r.get("influencer_id")))}) or {}
+    except Exception:
+        inf = {}
+    acct = {}
+    aid = str(r.get("account_id") or "")
+    if aid:
+        try:
+            acct = db.accounts.find_one({"_id": ObjectId(aid)}) or {}
+        except Exception:
+            acct = {}
+        if not inf:
+            inf = db.influencers.find_one({"account_id": aid}) or {}
+    snap = r.get("creator") or {}
+    live = _snapshot(inf, str(acct.get("phone") or "")) if inf else {}
+    merged = {k: (live.get(k) or snap.get(k) or ("" if k not in ("categories",) else [])) for k in
+              ("name", "city", "categories", "photo_url", "instagram", "phone")}
+    if not merged["phone"]:
+        merged["phone"] = str(acct.get("phone") or "")
+    if not merged["name"]:
+        merged["name"] = str(acct.get("name") or "") or "Creator"
+    return merged
+
+
 @merchant_router.get("/campaigns/{cid}/proposals")
 def campaign_proposals(cid: str, m=Depends(get_merchant)):
     """Creators who accepted. A creator's mobile number is included ONLY here, i.e. only for
@@ -189,17 +242,8 @@ def campaign_proposals(cid: str, m=Depends(get_merchant)):
     c = _own_campaign(cid, m)
     out = []
     for r in db[RESPONSES].find({"campaign_id": str(c["_id"]), "status": "accepted"}).sort("responded_at", -1):
-        inf = {}
-        try:
-            inf = db.influencers.find_one({"_id": ObjectId(r["influencer_id"])}) or {}
-        except Exception:
-            pass
-        cats = inf.get("categories") or ([inf["category"]] if inf.get("category") else [])
-        social = inf.get("social") or {}
-        out.append({"influencer_id": r["influencer_id"], "name": inf.get("name", "Creator"),
-                    "city": inf.get("city", ""), "categories": cats, "photo_url": inf.get("photo_url", ""),
-                    "instagram": social.get("instagram", ""), "phone": str(inf.get("phone") or ""),
-                    "accepted_at": str(r.get("responded_at", ""))[:19]})
+        info = _creator_info(r)
+        out.append({"influencer_id": r["influencer_id"], **info, "accepted_at": str(r.get("responded_at", ""))[:19]})
     return {"campaign": _merchant_row(c, len(out)), "proposals": out}
 
 
@@ -321,10 +365,12 @@ def _respond(cid: str, user: dict, status: str) -> dict:
     if mine and mine.get("status") == "accepted":
         raise HTTPException(409, "You have already accepted this collaboration.")
     now = datetime.utcnow()
+    acct = _resolve_own_account(user)
     db[RESPONSES].update_one(
         {"campaign_id": cid, "influencer_id": str(inf["_id"])},
         {"$set": {"status": status, "responded_at": now, "updated_at": now,
-                  "account_id": str(inf.get("account_id") or "")},
+                  "account_id": str(inf.get("account_id") or (acct or {}).get("_id") or ""),
+                  "creator": _snapshot(inf, str((acct or {}).get("phone") or ""))},
          "$setOnInsert": {"created_at": now}}, upsert=True)
     out = {"ok": True, "status": status, "merchant_phone": ""}
     if status == "accepted":

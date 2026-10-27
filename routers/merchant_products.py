@@ -103,6 +103,8 @@ def _fields(data: dict, m: dict) -> dict:
     except Exception:
         pass
     img = _cloudinary_upload(data.get("logo_url", ""), folder="offro/products")
+    if not str(img or "").strip():
+        raise HTTPException(400, "Please add an image before saving.")
     title = (data.get("title") or "").strip()
     if not title:
         raise HTTPException(400, "Product title is required")
