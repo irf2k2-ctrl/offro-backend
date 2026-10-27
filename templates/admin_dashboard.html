@@ -776,18 +776,7 @@ td[style*="sticky"]{background:#fff;}
         <label class="form-label fw-bold">GST Percentage (%)</label>
         <input id="gst_input" class="form-control" type="number" style="max-width:160px;" placeholder="18">
       </div>
-      <div class="mb-4" style="border:1px solid #c3dfc6;border-radius:12px;padding:16px 18px;background:#f7fbf8;">
-      <div style="font-size:13px;font-weight:800;letter-spacing:.8px;color:#3E5F55;margin-bottom:14px;">PRODUCT SETTINGS</div>
-      <div class="mb-4">
-        <label class="form-label fw-bold">Free Product Slots <small style="color:#6b8c7e;font-weight:normal;">(free products per store)</small></label>
-        <input id="free_product_limit_input" class="form-control" type="number" min="0" style="max-width:160px;">
-        <small class="text-muted">Every store gets this many free products (a merchant with two stores gets this many in each). Active, pending and deactivated-but-not-expired products use a slot; expired, deleted and rejected ones do not. Takes effect on the next save/renewal.</small>
-      </div>
-      <div class="mb-1">
-        <label class="form-label fw-bold">Maximum Product Validity (Days)</label>
-        <input id="product_max_validity_days_input" class="form-control" type="number" min="1" style="max-width:160px;">
-      </div>
-      </div>
+      <div style="font-size:13px;font-weight:800;letter-spacing:.8px;color:#3E5F55;margin-bottom:10px;">STORE PRICING</div>
       <div id="plans_editor"></div>
       <hr style="margin:24px 0;">
       <div style="background:#f0f9f4;border-radius:12px;padding:20px;border:1px solid #c3dfc6;">
@@ -835,6 +824,20 @@ td[style*="sticky"]{background:#fff;}
         <p style="font-size:12px;color:#a1275a;margin-top:8px;margin-bottom:0;">
           When disabled, influencers can publish their profile without payment (admin override). Existing published influencer profiles are never retroactively charged.
         </p>
+      </div>
+
+      <hr style="margin:24px 0;">
+      <div class="mb-2" style="border:1px solid #c3dfc6;border-radius:12px;padding:16px 18px;background:#f7fbf8;">
+      <div style="font-size:13px;font-weight:800;letter-spacing:.8px;color:#3E5F55;margin-bottom:14px;">PRODUCT SETTINGS</div>
+      <div class="mb-4">
+        <label class="form-label fw-bold">Free Product Slots <small style="color:#6b8c7e;font-weight:normal;">(free products per store)</small></label>
+        <input id="free_product_limit_input" class="form-control" type="number" min="0" style="max-width:160px;">
+        <small class="text-muted">Every store gets this many free products (a merchant with two stores gets this many in each). Active, pending and deactivated-but-not-expired products use a slot; expired, deleted and rejected ones do not. Takes effect on the next save/renewal.</small>
+      </div>
+      <div class="mb-1">
+        <label class="form-label fw-bold">Maximum Product Validity (Days)</label>
+        <input id="product_max_validity_days_input" class="form-control" type="number" min="1" style="max-width:160px;">
+      </div>
       </div>
 
       <button class="btn-p mt-3" onclick="savePricing()">Save All Settings</button>
@@ -6230,7 +6233,25 @@ function _gcUpdateValidity() {
   }
 }
 let _gcEditingId = '';  // backup for edit id in case DOM is stale
+// Double-save guard: the flag is set synchronously on the first click (before any await), so a
+// second click / tap while the request is in flight is ignored and can never send a second
+// create/update request. The button is disabled + shows "Saving…" and is always re-enabled in
+// `finally` (validation error, server error, network error or success).
+let _gcSaving = false;
 async function saveGiftCard() {
+  if (_gcSaving) return;
+  _gcSaving = true;
+  const btn = document.getElementById("gc_save_btn");
+  const idleLabel = btn ? btn.textContent : "Save";
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+  try {
+    await _saveGiftCardRequest();
+  } finally {
+    _gcSaving = false;
+    if (btn) { btn.disabled = false; btn.textContent = idleLabel; }
+  }
+}
+async function _saveGiftCardRequest() {
   const vid  = (document.getElementById("gc_id").value || _gcEditingId).trim();
   const text = document.getElementById("gc_text").value.trim();
   if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
@@ -6749,7 +6770,7 @@ async function saveStore() {
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary btn-sm" onclick="closeGiftCardModal()">Cancel</button>
-        <button class="btn-p btn-sm" onclick="saveGiftCard()">Save</button>
+        <button id="gc_save_btn" class="btn-p btn-sm" onclick="saveGiftCard()">Save</button>
       </div>
     </div>
   </div>
