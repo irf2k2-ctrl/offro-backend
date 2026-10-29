@@ -7359,72 +7359,66 @@ async function grantMerchantRole(accountId, name) {
   } catch(e) { showToast('Error: ' + e.message, true); }
 }
 
-async function loadAccounts() {
+let _acctTotal = 0, _acctReqId = 0, _acctSearchTimer = null;
+
+// Server-side pagination: only the current page (PAGE_SIZE rows) is fetched.
+// Search / role / city are sent with the request so paging and filtering
+// always work together.
+async function loadAccounts(page) {
+  if (page) _acctPage = page;
+  const reqId = ++_acctReqId;
+  const search = (document.getElementById('acct_search')?.value || '').trim();
+  const role   = document.getElementById('acct_role_filter')?.value || '';
+  const city   = document.getElementById('acct_city_filter')?.value || '';
+  const qs = new URLSearchParams({page: _acctPage, page_size: PAGE_SIZE});
+  if (search) qs.set('search', search);
+  if (role)   qs.set('role', role);
+  if (city)   qs.set('city', city);
+  const tb = document.getElementById('accounts_table');
+  const fail = (msg) => { if (tb) tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:32px;color:#c0392b;">
+        ⚠️ ${msg}<br>
+        <button onclick="loadAccounts()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button>
+      </td></tr>`; };
   try {
-    const r = await fetch('/admin/accounts', {credentials:'include'});
+    const r = await fetch('/admin/accounts?' + qs.toString(), {credentials:'include'});
+    if (reqId !== _acctReqId) return;            // a newer request superseded this one
     if (r.status === 401 || r.status === 403) { window.location.href = '/admin'; return; }
     if (!r.ok) {
       let errMsg = 'Server error ' + r.status;
       try { const e = await r.json(); errMsg = e.detail || errMsg; } catch(_) {}
-      const tb = document.getElementById('accounts_table');
-      if (tb) tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:32px;color:#c0392b;">
-        ⚠️ Failed to load accounts: ${errMsg}<br>
-        <button onclick="loadAccounts()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button>
-      </td></tr>`;
+      fail('Failed to load accounts: ' + errMsg);
       return;
     }
-    const raw = await r.json();
-    accountsList = Array.isArray(raw) ? raw.filter(a => a.account_id !== '__errors__') : [];
-    // Log debug errors if any
-    const errRec = Array.isArray(raw) ? raw.find(a => a.account_id === '__errors__') : null;
-    if (errRec && errRec._debug_errors) console.warn('Accounts with parse errors:', errRec._debug_errors);
-    // Populate city filter
-    const cities = [...new Set(accountsList.map(a=>a.city).filter(Boolean))].sort();
+    const d = await r.json();
+    accountsList = Array.isArray(d.items) ? d.items : [];
+    _acctTotal = d.total || 0;
+    _acctPage  = d.page || 1;
+    // Populate the city filter (keep the current selection)
     const cityEl = document.getElementById('acct_city_filter');
     if (cityEl) {
+      const cur = cityEl.value;
+      const cities = d.cities || [];
+      if (cur && !cities.includes(cur)) cities.push(cur);
       cityEl.innerHTML = '<option value="">All Cities</option>' +
-        cities.map(c=>`<option value="${c}">${c}</option>`).join('');
+        cities.map(c=>`<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+      cityEl.value = cur;
     }
-    _acctPage = 1;
-    filterAccounts();
+    renderAccountsPage();
   } catch(e) {
     console.error('loadAccounts error', e);
-    const tb = document.getElementById('accounts_table');
-    if (tb) tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:32px;color:#c0392b;">
-      ⚠️ Network error loading accounts.<br>
-      <button onclick="loadAccounts()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button>
-    </td></tr>`;
+    if (reqId === _acctReqId) fail('Network error loading accounts.');
   }
 }
 
+// Filter / search changed → back to page 1 (search is debounced).
 function filterAccounts() {
-  const search = (document.getElementById('acct_search')?.value || '').toLowerCase();
-  const role   = document.getElementById('acct_role_filter')?.value || '';
-  const city   = document.getElementById('acct_city_filter')?.value || '';
-  _filteredAccounts = accountsList.filter(a => {
-    const matchSearch = !search ||
-      (a.full_name||'').toLowerCase().includes(search) ||
-      (a.mobile_number||'').includes(search);
-    const matchCity = !city || a.city === city;
-    const isUser     = a.roles?.includes('user');
-    const isMerchant = a.roles?.includes('merchant');
-    const matchRole  = !role ||
-      (role === 'user_only'     &&  isUser && !isMerchant) ||
-      (role === 'merchant_only' && !isUser &&  isMerchant) ||
-      (role === 'both'          &&  isUser &&  isMerchant);
-    return matchSearch && matchCity && matchRole;
-  });
-  _acctPage = 1;
-  renderAccountsPage();
+  clearTimeout(_acctSearchTimer);
+  _acctSearchTimer = setTimeout(() => { _acctPage = 1; loadAccounts(); }, 300);
 }
 
-const ACCT_PER_PAGE = 20;
-
 function renderAccountsPage() {
-  const f    = _filteredAccounts;
-  const total = f.length;
-  const start = (_acctPage - 1) * ACCT_PER_PAGE;
-  const page  = f.slice(start, start + ACCT_PER_PAGE);
+  const page  = accountsList;
+  const total = _acctTotal;
   const tbody = document.getElementById('accounts_table');
   if (!tbody) return;
 
@@ -7474,7 +7468,7 @@ function renderAccountsPage() {
   renderPagination('accounts_pagination', total, _acctPage, 'goAcctPage');
 }
 
-function goAcctPage(p) { _acctPage = p; renderAccountsPage(); }
+function goAcctPage(p) { _acctPage = p; loadAccounts(); }
 
 async function processDeletion(accountId, action) {
   const verb = action === 'approve' ? 'permanently DELETE' : 'restore (reject deletion for)';

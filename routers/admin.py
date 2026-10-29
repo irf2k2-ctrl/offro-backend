@@ -652,14 +652,70 @@ def delete_merchant(id: str, a=Depends(get_current_admin)):
 # UNIFIED ACCOUNTS — merged view of users + merchants
 # ══════════════════════════════════════════════════════════════════
 
+def _accounts_query(a, search: str = "", role: str = "", city: str = "") -> dict:
+    """Mongo filter for the Accounts list: admin city scope + optional search / role / city."""
+    import re as _re
+    clauses = []
+    scope = _city_filter(a)
+    if scope:
+        clauses.append(scope)
+    search = (search or "").strip()
+    if search:
+        rx = {"$regex": _re.escape(search), "$options": "i"}
+        clauses.append({"$or": [{"name": rx}, {"phone": rx}]})
+    if city:
+        clauses.append({"city": city})
+    if role == "merchant_only":
+        clauses.append({"roles": {"$in": ["merchant"], "$nin": ["user"]}})
+    elif role == "both":
+        clauses.append({"roles": {"$all": ["user", "merchant"]}})
+    elif role == "user_only":
+        clauses.append({"$or": [
+            {"roles": {"$exists": False}},
+            {"roles": {"$in": ["user"], "$nin": ["merchant"]}},
+        ]})
+    if not clauses:
+        return {}
+    return clauses[0] if len(clauses) == 1 else {"$and": clauses}
+
+
 @router.get("/accounts")
-def list_accounts(a=Depends(get_current_admin)):
-    """Unified accounts view — single accounts collection. Bulletproof version."""
+def list_accounts(
+    a=Depends(get_current_admin),
+    page: int = None,
+    page_size: int = 20,
+    search: str = "",
+    role: str = "",
+    city: str = "",
+):
+    """Unified accounts view — single accounts collection. Bulletproof version.
+
+    Without `page` this returns the full list exactly as before (other admin
+    screens, e.g. the merchant phone lookup, rely on that). With `page` it
+    returns one page: {items, total, page, page_size, pages, cities}, with
+    search / role / city applied in the database BEFORE paging, and the
+    per-account store/product/banner counts computed only for that page."""
     result = []
     _errors = []
+    paged = page is not None
+    meta = None
 
     try:
-        all_accounts = list(db.accounts.find({**_city_filter(a)}).sort("created_at", -1))
+        if paged:
+            page_size = max(1, min(int(page_size or 20), 100))
+            query = _accounts_query(a, search, role, city)
+            total = db.accounts.count_documents(query)
+            pages = max(1, -(-total // page_size))
+            page = min(max(1, int(page)), pages)
+            all_accounts = list(
+                db.accounts.find(query).sort("created_at", -1)
+                .skip((page - 1) * page_size).limit(page_size))
+            cities = sorted(
+                c for c in db.accounts.distinct("city", _accounts_query(a)) if c)
+            meta = {"total": total, "page": page, "page_size": page_size,
+                    "pages": pages, "cities": cities}
+        else:
+            all_accounts = list(db.accounts.find({**_city_filter(a)}).sort("created_at", -1))
     except Exception as e:
         raise HTTPException(500, f"DB fetch failed: {e}")
 
@@ -748,6 +804,8 @@ def list_accounts(a=Depends(get_current_admin)):
                         "mobile_number": "", "city": "", "roles": ["__debug__"],
                         "status": "error", "total_points": 0, "store_count": 0,
                         "product_count": 0, "banner_count": 0, "created_at": ""})
+    if paged:
+        return {"items": [r for r in result if r.get("account_id") != "__errors__"], **meta}
     return result
 
 
