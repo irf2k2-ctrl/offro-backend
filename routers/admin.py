@@ -4447,6 +4447,7 @@ def admin_get_default_images(a=Depends(get_current_admin)):
 
     if not doc:
         return {"store": [], "product": [], "offer": [], "city": [], "merchant_banner": [],
+                "merchant_banner_explore_url": "",
                 "no_service_url": "", "no_service_title": "", "no_service_message": ""}
     return {
         "store":              _as_list(doc.get("store", "")),
@@ -4454,6 +4455,8 @@ def admin_get_default_images(a=Depends(get_current_admin)):
         "offer":              _as_list(doc.get("offer", "")),
         "city":               _as_list(doc.get("city", "")),
         "merchant_banner":    _as_list(doc.get("merchant_banner", "")),
+        # The ONE default merchant-banner media marked "Explore <City>" (empty = none).
+        "merchant_banner_explore_url": doc.get("merchant_banner_explore_url", "") or "",
         "no_service_url":     doc.get("no_service_url", ""),
         "no_service_title":   doc.get("no_service_title", ""),
         "no_service_message": doc.get("no_service_message", ""),
@@ -4479,7 +4482,34 @@ def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
             {"_type": "default_images"},
             {"$pull": {field: url}}
         )
+        # Removing the media that carried the "Explore <City>" flag clears the flag too.
+        if field == "merchant_banner":
+            db.settings.update_one(
+                {"_type": "default_images", "merchant_banner_explore_url": url},
+                {"$unset": {"merchant_banner_explore_url": ""}}
+            )
     return {"ok": True}
+
+
+@router.put("/default-images/merchant-banner-explore")
+def admin_set_merchant_banner_explore(body: dict, a=Depends(get_current_admin)):
+    """Mark ONE default merchant-banner media as the "Explore <City>" slide (or clear it with
+    url=""). Stored as a single value, so at most one media can ever carry the flag."""
+    _check_perm(a, "Settings", "edit")
+    url = (body.get("url") or "").strip()
+    if not url:
+        db.settings.update_one({"_type": "default_images"},
+                               {"$unset": {"merchant_banner_explore_url": ""}})
+        return {"ok": True, "merchant_banner_explore_url": ""}
+    doc = db.settings.find_one({"_type": "default_images"}, {"merchant_banner": 1}) or {}
+    existing = doc.get("merchant_banner", [])
+    if isinstance(existing, str):
+        existing = [existing]
+    if url not in existing:
+        raise HTTPException(400, "That media is not in the Default Merchant Banner list")
+    db.settings.update_one({"_type": "default_images"},
+                           {"$set": {"merchant_banner_explore_url": url}})
+    return {"ok": True, "merchant_banner_explore_url": url}
 
 
 @router.post("/default-images/no-service")

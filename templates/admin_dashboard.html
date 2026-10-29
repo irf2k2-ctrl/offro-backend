@@ -1518,15 +1518,16 @@ td[style*="sticky"]{background:#fff;}
           <span id="di_merchant_banner_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0</span>
         </div>
         <div style="padding:6px 16px 4px;background:#e8f5ee;font-size:11px;color:var(--primary);font-weight:600">
-          <i class="fas fa-info-circle me-1"></i>Shown on the app home screen when no city-specific promo slider exists. Supports <strong>images</strong> and <strong>MP4 videos</strong>. Recommended: <strong>1080 × 460 px</strong> (2.35:1 ratio).
+          <i class="fas fa-info-circle me-1"></i>Tick <strong>Explore City</strong> on ONE media to show “Explore &lt;user's city&gt;” on it in the Home hero (only that media; ticking another moves it). Shown on the app home screen when no city-specific promo slider exists. Supports <strong>images</strong> and <strong>MP4 videos</strong>. Recommended: <strong>1080 × 460 px</strong> (2.35:1 ratio).
         </div>
         <table class="table table-sm mb-0" id="di_merchant_banner_table">
           <thead style="background:#f8f9fa"><tr>
             <th style="width:70px">Preview</th>
             <th>Image URL</th>
+            <th style="width:110px;text-align:center" title="Show 'Explore City Name' on the Home hero for this media (only one)">Explore City</th>
             <th style="width:90px">Action</th>
           </tr></thead>
-          <tbody id="di_merchant_banner_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+          <tbody id="di_merchant_banner_body"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
         </table>
         <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="text" id="di_merchant_banner_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste HTTPS image URL…">
@@ -8069,7 +8070,7 @@ async function loadDefaultImages() {
     const d = await r.json();
     for (const type of ['store', 'product', 'offer', 'city', 'merchant_banner']) {
       const urls = Array.isArray(d[type]) ? d[type] : (d[type] ? [d[type]] : []);
-      _renderDiTable(type, urls);
+      _renderDiTable(type, urls, type === 'merchant_banner' ? (d.merchant_banner_explore_url || '') : '');
     }
     // Load no-service config — API returns no_service_url (string)
     const nsUrl = d.no_service_url || '';
@@ -8091,7 +8092,7 @@ async function loadDefaultImages() {
   } catch(e) { console.error('Default images load failed', e); }
 }
 
-function _renderDiTable(type, urls) {
+function _renderDiTable(type, urls, exploreUrl) {
   const tbody = document.getElementById(`di_${type}_body`);
   const count = document.getElementById(`di_${type}_count`);
   if (!tbody) return;
@@ -8102,7 +8103,7 @@ function _renderDiTable(type, urls) {
   if (count) count.textContent = plural;
   if (!urls.length) {
     const emptyTxt = type === 'merchant_banner' ? 'No media yet' : 'No images yet';
-    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">${emptyTxt}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${type === 'merchant_banner' ? 4 : 3}" style="text-align:center;color:#aaa;padding:16px">${emptyTxt}</td></tr>`;
     return;
   }
   tbody.innerHTML = urls.map((url, i) => {
@@ -8136,9 +8137,16 @@ function _renderDiTable(type, urls) {
     const urlCell = `<td style="padding:6px 10px;vertical-align:middle;word-break:break-all;font-size:12px;color:var(--muted)">
       ${urlDisplay}
     </td>`;
+    const exploreCell = type === 'merchant_banner'
+      ? `<td style="padding:6px 10px;vertical-align:middle;text-align:center">
+           <input type="checkbox" ${url === exploreUrl ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer"
+             title="Explore City Name" onchange="diSetExplore('${safeUrl}', this.checked, this)">
+         </td>`
+      : '';
     return `<tr>
       ${previewCell}
       ${urlCell}
+      ${exploreCell}
       <td style="padding:6px 10px;vertical-align:middle">
         <button class="btn btn-sm" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px"
           onclick="diRemoveUrl('${type}','${safeUrl}')">
@@ -8147,6 +8155,22 @@ function _renderDiTable(type, urls) {
       </td>
     </tr>`;
   }).join('');
+}
+
+// "Explore City Name" flag for ONE default merchant-banner media (stored server-side as a single value).
+async function diSetExplore(url, checked, el) {
+  const msg = document.getElementById('di_msg');
+  if (el) el.disabled = true;
+  try {
+    const r = await fetch('/admin/default-images/merchant-banner-explore', {
+      method:'PUT', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ url: checked ? url : '' })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    msg.textContent = checked ? '✓ This media now shows “Explore <city>” on the Home hero' : '✓ “Explore <city>” cleared'; msg.style.color='green';
+  } catch(e) { msg.textContent = '✗ ' + e.message; msg.style.color='red'; }
+  loadDefaultImages();   // re-render: only the selected media stays ticked
 }
 
 async function diAddUrl(type) {

@@ -1373,7 +1373,7 @@ def get_default_images():
     doc = db.settings.find_one({"_type": "default_images"})
     if not doc:
         return {"store": "", "product": "", "offer": "", "city": "",
-                "merchant_banner": "", "no_service_url": "",
+                "merchant_banner": "", "merchant_banner_explore_url": "", "no_service_url": "",
                 "no_service_title": "", "no_service_message": ""}
 
     def _first(val):
@@ -1405,6 +1405,8 @@ def get_default_images():
         "offer":            _first(doc.get("offer", "")),
         "city":             _all_urls(doc.get("city", "")),
         "merchant_banner":  _all_urls(doc.get("merchant_banner", "")),  # array — same pattern as city
+        # The single default banner media the admin marked "Explore <City>" ("" = none).
+        "merchant_banner_explore_url": doc.get("merchant_banner_explore_url", "") or "",
         "no_service_url":   _ns_val,
         "no_service_title": str(doc.get("no_service_title", "") or ""),
         "no_service_message": str(doc.get("no_service_message", "") or ""),
