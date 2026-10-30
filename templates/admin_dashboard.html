@@ -1493,7 +1493,7 @@ td[style*="sticky"]{background:#fff;}
           <span id="di_city_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0 images</span>
         </div>
         <div style="padding:6px 16px 4px;background:#e8f5ee;font-size:11px;color:var(--primary);font-weight:600">
-          <i class="fas fa-info-circle me-1"></i>Recommended: <strong>1080 × 720 px</strong> (3:2). Hero background on app home screen.
+          <i class="fas fa-info-circle me-1"></i>Recommended: <strong>1080 × 1080 px</strong> (1:1). Fallback Hero background on app home screen.
         </div>
         <table class="table table-sm mb-0" id="di_city_table">
           <thead style="background:#f8f9fa"><tr>
@@ -1518,7 +1518,7 @@ td[style*="sticky"]{background:#fff;}
           <span id="di_merchant_banner_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0</span>
         </div>
         <div style="padding:6px 16px 4px;background:#e8f5ee;font-size:11px;color:var(--primary);font-weight:600">
-          <i class="fas fa-info-circle me-1"></i>Tick <strong>Explore City</strong> on ONE media to show “Explore &lt;user's city&gt;” on it in the Home hero (only that media; ticking another moves it). Shown on the app home screen when no city-specific promo slider exists. Supports <strong>images</strong> and <strong>MP4 videos</strong>. Recommended: <strong>1080 × 460 px</strong> (2.35:1 ratio).
+          <i class="fas fa-info-circle me-1"></i>Tick <strong>Explore City</strong> on ONE media to show “Explore &lt;user's city&gt;” on it in the Home hero (only that media; ticking another moves it). Shown first in the Home Hero. Supports <strong>images</strong> and <strong>MP4 videos</strong>. Recommended: <strong>1080 × 1080 px</strong> (1:1).
         </div>
         <table class="table table-sm mb-0" id="di_merchant_banner_table">
           <thead style="background:#f8f9fa"><tr>
@@ -6546,7 +6546,7 @@ async function saveStore() {
             <input type="file" id="sl_file_input" accept="image/*" style="display:none" onchange="sliderUploadFile(this)">
           </div>
           <div id="sl_upload_status" style="font-size:12px;color:var(--muted);margin-top:4px;"></div>
-          <small class="text-muted">📐 Recommended size: <strong>1080 × 460 px</strong> &nbsp;|&nbsp; Ratio: 2.35:1 &nbsp;|&nbsp; Max 2 MB</small>
+          <small class="text-muted">📐 Recommended size: <strong>1080 × 1080 px</strong> &nbsp;|&nbsp; Ratio: 1:1 &nbsp;|&nbsp; Max 2 MB</small>
         </div>
         <input type="hidden" id="sl_link_url" value="">
         <div class="row g-2 mb-3">
