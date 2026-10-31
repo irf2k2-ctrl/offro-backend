@@ -320,6 +320,10 @@ def _get_google_page(url: str):
             "Chrome/151.0 Safari/537.36"
         ),
         "Accept-Language": "en-US,en;q=0.9",
+        # Pre-accept Google's cookie-consent interstitial. Without this,
+        # requests from data-centre IPs (e.g. Railway) are often redirected
+        # to consent.google.com, which hides the real Maps URL / page.
+        "Cookie": "CONSENT=YES+cb; SOCS=CAI",
     }
 
     return requests.get(
@@ -1006,10 +1010,61 @@ def _extract_html_title(html: str):
         return ""
 
 
+def _redirect_chain_urls(response):
+    """
+    Every URL seen while following redirects (hops + final), plus the real
+    target hidden in consent.google.com ?continue=... wrappers.
+
+    Saved-place short links (maps.app.goo.gl/...) can pass through a hop that
+    carries coordinates even when the final page URL does not, so all hops
+    are inspected, not just response.url.
+    """
+    urls = []
+
+    def add(u):
+        if u and u not in urls:
+            urls.append(u)
+
+    try:
+        for hop in list(getattr(response, "history", None) or []):
+            add(getattr(hop, "url", None))
+            try:
+                add(hop.headers.get("Location"))
+            except Exception:
+                pass
+        add(getattr(response, "url", None))
+    except Exception:
+        pass
+
+    for u in list(urls):
+        try:
+            params = parse_qs(urlparse(u).query)
+            for key in ("continue", "url", "q"):
+                for v in params.get(key, []):
+                    if v.startswith(("http://", "https://")):
+                        add(v)
+        except Exception:
+            pass
+    return urls
+
+
 def _extract_coordinates_from_html(html: str):
 
     if not html:
         return None, None
+
+    # Place pages (incl. saved places whose URL carries no coordinates) embed
+    # the place location as the centre of a static-map preview image:
+    #   <meta property="og:image" content=".../staticmap?center=LAT%2CLNG&...">
+    # It belongs to the place itself, so it is safe (unlike generic pairs).
+    m = re.search(
+        r'staticmap\?[^"\'\s>]*?center=(-?\d+(?:\.\d+)?)(?:%2C|%2c|,)(-?\d+(?:\.\d+)?)',
+        html.replace("&amp;", "&"),
+    )
+    if m:
+        lat, lng = _valid_coordinates(m.group(1), m.group(2))
+        if lat is not None:
+            return lat, lng
 
     # First run normal coordinate extraction.
 
@@ -1179,6 +1234,27 @@ def resolve_maps_link(
             lat, lng = _extract_coordinates(
                 resolved_url
             )
+
+        # Inspect every redirect hop / consent-wrapped target too.
+        for hop_url in _redirect_chain_urls(response):
+
+            if lat is None or lng is None:
+
+                lat, lng = _extract_coordinates(
+                    hop_url
+                )
+
+            if not place_name:
+
+                place_name = _extract_place_name(
+                    hop_url
+                )
+
+            if not place_id:
+
+                place_id = _extract_place_id(
+                    hop_url
+                )
 
         if not place_name:
 
@@ -1463,17 +1539,33 @@ def resolve_maps_link(
 
         if not GOOGLE_MAPS_API_KEY:
 
-            detail += (
-                " The server also needs "
-                "GOOGLE_MAPS_API_KEY configured "
-                "for reliable resolution of "
-                "maps.app.goo.gl links."
+            print(
+                "[MAPS] Hint: GOOGLE_MAPS_API_KEY is not "
+                "configured; some saved-place links need it."
             )
 
         raise HTTPException(
             status_code=422,
             detail=detail,
         )
+
+    # -----------------------------------------------------------------------
+    # Fill city / state / area (+ address) from the coordinates when the
+    # resolver only produced coordinates. Uses the app's existing free
+    # Nominatim reverse geocoder (same one behind GET /reverse-geocode and
+    # the GPS flow) - no paid API.
+    # -----------------------------------------------------------------------
+    if not (city and state and area):
+        try:
+            from routers.public import _nominatim_reverse
+
+            geo = _nominatim_reverse(lat, lng) or {}
+            state = state or geo.get("state", "")
+            city = city or geo.get("city", "")
+            area = area or geo.get("area", "")
+            address = address or geo.get("address", "")
+        except Exception as exc:
+            print(f"[MAPS] Reverse geocode warning: {exc}")
 
     # -----------------------------------------------------------------------
     # SUCCESS
