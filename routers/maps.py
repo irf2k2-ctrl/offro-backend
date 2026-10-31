@@ -1102,459 +1102,163 @@ def _extract_coordinates_from_html(html: str):
 # Endpoint
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# STRICT exact-coordinate extraction
+#
+# "No verified exact coordinates = no location resolution."
+#
+# Only coordinates that identify the exact pin / place Google encoded in the
+# link are accepted:
+#   * !3d<lat>!4d<lng>              - the place/pin marker
+#   * /place|search|dir/<lat>,<lng> - a dropped pin (coordinates as the name)
+#   * q / query / ll / destination  - a value that is purely "<lat>,<lng>"
+#   * @<lat>,<lng>                  - ONLY when the place name is itself a
+#                                     coordinate (decimal or degree/minute)
+# A bare "@lat,lng" on a search-result link is just the map viewport centre,
+# so it is NOT trusted; neither are page-HTML coordinates, "center=" or
+# generic coordinate pairs.
+# ---------------------------------------------------------------------------
+
+_DEC = r"-?\d+\.\d+"
+
+LOCATION_NOT_EXACT_MESSAGE = (
+    "Unable to identify the exact location from this Google Maps link. "
+    "Please open Google Maps, drop a pin on the exact location, "
+    "tap Share \u2192 Copy link, and try again."
+)
+
+
+def _exact_coordinates(url: str):
+    if not url:
+        return None, None
+
+    candidates = []
+    for c in (url, unquote(url), unquote(unquote(url))):
+        if c and c not in candidates:
+            candidates.append(c)
+
+    for cand in candidates:
+        # 1. place / pin marker
+        m = re.search(r"!3d(%s)!4d(%s)" % (_DEC, _DEC), cand)
+        if m:
+            lat, lng = _valid_coordinates(m.group(1), m.group(2))
+            if lat is not None:
+                return lat, lng
+
+        try:
+            parsed = urlparse(cand)
+        except Exception:
+            continue
+        path = parsed.path or ""
+
+        # 2. coordinate-only path segment (dropped pin)
+        m = re.search(
+            r"/(?:place|search|dir)/\+?(%s)\s*,\s*\+?(%s)(?:/|$)" % (_DEC, _DEC),
+            path,
+        )
+        if m:
+            lat, lng = _valid_coordinates(m.group(1), m.group(2))
+            if lat is not None:
+                return lat, lng
+
+        # 3. query values that are purely a coordinate pair
+        try:
+            params = parse_qs(parsed.query)
+        except Exception:
+            params = {}
+        for key in ("q", "query", "ll", "destination", "daddr", "saddr"):
+            for value in params.get(key, []):
+                m = re.fullmatch(r"\s*(%s)\s*,\s*(%s)\s*" % (_DEC, _DEC), value)
+                if m:
+                    lat, lng = _valid_coordinates(m.group(1), m.group(2))
+                    if lat is not None:
+                        return lat, lng
+
+        # 4. "@lat,lng" only when the place name is itself a coordinate
+        #    (e.g. 12°58'17.8"N 77°38'28.1"E dropped-pin names).
+        m = re.search(r"/maps/place/([^/]+)/@(%s),(%s)" % (_DEC, _DEC), path)
+        if m and "\u00b0" in m.group(1):
+            lat, lng = _valid_coordinates(m.group(2), m.group(3))
+            if lat is not None:
+                return lat, lng
+
+    return None, None
+
+
 @router.get("/resolve-maps-link")
 def resolve_maps_link(
-    url: str = Query(
-        ...,
-        description="Google Maps URL",
-    ),
+    url: str = Query(..., description="Google Maps URL"),
 ):
     """
-    Resolve a Google Maps link and return location information.
+    Resolve a Google Maps link to an EXACT location.
 
-    Response fields:
+    Succeeds only when the link (or one of its redirect hops) carries
+    verified exact coordinates, or an explicit Place ID that Google's Places
+    API resolves to a single place. Search-result links with no pin are
+    rejected - the location is never guessed from a place name or viewport.
 
-        success
-        lat
-        lng
-        latitude
-        longitude
-        place_name
-        address
-        state
-        city
-        area
-        url
-        place_id
+    Response: success, lat, lng, latitude, longitude, place_name, address,
+    state, city, area, url, place_id
     """
 
     url = url.strip()
 
-    # -----------------------------------------------------------------------
-    # Validate URL
-    # -----------------------------------------------------------------------
-
     if not url:
+        raise HTTPException(status_code=400, detail="Google Maps link is required.")
 
-        raise HTTPException(
-            status_code=400,
-            detail="Google Maps link is required.",
-        )
-
-    if not url.startswith(
-        (
-            "http://",
-            "https://",
-        )
-    ):
-
-        raise HTTPException(
-            status_code=400,
-            detail="Please provide a valid Google Maps URL.",
-        )
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="Please provide a valid Google Maps URL.")
 
     if not _is_google_maps_url(url):
+        raise HTTPException(status_code=400, detail="Please provide a valid Google Maps link.")
 
-        raise HTTPException(
-            status_code=400,
-            detail="Please provide a valid Google Maps link.",
-        )
+    print(f"[MAPS] Resolve request (api key configured: {bool(GOOGLE_MAPS_API_KEY)})")
 
-    print("")
-    print(
-        "[MAPS] ======================================="
-    )
-    print(
-        "[MAPS] NEW GOOGLE MAPS RESOLUTION REQUEST"
-    )
-    print(
-        f"[MAPS] Input URL: {url}"
-    )
-    print(
-        f"[MAPS] API key configured: "
-        f"{bool(GOOGLE_MAPS_API_KEY)}"
-    )
-    print(
-        "[MAPS] ======================================="
-    )
-
-    # -----------------------------------------------------------------------
-    # STEP 1:
-    # Try coordinates directly from original URL.
-    # -----------------------------------------------------------------------
-
-    lat, lng = _extract_coordinates(url)
-
-    resolved_url = url
-
+    lat, lng = _exact_coordinates(url)
     place_name = _extract_place_name(url)
-
-    address = ""
-
-    state = ""
-    city = ""
-    area = ""
-
     place_id = _extract_place_id(url)
+    resolved_url = url
+    address = ""
+    state = city = area = ""
 
-    if lat is not None and lng is not None:
-
-        print(
-            f"[MAPS] Direct coordinates found: "
-            f"{lat}, {lng}"
-        )
-
-    # -----------------------------------------------------------------------
-    # STEP 2:
-    # Follow redirects.
-    #
-    # Especially important for:
-    #
-    # https://maps.app.goo.gl/...
-    # -----------------------------------------------------------------------
-
-    response = None
-
+    # Follow redirects (maps.app.goo.gl short links) and inspect every hop.
+    # Only URLs are inspected - never the returned page HTML, which can
+    # contain unrelated coordinates.
     try:
-
         response = _get_google_page(url)
-
-        resolved_url = (
-            response.url
-            or url
-        )
-
-        print(
-            f"[MAPS] Final redirected URL: "
-            f"{resolved_url}"
-        )
-
-        if lat is None or lng is None:
-
-            lat, lng = _extract_coordinates(
-                resolved_url
-            )
-
-        # Inspect every redirect hop / consent-wrapped target too.
+        resolved_url = response.url or url
         for hop_url in _redirect_chain_urls(response):
-
             if lat is None or lng is None:
-
-                lat, lng = _extract_coordinates(
-                    hop_url
-                )
-
+                lat, lng = _exact_coordinates(hop_url)
             if not place_name:
-
-                place_name = _extract_place_name(
-                    hop_url
-                )
-
+                place_name = _extract_place_name(hop_url)
             if not place_id:
-
-                place_id = _extract_place_id(
-                    hop_url
-                )
-
-        if not place_name:
-
-            place_name = _extract_place_name(
-                resolved_url
-            )
-
-        if not place_id:
-
-            place_id = _extract_place_id(
-                resolved_url
-            )
-
+                place_id = _extract_place_id(hop_url)
     except requests.RequestException as exc:
+        print(f"[MAPS] Redirect request failed: {type(exc).__name__}")
 
-        print(
-            f"[MAPS] Redirect request failed: "
-            f"{exc}"
-        )
-
-    # -----------------------------------------------------------------------
-    # STEP 3:
-    # Parse returned HTML.
-    # -----------------------------------------------------------------------
-
-    if response is not None:
-
-        try:
-
-            html = response.text or ""
-
-            if lat is None or lng is None:
-
-                lat, lng = (
-                    _extract_coordinates_from_html(
-                        html
-                    )
-                )
-
-            if not place_name:
-
-                place_name = _extract_html_title(
-                    html
-                )
-
-            if not place_id:
-
-                place_id = _extract_place_id(
-                    html
-                )
-
-        except Exception as exc:
-
-            print(
-                f"[MAPS] HTML parsing warning: "
-                f"{exc}"
-            )
-
-    # -----------------------------------------------------------------------
-    # STEP 4:
-    # Google Maps Resolution API.
-    #
-    # This is the important path for maps.app.goo.gl
-    # links where the redirect does not expose coordinates.
-    # -----------------------------------------------------------------------
-
-    if lat is None or lng is None:
-
-        print(
-            "[MAPS] Coordinates still missing."
-        )
-
-        print(
-            "[MAPS] Trying Google Maps "
-            "Resolution API..."
-        )
-
-        resolved_place_id = (
-            _resolve_maps_url_with_resolution_api(
-                url
-            )
-        )
-
-        if resolved_place_id:
-
-            place_id = resolved_place_id
-
-            details = _get_place_details(
-                resolved_place_id
-            )
-
-            if details:
-
-                lat = details.get("lat")
-                lng = details.get("lng")
-
-                if details.get("place_name"):
-
-                    place_name = details[
-                        "place_name"
-                    ]
-
-                if details.get("address"):
-
-                    address = details[
-                        "address"
-                    ]
-
-                if details.get("state"):
-                    state = details["state"]
-
-                if details.get("city"):
-                    city = details["city"]
-
-                if details.get("area"):
-                    area = details["area"]
-
-                if details.get("url"):
-
-                    resolved_url = details[
-                        "url"
-                    ]
-
-    # -----------------------------------------------------------------------
-    # STEP 5:
-    # If a Place ID was already found, try Places API directly.
-    # -----------------------------------------------------------------------
-
-    if (
-        (lat is None or lng is None)
-        and place_id
-    ):
-
-        print(
-            "[MAPS] Trying Places API using "
-            "existing Place ID..."
-        )
-
-        details = _get_place_details(
-            place_id
-        )
-
+    # An explicit Place ID found in the link identifies ONE place; Google's
+    # Places API gives its exact coordinates. (No name search, no Resolution
+    # API: those can return a best-guess place.)
+    if (lat is None or lng is None) and place_id and GOOGLE_MAPS_API_KEY:
+        details = _get_place_details(place_id)
         if details:
-
             lat = details.get("lat")
             lng = details.get("lng")
+            place_name = details.get("place_name") or place_name
+            address = details.get("address") or address
+            state = details.get("state") or state
+            city = details.get("city") or city
+            area = details.get("area") or area
+            resolved_url = details.get("url") or resolved_url
 
-            if details.get("place_name"):
-
-                place_name = details[
-                    "place_name"
-                ]
-
-            if details.get("address"):
-
-                address = details[
-                    "address"
-                ]
-
-            if details.get("state"):
-                state = details["state"]
-
-            if details.get("city"):
-                city = details["city"]
-
-            if details.get("area"):
-                area = details["area"]
-
-            if details.get("url"):
-
-                resolved_url = details[
-                    "url"
-                ]
-
-    # -----------------------------------------------------------------------
-    # STEP 6:
-    # Last-resort Google Places Text Search fallback.
-    #
-    # This handles place/search links where Google did not expose coordinates
-    # or a usable Place ID in the URL/page.
-    # -----------------------------------------------------------------------
-    if (lat is None or lng is None) and GOOGLE_MAPS_API_KEY:
-        search_query = ""
-
-        # Prefer an extracted place name from the Google Maps URL.
-        if place_name:
-            search_query = place_name
-
-        # If available, use a useful query parameter instead.
-        try:
-            parsed_search = urlparse(resolved_url)
-            search_params = parse_qs(parsed_search.query)
-
-            for key in ("query", "q", "destination"):
-                values = search_params.get(key) or []
-                if values and values[0].strip():
-                    value = values[0].strip()
-
-                    if not re.fullmatch(
-                        r"-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?",
-                        value,
-                    ):
-                        search_query = value
-                        break
-        except Exception:
-            pass
-
-        if search_query:
-            details = _search_place_text(search_query)
-
-            if details:
-                lat = details.get("lat")
-                lng = details.get("lng")
-
-                if details.get("place_id"):
-                    place_id = details["place_id"]
-
-                if details.get("place_name"):
-                    place_name = details["place_name"]
-
-                if details.get("address"):
-                    address = details["address"]
-
-                if details.get("state"):
-                    state = details["state"]
-
-                if details.get("city"):
-                    city = details["city"]
-
-                if details.get("area"):
-                    area = details["area"]
-
-                if details.get("url"):
-                    resolved_url = details["url"]
-
-    # -----------------------------------------------------------------------
-    # STEP 7:
-    # Validate final coordinates.
-    # -----------------------------------------------------------------------
-
-    lat, lng = _valid_coordinates(
-        lat,
-        lng,
-    )
-
-    # -----------------------------------------------------------------------
-    # FAILURE
-    # -----------------------------------------------------------------------
+    lat, lng = _valid_coordinates(lat, lng)
 
     if lat is None or lng is None:
+        print("[MAPS] No verified exact coordinates - rejected")
+        raise HTTPException(status_code=422, detail=LOCATION_NOT_EXACT_MESSAGE)
 
-        print(
-            "[MAPS] ======================================="
-        )
-
-        print(
-            "[MAPS] FINAL RESULT: FAILED"
-        )
-
-        print(
-            f"[MAPS] Input URL: {url}"
-        )
-
-        print(
-            f"[MAPS] Resolved URL: {resolved_url}"
-        )
-
-        print(
-            f"[MAPS] Place ID: {place_id}"
-        )
-
-        print(
-            "[MAPS] ======================================="
-        )
-
-        detail = (
-            "Could not extract the location from this "
-            "Google Maps link. "
-            "Please copy the location using "
-            "Google Maps → Share → Copy link."
-        )
-
-        if not GOOGLE_MAPS_API_KEY:
-
-            print(
-                "[MAPS] Hint: GOOGLE_MAPS_API_KEY is not "
-                "configured; some saved-place links need it."
-            )
-
-        raise HTTPException(
-            status_code=422,
-            detail=detail,
-        )
-
-    # -----------------------------------------------------------------------
-    # Fill city / state / area (+ address) from the coordinates when the
-    # resolver only produced coordinates. Uses the app's existing free
-    # Nominatim reverse geocoder (same one behind GET /reverse-geocode and
-    # the GPS flow) - no paid API.
-    # -----------------------------------------------------------------------
+    # City / state / area come ONLY from the verified coordinates.
     if not (city and state and area):
         try:
             from routers.public import _nominatim_reverse
@@ -1565,55 +1269,9 @@ def resolve_maps_link(
             area = area or geo.get("area", "")
             address = address or geo.get("address", "")
         except Exception as exc:
-            print(f"[MAPS] Reverse geocode warning: {exc}")
+            print(f"[MAPS] Reverse geocode warning: {type(exc).__name__}")
 
-    # -----------------------------------------------------------------------
-    # SUCCESS
-    # -----------------------------------------------------------------------
-
-    print(
-        "[MAPS] ======================================="
-    )
-
-    print(
-        "[MAPS] FINAL RESULT: SUCCESS"
-    )
-
-    print(
-        f"[MAPS] Latitude: {lat}"
-    )
-
-    print(
-        f"[MAPS] Longitude: {lng}"
-    )
-
-    print(
-        f"[MAPS] Place: {place_name}"
-    )
-
-    print(
-        f"[MAPS] Address: {address}"
-    )
-
-    print(
-        f"[MAPS] State: {state}"
-    )
-
-    print(
-        f"[MAPS] City: {city}"
-    )
-
-    print(
-        f"[MAPS] Area: {area}"
-    )
-
-    print(
-        f"[MAPS] Place ID: {place_id}"
-    )
-
-    print(
-        "[MAPS] ======================================="
-    )
+    print(f"[MAPS] Resolved exact location {lat}, {lng}")
 
     return {
         "success": True,
