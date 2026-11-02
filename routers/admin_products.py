@@ -192,6 +192,11 @@ def update_product(vid: str, data: dict, a=Depends(get_current_admin)):
                 raise HTTPException(400, f"A product can run for at most {mx} days")
             upd.update({"start_date": new_s, "end_date": new_e,
                         "duration_days": P.inclusive_days(new_s, new_e)})
+            # An expired product whose end date now lies in the future is live again - but only if it
+            # was approved before. is_active is NOT touched (a deactivation stays), and a never-approved
+            # product keeps its expired status.
+            if doc.get("status") == "expired" and new_e >= P.ist_today() and _previously_approved(doc):
+                upd["status"] = "approved"
     if "is_active" in data:
         upd["is_active"] = bool(data["is_active"])
     if upd:
@@ -248,6 +253,13 @@ def deactivate_product(vid: str, a=Depends(get_current_admin)):
     return {"ok": True}
 
 
+def _previously_approved(doc: dict) -> bool:
+    """expire_due overwrites the old status, so prior approval is inferred from markers
+    (admin approval, admin-created, a paid/free renewal or an earlier admin extension)."""
+    return bool(doc.get("approved_at") or doc.get("renewed_at") or doc.get("admin_extended")
+                or doc.get("source") == "admin")
+
+
 @router.put("/products/{vid}/extend")
 def extend_product(vid: str, data: dict, a=Depends(get_current_admin)):
     """Admin goodwill extension by N days (no charge, no order, no pricing/history change).
@@ -267,8 +279,7 @@ def extend_product(vid: str, data: dict, a=Depends(get_current_admin)):
         raise HTTPException(409, "This product was rejected and cannot be extended.")
     if status == "pending":
         raise HTTPException(409, "This product is pending approval. Approve it first; extending does not approve it.")
-    if status == "expired" and not (doc.get("approved_at") or doc.get("renewed_at") or doc.get("admin_extended")
-                                    or doc.get("source") == "admin"):
+    if status == "expired" and not _previously_approved(doc):
         raise HTTPException(409, "This product expired without ever being approved, so it cannot be extended.")
     if status not in ("approved", "expired"):
         raise HTTPException(409, f"A product with status '{status}' cannot be extended.")
