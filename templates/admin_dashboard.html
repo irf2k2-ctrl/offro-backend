@@ -495,10 +495,10 @@ td[style*="sticky"]{background:#fff;}
   <!-- Stats row -->
   <div class="row g-3 mb-4">
     <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_total">—</h3><p>Total Cards</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_active_premium" style="color:#6b21a8">—</h3><p>Active Premium</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_active_premium" style="color:#6b21a8">—</h3><p>Active</p></div></div>
     <div class="col-6 col-md"><div class="card-stat warn"><h3 id="pc_pending">—</h3><p>Pending</p></div></div>
     <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_expired" style="color:var(--danger)">—</h3><p>Expired</p></div></div>
-    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_standard_active" style="color:var(--primary)">—</h3><p>Standard Active</p></div></div>
+    <div class="col-6 col-md"><div class="card-stat"><h3 id="pc_standard_active" style="color:var(--primary)">—</h3><p>Paid Products</p></div></div>
   </div>
 
   <!-- Filters -->
@@ -520,9 +520,10 @@ td[style*="sticky"]{background:#fff;}
     <input id="pc_date_from" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterProductCards()" placeholder="From">
     <input id="pc_date_to" type="date" class="form-control" style="max-width:150px;font-size:13px" onchange="filterProductCards()" placeholder="To">
     <select id="pc_type_filter" class="form-select" style="max-width:140px;font-size:13px" onchange="filterProductCards()">
-      <option value="">All Types</option>
-      <option value="standard">Standard</option>
-      <option value="premium">Premium</option>
+      <option value="">All Products</option>
+      <option value="free">Free</option>
+      <option value="paid">Paid</option>
+      <option value="admin">OffrO-owned</option>
     </select>
   </div>
 
@@ -775,11 +776,7 @@ td[style*="sticky"]{background:#fff;}
         <label class="form-label fw-bold">GST Percentage (%)</label>
         <input id="gst_input" class="form-control" type="number" style="max-width:160px;" placeholder="18">
       </div>
-      <div class="mb-4">
-        <label class="form-label fw-bold">Standard Product Limit <small style="color:#6b8c7e;font-weight:normal;">(free products per merchant)</small></label>
-        <input id="std_product_limit_input" class="form-control" type="number" min="0" style="max-width:160px;" placeholder="10">
-        <small class="text-muted">Max Standard (free) products a merchant can create. Set 0 for unlimited.</small>
-      </div>
+      <div style="font-size:13px;font-weight:800;letter-spacing:.8px;color:#3E5F55;margin-bottom:10px;">STORE PRICING</div>
       <div id="plans_editor"></div>
       <hr style="margin:24px 0;">
       <div style="background:#f0f9f4;border-radius:12px;padding:20px;border:1px solid #c3dfc6;">
@@ -829,6 +826,20 @@ td[style*="sticky"]{background:#fff;}
         </p>
       </div>
 
+      <hr style="margin:24px 0;">
+      <div class="mb-2" style="border:1px solid #c3dfc6;border-radius:12px;padding:16px 18px;background:#f7fbf8;">
+      <div style="font-size:13px;font-weight:800;letter-spacing:.8px;color:#3E5F55;margin-bottom:14px;">PRODUCT SETTINGS</div>
+      <div class="mb-4">
+        <label class="form-label fw-bold">Free Product Slots <small style="color:#6b8c7e;font-weight:normal;">(free products per store)</small></label>
+        <input id="free_product_limit_input" class="form-control" type="number" min="0" style="max-width:160px;">
+        <small class="text-muted">Every store gets this many free products (a merchant with two stores gets this many in each). Active, pending and deactivated-but-not-expired products use a slot; expired, deleted and rejected ones do not. Takes effect on the next save/renewal.</small>
+      </div>
+      <div class="mb-1">
+        <label class="form-label fw-bold">Maximum Product Validity (Days)</label>
+        <input id="product_max_validity_days_input" class="form-control" type="number" min="1" style="max-width:160px;">
+      </div>
+      </div>
+
       <button class="btn-p mt-3" onclick="savePricing()">Save All Settings</button>
       <p id="pricing_msg" class="mt-2" style="font-size:13px;color:var(--primary);"></p>
     </div>
@@ -847,11 +858,11 @@ td[style*="sticky"]{background:#fff;}
     </div>
 
     <div style="margin-top:16px;background:#f0f8ff;border-radius:12px;padding:20px;border:1px solid #c0d8f0;max-width:640px;">
-      <div class="fw-bold mb-3" style="color:#0d47a1;font-size:15px;">🎁 Product Pricing — Per Day</div>
-      <p style="font-size:12px;color:#0d47a1;margin-bottom:14px;">Merchant selects number of days + start date. Total = days × rate + GST</p>
+      <div class="fw-bold mb-3" style="color:#0d47a1;font-size:13px;letter-spacing:.8px;">PRODUCT PRICING BY DURATION</div>
+      <p style="font-size:12px;color:#0d47a1;margin-bottom:14px;">Used only for products beyond the free slots. Merchant selects the number of days. Price = days × rate per day, plus GST. Free products cost ₹0.</p>
       <div class="row g-3 mb-2">
         <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">Product Price per Day (₹)</label>
+          <label class="form-label" style="font-size:13px">Price per Day (₹)</label>
           <input id="product_price_per_day" class="form-control" type="number" min="0" step="0.50" placeholder="10">
           <small class="text-muted">e.g. 45 days × ₹10 = ₹450 base</small>
         </div>
@@ -1451,6 +1462,7 @@ td[style*="sticky"]{background:#fff;}
           <button class="btn" onclick="diAddUrl('product')"><i class="fas fa-plus me-1"></i>Add URL</button>
           <button class="btn btn-secondary" onclick="diUploadFile('product')"><i class="fas fa-upload me-1"></i>Upload</button>
         </div>
+        <div style="padding:0 16px 12px;background:#fafafa;font-size:12px;color:var(--muted)">Recommended: 1080×1080 px (1:1) — 1080×1080, keep the subject centred.</div>
       </div>
 
       <!-- OFFER -->
@@ -1482,7 +1494,7 @@ td[style*="sticky"]{background:#fff;}
           <span id="di_city_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0 images</span>
         </div>
         <div style="padding:6px 16px 4px;background:#e8f5ee;font-size:11px;color:var(--primary);font-weight:600">
-          <i class="fas fa-info-circle me-1"></i>Recommended: <strong>1080 × 720 px</strong> (3:2). Hero background on app home screen.
+          <i class="fas fa-info-circle me-1"></i>Recommended: <strong>1080 × 1080 px</strong> (1:1). Fallback Hero background on app home screen.
         </div>
         <table class="table table-sm mb-0" id="di_city_table">
           <thead style="background:#f8f9fa"><tr>
@@ -1507,15 +1519,16 @@ td[style*="sticky"]{background:#fff;}
           <span id="di_merchant_banner_count" style="background:rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 10px;border-radius:20px">0</span>
         </div>
         <div style="padding:6px 16px 4px;background:#e8f5ee;font-size:11px;color:var(--primary);font-weight:600">
-          <i class="fas fa-info-circle me-1"></i>Shown on the app home screen when no city-specific promo slider exists. Supports <strong>images</strong> and <strong>MP4 videos</strong>. Recommended: <strong>1080 × 460 px</strong> (2.35:1 ratio).
+          <i class="fas fa-info-circle me-1"></i>Tick <strong>Explore City</strong> on ONE media to show “Explore &lt;user's city&gt;” on it in the Home hero (only that media; ticking another moves it). Shown first in the Home Hero. Supports <strong>images</strong> and <strong>MP4 videos</strong>. Recommended: <strong>1080 × 1080 px</strong> (1:1).
         </div>
         <table class="table table-sm mb-0" id="di_merchant_banner_table">
           <thead style="background:#f8f9fa"><tr>
             <th style="width:70px">Preview</th>
             <th>Image URL</th>
+            <th style="width:110px;text-align:center" title="Show 'Explore City Name' on the Home hero for this media (only one)">Explore City</th>
             <th style="width:90px">Action</th>
           </tr></thead>
-          <tbody id="di_merchant_banner_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+          <tbody id="di_merchant_banner_body"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
         </table>
         <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="text" id="di_merchant_banner_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste HTTPS image URL…">
@@ -2758,8 +2771,10 @@ async function loadPricing(){
   let r=await fetch("/admin/pricing",{credentials:"include"});
   let d=await r.json();
   document.getElementById("gst_input").value=(d.gst_percent!=null?d.gst_percent:18);
-  const stdLimitEl = document.getElementById("std_product_limit_input");
-  if (stdLimitEl) stdLimitEl.value = (d.standard_product_limit != null ? d.standard_product_limit : 10);
+  [["free_product_limit_input","free_product_limit"],
+   ["product_max_validity_days_input","product_max_validity_days"]].forEach(([id,k])=>{
+    const el=document.getElementById(id); if(el) el.value=(d[k]!=null?d[k]:"");
+  });
   currentPlans=d.plans||[];
   let rate=d.conversion_rate||0.10;
   document.getElementById("conversion_rate_input").value=rate;
@@ -2801,16 +2816,20 @@ async function savePricing(){
   let rate=parseFloat(document.getElementById("conversion_rate_input").value)||0.10;
   let minW=parseInt(document.getElementById("min_withdraw_input").value)||200;
   let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
-  const stdLimitRaw = document.getElementById("std_product_limit_input")?.value;
-  const stdLimit = (stdLimitRaw === '' || stdLimitRaw == null) ? 10 : parseInt(stdLimitRaw);
+  const productSettings = {};
+  [["free_product_limit_input","free_product_limit"],
+   ["product_max_validity_days_input","product_max_validity_days"]].forEach(([id,k])=>{
+    const v=document.getElementById(id)?.value; if(v!==''&&v!=null) productSettings[k]=Number(v);
+  });
   let influencerSub={
     fee: parseFloat(document.getElementById("influencer_fee_input").value)||0,
     gst_percent: parseFloat(document.getElementById("influencer_gst_input").value)||0,
     enabled: document.getElementById("influencer_enabled_input").checked,
   };
   let r=await fetch("/admin/pricing",{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({gst_percent:gst,plans,conversion_rate:rate,min_withdraw_points:minW,standard_product_limit:stdLimit,influencer_subscription:influencerSub}),credentials:"include"});
-  document.getElementById("pricing_msg").innerText=r.ok?"✅ All settings saved!":"❌ Error saving";
+    body:JSON.stringify({gst_percent:gst,plans,conversion_rate:rate,min_withdraw_points:minW,...productSettings,influencer_subscription:influencerSub}),credentials:"include"});
+  let _pmsg="❌ Error saving"; if(r.ok) _pmsg="✅ All settings saved!"; else { try{ const _e=await r.json(); _pmsg="❌ "+(_e.detail||"Error saving"); }catch(e){} }
+  document.getElementById("pricing_msg").innerText=_pmsg;
   setTimeout(()=>document.getElementById("pricing_msg").innerText="",2500);
 }
 
@@ -5274,7 +5293,12 @@ window.addEventListener("DOMContentLoaded", function() {
   };
   gcModalInst      = _safeModal("giftCardModal");
   // NOTE: storeModalInst / vzViewModalInst / bnViewModalInst initialized in window.onload above — do NOT re-init here or Bootstrap creates duplicate instances causing stuck backdrops.
-  productModalInst = _safeModal("giftCardModal"); // product edit reuses gcModal
+  productModalInst = gcModalInst;   // SAME instance: a second Modal on one element made Cancel/X hide() a modal that was never shown
+  const _gcEl = document.getElementById("giftCardModal");
+  if (_gcEl) _gcEl.addEventListener("hidden.bs.modal", function() {   // closing always discards unsaved edits
+    _gcEditingId = ""; const i = document.getElementById("gc_id"); if (i) i.value = "";
+    const m = document.getElementById("gc_msg"); if (m) m.innerText = "";
+  });
   accountDetailModalInst = _safeModal("accountDetailModal");
 });
 
@@ -5330,12 +5354,10 @@ async function loadGiftCards() {
     }
     if (!merchantsList || merchantsList.length === 0) { try { await loadMerchants(); } catch(e) {} }
     // Fetch admin product cards + merchant product submissions in parallel
-    const [adminR, merchantR] = await Promise.all([
-      fetch("/admin/products", {credentials:"include"}),
-      fetch("/admin/merchant-products", {credentials:"include"}),
-    ]);
-    const adminCards    = adminR.ok    ? await adminR.json()    : [];
-    const merchantCards = merchantR.ok ? await merchantR.json() : [];
+    // Single product collection (merchant_products): one endpoint returns every product.
+    const _prodR = await fetch("/admin/products", {credentials:"include"});
+    const adminCards    = [];
+    const merchantCards = _prodR.ok ? await _prodR.json() : [];
 
     // Normalize admin cards
     const adminRows = adminCards.map(v => {
@@ -5414,7 +5436,7 @@ async function loadGiftCards() {
         ? `${_fmtDate(fromD)} → ${_fmtDate(toD)}`
         : (v.validity || (v.end_date ? _fmtDate(v.end_date) : '—'));
       // ISSUE 7: Check expiry at render time
-      let computedStatus = st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : 'pending');
+      let computedStatus = st === 'approved' ? 'approved' : (st === 'rejected' ? 'rejected' : (st === 'expired' ? 'expired' : 'pending'));
       if (computedStatus === 'approved') {
         // Use end_date directly; fall back to parsing the validity string if end_date is empty
         let _expiryStr = toD;
@@ -5435,14 +5457,14 @@ async function loadGiftCards() {
       }
       return {
         _id:          v._id,
-        _source:      'merchant',
+        _source:      (v.source === 'admin' ? 'admin' : 'merchant'),
         logo:         v.logo_url || v.logo || '',
         title:        v.title || '',
         offer_text:   v.offer_text || '',
         validity:     validityDisplay,
         from_date:    fromD,
         end_date:     toD,
-        is_active:    computedStatus === 'approved',
+        is_active:    v.is_active !== false,
         status:       computedStatus,
         approval_status: st,
         merchant_name:  v.merchant_name || '',
@@ -5451,9 +5473,12 @@ async function loadGiftCards() {
         city:         v.city       || '',
         store_id:     v.store_id   || '',
         store_name:   v.store_name || '',
-        product_type: v.product_type || 'premium',
+        product_type: v.pricing_tier || 'free',
         duration_days:v.duration_days || '',
-        amount:       v.amount || 0,
+        amount:       v.paid_amount || 0,
+        paid_status:  v.paid_status || '',
+        paid_amount:  v.paid_amount || 0,
+        expected_amount: v.expected_amount || 0,
         _raw: v,
         // product-specific fields for edit modal
         sale_price:     v.sale_price ?? v.price ?? '',
@@ -5503,8 +5528,8 @@ async function loadGiftCards() {
     // Update stats
     const pending        = _allProductRows.filter(r=>r.status==='pending').length;
     const expired        = _allProductRows.filter(r=>r.status==='expired').length;
-    const active_premium = _allProductRows.filter(r=>r.status==='approved' && (r.product_type||'premium')==='premium').length;
-    const std_active     = _allProductRows.filter(r=>r.status==='approved' && (r.product_type||'premium')==='standard').length;
+    const active_premium = _allProductRows.filter(r=>r.status==='approved' && r.is_active).length;
+    const std_active     = _allProductRows.filter(r=>r.product_type==='paid').length;
     const _set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
     _set('pc_total',          _allProductRows.length);
     _set('pc_active_premium', active_premium);
@@ -5536,7 +5561,7 @@ function filterProductCards() {
   if (byStore) rows = rows.filter(r=>(r.store_name||'').toLowerCase().includes(byStore));
   if (dateFrom)rows = rows.filter(r=>(r.created_at||'')>=dateFrom);
   if (dateTo)  rows = rows.filter(r=>(r.created_at||'')<=dateTo+'z');
-  if (byType)  rows = rows.filter(r=>(r.product_type||'premium')===byType);
+  if (byType)  rows = rows.filter(r=>(r.product_type||'')===byType);
 
   _pcFilteredRows = rows;
   _pcPage = 1; // reset to page 1 on filter change
@@ -5619,6 +5644,15 @@ function renderProductCards() {
       : st==='expired'
       ? `<span style="background:#fde8e6;color:#c0392b;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">+ Expired</span>`
       : `<span style="background:#f8f9fa;color:#6c757d;padding:3px 10px;border-radius:20px;font-size:11px">○ Hidden</span>`;
+    // OFF indicator sits BELOW the existing status badge (never replaces it)
+    const offTag = (r.is_active === false && (st==='approved'||st==='pending'||st==='pending_approval'))
+      ? `<div style="font-size:11px;font-weight:700;color:#c0392b;margin-top:4px;letter-spacing:.4px">OFF</div>` : '';
+    // Paid column: actual recorded amount for paid products, Free / ₹0 for free ones
+    const paidCell = r.paid_status === 'paid'
+      ? `<span style="font-weight:700;color:#6b21a8">Paid</span><div style="font-size:12px;color:var(--text)">₹${Number(r.paid_amount||0).toLocaleString('en-IN')}</div>`
+      : r.paid_status === 'free'
+      ? `<span style="font-weight:700;color:#1a6640">Free</span><div style="font-size:12px;color:var(--muted)">₹0</div>`
+      : `<span style="color:var(--muted)">OffrO-owned</span>`;
 
     const isPending = (st==='pending'||st==='pending_approval');
     const approveBtn = (!isAdmin && isPending)
@@ -5640,10 +5674,10 @@ function renderProductCards() {
     const _pcStore = r.store_name
       ? `<span style="font-size:12px;font-weight:600;color:var(--text)">${r.store_name}</span>`
       : `<span style="color:var(--muted);font-size:11px">—</span>`;
-    const _prodType = r.product_type || 'premium';
-    const _typeLabel = _prodType === 'standard' ? '🟢 Standard' : '🟣 Premium';
-    const _typeBg    = _prodType === 'standard' ? '#e8f5e9' : '#f3e8ff';
-    const _typeColor = _prodType === 'standard' ? '#1a6640' : '#6b21a8';
+    const _prodType = r.product_type || 'free';
+    const _typeLabel = _prodType === 'paid' ? '🟣 Paid' : (_prodType === 'admin' ? '⚪ OffrO' : '🟢 Free');
+    const _typeBg    = _prodType === 'paid' ? '#f3e8ff' : (_prodType === 'admin' ? '#eceff1' : '#e8f5e9');
+    const _typeColor = _prodType === 'paid' ? '#6b21a8' : (_prodType === 'admin' ? '#455a64' : '#1a6640');
     const typeBadge  = `<span style="background:${_typeBg};color:${_typeColor};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap">${_typeLabel}</span>`;
     return `<tr>
       <td>${logoHtml}</td>
@@ -5653,9 +5687,9 @@ function renderProductCards() {
       <td>${_pcStore}</td>
       <td>${_pcCity}</td>
       <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
-      <td>${statusBadge}</td>
-      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${_prodType==='premium' && r.duration_days ? r.duration_days+' days' : '—'}</td>
-      <td style="font-size:12px;color:var(--text);white-space:nowrap">${_prodType==='premium' && r.amount ? '₹'+Number(r.amount).toLocaleString('en-IN') : '—'}</td>
+      <td>${statusBadge}${offTag}</td>
+      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${r.duration_days ? r.duration_days+' days' : '—'}</td>
+      <td style="font-size:12px;white-space:nowrap">${paidCell}</td>
       <td>
         <button class="btn-o me-1" onclick='openVZViewModal(${viewJson})'>View</button>
         ${approveBtn}
@@ -5740,13 +5774,7 @@ function openVZViewModal(r) {
 
 function approveProductCard(id, source) {
   if (source === 'merchant') {
-    // Standard products live in gift_vouchers — route to the correct approve endpoint
-    const row = _allProductRows.find(r => r._id === id);
-    if (row && row._collection === 'gift_vouchers') {
-      approveStandardProduct(id);
-    } else {
-      approveMerchantProduct(id);  // Premium products live in merchant_vouchers
-    }
+    approveMerchantProduct(id);   // every product lives in merchant_products
   } else if (confirm('Activate this product?')) {
     loadGiftCards();
   }
@@ -5755,7 +5783,7 @@ function approveProductCard(id, source) {
 async function approveStandardProduct(id) {
   if (!confirm('Approve this standard product?')) return;
   try {
-    const r = await fetch(`/admin/gift-vouchers/${id}/approve`, {method:'PUT', credentials:'include'});
+    const r = await fetch(`/admin/products/${id}/approve`, {method:'PUT', credentials:'include'});
     if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Approval failed'); }
     showToast('✅ Standard product approved!');
     loadGiftCards();
@@ -5824,10 +5852,11 @@ function openVZMerchantEditModal(row) {
         <!-- Product Type + Status row -->
         <div class="row mb-3">
           <div class="col-6">
-            <label style="font-size:12px;font-weight:600;color:var(--muted)">Product Type</label>
-            <select id="pc_edit_product_type" class="form-select" style="margin-top:4px">
-              <option value="premium">🟣 Premium</option>
-              <option value="standard">🟢 Standard</option>
+            <label style="font-size:12px;font-weight:600;color:var(--muted)">Pricing (set at purchase)</label>
+            <select id="pc_edit_product_type" class="form-select" style="margin-top:4px" disabled>
+              <option value="free">🟢 Free</option>
+              <option value="paid">🟣 Paid</option>
+              <option value="admin">⚪ OffrO-owned</option>
             </select>
           </div>
           <div class="col-6">
@@ -6040,13 +6069,13 @@ async function saveVZMerchantEdit() {
     const _col = row._raw?._collection || '';
     let url;
     if (_src === 'merchant' || _col === 'merchant_vouchers') {
-      url = `/admin/merchant-products/${row._id}`;
+      url = `/admin/products/${row._id}`;
     } else if (_col === 'products') {
       url = `/admin/products/${row._id}`;
       payload._collection = 'products';
     } else {
       // gift_vouchers — try merchant-products first (it falls back to gift_vouchers)
-      url = `/admin/merchant-products/${row._id}`;
+      url = `/admin/products/${row._id}`;
     }
     const res = await fetch(url, {
       method:'PUT', credentials:'include',
@@ -6068,7 +6097,7 @@ async function deleteProductCard(id, source) {
     // For merchant-source (pending in merchant_vouchers), use merchant-products endpoint
     // For all others (gift_vouchers or products collection), use products endpoint (tries both)
     const url = (source === 'merchant')
-      ? `/admin/merchant-products/${id}`
+      ? `/admin/products/${id}`
       : `/admin/products/${id}`;
     const r = await fetch(url, {method:'DELETE', credentials:'include'});
     if (!r.ok) {
@@ -6097,8 +6126,6 @@ async function openGiftCardModal() {
   document.getElementById("gc_from_date").value    = "";
   document.getElementById("gc_duration_days").value= "";
   if(document.getElementById("gc_to_date")) document.getElementById("gc_to_date").value = "";
-  if(document.getElementById("gc_pay_from"))   document.getElementById("gc_pay_from").value   = "";
-  if(document.getElementById("gc_pay_to"))     document.getElementById("gc_pay_to").value     = "";
   if(document.getElementById("gc_pay_amount")) document.getElementById("gc_pay_amount").value = "";
   if(document.getElementById("gc_pay_gst"))    document.getElementById("gc_pay_gst").value    = "18";
   if(document.getElementById("gc_pay_mode"))   document.getElementById("gc_pay_mode").value   = "";
@@ -6146,12 +6173,10 @@ async function editGiftCard(v) {
   _populateGcMerchants(v.merchant_id||"");
   if (document.getElementById("gc_city")) document.getElementById("gc_city").value = v.city || '';
   // Populate payment fields if stored on the record
-  if (document.getElementById("gc_pay_from"))   document.getElementById("gc_pay_from").value   = v.pay_from_date || v.from_date || '';
-  if (document.getElementById("gc_pay_to"))     document.getElementById("gc_pay_to").value     = v.pay_to_date   || v.end_date  || '';
-  if (document.getElementById("gc_pay_amount")) document.getElementById("gc_pay_amount").value = v.pay_amount    || '';
-  if (document.getElementById("gc_pay_gst"))    document.getElementById("gc_pay_gst").value    = v.pay_gst       || '18';
-  if (document.getElementById("gc_pay_mode"))   document.getElementById("gc_pay_mode").value   = v.pay_mode      || '';
-  if (document.getElementById("gc_pay_ref"))    document.getElementById("gc_pay_ref").value    = v.pay_ref       || '';
+  if (document.getElementById("gc_pay_amount")) document.getElementById("gc_pay_amount").value = v.paid_amount || '';
+  if (document.getElementById("gc_pay_gst"))    document.getElementById("gc_pay_gst").value    = '18';
+  if (document.getElementById("gc_pay_mode"))   document.getElementById("gc_pay_mode").value   = v.payment_mode || '';
+  if (document.getElementById("gc_pay_ref"))    document.getElementById("gc_pay_ref").value    = v.payment_ref  || '';
   gcModalInst.show();
 }
 
@@ -6181,6 +6206,8 @@ function clearProductLogo() {
   document.getElementById("gc_logo_preview").style.display = "none";
   document.getElementById("gc_logo_img").src = "";
 }
+function closeGiftCardModal() { if (gcModalInst) gcModalInst.hide(); }
+
 function _gcUpdateValidity() {
   // ISSUE 2 FIX: From Date + Number of Days → compute end_date + validity string
   const from = document.getElementById('gc_from_date')?.value;
@@ -6191,8 +6218,10 @@ function _gcUpdateValidity() {
   if (from && days > 0) {
     const startD = new Date(from + 'T00:00:00');
     const endD   = new Date(from + 'T00:00:00');
-    endD.setDate(endD.getDate() + days);
-    const endISO = endD.toISOString().split('T')[0];
+    endD.setDate(endD.getDate() + days - 1);   // inclusive: 30 days from 1 Nov ends 30 Nov
+    // Local calendar date (toISOString() is UTC and shifts the day back by one in IST).
+    const _p2 = n => String(n).padStart(2, '0');
+    const endISO = `${endD.getFullYear()}-${_p2(endD.getMonth()+1)}-${_p2(endD.getDate())}`;
     if (toEl)    toEl.value = endISO;   // store computed end_date
     const opts = {day:'numeric', month:'short', year:'numeric'};
     const fmtStart = startD.toLocaleDateString('en-IN', opts);
@@ -6206,10 +6235,33 @@ function _gcUpdateValidity() {
   }
 }
 let _gcEditingId = '';  // backup for edit id in case DOM is stale
+// Double-save guard: the flag is set synchronously on the first click (before any await), so a
+// second click / tap while the request is in flight is ignored and can never send a second
+// create/update request. The button is disabled + shows "Saving…" and is always re-enabled in
+// `finally` (validation error, server error, network error or success).
+let _gcSaving = false;
 async function saveGiftCard() {
+  if (_gcSaving) return;
+  _gcSaving = true;
+  const btn = document.getElementById("gc_save_btn");
+  const idleLabel = btn ? btn.textContent : "Save";
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+  try {
+    await _saveGiftCardRequest();
+  } finally {
+    _gcSaving = false;
+    if (btn) { btn.disabled = false; btn.textContent = idleLabel; }
+  }
+}
+async function _saveGiftCardRequest() {
   const vid  = (document.getElementById("gc_id").value || _gcEditingId).trim();
   const text = document.getElementById("gc_text").value.trim();
   if (!text) { document.getElementById("gc_msg").innerText = "Offer text is required"; return; }
+  // Product image is mandatory (an existing image counts when editing; removing it re-requires one).
+  if (!(document.getElementById("gc_logo").value || "").trim()) {
+    document.getElementById("gc_msg").innerText = "Product image is required. Please upload an image before saving.";
+    return;
+  }
   const _gcFrom = document.getElementById("gc_from_date")?.value  || '';
   const _gcTo   = document.getElementById("gc_to_date")?.value    || ''; // computed by _gcUpdateValidity
   const _gcDays = parseInt(document.getElementById("gc_duration_days")?.value) || 0;
@@ -6220,8 +6272,6 @@ async function saveGiftCard() {
   const _gcStoreSel  = document.getElementById("gc_store_sel");
   const _gcStoreName = (_gcStoreSel && _gcStoreSel.selectedIndex > 0)
     ? (_gcStoreSel.options[_gcStoreSel.selectedIndex]?.text || '') : '';
-  const _gcPayFrom   = document.getElementById("gc_pay_from")?.value  || '';
-  const _gcPayTo     = document.getElementById("gc_pay_to")?.value    || '';
   const _gcPayAmt    = parseFloat(document.getElementById("gc_pay_amount")?.value) || 0;
   const _gcPayGst    = parseFloat(document.getElementById("gc_pay_gst")?.value) || 18;
   const _gcPayMode   = (document.getElementById("gc_pay_mode")?.value  || '').trim();
@@ -6244,8 +6294,6 @@ async function saveGiftCard() {
     price:          isNaN(_salePriceRaw) ? undefined : _salePriceRaw,   // merchant-product field
     sale_price:     isNaN(_salePriceRaw) ? undefined : _salePriceRaw,
     original_price: isNaN(_origPriceRaw) ? undefined : _origPriceRaw,
-    pay_from_date:  _gcPayFrom || undefined,
-    pay_to_date:    _gcPayTo   || undefined,
     pay_amount:     _gcPayAmt  || undefined,
     pay_gst:        _gcPayGst  !== 18 ? _gcPayGst : undefined,
     pay_mode:       _gcPayMode || undefined,
@@ -6260,8 +6308,8 @@ async function saveGiftCard() {
       url  = `/admin/products/${vid}`;
       meth = "PUT";
     } else if (vid && _isMerchantProduct) {
-      // Merchant-created product → /admin/merchant-products/{vid}
-      url  = `/admin/merchant-products/${vid}`;
+      // Merchant-created product → /admin/products/{vid}
+      url  = `/admin/products/${vid}`;
       meth = "PUT";
     } else {
       // New admin product
@@ -6499,7 +6547,7 @@ async function saveStore() {
             <input type="file" id="sl_file_input" accept="image/*" style="display:none" onchange="sliderUploadFile(this)">
           </div>
           <div id="sl_upload_status" style="font-size:12px;color:var(--muted);margin-top:4px;"></div>
-          <small class="text-muted">📐 Recommended size: <strong>1080 × 460 px</strong> &nbsp;|&nbsp; Ratio: 2.35:1 &nbsp;|&nbsp; Max 2 MB</small>
+          <small class="text-muted">📐 Recommended size: <strong>1080 × 1080 px</strong> &nbsp;|&nbsp; Ratio: 1:1 &nbsp;|&nbsp; Max 2 MB</small>
         </div>
         <input type="hidden" id="sl_link_url" value="">
         <div class="row g-2 mb-3">
@@ -6690,16 +6738,6 @@ async function saveStore() {
         <div style="font-size:12px;font-weight:600;color:var(--primary);margin-bottom:10px">Payment Information</div>
         <div class="row mb-3">
           <div class="col-6">
-            <label class="form-label fw-semibold">From Date</label>
-            <input type="date" id="gc_pay_from" class="form-control">
-          </div>
-          <div class="col-6">
-            <label class="form-label fw-semibold">To Date</label>
-            <input type="date" id="gc_pay_to" class="form-control">
-          </div>
-        </div>
-        <div class="row mb-3">
-          <div class="col-6">
             <label class="form-label fw-semibold">Amount Paid (₹)</label>
             <input type="number" id="gc_pay_amount" class="form-control" placeholder="0" min="0" step="0.01">
           </div>
@@ -6733,8 +6771,8 @@ async function saveStore() {
         <p id="gc_msg" style="color:var(--danger);font-size:13px;"></p>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn-p btn-sm" onclick="saveGiftCard()">Save</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="closeGiftCardModal()">Cancel</button>
+        <button id="gc_save_btn" class="btn-p btn-sm" onclick="saveGiftCard()">Save</button>
       </div>
     </div>
   </div>
@@ -6893,7 +6931,7 @@ async function loadMerchantProducts() {
   const cnt = document.getElementById('mproduct_count');
   if (!el) return;
   try {
-    const r = await fetch('/admin/merchant-products', {credentials:'include'});
+    const r = await fetch('/admin/products', {credentials:'include'});
     const data = r.ok ? await r.json() : [];
     if (cnt) cnt.textContent = `${data.length} submitted`;
     if (!data.length) {
@@ -6939,7 +6977,7 @@ async function approveMerchantProduct(id) {
   // TASK 7: Approve product — upsert into gift_vouchers, no duplicate, refresh immediately
   const btn = event?.target; if (btn) { btn.disabled=true; btn.textContent='Approving...'; }
   try {
-    const _vApprRes = await fetch(`/admin/merchant-products/${id}/approve`, {method:'PUT', credentials:'include'});
+    const _vApprRes = await fetch(`/admin/products/${id}/approve`, {method:'PUT', credentials:'include'});
     if (!_vApprRes.ok) {
       const errText = await _vApprRes.text();
       showToast('❌ Approve failed: ' + errText, 'danger');
@@ -6956,14 +6994,14 @@ async function approveMerchantProduct(id) {
 }
 async function rejectMerchantProduct(id) {
   const reason = prompt('Rejection reason (optional):') || '';
-  await fetch(`/admin/merchant-products/${id}/reject`, {method:'PUT', credentials:'include',
+  await fetch(`/admin/products/${id}/reject`, {method:'PUT', credentials:'include',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason})});
   if (typeof loadGiftCards === 'function') loadGiftCards();
   loadMerchantProducts();
 }
 async function deleteMerchantProduct(id) {
   if (!confirm('Delete this product?')) return;
-  await fetch(`/admin/merchant-products/${id}`, {method:'DELETE', credentials:'include'});
+  await fetch(`/admin/products/${id}`, {method:'DELETE', credentials:'include'});
   loadGiftCards();
 }
 
@@ -7146,11 +7184,11 @@ async function loadP2Summary() {
     const r = await fetch('/admin/products/summary', {credentials:'include'});
     const d = await r.json();
     const _sp = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-    _sp('p2_total_premium',   d.total_premium   ?? '--');
-    _sp('p2_live_premium',    d.live_premium     ?? '--');
-    _sp('p2_pending_premium', d.pending_premium  ?? '--');
-    _sp('p2_expired_premium', d.expired_premium  ?? '--');
-    _sp('p2_total_standard',  d.total_standard   ?? '--');
+    _sp('p2_total_premium',   d.total   ?? '--');
+    _sp('p2_live_premium',    d.live     ?? '--');
+    _sp('p2_pending_premium', d.pending  ?? '--');
+    _sp('p2_expired_premium', d.expired  ?? '--');
+    _sp('p2_total_standard',  d.paid   ?? '--');
   } catch(e) { console.error('p2summary', e); }
 }
 
@@ -7177,7 +7215,7 @@ async function loadP2TopMerchants() {
       <td>${i+1}</td>
       <td><strong>${r.merchant_name||'-'}</strong></td>
       <td>${r.merchant_phone||'-'}</td>
-      <td><span class="badge-active">${r.premium_count} premium</span></td>
+      <td><span class="badge-active">${r.product_count} products</span></td>
     </tr>`).join('');
   } catch(e) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:red">Error loading</td></tr>'; }
 }
@@ -7203,8 +7241,8 @@ async function loadP2Expiry() {
 
 async function adminExtendProduct(vid) {
   try {
-    const res = await fetch('/merchant-vouchers/' + vid + '/extend', {
-      method:'PUT', headers:{'Content-Type':'application/json'},
+    const res = await fetch('/admin/products/' + vid + '/extend', {
+      method:'PUT', credentials:'include', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({days:7})
     });
     const d = await res.json();
@@ -7323,72 +7361,66 @@ async function grantMerchantRole(accountId, name) {
   } catch(e) { showToast('Error: ' + e.message, true); }
 }
 
-async function loadAccounts() {
+let _acctTotal = 0, _acctReqId = 0, _acctSearchTimer = null;
+
+// Server-side pagination: only the current page (PAGE_SIZE rows) is fetched.
+// Search / role / city are sent with the request so paging and filtering
+// always work together.
+async function loadAccounts(page) {
+  if (page) _acctPage = page;
+  const reqId = ++_acctReqId;
+  const search = (document.getElementById('acct_search')?.value || '').trim();
+  const role   = document.getElementById('acct_role_filter')?.value || '';
+  const city   = document.getElementById('acct_city_filter')?.value || '';
+  const qs = new URLSearchParams({page: _acctPage, page_size: PAGE_SIZE});
+  if (search) qs.set('search', search);
+  if (role)   qs.set('role', role);
+  if (city)   qs.set('city', city);
+  const tb = document.getElementById('accounts_table');
+  const fail = (msg) => { if (tb) tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:32px;color:#c0392b;">
+        ⚠️ ${msg}<br>
+        <button onclick="loadAccounts()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button>
+      </td></tr>`; };
   try {
-    const r = await fetch('/admin/accounts', {credentials:'include'});
+    const r = await fetch('/admin/accounts?' + qs.toString(), {credentials:'include'});
+    if (reqId !== _acctReqId) return;            // a newer request superseded this one
     if (r.status === 401 || r.status === 403) { window.location.href = '/admin'; return; }
     if (!r.ok) {
       let errMsg = 'Server error ' + r.status;
       try { const e = await r.json(); errMsg = e.detail || errMsg; } catch(_) {}
-      const tb = document.getElementById('accounts_table');
-      if (tb) tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:32px;color:#c0392b;">
-        ⚠️ Failed to load accounts: ${errMsg}<br>
-        <button onclick="loadAccounts()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button>
-      </td></tr>`;
+      fail('Failed to load accounts: ' + errMsg);
       return;
     }
-    const raw = await r.json();
-    accountsList = Array.isArray(raw) ? raw.filter(a => a.account_id !== '__errors__') : [];
-    // Log debug errors if any
-    const errRec = Array.isArray(raw) ? raw.find(a => a.account_id === '__errors__') : null;
-    if (errRec && errRec._debug_errors) console.warn('Accounts with parse errors:', errRec._debug_errors);
-    // Populate city filter
-    const cities = [...new Set(accountsList.map(a=>a.city).filter(Boolean))].sort();
+    const d = await r.json();
+    accountsList = Array.isArray(d.items) ? d.items : [];
+    _acctTotal = d.total || 0;
+    _acctPage  = d.page || 1;
+    // Populate the city filter (keep the current selection)
     const cityEl = document.getElementById('acct_city_filter');
     if (cityEl) {
+      const cur = cityEl.value;
+      const cities = d.cities || [];
+      if (cur && !cities.includes(cur)) cities.push(cur);
       cityEl.innerHTML = '<option value="">All Cities</option>' +
-        cities.map(c=>`<option value="${c}">${c}</option>`).join('');
+        cities.map(c=>`<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+      cityEl.value = cur;
     }
-    _acctPage = 1;
-    filterAccounts();
+    renderAccountsPage();
   } catch(e) {
     console.error('loadAccounts error', e);
-    const tb = document.getElementById('accounts_table');
-    if (tb) tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:32px;color:#c0392b;">
-      ⚠️ Network error loading accounts.<br>
-      <button onclick="loadAccounts()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button>
-    </td></tr>`;
+    if (reqId === _acctReqId) fail('Network error loading accounts.');
   }
 }
 
+// Filter / search changed → back to page 1 (search is debounced).
 function filterAccounts() {
-  const search = (document.getElementById('acct_search')?.value || '').toLowerCase();
-  const role   = document.getElementById('acct_role_filter')?.value || '';
-  const city   = document.getElementById('acct_city_filter')?.value || '';
-  _filteredAccounts = accountsList.filter(a => {
-    const matchSearch = !search ||
-      (a.full_name||'').toLowerCase().includes(search) ||
-      (a.mobile_number||'').includes(search);
-    const matchCity = !city || a.city === city;
-    const isUser     = a.roles?.includes('user');
-    const isMerchant = a.roles?.includes('merchant');
-    const matchRole  = !role ||
-      (role === 'user_only'     &&  isUser && !isMerchant) ||
-      (role === 'merchant_only' && !isUser &&  isMerchant) ||
-      (role === 'both'          &&  isUser &&  isMerchant);
-    return matchSearch && matchCity && matchRole;
-  });
-  _acctPage = 1;
-  renderAccountsPage();
+  clearTimeout(_acctSearchTimer);
+  _acctSearchTimer = setTimeout(() => { _acctPage = 1; loadAccounts(); }, 300);
 }
 
-const ACCT_PER_PAGE = 20;
-
 function renderAccountsPage() {
-  const f    = _filteredAccounts;
-  const total = f.length;
-  const start = (_acctPage - 1) * ACCT_PER_PAGE;
-  const page  = f.slice(start, start + ACCT_PER_PAGE);
+  const page  = accountsList;
+  const total = _acctTotal;
   const tbody = document.getElementById('accounts_table');
   if (!tbody) return;
 
@@ -7438,7 +7470,7 @@ function renderAccountsPage() {
   renderPagination('accounts_pagination', total, _acctPage, 'goAcctPage');
 }
 
-function goAcctPage(p) { _acctPage = p; renderAccountsPage(); }
+function goAcctPage(p) { _acctPage = p; loadAccounts(); }
 
 async function processDeletion(accountId, action) {
   const verb = action === 'approve' ? 'permanently DELETE' : 'restore (reject deletion for)';
@@ -8039,7 +8071,7 @@ async function loadDefaultImages() {
     const d = await r.json();
     for (const type of ['store', 'product', 'offer', 'city', 'merchant_banner']) {
       const urls = Array.isArray(d[type]) ? d[type] : (d[type] ? [d[type]] : []);
-      _renderDiTable(type, urls);
+      _renderDiTable(type, urls, type === 'merchant_banner' ? (d.merchant_banner_explore_url || '') : '');
     }
     // Load no-service config — API returns no_service_url (string)
     const nsUrl = d.no_service_url || '';
@@ -8061,7 +8093,7 @@ async function loadDefaultImages() {
   } catch(e) { console.error('Default images load failed', e); }
 }
 
-function _renderDiTable(type, urls) {
+function _renderDiTable(type, urls, exploreUrl) {
   const tbody = document.getElementById(`di_${type}_body`);
   const count = document.getElementById(`di_${type}_count`);
   if (!tbody) return;
@@ -8072,7 +8104,7 @@ function _renderDiTable(type, urls) {
   if (count) count.textContent = plural;
   if (!urls.length) {
     const emptyTxt = type === 'merchant_banner' ? 'No media yet' : 'No images yet';
-    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">${emptyTxt}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${type === 'merchant_banner' ? 4 : 3}" style="text-align:center;color:#aaa;padding:16px">${emptyTxt}</td></tr>`;
     return;
   }
   tbody.innerHTML = urls.map((url, i) => {
@@ -8106,9 +8138,16 @@ function _renderDiTable(type, urls) {
     const urlCell = `<td style="padding:6px 10px;vertical-align:middle;word-break:break-all;font-size:12px;color:var(--muted)">
       ${urlDisplay}
     </td>`;
+    const exploreCell = type === 'merchant_banner'
+      ? `<td style="padding:6px 10px;vertical-align:middle;text-align:center">
+           <input type="checkbox" ${url === exploreUrl ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer"
+             title="Explore City Name" onchange="diSetExplore('${safeUrl}', this.checked, this)">
+         </td>`
+      : '';
     return `<tr>
       ${previewCell}
       ${urlCell}
+      ${exploreCell}
       <td style="padding:6px 10px;vertical-align:middle">
         <button class="btn btn-sm" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px"
           onclick="diRemoveUrl('${type}','${safeUrl}')">
@@ -8117,6 +8156,22 @@ function _renderDiTable(type, urls) {
       </td>
     </tr>`;
   }).join('');
+}
+
+// "Explore City Name" flag for ONE default merchant-banner media (stored server-side as a single value).
+async function diSetExplore(url, checked, el) {
+  const msg = document.getElementById('di_msg');
+  if (el) el.disabled = true;
+  try {
+    const r = await fetch('/admin/default-images/merchant-banner-explore', {
+      method:'PUT', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ url: checked ? url : '' })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    msg.textContent = checked ? '✓ This media now shows “Explore <city>” on the Home hero' : '✓ “Explore <city>” cleared'; msg.style.color='green';
+  } catch(e) { msg.textContent = '✗ ' + e.message; msg.style.color='red'; }
+  loadDefaultImages();   // re-render: only the selected media stays ticked
 }
 
 async function diAddUrl(type) {
