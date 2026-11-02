@@ -284,6 +284,31 @@ def _same_store(order: dict, fields: dict):
         raise HTTPException(400, "This order was created for a different store. Please start again.")
 
 
+_CLAIM_STALE = timedelta(minutes=5)
+
+
+def _claim_order(order_id):
+    """Atomically move an order created -> processing so only ONE request can turn a payment into a
+    product/renewal (double tap, retry, duplicate callback). A claim left behind by a crashed
+    request is taken over after _CLAIM_STALE. Returns the claimed order, or None."""
+    now = datetime.utcnow()
+    return db[ORDERS].find_one_and_update(
+        {"_id": order_id, "$or": [{"status": "created"},
+                                   {"status": "processing", "processing_at": {"$lt": now - _CLAIM_STALE}}]},
+        {"$set": {"status": "processing", "processing_at": now}})
+
+
+def _release_order(order_id):
+    """Give the order back (processing -> created) when nothing was created, so the same payment can be retried."""
+    db[ORDERS].update_one({"_id": order_id, "status": "processing"},
+                          {"$set": {"status": "created"}, "$unset": {"processing_at": ""}})
+
+
+def _already_done(order_id):
+    cur = db[ORDERS].find_one({"_id": order_id}) or {}
+    return cur if cur.get("status") in ("paid", "submitted") else None
+
+
 @router.post("/products/activate-free")
 def activate_free_product(data: dict, m=Depends(get_merchant)):
     """Submit a product that needs no payment (free slot, or fully discounted)."""
@@ -312,11 +337,19 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
 
 @router.post("/products/verify")
 def verify_product_payment(data: dict, m=Depends(get_merchant)):
-    """Verify the Razorpay payment for an additional (paid) product, then create it."""
+    """Verify the Razorpay payment for an additional (paid) product, then create it.
+
+    Idempotent: one paid order creates exactly one product, however many times this is called.
+    The product is built from the dates/prices PERSISTED on the order, so verifying after
+    midnight still creates what was originally quoted and paid for."""
     order = _order(data, m)
+
+    def _done(o):
+        return {"message": "Payment already verified.", "product_id": o.get("product_id", ""),
+                "invoice_no": o.get("invoice_no", ""), "already_processed": True}
+
     if order.get("status") == "paid":
-        return {"message": "Payment already verified.", "product_id": order.get("product_id", ""),
-                "invoice_no": order.get("invoice_no", "")}
+        return _done(order)
     if float(order.get("total", 0) or 0) <= 0:
         raise HTTPException(400, "This product does not need payment.")
     rp_oid, rp_pid, sig = (data.get("razorpay_order_id", ""), data.get("razorpay_payment_id", ""),
@@ -324,16 +357,31 @@ def verify_product_payment(data: dict, m=Depends(get_merchant)):
     _require_valid_razorpay_payment(order, rp_oid, rp_pid, sig)
     fields = _fields(data, m)
     _same_store(order, fields)
-    prod = _guard(P.create_paid, merchant=m, fields=fields, end_raw=order["end_date"],
-                  from_raw=order.get("from_date"), source="merchant", price=_order_price(order),
-                  paid_total=float(order["total"]),
-                  payment={"razorpay_payment_id": rp_pid, "razorpay_order_id": rp_oid, "payment_status": "paid",
-                           "discount_code": order.get("discount_code") or "",
-                           "discount_amount": order.get("discount_amount", 0)})
+    if not _claim_order(order["_id"]):
+        done = _already_done(order["_id"])
+        if done:
+            return _done(done)
+        raise HTTPException(409, "This payment is already being processed. Please wait a moment and check My Products.")
+    try:
+        prod = _guard(P.create_paid, merchant=m, fields=fields, end_raw=order["end_date"],
+                      from_raw=order.get("from_date"), source="merchant", price=_order_price(order),
+                      paid_total=float(order["total"]), quoted=True, order_ref=str(order["_id"]),
+                      payment={"razorpay_payment_id": rp_pid, "razorpay_order_id": rp_oid, "payment_status": "paid",
+                               "discount_code": order.get("discount_code") or "",
+                               "discount_amount": order.get("discount_amount", 0)})
+    except Exception:
+        _release_order(order["_id"])          # nothing was created -> the same payment may be retried
+        raise
+    # The product exists: record it on the order FIRST so any retry returns it instead of creating another.
+    db[ORDERS].update_one({"_id": order["_id"]}, {"$set": {"status": "paid", "product_id": str(prod["_id"]),
+                                                          "payment_id": rp_pid, "paid_at": datetime.utcnow()},
+                                                  "$unset": {"processing_at": ""}})
+    if prod.get("invoice_no"):               # product already existed for this order (repeat) - nothing more to do
+        return {"message": "Payment already verified.", "product_id": str(prod["_id"]),
+                "invoice_no": prod["invoice_no"], "already_processed": True}
     _mark_discount_used(order.get("discount_code"))
     inv = _invoice(m, prod, order, paid=True, rp_payment_id=rp_pid)
-    db[ORDERS].update_one({"_id": order["_id"]}, {"$set": {"status": "paid", "product_id": str(prod["_id"]),
-                                                          "invoice_no": inv}})
+    db[ORDERS].update_one({"_id": order["_id"]}, {"$set": {"invoice_no": inv}})
     _log_tx(_mid(m), "product", f"Product '{prod['title']}'", amount=order["total"],
             meta={"product_id": str(prod["_id"]), "invoice_no": inv})
     return {"message": "Payment verified. Product pending admin approval.",
@@ -444,6 +492,8 @@ def renew_order(pid: str, data: dict, m=Depends(get_merchant)):
 
 @router.post("/products/{pid}/renew/verify")
 def verify_renewal(pid: str, data: dict, m=Depends(get_merchant)):
+    """Idempotent: one paid renewal order extends the product exactly once. A paid renewal uses the
+    end date / days PERSISTED on the order, so it also works when verified after midnight."""
     mid = _mid(m)
     prod = _own(pid, m)
     rp_oid, rp_pid, sig = (data.get("razorpay_order_id", ""), data.get("razorpay_payment_id", ""),
@@ -451,19 +501,36 @@ def verify_renewal(pid: str, data: dict, m=Depends(get_merchant)):
     q = {"kind": "renew", "product_id": pid, "merchant_id": mid}
     order = db[ORDERS].find_one({**q, "razorpay_order_id": rp_oid}) if rp_oid else None
     order = order or db[ORDERS].find_one({**q, "status": "created"}, sort=[("created_at", -1)])
+    if not order and not rp_oid:       # a repeat call without ids: answer from the latest already-paid renewal
+        order = db[ORDERS].find_one({**q, "status": "paid"}, sort=[("created_at", -1)])
     if not order:
         raise HTTPException(404, "Renewal order not found")
+
+    def _done(cur):
+        return {"ok": True, "message": "Product already renewed.", "already_processed": True,
+                "new_end_date": _dstr(cur.get("end_date"))}
+
     if order.get("status") == "paid":
-        return {"ok": True, "message": "Product already renewed."}
+        return _done(prod)
     _require_valid_razorpay_payment(order, rp_oid, rp_pid, sig)
     total = float(order.get("total", 0) or 0)
+    if not _claim_order(order["_id"]):
+        if _already_done(order["_id"]):
+            return _done(prod)
+        raise HTTPException(409, "This renewal is already being processed. Please wait a moment.")
     payment = {"razorpay_renewal_order_id": rp_oid, "last_renewal_payment_id": rp_pid,
                "discount_code": order.get("discount_code") or ""} if total > 0 else None
-    # Free renewals are re-validated inside apply_renewal (lock + fresh decision).
-    new = _guard(P.apply_renewal, prod, order["end_date"], charged_amount=total, payment=payment,
-                 price=_order_price(order))
+    try:
+        # Free renewals are re-validated inside apply_renewal (lock + fresh decision).
+        new = _guard(P.apply_renewal, prod, order["end_date"], charged_amount=total, payment=payment,
+                     price=_order_price(order), order_ref=str(order["_id"]),
+                     quoted_days=(int(order.get("days") or 0) or None) if total > 0 else None)
+    except Exception:
+        _release_order(order["_id"])
+        raise
     db[ORDERS].update_one({"_id": order["_id"]}, {"$set": {"status": "paid", "payment_id": rp_pid,
-                                                          "paid_at": datetime.utcnow()}})
+                                                          "paid_at": datetime.utcnow()},
+                                                  "$unset": {"processing_at": ""}})
     _mark_discount_used(order.get("discount_code"))
     _log_tx(mid, "product_renew", f"Product '{prod.get('title','')}' renewed", amount=total,
             meta={"product_id": pid})

@@ -351,19 +351,53 @@ def create_free(*, merchant: dict, fields: dict, end_raw, from_raw=None, source:
     return doc
 
 
+def quoted_period(from_raw, end_raw):
+    """Dates of an ALREADY QUOTED (and paid) order -> (start, end, days). The merchant agreed to
+    these dates when the order was created, so they are honoured as persisted: no 'start date in
+    the past' check (the calendar may have rolled over between payment and verification) and no
+    re-check of the max-validity setting (the Admin may have changed it since). Only structural
+    sanity is enforced. Inclusive rule unchanged: 1 day = start == end."""
+    end = parse_date(end_raw)
+    if end is None:
+        raise ProductError(400, "The order has no valid end date")
+    start = parse_date(from_raw) if from_raw not in (None, "") else None
+    if start is None:                    # order without a start date: default to today, never after the end
+        start = min(ist_today(), end)
+    if end < start:
+        raise ProductError(400, "The order has an invalid date range")
+    return start, end, inclusive_days(start, end)
+
+
 def create_paid(*, merchant: dict, fields: dict, end_raw, from_raw=None, source: str, paid_total: float,
-                payment: dict, price: dict) -> dict:
+                payment: dict, price: dict, quoted: bool = False, order_ref: str = "") -> dict:
     """Insert a paid product after the merchant's payment was verified. `price` is what the
     ORDER quoted (unit_price, price_per_day, gst_percent, gst_amount) - the merchant is
-    recorded at the price they were shown and paid, even if the Admin changed the rate since."""
+    recorded at the price they were shown and paid, even if the Admin changed the rate since.
+
+    quoted=True  -> the dates come from the persisted order (see quoted_period).
+    order_ref    -> the product-order id; at most ONE product can ever be created for it
+                    (a repeat returns the existing product, and a unique index backs it up)."""
     sid = _need_store(fields)
-    start, end, days = validate_period(from_raw, end_raw)
+    start, end, days = quoted_period(from_raw, end_raw) if quoted else validate_period(from_raw, end_raw)
     with store_lock(sid):
+        if order_ref:
+            existing = db[PRODUCTS].find_one({"product_order_id": str(order_ref)})
+            if existing:
+                return existing
         d = {"tier": "paid", "price_per_day": price["price_per_day"], "unit_price": price["unit_price"],
              "gst_percent": price["gst_percent"], "gst_amount": price["gst_amount"]}
+        pay = dict(payment or {})
+        if order_ref:
+            pay["product_order_id"] = str(order_ref)
         doc = build_doc(merchant=merchant, fields=fields, start_date=start, end_date=end,
-                        source=source, decision=d, charged_amount=paid_total, payment=payment)
-        doc["_id"] = db[PRODUCTS].insert_one(doc).inserted_id
+                        source=source, decision=d, charged_amount=paid_total, payment=pay)
+        try:
+            doc["_id"] = db[PRODUCTS].insert_one(doc).inserted_id
+        except DuplicateKeyError:
+            existing = db[PRODUCTS].find_one({"product_order_id": str(order_ref)}) if order_ref else None
+            if existing:
+                return existing
+            raise
     return doc
 
 
@@ -499,21 +533,39 @@ def renew_decision(doc: dict, days: int = 0) -> dict:
 
 
 def apply_renewal(doc: dict, end_raw, *, charged_amount: float = 0.0, payment: dict = None,
-                  price: dict = None) -> dict:
+                  price: dict = None, quoted_days: int = None, order_ref: str = "") -> dict:
     """Extend/reactivate. Free renewals re-check under the lock; paid renewals
-    are applied after the caller verified payment. `price` = what the renewal ORDER quoted."""
-    end, days = renewal_period(doc, end_raw)
+    are applied after the caller verified payment. `price` = what the renewal ORDER quoted.
+
+    quoted_days -> a PAID renewal: end date and billable days are taken from the persisted order,
+                   so a verification after midnight cannot fail or change what was bought.
+    order_ref   -> the renewal-order id; applying the same order twice is a no-op."""
+    ensure_editable(doc)
+    if quoted_days is not None:
+        end = parse_date(end_raw)
+        if end is None:
+            raise ProductError(400, "The order has no valid end date")
+        days = int(quoted_days)
+    else:
+        end, days = renewal_period(doc, end_raw)
     with store_lock(doc.get("store_id")):
-        d = renew_decision(doc, days)
+        fresh = db[PRODUCTS].find_one({"_id": doc["_id"]}) or doc
+        if order_ref and any(str(r.get("order_ref", "")) == str(order_ref) for r in fresh.get("renewals", [])):
+            return fresh                                    # already applied - never extend twice
+        ensure_editable(fresh)
+        d = renew_decision(fresh, days)
         if charged_amount <= 0 and d["tier"] == "paid":
             raise ProductError(409, _paid_message(d))
         # Purchase history is permanent: pricing_tier / unit_price / charged_amount of the
         # ORIGINAL purchase are never rewritten. Each renewal is appended instead.
         now = datetime.utcnow()
-        start = parse_date(doc.get("start_date")) or ist_today()
+        cur = parse_date(fresh.get("end_date"))
+        if quoted_days is not None and cur and cur > end:
+            end = cur                                       # never shorten a product that already runs longer
+        start = parse_date(fresh.get("start_date")) or ist_today()
         upd = {"end_date": end, "is_active": True, "updated_at": now, "renewed_at": now,
                "duration_days": inclusive_days(min(start, end), end)}
-        if doc.get("status") == "expired":
+        if fresh.get("status") == "expired":
             upd["status"] = "approved"
         if payment:
             upd.update(payment)
@@ -524,6 +576,8 @@ def apply_renewal(doc: dict, end_raw, *, charged_amount: float = 0.0, payment: d
                  "unit_price": q.get("unit_price", d["unit_price"]),
                  "charged_amount": round(float(charged_amount or 0), 2),
                  "gst_percent": q.get("gst_percent", d["gst_percent"])}
+        if order_ref:
+            entry["order_ref"] = str(order_ref)
         db[PRODUCTS].update_one({"_id": doc["_id"]}, {"$set": upd, "$push": {"renewals": entry}})
     return db[PRODUCTS].find_one({"_id": doc["_id"]})
 
@@ -544,3 +598,5 @@ def ensure_indexes():
     db[PRODUCTS].create_index([("store_id", 1), ("status", 1), ("end_date", 1)])
     db[ORDERS].create_index([("merchant_id", 1), ("created_at", -1)])
     db[ORDERS].create_index("razorpay_order_id")
+    # At most one product per paid product-order (DB-level guard behind the idempotent verify).
+    db[PRODUCTS].create_index("product_order_id", unique=True, sparse=True)

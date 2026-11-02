@@ -250,19 +250,52 @@ def deactivate_product(vid: str, a=Depends(get_current_admin)):
 
 @router.put("/products/{vid}/extend")
 def extend_product(vid: str, data: dict, a=Depends(get_current_admin)):
-    """Admin goodwill extension by N days (no charge)."""
+    """Admin goodwill extension by N days (no charge, no order, no pricing/history change).
+
+    It only moves the end date. It never approves, rejects or (re)activates a product:
+      approved + active     -> end date extended, nothing else changes
+      approved + inactive   -> end date extended, stays inactive (a merchant/admin deactivation is respected)
+      expired (was approved)-> end date extended and status restored to approved; stays inactive until
+                               someone activates it
+      pending / rejected / deleted -> refused with a clear error"""
     _check_perm(a, "Products", "edit")
-    doc = _get(vid)
+    doc = _get(vid, allow_deleted=True)
+    status = doc.get("status")
+    if status == "deleted":
+        raise HTTPException(410, "This product was deleted and cannot be extended.")
+    if status == "rejected":
+        raise HTTPException(409, "This product was rejected and cannot be extended.")
+    if status == "pending":
+        raise HTTPException(409, "This product is pending approval. Approve it first; extending does not approve it.")
+    if status == "expired" and not (doc.get("approved_at") or doc.get("renewed_at") or doc.get("admin_extended")
+                                    or doc.get("source") == "admin"):
+        raise HTTPException(409, "This product expired without ever being approved, so it cannot be extended.")
+    if status not in ("approved", "expired"):
+        raise HTTPException(409, f"A product with status '{status}' cannot be extended.")
     try:
-        days = max(1, int(data.get("days", 7)))
+        days = int(data.get("days", 7))
     except Exception:
         raise HTTPException(400, "days must be a number")
-    end = P.parse_date(doc.get("end_date")) or P.ist_today()
-    new_end = max(end, P.ist_today()) + timedelta(days=days)
-    db[PRODUCTS].update_one({"_id": doc["_id"]}, {"$set": {
-        "end_date": new_end, "status": "approved", "is_active": True,
-        "admin_extended": True, "extended_at": datetime.utcnow(), "updated_at": datetime.utcnow()}})
-    return {"ok": True, "new_end_date": new_end.isoformat(), "extended_days": days}
+    if days < 1:
+        raise HTTPException(400, "days must be at least 1")
+    max_days = P.get_settings()["product_max_validity_days"]
+    if days > max_days:
+        raise HTTPException(400, f"A product can run for at most {max_days} days")
+    today = P.ist_today()
+    end = P.parse_date(doc.get("end_date")) or today
+    new_end = max(end, today) + timedelta(days=days)
+    if (new_end - today).days + 1 > max_days:            # same rule as a merchant renewal: remaining time from today
+        raise HTTPException(400, f"A product can run for at most {max_days} days from today. "
+                                 f"Extend by fewer days.")
+    now = datetime.utcnow()
+    start = P.parse_date(doc.get("start_date")) or today
+    upd = {"end_date": new_end, "duration_days": P.inclusive_days(min(start, new_end), new_end),
+           "admin_extended": True, "extended_at": now, "updated_at": now}
+    if status == "expired":
+        upd["status"] = "approved"        # is_active is deliberately NOT touched
+    db[PRODUCTS].update_one({"_id": doc["_id"]}, {"$set": upd})
+    return {"ok": True, "new_end_date": new_end.isoformat(), "extended_days": days,
+            "status": upd.get("status", status), "is_active": bool(doc.get("is_active", True))}
 
 
 # ── reporting ──────────────────────────────────────────────────────────────────
