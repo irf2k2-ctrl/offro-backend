@@ -8644,6 +8644,64 @@ function gcOnStoreChange() {
       <i class="fab fa-whatsapp" style="color:#25D366"></i> WhatsApp Live Chat
     </h5>
     <span style="font-size:12px;color:var(--muted)">Incoming messages from customers &middot; Manual replies only</span>
+    <button type="button" class="btn btn-sm btn-secondary" id="wa_tpl_toggle" onclick="waTplTogglePanel()" style="margin-left:auto;">
+      <i class="fas fa-vial"></i> WhatsApp Template Test
+    </button>
+  </div>
+
+  <!-- WhatsApp Template Test (separate from Live Chat; single recipient, dry-run first) -->
+  <div id="wa_tpl_panel" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:10px;flex-shrink:0;max-height:60vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+      <i class="fas fa-vial" style="color:var(--primary)"></i>
+      <strong style="color:var(--primary);">WhatsApp Template Test</strong>
+      <span style="font-size:12px;color:var(--muted);">Template <code>offro_merchant_invitation</code> &middot; English &middot; ONE recipient per test</span>
+    </div>
+    <div style="font-size:12px;color:var(--warning);margin-bottom:12px;">
+      This is a marketing template. Send only to a person who has explicitly opted in to WhatsApp messages from OffrO &mdash; a publicly listed business number is not consent.
+    </div>
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label" style="font-size:12px;font-weight:600;" for="wa_tpl_phone">Recipient phone (with country code)</label>
+        <input id="wa_tpl_phone" class="form-control form-control-sm" inputmode="tel" autocomplete="off" placeholder="919876543210" oninput="waTplInputsChanged()">
+        <small class="text-muted">One number only, digits with country code (e.g. 91&hellip;).</small>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" style="font-size:12px;font-weight:600;" for="wa_tpl_file">Header image</label>
+        <input id="wa_tpl_file" type="file" class="form-control form-control-sm" accept="image/jpeg,image/png,image/webp" onchange="waTplFileSelected(this)">
+        <small id="wa_tpl_upload_status" class="text-muted">JPEG/PNG/WebP, max 5 MB. Uploaded to WhatsApp when selected.</small>
+      </div>
+      <div class="col-md-4" id="wa_tpl_preview_col" style="display:none;">
+        <img id="wa_tpl_preview" alt="Header preview" style="max-height:74px;max-width:100%;border-radius:8px;border:1px solid var(--border);">
+      </div>
+      <div class="col-12">
+        <label class="form-label" style="font-size:12px;font-weight:600;" for="wa_tpl_note">Consent note (how and when this person opted in)</label>
+        <textarea id="wa_tpl_note" class="form-control form-control-sm" rows="2" maxlength="500" placeholder="e.g. Opted in via the merchant sign-up form on 2026-10-01" oninput="waTplInputsChanged()"></textarea>
+      </div>
+      <div class="col-12">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="wa_tpl_consent" onchange="waTplInputsChanged()">
+          <label class="form-check-label" for="wa_tpl_consent" style="font-size:13px;">
+            I confirm this recipient has <strong>explicitly opted in</strong> to receive WhatsApp marketing messages from OffrO.
+          </label>
+        </div>
+        <div class="form-check" style="margin-top:6px;">
+          <input class="form-check-input" type="checkbox" id="wa_tpl_dry" checked onchange="waTplInputsChanged()">
+          <label class="form-check-label" for="wa_tpl_dry" style="font-size:13px;">
+            <strong>Dry run</strong> &mdash; check everything with Meta but do <u>not</u> send a message (default).
+          </label>
+        </div>
+        <small id="wa_tpl_gate_hint" class="text-muted" style="display:none;"></small>
+      </div>
+      <div class="col-12" style="display:flex;gap:8px;align-items:center;">
+        <button type="button" id="wa_tpl_run" class="btn btn-sm btn-secondary" onclick="waTplRun()">
+          <i class="fas fa-vial"></i> Run dry-run
+        </button>
+        <button type="button" class="btn btn-sm" onclick="waTplReset()" style="background:none;border:1px solid var(--border);">Reset</button>
+      </div>
+      <div class="col-12">
+        <div id="wa_tpl_result" role="status" aria-live="polite"></div>
+      </div>
+    </div>
   </div>
 
   <div class="wa-chat-wrap" style="overflow:hidden;">
@@ -8739,6 +8797,184 @@ function gcOnStoreChange() {
   </div>
 </div>
 <!-- /WhatsApp Live Chat Section -->
+
+<script>
+// ══════════════════════════════════════════════════════
+//  WhatsApp Template Test — single recipient, dry-run first.
+//  Auth: same-origin cookies (credentials:'include'), exactly like Live Chat. No token is ever read,
+//  stored or logged here, and responses are rendered with textContent only.
+// ══════════════════════════════════════════════════════
+var _waTplMediaId = '';          // media_id returned by POST /admin/whatsapp/upload
+var _waTplUploadedName = '';
+var _waTplDryOkKey = '';         // inputs that passed a dry-run; real send needs an exact match
+var _waTplBusy = false;
+var _WA_TPL_MAX = 5 * 1024 * 1024;
+
+function waTplEl(id){ return document.getElementById(id); }
+
+function waTplTogglePanel(){
+  var p = waTplEl('wa_tpl_panel');
+  p.style.display = (p.style.display === 'none') ? 'block' : 'none';
+}
+
+function waTplNormalizePhone(raw){
+  raw = String(raw || '').trim();
+  if (/[,;\n\r|]/.test(raw) || raw.split(/\s+/).length > 3) return {err: 'Only ONE phone number is allowed.'};
+  var d = raw.replace(/[\s\-()]/g, '');
+  if (d.charAt(0) === '+') d = d.slice(1);
+  if (!/^[1-9][0-9]{7,14}$/.test(d)) return {err: 'Enter the number in international format with country code, e.g. 919876543210.'};
+  return {phone: d};
+}
+
+function waTplKey(){
+  var p = waTplNormalizePhone(waTplEl('wa_tpl_phone').value);
+  return [p.phone || '', _waTplMediaId, waTplEl('wa_tpl_note').value.trim(), waTplEl('wa_tpl_consent').checked ? '1' : '0'].join('|');
+}
+
+function waTplShow(kind, title, rows, lines){
+  var box = waTplEl('wa_tpl_result');
+  box.textContent = '';
+  var colors = {ok:'#1e7e34', err:'var(--danger)', info:'var(--muted)'};
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'border:1px solid '+(kind==='ok'?'#b7e1c1':kind==='err'?'#f1b9b3':'var(--border)')+';border-radius:10px;padding:10px 14px;font-size:13px;background:'+(kind==='ok'?'#f3fbf5':kind==='err'?'#fdf4f3':'#fafafa')+';';
+  var h = document.createElement('div');
+  h.style.cssText = 'font-weight:700;margin-bottom:6px;color:'+colors[kind]+';';
+  h.textContent = title;
+  wrap.appendChild(h);
+  (rows || []).forEach(function(r){
+    var d = document.createElement('div');
+    var k = document.createElement('span'); k.style.cssText = 'display:inline-block;min-width:150px;color:var(--muted);'; k.textContent = r[0];
+    var v = document.createElement('span'); v.textContent = r[1];
+    d.appendChild(k); d.appendChild(v); wrap.appendChild(d);
+  });
+  (lines || []).forEach(function(t){
+    var d = document.createElement('div'); d.textContent = t; wrap.appendChild(d);
+  });
+  box.appendChild(wrap);
+}
+
+// Anything the admin edits invalidates a previous dry-run, so a real send always follows a matching dry-run.
+function waTplInputsChanged(){ waTplRefreshControls(); }
+
+function waTplRefreshControls(){
+  var dry = waTplEl('wa_tpl_dry').checked;
+  var btn = waTplEl('wa_tpl_run');
+  var hint = waTplEl('wa_tpl_gate_hint');
+  var matched = _waTplDryOkKey && _waTplDryOkKey === waTplKey();
+  if (dry) {
+    btn.innerHTML = '<i class="fas fa-vial"></i> Run dry-run';
+    btn.className = 'btn btn-sm btn-secondary';
+    btn.disabled = _waTplBusy;
+    hint.style.display = 'none';
+  } else {
+    btn.innerHTML = '<i class="fab fa-whatsapp"></i> Send ONE real test message';
+    btn.className = 'btn btn-sm btn-success';
+    btn.disabled = _waTplBusy || !matched;
+    hint.style.display = 'block';
+    hint.style.color = matched ? '#1e7e34' : 'var(--danger)';
+    hint.textContent = matched ? 'Dry-run passed for these exact inputs. You will be asked to confirm before sending.'
+      : 'Sending is locked: run a successful dry-run with these exact inputs first (changing any field requires a new dry-run).';
+  }
+}
+
+async function waTplFileSelected(input){
+  var st = waTplEl('wa_tpl_upload_status');
+  var file = input.files && input.files[0];
+  _waTplMediaId = ''; _waTplUploadedName = ''; _waTplDryOkKey = '';
+  waTplEl('wa_tpl_preview_col').style.display = 'none';
+  waTplRefreshControls();
+  if (!file) { st.textContent = 'JPEG/PNG/WebP, max 5 MB. Uploaded to WhatsApp when selected.'; st.style.color = ''; return; }
+  if (['image/jpeg','image/png','image/webp'].indexOf(file.type) < 0) {
+    st.textContent = '❌ Unsupported file type. Use JPEG, PNG or WebP.'; st.style.color = 'var(--danger)'; input.value = ''; return;
+  }
+  if (file.size > _WA_TPL_MAX) { st.textContent = '❌ File too large (max 5 MB).'; st.style.color = 'var(--danger)'; input.value = ''; return; }
+  st.textContent = '⏳ Uploading to WhatsApp…'; st.style.color = 'var(--muted)';
+  try {
+    var fd = new FormData(); fd.append('file', file);
+    var r = await fetch('/admin/whatsapp/upload', {method: 'POST', credentials: 'include', body: fd});
+    var d = {}; try { d = await r.json(); } catch(e) {}
+    if (r.status === 401 || r.status === 403) { st.textContent = '❌ Session expired — please log in again.'; st.style.color = 'var(--danger)'; return; }
+    if (r.ok && d.ok && d.media_id) {
+      _waTplMediaId = String(d.media_id); _waTplUploadedName = file.name;
+      st.textContent = '✅ Uploaded — media id ' + _waTplMediaId + ' (valid ~30 days)'; st.style.color = '#1e7e34';
+      var url = URL.createObjectURL(file);
+      var img = waTplEl('wa_tpl_preview'); img.onload = function(){ URL.revokeObjectURL(url); }; img.src = url;
+      waTplEl('wa_tpl_preview_col').style.display = 'block';
+    } else {
+      st.textContent = '❌ Upload failed: ' + (typeof d.detail === 'string' ? d.detail : 'HTTP ' + r.status); st.style.color = 'var(--danger)';
+      input.value = '';
+    }
+  } catch (e) {
+    st.textContent = '❌ Upload error: network problem'; st.style.color = 'var(--danger)'; input.value = '';
+  }
+  waTplRefreshControls();
+}
+
+async function waTplRun(){
+  if (_waTplBusy) return;
+  var dry = waTplEl('wa_tpl_dry').checked;
+  var p = waTplNormalizePhone(waTplEl('wa_tpl_phone').value);
+  var note = waTplEl('wa_tpl_note').value.trim();
+  var problems = [];
+  if (p.err) problems.push(p.err);
+  if (!_waTplMediaId) problems.push('Upload a header image first.');
+  if (!waTplEl('wa_tpl_consent').checked) problems.push('Confirm that the recipient has explicitly opted in.');
+  if (note.length < 10) problems.push('Enter a consent note (at least 10 characters).');
+  if (problems.length) { waTplShow('err', 'Please fix the following', [], problems); return; }
+
+  var key = waTplKey();
+  if (!dry) {
+    if (_waTplDryOkKey !== key) { waTplShow('err', 'Run a successful dry-run with these exact inputs first.'); waTplRefreshControls(); return; }
+    var ok = window.confirm('Send ONE real WhatsApp marketing message?\n\nTemplate: offro_merchant_invitation\nRecipient: number ending ' + p.phone.slice(-4) +
+      '\n\nOnly continue if this person has explicitly opted in. This sends exactly one message and cannot be undone.');
+    if (!ok) return;
+  }
+
+  _waTplBusy = true; waTplRefreshControls();
+  waTplShow('info', dry ? '⏳ Running dry-run…' : '⏳ Sending…');
+  try {
+    var r = await fetch('/admin/whatsapp/template-test', {
+      method: 'POST', credentials: 'include', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({phone: p.phone, consent_confirmed: true, consent_note: note, header_media_id: _waTplMediaId, dry_run: dry})
+    });
+    var d = {}; try { d = await r.json(); } catch(e) {}
+    if (r.status === 401 || r.status === 403) {
+      var dis = typeof d.detail === 'string' && /disabled|WHATSAPP_TEMPLATE_TEST_ENABLED/i.test(d.detail);
+      waTplShow('err', dis ? 'Template test is switched off on the server' : 'Not authorised',
+        [], [dis ? d.detail : 'Your admin session has expired or you are not allowed to do this. Please log in again.']);
+    } else if (r.ok && d.ok) {
+      var rows = [['Template', (d.template || '') + ' (' + (d.language || '') + ')'], ['Meta template status', d.template_status || ''],
+                  ['Recipient', '•••• ' + (d.to_last4 || '')], ['Header image source', d.header_source === 'id' ? 'Uploaded media id' : (d.header_source || '')]];
+      if (d.dry_run) {
+        _waTplDryOkKey = key;
+        if (d.category) rows.splice(2, 0, ['Category', d.category]);
+        waTplShow('ok', '✅ Dry-run passed — nothing was sent', rows,
+          ['✔ Template is APPROVED with an image header and no variables', '✔ Phone number format valid', '✔ Consent confirmed and note provided',
+           '✔ Header image uploaded (media id attached)', 'To send for real, untick “Dry run”, then confirm.']);
+      } else {
+        _waTplDryOkKey = '';
+        rows.push(['Message id', d.message_id || '']);
+        waTplShow('ok', '✅ Message sent to WhatsApp (one message)', rows, ['Delivery status will arrive via the webhook. Run a new dry-run before any further test.']);
+        waTplEl('wa_tpl_dry').checked = true;
+      }
+    } else {
+      waTplShow('err', '❌ ' + (dry ? 'Dry-run failed' : 'Send failed') + ' (HTTP ' + r.status + ')', [],
+        [typeof d.detail === 'string' ? d.detail : 'Unexpected response from the server.']);
+    }
+  } catch (e) {
+    waTplShow('err', '❌ Network error', [], ['Could not reach the server. Nothing was confirmed as sent — check before retrying.']);
+  }
+  _waTplBusy = false; waTplRefreshControls();
+}
+
+function waTplReset(){
+  ['wa_tpl_phone','wa_tpl_note'].forEach(function(i){ waTplEl(i).value = ''; });
+  waTplEl('wa_tpl_file').value = ''; waTplEl('wa_tpl_consent').checked = false; waTplEl('wa_tpl_dry').checked = true;
+  waTplEl('wa_tpl_preview_col').style.display = 'none'; waTplEl('wa_tpl_result').textContent = '';
+  var st = waTplEl('wa_tpl_upload_status'); st.textContent = 'JPEG/PNG/WebP, max 5 MB. Uploaded to WhatsApp when selected.'; st.style.color = '';
+  _waTplMediaId = ''; _waTplUploadedName = ''; _waTplDryOkKey = ''; waTplRefreshControls();
+}
+</script>
 
 <script>
 // ══════════════════════════════════════════════════════
