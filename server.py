@@ -8,17 +8,20 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Redirect
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, dashboard_auth, maps, smart_link
 from routers import merchant_products, admin_products, public_products, collaborations
 from database import db
-import base64, io, re
+import base64, io, re, html as _html
+from services.security import cors_origins, SecurityMiddleware
 
 app = FastAPI(title="OffrO API", version="5.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins(),        # explicit trusted origins (see services/security.py) - never "*" with credentials
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Outermost: security headers + CSP, Secure cookies over HTTPS, noindex/no-docs/no-/open on staging hosts.
+app.add_middleware(SecurityMiddleware)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -85,7 +88,12 @@ async def root_redirect():
 
 # ── File download endpoints ──
 @app.get("/download/admin_dashboard")
-def download_admin_dashboard():
+def download_admin_dashboard(request: Request):
+    # Was public. The dashboard source is now only downloadable with a valid admin session.
+    token = request.cookies.get("admin_token") or \
+            request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not token or not (db.dashboard_users.find_one({"token": token}) or db.admins.find_one({"token": token})):
+        return JSONResponse(status_code=401, content={"detail": "Admin login required"})
     return FileResponse(
         path="templates/admin_dashboard.html",
         media_type="text/html",
@@ -481,7 +489,7 @@ def serve_admin_dashboard(request: Request):
         return response
     except Exception:
         import traceback
-        return HTMLResponse(f"<pre>Template Error:\n{traceback.format_exc()}</pre>", status_code=500)
+        return HTMLResponse(f"<pre>Template Error:\n{_html.escape(traceback.format_exc())}</pre>", status_code=500)
 
 
 @app.get("/merchant-dashboard", response_class=HTMLResponse)
@@ -490,7 +498,7 @@ def serve_merchant_dashboard(request: Request):
         return templates.TemplateResponse("merchant_dashboard.html", {"request": request})
     except Exception:
         import traceback
-        return HTMLResponse(f"<pre>Template Error:\n{traceback.format_exc()}</pre>", status_code=500)
+        return HTMLResponse(f"<pre>Template Error:\n{_html.escape(traceback.format_exc())}</pre>", status_code=500)
 
 
 @app.get("/health")
