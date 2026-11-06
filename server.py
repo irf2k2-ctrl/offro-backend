@@ -6,18 +6,22 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, dashboard_auth, maps, smart_link
+from routers import merchant_products, admin_products, public_products, collaborations
 from database import db
-import base64, io, re
+import base64, io, re, html as _html
+from services.security import cors_origins, SecurityMiddleware
 
 app = FastAPI(title="OffrO API", version="5.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins(),        # explicit trusted origins (see services/security.py) - never "*" with credentials
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Outermost: security headers + CSP, Secure cookies over HTTPS, noindex/no-docs/no-/open on staging hosts.
+app.add_middleware(SecurityMiddleware)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -27,6 +31,11 @@ app.include_router(merchant_app.router,    prefix="/merchant")
 app.include_router(admin.router,          prefix="/admin")
 app.include_router(users.router,          prefix="/user")
 app.include_router(public.router)
+app.include_router(public_products.router)   # /products-public, /products/{id}/reviews ... (merchant_products)
+app.include_router(merchant_products.router) # /merchant/products/...
+app.include_router(admin_products.router)    # /admin/products/...
+app.include_router(collaborations.merchant_router)    # /merchant/collab/...
+app.include_router(collaborations.influencer_router)  # /influencer/opportunities/...
 app.include_router(popup_campaigns.router)
 app.include_router(webhook.router)          # WhatsApp Cloud API webhook — no prefix
 app.include_router(wa_chat.router, prefix="/admin")  # WhatsApp Live Chat admin API
@@ -79,7 +88,19 @@ async def root_redirect():
 
 # ── File download endpoints ──
 @app.get("/download/admin_dashboard")
-def download_admin_dashboard():
+def download_admin_dashboard(request: Request):
+    # Was public. The dashboard source is now only downloadable with a valid admin session.
+    token = request.cookies.get("admin_token") or \
+            request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not token:
+        return JSONResponse(status_code=401, content={"detail": "Admin login required"})
+    du = db.dashboard_users.find_one({"token": token})
+    if du:
+        # Same rule as routers.admin.get_current_admin: disabled / suspended accounts are refused.
+        if du.get("status") in ("disabled", "suspended"):
+            return JSONResponse(status_code=403, content={"detail": "Account is " + du.get("status", "disabled")})
+    elif not db.admins.find_one({"token": token}):
+        return JSONResponse(status_code=401, content={"detail": "Admin login required"})
     return FileResponse(
         path="templates/admin_dashboard.html",
         media_type="text/html",
@@ -280,6 +301,20 @@ def startup():
         _ensure_indexes()
     except Exception as e:
         print(f"⚠️  index creation skipped (DB unreachable at startup): {e}")
+    # Product settings (free_product_limit, product_price_per_day, ...) — creates only
+    # MISSING keys; never overwrites a value the Admin set. Plus product indexes.
+    try:
+        from services import products as _products_svc
+        _created = _products_svc.ensure_settings()
+        if _created:
+            print(f"[products] seeded missing settings: {_created}")
+        _products_svc.ensure_indexes()
+    except Exception as e:
+        print(f"⚠️  product settings/indexes skipped: {e}")
+    try:
+        collaborations.ensure_indexes()
+    except Exception as e:
+        print(f"⚠️  collaboration indexes skipped: {e}")
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
         from routers.otp_service import _ensure_otp_indexes
@@ -539,7 +574,7 @@ def serve_admin_dashboard(request: Request):
         return response
     except Exception:
         import traceback
-        return HTMLResponse(f"<pre>Template Error:\n{traceback.format_exc()}</pre>", status_code=500)
+        return HTMLResponse(f"<pre>Template Error:\n{_html.escape(traceback.format_exc())}</pre>", status_code=500)
 
 
 @app.get("/merchant-dashboard", response_class=HTMLResponse)
@@ -548,7 +583,7 @@ def serve_merchant_dashboard(request: Request):
         return templates.TemplateResponse("merchant_dashboard.html", {"request": request})
     except Exception:
         import traceback
-        return HTMLResponse(f"<pre>Template Error:\n{traceback.format_exc()}</pre>", status_code=500)
+        return HTMLResponse(f"<pre>Template Error:\n{_html.escape(traceback.format_exc())}</pre>", status_code=500)
 
 
 @app.get("/health")

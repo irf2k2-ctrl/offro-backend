@@ -96,6 +96,31 @@ tr:hover td { background: #f7faf8; }
 #qrImage { width: 180px; height: 180px; border-radius: 10px; border: 3px solid var(--accent); }
 .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 </style>
+<script>
+/* ── XSS-safe output helpers (security hardening) ──────────────────────────────
+   escHtml  : text inside HTML or inside a quoted HTML attribute
+   _secJs   : value placed inside a JS string in an inline handler, e.g. onclick="f('${...}')"
+              (hex-escapes everything outside a tiny safe set, so it is safe in ', " and ` strings)
+   _secUrl  : value placed in src= / href=; blocks javascript:, vbscript:, data:text/html ... */
+function escHtml(s) {
+  if (s === null || s === undefined || s === false) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function _secJs(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[^A-Za-z0-9 _\-.,@:\/()+]/g, function (c) {
+    var n = c.charCodeAt(0);
+    return n < 256 ? '\\x' + ('0' + n.toString(16)).slice(-2) : '\\u' + ('000' + n.toString(16)).slice(-4);
+  });
+}
+function _secUrl(u) {
+  u = String(u === null || u === undefined ? '' : u).trim();
+  if (!u) return '';
+  var ok = /^(https?:|blob:)/i.test(u) || /^data:(image\/(png|jpe?g|gif|webp|bmp|svg\+xml)|video\/(mp4|webm|ogg));/i.test(u) ||
+           !/^[a-z][a-z0-9+.\-]*:/i.test(u);
+  return ok ? escHtml(u) : '';
+}
+</script>
 </head>
 <body>
 
@@ -272,21 +297,21 @@ async function loadStores() {
         } else {
             myStores.forEach(s => {
                 html += `<div class="store-card">
-                    <h5>${s.store_name || "-"}</h5>
+                    <h5>${escHtml(s.store_name || "-")}</h5>
                     <div class="meta">
-                        <span class="me-3"><i class="fas fa-tag"></i> ${s.category || "General"}</span>
-                        <span class="me-3"><i class="fas fa-map-marker-alt"></i> ${s.city || "-"}, ${s.area || "-"}</span>
+                        <span class="me-3"><i class="fas fa-tag"></i> ${escHtml(s.category || "General")}</span>
+                        <span class="me-3"><i class="fas fa-map-marker-alt"></i> ${escHtml(s.city || "-")}, ${escHtml(s.area || "-")}</span>
                         <span class="me-3"><i class="fas fa-tags"></i> ${s.deal_count || 0} deals</span>
                         <span><i class="fas fa-coins"></i> ${s.points_per_scan || 10} pts/scan</span>
                     </div>
                     <div class="d-flex align-items-center gap-2 mb-2">
-                        <span class="badge-${s.status}">${s.status}</span>
+                        <span class="badge-${escHtml(s.status)}">${escHtml(s.status)}</span>
                     </div>
                     <div class="actions">
-                        <button class="btn-outline" onclick="showQR('${s._id}', \`${s.store_name}\`, \`${s.qr_code}\`)">
+                        <button class="btn-outline" onclick="showQR('${_secJs(s._id)}', \`${_secJs(s.store_name)}\`, \`${_secJs(s.qr_code)}\`)">
                             <i class="fas fa-qrcode"></i> View QR
                         </button>
-                        <button class="btn-outline" onclick="quickAddDeal('${s._id}', \`${s.store_name}\`)">
+                        <button class="btn-outline" onclick="quickAddDeal('${_secJs(s._id)}', \`${_secJs(s.store_name)}\`)">
                             <i class="fas fa-plus"></i> Add Deal
                         </button>
                     </div>
@@ -305,14 +330,14 @@ async function loadDeals() {
         let html = "";
         deals.forEach(d => {
             html += `<tr>
-                <td>${d.store_name || "-"}</td>
-                <td><strong>${d.title || "-"}</strong></td>
+                <td>${escHtml(d.store_name || "-")}</td>
+                <td><strong>${escHtml(d.title || "-")}</strong></td>
                 <td>${d.discount || "-"}%</td>
-                <td>${d.category || "-"}</td>
+                <td>${escHtml(d.category || "-")}</td>
                 <td>${d.start_date || "-"}</td>
                 <td>${d.end_date || "-"}</td>
-                <td><span class="badge-${d.status}">${d.status}</span></td>
-                <td><button class="btn-danger-sm" onclick="deleteDeal('${d._id}')">Delete</button></td>
+                <td><span class="badge-${escHtml(d.status)}">${escHtml(d.status)}</span></td>
+                <td><button class="btn-danger-sm" onclick="deleteDeal('${_secJs(d._id)}')">Delete</button></td>
             </tr>`;
         });
         document.getElementById("deals_table").innerHTML = html ||
@@ -336,7 +361,7 @@ async function openAddDeal() {
     let select = document.getElementById("deal_store");
     select.innerHTML = '<option value="">-- Select Store --</option>';
     myStores.forEach(s => {
-        select.innerHTML += `<option value="${s._id}">${s.store_name}</option>`;
+        select.innerHTML += `<option value="${s._id}">${escHtml(s.store_name)}</option>`;
     });
     document.getElementById("deal_msg").innerText = "";
     dealModal.show();
