@@ -137,6 +137,31 @@ td[style*="sticky"]{background:#fff;}
 .wa-send-btn{background:#25D366;color:#fff;border:none;border-radius:50%;width:42px;height:42px;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;flex-shrink:0;}
 
 </style>
+<script>
+/* ── XSS-safe output helpers (security hardening) ──────────────────────────────
+   escHtml  : text inside HTML or inside a quoted HTML attribute
+   _secJs   : value placed inside a JS string in an inline handler, e.g. onclick="f('${...}')"
+              (hex-escapes everything outside a tiny safe set, so it is safe in ', " and ` strings)
+   _secUrl  : value placed in src= / href=; blocks javascript:, vbscript:, data:text/html ... */
+function escHtml(s) {
+  if (s === null || s === undefined || s === false) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function _secJs(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[^A-Za-z0-9 _\-.,@:\/()+]/g, function (c) {
+    var n = c.charCodeAt(0);
+    return n < 256 ? '\\x' + ('0' + n.toString(16)).slice(-2) : '\\u' + ('000' + n.toString(16)).slice(-4);
+  });
+}
+function _secUrl(u) {
+  u = String(u === null || u === undefined ? '' : u).trim();
+  if (!u) return '';
+  var ok = /^(https?:|blob:)/i.test(u) || /^data:(image\/(png|jpe?g|gif|webp|bmp|svg\+xml)|video\/(mp4|webm|ogg));/i.test(u) ||
+           !/^[a-z][a-z0-9+.\-]*:/i.test(u);
+  return ok ? escHtml(u) : '';
+}
+</script>
 </head>
 <body>
 
@@ -1986,17 +2011,17 @@ function renderDiscounts() {
     const dtype = d.type || 'VALUE';
     const valueDisplay = dtype === 'PERCENTAGE' ? `${d.value}%` : `₹${d.value}`;
     return `<tr>
-      <td><b>${d.code}</b></td>
-      <td>${dtype}</td>
-      <td>${valueDisplay}</td>
-      <td>${d.applies_to || 'ALL'}</td>
+      <td><b>${escHtml(d.code)}</b></td>
+      <td>${escHtml(dtype)}</td>
+      <td>${escHtml(valueDisplay)}</td>
+      <td>${escHtml(d.applies_to || 'ALL')}</td>
       <td>${d.used_count||0}</td>
       <td>${maxU}</td>
       <td>${expiry}</td>
       <td>${st}</td>
       <td>
-        <button class="btn-sm-outline" onclick="toggleDiscount('${d._id}',${!d.active})">${d.active?'Disable':'Enable'}</button>
-        <button class="btn-sm-danger" onclick="deleteDiscount('${d._id}')">Delete</button>
+        <button class="btn-sm-outline" onclick="toggleDiscount('${_secJs(d._id)}',${!d.active})">${d.active?'Disable':'Enable'}</button>
+        <button class="btn-sm-danger" onclick="deleteDiscount('${_secJs(d._id)}')">Delete</button>
       </td>
     </tr>`;
   }).join("") : '<tr><td colspan="9" style="text-align:center;color:var(--muted);">No discount codes</td></tr>';
@@ -2094,12 +2119,12 @@ async function loadInfluencers() {
   if (catSel) {
     const cats = categoriesList.length ? categoriesList.map(c => c.name || c) : [];
     catSel.innerHTML = '<option value="">Select category</option>' +
-      cats.map(c => `<option value="${c}">${c}</option>`).join('');
+      cats.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
   }
   const filterSel = document.getElementById('inf_city_filter');
   if (filterSel) {
     filterSel.innerHTML = '<option value="">All Cities</option>' +
-      infCitiesCache.map(c => `<option value="${c}">${c}</option>`).join('');
+      infCitiesCache.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
   }
 }
 
@@ -2142,8 +2167,8 @@ function renderInfluencers() {
   document.getElementById("inf_body").innerHTML = rows.length ? rows.map(i => {
     const st = i.status === 'active' ? '<span class="badge-active">Active</span>' : '<span class="badge-inactive">Inactive</span>';
     const photo = i.photo_url
-      ? `<img src="${i.photo_url}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">`
-      : `<div style="width:36px;height:36px;border-radius:50%;background:var(--light);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--primary);">${(i.name||'?')[0].toUpperCase()}</div>`;
+      ? `<img src="${_secUrl(i.photo_url)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">`
+      : `<div style="width:36px;height:36px;border-radius:50%;background:var(--light);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--primary);">${escHtml((i.name||'?')[0].toUpperCase())}</div>`;
     // Subscription/publish info (Influencer Subscription Fee + Payment +
     // Publish feature). payment_status/publish_status default to
     // PAID/published server-side for any record that predates this feature
@@ -2153,24 +2178,24 @@ function renderInfluencers() {
     const pubBadgeColor = i.publish_status === 'draft' ? '#e69500' : '#198754';
     const subInfo = `
       <div style="font-size:11px;line-height:1.6;">
-        <span style="color:${payBadgeColor};font-weight:600;">${i.payment_status||'PAID'}</span><br>
-        <span style="color:${pubBadgeColor};font-weight:600;">${i.publish_status||'published'}</span>
+        <span style="color:${payBadgeColor};font-weight:600;">${escHtml(i.payment_status||'PAID')}</span><br>
+        <span style="color:${pubBadgeColor};font-weight:600;">${escHtml(i.publish_status||'published')}</span>
         ${i.total_amount ? `<br><span style="color:var(--muted);">₹${i.total_amount}</span>` : ''}
         ${i.is_active === false ? '<br><span style="color:#dc3545;">Self-disabled</span>' : ''}
       </div>`;
     return `<tr>
       <td>${photo}</td>
-      <td><b>${i.name}</b></td>
-      <td>${i.phone || '—'}</td>
-      <td>${i.city}</td>
-      <td>${i.category||'—'}</td>
+      <td><b>${escHtml(i.name)}</b></td>
+      <td>${escHtml(i.phone || '—')}</td>
+      <td>${escHtml(i.city)}</td>
+      <td>${escHtml(i.category||'—')}</td>
       <td>⭐ ${(i.rating||0).toFixed ? i.rating.toFixed(1) : i.rating} (${i.review_count||0})</td>
       <td>${st}</td>
       <td>${subInfo}</td>
       <td>
-        <button class="btn-sm-outline" onclick="editInfluencer('${i._id}')">Edit</button>
-        <button class="btn-sm-outline" onclick="toggleInfluencerStatus('${i._id}','${i.status==='active'?'inactive':'active'}')">${i.status==='active'?'Deactivate':'Activate'}</button>
-        <button class="btn-sm-danger" onclick="deleteInfluencerRow('${i._id}')">Delete</button>
+        <button class="btn-sm-outline" onclick="editInfluencer('${_secJs(i._id)}')">Edit</button>
+        <button class="btn-sm-outline" onclick="toggleInfluencerStatus('${_secJs(i._id)}','${i.status==='active'?'inactive':'active'}')">${i.status==='active'?'Deactivate':'Activate'}</button>
+        <button class="btn-sm-danger" onclick="deleteInfluencerRow('${_secJs(i._id)}')">Delete</button>
       </td>
     </tr>`;
   }).join("") : '<tr><td colspan="9" style="text-align:center;color:var(--muted);">No influencers yet</td></tr>';
@@ -2531,17 +2556,17 @@ async function loadGiftProductRequests() {
             const val = (pts * (v.rate||0.1)).toFixed(2);
             const isPending = (v.status||"pending") === "pending";
             return `<tr>
-                <td><strong>${v.user_name||v.name||"—"}</strong></td>
-                <td>${v.phone||"—"}</td>
+                <td><strong>${escHtml(v.user_name||v.name||"—")}</strong></td>
+                <td>${escHtml(v.phone||"—")}</td>
                 <td>${pts} pts</td>
                 <td>₹${val}</td>
                 <td style="font-size:12px;">${date}</td>
                 <td><span class="badge" style="background:${isPending?'#f59e0b':'#16a34a'};color:white;padding:3px 8px;border-radius:12px;font-size:11px;">${isPending?"Pending":"Fulfilled"}</span></td>
-                <td>${isPending?`<button class='btn-p' style='font-size:11px;padding:4px 10px;' onclick="openFulfillModal('${v._id||v.id}','${v.user_name||v.name||"User"}',${pts},'${val}')">Fulfill</button>`:"<span style='color:var(--muted);font-size:12px;'>Done</span>"}</td>
+                <td>${isPending?`<button class='btn-p' style='font-size:11px;padding:4px 10px;' onclick="openFulfillModal('${_secJs(v._id||v.id)}','${_secJs(v.user_name||v.name||"User")}',${_secJs(pts)},'${_secJs(val)}')">Fulfill</button>`:"<span style='color:var(--muted);font-size:12px;'>Done</span>"}</td>
             </tr>`;
         }).join("");
     } catch(e) {
-        tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:#ef4444'>Error: "+e.message+"</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:#ef4444'>Error: "+escHtml(e.message)+"</td></tr>";
     }
 }
 
@@ -2686,14 +2711,14 @@ function renderCategories(){
     const g=gradColors[i%gradColors.length];
     return `<div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,.1);">
       <div style="height:120px;background:linear-gradient(135deg,${g[0]},${g[1]});position:relative;overflow:hidden;">
-        ${img?`<img src="${img}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;" onerror="this.style.display='none'">`:""}
+        ${img?`<img src="${_secUrl(img)}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0;" onerror="this.style.display='none'">`:""}
         <div style="position:absolute;inset:0;background:linear-gradient(to bottom,transparent 30%,rgba(0,0,0,.6))"></div>
         <div style="position:absolute;bottom:8px;left:10px;">
-          <div style="font-size:22px">${icon}</div>
-          <div style="color:#fff;font-weight:700;font-size:13px">${name}</div>
-          ${sub?`<div style="color:rgba(255,255,255,.8);font-size:10px">${sub}</div>`:""}
+          <div style="font-size:22px">${escHtml(icon)}</div>
+          <div style="color:#fff;font-weight:700;font-size:13px">${escHtml(name)}</div>
+          ${sub?`<div style="color:rgba(255,255,255,.8);font-size:10px">${escHtml(sub)}</div>`:""}
         </div>
-        <button onclick="deleteCategory('${name}')" title="Delete" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.4);border:none;color:#fff;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;line-height:1;">×</button>
+        <button onclick="deleteCategory('${_secJs(name)}')" title="Delete" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.4);border:none;color:#fff;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;line-height:1;">×</button>
       </div>
           </div>`;
   }).join("");
@@ -2805,7 +2830,7 @@ function recalcInfluencerTotal(){
 function renderPlans(){
   let html=currentPlans.map((p,i)=>`
     <div class="plan-row">
-      <label>${p.label}</label>
+      <label>${escHtml(p.label)}</label>
       <span style="font-size:12px;color:var(--muted);">₹</span>
       <input class="form-control" type="number" value="${p.price}" min="1" id="plan_price_${i}" style="max-width:130px;">
     </div>`).join("");
@@ -2916,14 +2941,14 @@ function renderMerchantsPage(){
   let html="";
   pageData.forEach(m=>{
     html+=`<tr>
-      <td><strong>${m.name||"-"}</strong></td><td>${m.phone||"-"}</td>
-      <td>${m.city||"-"}</td><td>${m.area||"-"}</td>
+      <td><strong>${escHtml(m.name||"-")}</strong></td><td>${escHtml(m.phone||"-")}</td>
+      <td>${escHtml(m.city||"-")}</td><td>${escHtml(m.area||"-")}</td>
       <td><span class="badge-active">${m.store_count||0}</span></td>
-      <td><span class="badge-${m.status}">${m.status}</span></td>
+      <td><span class="badge-${escHtml(m.status)}">${escHtml(m.status)}</span></td>
       <td style="white-space:nowrap;">
-        <button class="btn-o me-1" onclick="openEditMerchant('${m._id}')"><i class="fas fa-edit"></i> Edit</button>
-        <button class="btn-w me-1" onclick="toggleMerchant('${m._id}')">${m.status==="active"?"Off":"On"}</button>
-        <button class="btn-d" onclick="deleteMerchant('${m._id}')">Del</button>
+        <button class="btn-o me-1" onclick="openEditMerchant('${_secJs(m._id)}')"><i class="fas fa-edit"></i> Edit</button>
+        <button class="btn-w me-1" onclick="toggleMerchant('${_secJs(m._id)}')">${m.status==="active"?"Off":"On"}</button>
+        <button class="btn-d" onclick="deleteMerchant('${_secJs(m._id)}')">Del</button>
       </td></tr>`;
   });
   document.getElementById("merchants_table").innerHTML=html||`<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">No merchants</td></tr>`;
@@ -2972,14 +2997,14 @@ async function loadStores(){
     if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
     const raw=await r.json();
     if (!r.ok) {
-      document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:24px;color:#c0392b;">⚠️ ${raw.detail||('Server error '+r.status)}</td></tr>`;
+      document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:24px;color:#c0392b;">⚠️ ${escHtml(raw.detail||('Server error '+r.status))}</td></tr>`;
       return;
     }
     allStores=Array.isArray(raw)?raw:[];
     populateCityFilter("store_city_filter",allStores,"city");
     filterStores();
   } catch(e) {
-    document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:24px;color:red">Error loading stores: ${e.message}</td></tr>`;
+    document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:24px;color:red">Error loading stores: ${escHtml(e.message)}</td></tr>`;
   }
 }
 function filterStores(){
@@ -3038,7 +3063,7 @@ function renderStoresPage(){
     const _cat = (s.category||"").toLowerCase();
     // Use named function to avoid quote-escaping issues in onerror attribute
     let img = imgSrc
-      ? `<img src="${imgSrc}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="_storeImgFallback(this,'${_cat}')">`
+      ? `<img src="${_secUrl(imgSrc)}" style="width:38px;height:38px;border-radius:6px;object-fit:cover;margin-right:6px;vertical-align:middle;" onerror="_storeImgFallback(this,'${_secJs(_cat)}')">`
       : _storeImgPhHtml(_cat);
     const _badgeLabels={newly_added:"✨ Newly Added",just_opened:"🎉 Just Opened",new_store:"🆕 New Store",trending:"🔥 Trending",popular:"⭐ Popular",top_rated:"🏆 Top Rated",must_visit:"📍 Must Visit",limited_offer:"⏳ Limited Offer"};
     const _badge = s.badge||s.store_badge||"";
@@ -3064,16 +3089,16 @@ function renderStoresPage(){
     let dealBadge = (s.deal_count > 0)
       ? `<span class="badge-active" style="font-size:10px;padding:2px 7px;">🔥 ${s.best_deal>0?s.best_deal+'% off':s.deal_count+' deal'+(s.deal_count>1?'s':'')}</span>`
       : `<span style="color:var(--muted);font-size:11px;">—</span>`;
-    let statusBadge=s.status==="waiting_approval"?`<span class="badge-waiting">⏳ Waiting</span>`:`<span class="badge-${s.status}">${s.status}</span>`;
-    let approveBtn=s.status==="waiting_approval"?`<button class="btn-approve me-1" onclick="approveStore('${s._id}')">✓ Approve</button>`:"";
+    let statusBadge=s.status==="waiting_approval"?`<span class="badge-waiting">⏳ Waiting</span>`:`<span class="badge-${escHtml(s.status)}">${escHtml(s.status)}</span>`;
+    let approveBtn=s.status==="waiting_approval"?`<button class="btn-approve me-1" onclick="approveStore('${_secJs(s._id)}')">✓ Approve</button>`:"";
     html+=`<tr>
-      <td>${img}<strong>${s.store_name}</strong></td>
+      <td>${img}<strong>${escHtml(s.store_name)}</strong></td>
       <td style="font-size:12px">
-        <div style="font-weight:600">${s.merchant_name||"—"}</div>
-        ${s.merchant_phone ? `<div style="color:var(--muted);font-size:11px">${s.merchant_phone}</div>` : ''}
+        <div style="font-weight:600">${escHtml(s.merchant_name||"—")}</div>
+        ${s.merchant_phone ? `<div style="color:var(--muted);font-size:11px">${escHtml(s.merchant_phone)}</div>` : ''}
       </td>
-      <td style="font-size:12px">${s.category||"—"}</td>
-      <td style="font-size:12px">${s.city||"—"}${s.area?`<br><small style="color:var(--muted)">${s.area}</small>`:""}  </td>
+      <td style="font-size:12px">${escHtml(s.category||"—")}</td>
+      <td style="font-size:12px">${escHtml(s.city||"—")}${s.area?`<br><small style="color:var(--muted)">${escHtml(s.area)}</small>`:""}  </td>
       <td style="font-size:12px">${s.points_per_scan||0}</td>
       <td>${newBadge}</td><td>${statusBadge}</td><td>${dealBadge}</td>
       <td>
@@ -3081,7 +3106,7 @@ function renderStoresPage(){
           const _ss = (s.sub_status||"").toLowerCase();
           const _sp = s.sub_plan||"";
           const _ed = s.sub_end_date ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${s.sub_end_date}</div>` : '';
-          if(_ss==='active') return `<span class="badge-active" style="font-size:10px;">✓ ${_sp||'Paid'}</span>${_ed}`;
+          if(_ss==='active') return `<span class="badge-active" style="font-size:10px;">✓ ${escHtml(_sp||'Paid')}</span>${_ed}`;
           if(_ss==='expired') return `<span class="badge-inactive" style="font-size:10px;">Expired</span>${_ed}`;
           if(_ss==='free') return `<span class="badge-warn" style="font-size:10px;">Free</span>${_ed}`;
           return `<span class="badge-warn" style="font-size:10px;">Unpaid</span>${_ed}`;
@@ -3089,11 +3114,11 @@ function renderStoresPage(){
       </td>
       <td>
         ${approveBtn}
-        <button class="btn-o me-1" onclick="openEditStore('${s._id}')">Edit</button>
-        ${(s.sub_status||"").toLowerCase()==='expired'?`<button class="btn-approve me-1" onclick="openRenewSub('${s._id}')">Renew</button>`:''}
-        <button class="btn-o me-1" onclick="showQR('${s._id}',\`${s.store_name}\`,'')"><i class="fas fa-qrcode"></i></button>
-        <button class="btn-w me-1" onclick="toggleStore('${s._id}')">${s.status==="active"?"Off":"On"}</button>
-        <button class="btn-d" onclick="deleteStore('${s._id}')">Del</button>
+        <button class="btn-o me-1" onclick="openEditStore('${_secJs(s._id)}')">Edit</button>
+        ${(s.sub_status||"").toLowerCase()==='expired'?`<button class="btn-approve me-1" onclick="openRenewSub('${_secJs(s._id)}')">Renew</button>`:''}
+        <button class="btn-o me-1" onclick="showQR('${_secJs(s._id)}',\`${_secJs(s.store_name)}\`,'')"><i class="fas fa-qrcode"></i></button>
+        <button class="btn-w me-1" onclick="toggleStore('${_secJs(s._id)}')">${s.status==="active"?"Off":"On"}</button>
+        <button class="btn-d" onclick="deleteStore('${_secJs(s._id)}')">Del</button>
       </td>
     </tr>`;
   });
@@ -3183,11 +3208,11 @@ function setStoreCityDropdown(state, city, area) {
   if (state && INDIA_STATES_CITIES[state]) {
     citySel.innerHTML = '<option value="">— Select City —</option>' +
       INDIA_STATES_CITIES[state].sort().map(c =>
-        `<option value="${c}"${c === city ? ' selected' : ''}>${c}</option>`
+        `<option value="${escHtml(c)}"${c === city ? ' selected' : ''}>${escHtml(c)}</option>`
       ).join('');
   } else if (city) {
     // Legacy: state unknown — just show the city as-is
-    citySel.innerHTML = `<option value="${city}" selected>${city}</option>`;
+    citySel.innerHTML = `<option value="${escHtml(city)}" selected>${escHtml(city)}</option>`;
   } else {
     citySel.innerHTML = '<option value="">— Select City —</option>';
   }
@@ -3228,7 +3253,7 @@ async function openCreateStore(){
   try{let r=await fetch("/admin/merchants",{credentials:"include"});merchantsList=await r.json();}catch{}
   let sel=document.getElementById("store_merchant");
   sel.innerHTML='<option value="">-- Select Merchant --</option>';
-  merchantsList.forEach(m=>{sel.innerHTML+=`<option value="${m._id}">${m.name} (${m.phone})</option>`;});
+  merchantsList.forEach(m=>{sel.innerHTML+=`<option value="${m._id}">${escHtml(m.name)} (${escHtml(m.phone)})</option>`;});
   sel.onchange=function(){let m=merchantsList.find(x=>x._id===this.value);if(m){setStoreCityDropdown(m.state||"",m.city||"",m.area||"");document.getElementById("store_phone").value=m.phone||"";}};
   ["store_name","store_address","store_phone","store_lat","store_lng"].forEach(id=>document.getElementById(id).value="");
   populateStoreStateDropdown("");
@@ -3492,15 +3517,15 @@ function renderUsersPage(){
   pageData.forEach(u=>{
     let totalColor=u.total_points>0?"color:#1a6640;font-weight:700;":"";
     html+=`<tr>
-      <td><strong>${u.name||"-"}</strong>${u.pending_withdraw?` <span onclick="showSection('gift_product_requests',document.querySelector('[onclick*=vouchers]'))" title="Has pending gift voucher request" style="background:#fff3cd;color:#856404;font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid #ffc107;vertical-align:middle;cursor:pointer;">🎁 Voucher Pending</span>`:""}</td>
-      <td>${u.phone||"-"}</td><td>${u.city||"-"}</td>
+      <td><strong>${escHtml(u.name||"-")}</strong>${u.pending_withdraw?` <span onclick="showSection('gift_product_requests',document.querySelector('[onclick*=vouchers]'))" title="Has pending gift voucher request" style="background:#fff3cd;color:#856404;font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid #ffc107;vertical-align:middle;cursor:pointer;">🎁 Voucher Pending</span>`:""}</td>
+      <td>${escHtml(u.phone||"-")}</td><td>${escHtml(u.city||"-")}</td>
       <td>${u.visit_points||0}</td><td>${u.pool_points||0}</td>
       <td style="${totalColor}">${u.total_points||0}</td>
       <td><span class="badge-active">${u.redemption_count||0}</span></td>
       <td style="font-size:11px;color:var(--muted)">${u.registered_on||"-"}</td>
       <td style="white-space:nowrap;">
-        <button class="btn-o me-1" onclick="viewHistory('${u._id}','${(u.name||"").replace(/'/g,String.fromCharCode(39))}')"><i class="fas fa-history"></i></button>
-        <button class="btn-p" onclick="openAdjust('${u._id}','${(u.name||"").replace(/'/g,String.fromCharCode(39))}')"><i class="fas fa-coins"></i></button>
+        <button class="btn-o me-1" onclick="viewHistory('${_secJs(u._id)}','${_secJs((u.name||"").replace(/'/g,String.fromCharCode(39)))}')"><i class="fas fa-history"></i></button>
+        <button class="btn-p" onclick="openAdjust('${_secJs(u._id)}','${_secJs((u.name||"").replace(/'/g,String.fromCharCode(39)))}')"><i class="fas fa-coins"></i></button>
       </td></tr>`;
   });
   document.getElementById("users_table").innerHTML=html||`<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No users yet</td></tr>`;
@@ -3519,7 +3544,7 @@ async function viewHistory(uid,uname){
   document.getElementById("histTotal").innerText=u.total_points;
   let html=data.history.length?data.history.map(h=>{
     let b=h.type==="credit"?`<span class="badge-active">+${h.points}</span>`:`<span class="badge-inactive">−${h.points}</span>`;
-    return`<tr><td style="color:${h.type==='credit'?'#1a6640':'#b33a2d'};font-weight:600;">${h.type.toUpperCase()}</td><td>${h.description}</td><td>${b}</td><td style="font-size:11px;color:var(--muted)">${h.date}</td></tr>`;
+    return`<tr><td style="color:${h.type==='credit'?'#1a6640':'#b33a2d'};font-weight:600;">${escHtml(h.type.toUpperCase())}</td><td>${escHtml(h.description)}</td><td>${b}</td><td style="font-size:11px;color:var(--muted)">${h.date}</td></tr>`;
   }).join(""):`<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted)">No transactions yet</td></tr>`;
   document.getElementById("hist_table").innerHTML=html;
 }
@@ -3580,7 +3605,7 @@ function loadMerchantTxns() { return loadMerchantTxnsFull(); }
 function downloadInvoicePdf(inv) {
   const w = window.open('','_blank');
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-    <title>Invoice ${inv.invoice_no||''}</title>
+    <title>Invoice ${escHtml(inv.invoice_no||'')}</title>
     <style>
       body{font-family:Arial,sans-serif;padding:40px;color:#2c3e35;max-width:680px;margin:auto}
       .logo{color:#3E5F55;font-size:26px;font-weight:800;letter-spacing:-1px}
@@ -3594,16 +3619,16 @@ function downloadInvoicePdf(inv) {
     </style></head><body>
     <div class="logo">OFFRO</div>
     <p style="color:#6b8c7e;font-size:13px">Tax Invoice / Receipt</p>
-    <h2>Invoice #${inv.invoice_no||'—'}</h2>
+    <h2>Invoice #${escHtml(inv.invoice_no||'—')}</h2>
     <div class="row"><span class="label">Date</span><span class="value">${(inv.created_at||'—').slice(0,10)}</span></div>
-    <div class="row"><span class="label">Merchant</span><span class="value">${inv.merchant_name||'—'}</span></div>
-    <div class="row"><span class="label">Phone</span><span class="value">${inv.merchant_phone||'—'}</span></div>
-    <div class="row"><span class="label">Item</span><span class="value">${inv.item_label||inv.store_name||'—'}</span></div>
-    <div class="row"><span class="label">Type</span><span class="value">${inv.type||'—'}</span></div>
-    <div class="row"><span class="label">Plan</span><span class="value">${inv.plan||'—'}</span></div>
+    <div class="row"><span class="label">Merchant</span><span class="value">${escHtml(inv.merchant_name||'—')}</span></div>
+    <div class="row"><span class="label">Phone</span><span class="value">${escHtml(inv.merchant_phone||'—')}</span></div>
+    <div class="row"><span class="label">Item</span><span class="value">${escHtml(inv.item_label||inv.store_name||'—')}</span></div>
+    <div class="row"><span class="label">Type</span><span class="value">${escHtml(inv.type||'—')}</span></div>
+    <div class="row"><span class="label">Plan</span><span class="value">${escHtml(inv.plan||'—')}</span></div>
     <hr style="margin:20px 0;border-color:#d4e8de">
     <div class="row"><span class="label">Original Amount</span><span class="value">₹${parseFloat(inv.original_amount||inv.base_price||0).toFixed(2)}</span></div>
-    <div class="row"><span class="label">Discount Code</span><span class="value">${inv.discount_code||'—'}</span></div>
+    <div class="row"><span class="label">Discount Code</span><span class="value">${escHtml(inv.discount_code||'—')}</span></div>
     <div class="row"><span class="label">Discount Value</span><span class="value" style="color:#c0392b">${parseFloat(inv.discount_amount||0)>0?'−₹'+parseFloat(inv.discount_amount).toFixed(2):'—'}</span></div>
     <div class="row"><span class="label">Final Amount (pre-tax)</span><span class="value">₹${parseFloat(inv.final_amount||(parseFloat(inv.base_price||0)-parseFloat(inv.discount_amount||0))||0).toFixed(2)}</span></div>
     <div class="row"><span class="label">GST (18%)</span><span class="value">₹${parseFloat(inv.gst||0).toFixed(2)}</span></div>
@@ -3911,7 +3936,7 @@ async function loadSliders() {
   } catch(e) {
     console.error('loadSliders error', e);
     const tbody = document.getElementById('bn_unified_body');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--danger)">Error loading banners: ${e.message}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--danger)">Error loading banners: ${escHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -3977,24 +4002,24 @@ function renderBanners(rows) {
 
   tbody.innerHTML = rows.map(r => {
     const thumb = (r.image_url && _bnIsVideo(r))
-      ? `<div class="bn-vthumb" onclick="bnToggleVideo(this)" title="Click to play / pause" style="position:relative;width:100px;height:50px;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:#000;cursor:pointer"><video src="${r.image_url}#t=0.1" muted loop playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;display:block" onerror="bnVideoFail(this)"></video><i class="fas fa-play bn-vplay" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;background:rgba(0,0,0,.5);border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;pointer-events:none"></i></div>`
+      ? `<div class="bn-vthumb" onclick="bnToggleVideo(this)" title="Click to play / pause" style="position:relative;width:100px;height:50px;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:#000;cursor:pointer"><video src="${_secUrl(r.image_url)}#t=0.1" muted loop playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;display:block" onerror="bnVideoFail(this)"></video><i class="fas fa-play bn-vplay" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;background:rgba(0,0,0,.5);border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:10px;pointer-events:none"></i></div>`
       : r.image_url
-      ? `<img src="${r.image_url}" style="width:100px;height:50px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=0.2">`
+      ? `<img src="${_secUrl(r.image_url)}" style="width:100px;height:50px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.opacity=0.2">`
       : `<div style="width:100px;height:50px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center"><i class="fas fa-image" style="color:var(--muted)"></i></div>`;
 
     const isAdmin = r._source==='admin' && !r._is_merchant_approved;
     const isMerchApproved = r._is_merchant_approved;
     const nameDisplay = r.merchant_name || (isAdmin ? 'Offro (Admin)' : '—');
-    const phoneDisplay = r.merchant_phone ? `<div style="font-size:11px;color:var(--muted)">${r.merchant_phone}</div>` : '';
+    const phoneDisplay = r.merchant_phone ? `<div style="font-size:11px;color:var(--muted)">${escHtml(r.merchant_phone)}</div>` : '';
     const creatorBadge = isAdmin
-      ? `<div style="font-weight:600;font-size:13px">${nameDisplay}</div>
+      ? `<div style="font-weight:600;font-size:13px">${escHtml(nameDisplay)}</div>
          ${phoneDisplay}
          <span style="background:#e8f4ef;color:#3E5F55;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Admin Created</span>`
       : isMerchApproved
-      ? `<div style="font-weight:600;font-size:13px">${nameDisplay}</div>
+      ? `<div style="font-weight:600;font-size:13px">${escHtml(nameDisplay)}</div>
          ${phoneDisplay}
          <span style="background:#e8f0fe;color:#1a56db;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant ✓ Approved</span>`
-      : `<div style="font-weight:600;font-size:13px">${nameDisplay}</div>
+      : `<div style="font-weight:600;font-size:13px">${escHtml(nameDisplay)}</div>
          ${phoneDisplay}
          <span style="background:#fff3cd;color:#856404;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Merchant Pending</span>`;
 
@@ -4058,26 +4083,26 @@ function renderBanners(rows) {
 
     const isPending = (st==='pending'||st==='pending_approval');
     const approveBtn = (!isAdmin && isPending)
-      ? `<button class="btn-approve" style="font-size:12px;padding:5px 14px;margin-left:4px" onclick="approveBnBanner('${r._id}')">Approve</button>`
+      ? `<button class="btn-approve" style="font-size:12px;padding:5px 14px;margin-left:4px" onclick="approveBnBanner('${_secJs(r._id)}')">Approve</button>`
       : '';
 
-    const viewJson = JSON.stringify({...r, _raw:undefined}).replace(/"/g,'&quot;');
+    const viewJson = escHtml(JSON.stringify({...r, _raw:undefined}));
     // Resolve city: use stored city, or look up from store list if store_id is present
     let _bnCityText = r.city || '';
     if (!_bnCityText && r.store_id && window.allStoresList) {
       const _bnSt = window.allStoresList.find(s => s._id === r.store_id);
       if (_bnSt) _bnCityText = _bnSt.city || '';
     }
-    const _bnCity = _bnCityText ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${_bnCityText}</span>` : `<span style="color:var(--muted);font-size:11px">All Cities</span>`;
+    const _bnCity = _bnCityText ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${escHtml(_bnCityText)}</span>` : `<span style="color:var(--muted);font-size:11px">All Cities</span>`;
     const _bnStore = r.store_name
-      ? `<span style="font-size:12px;font-weight:600;color:var(--text)">${r.store_name}</span>`
+      ? `<span style="font-size:12px;font-weight:600;color:var(--text)">${escHtml(r.store_name)}</span>`
       : `<span style="color:var(--muted);font-size:11px">—</span>`;
     return `<tr>
       <td>${thumb}</td>
       <td>${creatorBadge}</td>
       <td>
-        <div style="font-weight:700;font-size:13px">${r.title||'—'}</div>
-        ${r.subtitle?`<div style="font-size:11px;color:var(--muted)">${r.subtitle}</div>`:''}
+        <div style="font-weight:700;font-size:13px">${escHtml(r.title||'—')}</div>
+        ${r.subtitle?`<div style="font-size:11px;color:var(--muted)">${escHtml(r.subtitle)}</div>`:''}
       </td>
       <td>${_bnStore}</td>
       <td>${_bnCity}</td>
@@ -4088,8 +4113,8 @@ function renderBanners(rows) {
       <td>
         <button class="btn-o me-1" onclick='openBnViewModal(${viewJson})'>View</button>
         ${approveBtn}
-        ${!_deletedByAdmin && r._source==='merchant' ? `<button onclick="toggleBnBanner('${r._id}',${_isActive})" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid ${_isActive?'#e0b84d':'#3E5F55'};background:${_isActive?'#fff9e6':'#e8f4ef'};color:${_isActive?'#856404':'#1a6640'};cursor:pointer;margin-right:4px">${_isActive?'Turn Off':'Turn On'}</button>` : ''}
-        <button class="btn-o" style="border:none;padding:4px 8px" onclick='openBnMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>
+        ${!_deletedByAdmin && r._source==='merchant' ? `<button onclick="toggleBnBanner('${_secJs(r._id)}',${_secJs(_isActive)})" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid ${_isActive?'#e0b84d':'#3E5F55'};background:${_isActive?'#fff9e6':'#e8f4ef'};color:${_isActive?'#856404':'#1a6640'};cursor:pointer;margin-right:4px">${_isActive?'Turn Off':'Turn On'}</button>` : ''}
+        <button class="btn-o" style="border:none;padding:4px 8px" onclick='openBnMoreMenu(event,"${_secJs(r._id)}","${_secJs(r._source)}","${_secJs(st)}")'><i class="fas fa-ellipsis-v"></i></button>
       </td>
     </tr>`;
   }).join('');
@@ -4165,8 +4190,8 @@ function openBnMoreMenu(evt, id, source, status) {
   menu.id = '_bnCtxMenu';
   menu.style.cssText = 'position:fixed;background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px 0;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:130px';
   menu.innerHTML = `
-    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--text)" onmouseenter="this.style.background='#f7faf8'" onmouseleave="this.style.background=''" onclick="openBnEdit('${id}','${source}');this.closest('#_bnCtxMenu').remove()"><i class="fas fa-pen me-2" style="color:var(--primary)"></i>Edit</div>
-    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--danger)" onmouseenter="this.style.background='#fde8e6'" onmouseleave="this.style.background=''" onclick="deleteBnBanner('${id}','${source}');this.closest('#_bnCtxMenu').remove()"><i class="fas fa-trash me-2"></i>Delete</div>
+    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--text)" onmouseenter="this.style.background='#f7faf8'" onmouseleave="this.style.background=''" onclick="openBnEdit('${_secJs(id)}','${_secJs(source)}');this.closest('#_bnCtxMenu').remove()"><i class="fas fa-pen me-2" style="color:var(--primary)"></i>Edit</div>
+    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--danger)" onmouseenter="this.style.background='#fde8e6'" onmouseleave="this.style.background=''" onclick="deleteBnBanner('${_secJs(id)}','${_secJs(source)}');this.closest('#_bnCtxMenu').remove()"><i class="fas fa-trash me-2"></i>Delete</div>
   `;
   document.body.appendChild(menu);
   const rect = evt.target.getBoundingClientRect();
@@ -4411,7 +4436,7 @@ async function openSliderModal() {
   const _slMerchSel = document.getElementById("sl_merchant_sel");
   if (_slMerchSel) {
     _slMerchSel.innerHTML = '<option value="">None (Admin banner)</option>' +
-      (merchantsList||[]).map(m => `<option value="${m.id||m._id}">${m.name||m.merchant_name||m.phone}</option>`).join('');
+      (merchantsList||[]).map(m => `<option value="${m.id||m._id}">${escHtml(m.name||m.merchant_name||m.phone)}</option>`).join('');
     _slMerchSel.value = "";
   }
   // Reset store dropdown
@@ -4470,7 +4495,7 @@ async function editSlider(s) {
   const _slMerchSel = document.getElementById("sl_merchant_sel");
   if (_slMerchSel) {
     _slMerchSel.innerHTML = '<option value="">None (Admin banner)</option>' +
-      (merchantsList||[]).map(m => `<option value="${m._id||m.id}">${m.name||m.merchant_name||m.phone}</option>`).join('');
+      (merchantsList||[]).map(m => `<option value="${m._id||m.id}">${escHtml(m.name||m.merchant_name||m.phone)}</option>`).join('');
     // Set selected merchant — match by merchant_id stored in banner, or by phone
     const mid = s.merchant_id || '';
     const mphone = (s.merchant_phone||'').replace(/\D/g,'').slice(-10);
@@ -4515,12 +4540,12 @@ async function editSlider(s) {
         const mStores = mId ? allStores.filter(st => String(st.merchant_id)===String(mId)) : allStores;
         if (mStores.length > 0) {
           _slStoreSel.innerHTML = '<option value="">Select a store</option>' +
-            mStores.map(st => `<option value="${st._id}" data-city="${(st.city||'').toLowerCase()}" data-name="${st.store_name||''}">${st.store_name||st._id}</option>`).join('');
+            mStores.map(st => `<option value="${st._id}" data-city="${escHtml((st.city||'').toLowerCase())}" data-name="${escHtml(st.store_name||'')}">${escHtml(st.store_name||st._id)}</option>`).join('');
           _slStoreSel.value = s.store_id;
           _slStoreSel.disabled = false;
         }
       } catch(e) {
-        _slStoreSel.innerHTML = `<option value="${s.store_id}">${s.store_name||s.store_id}</option>`;
+        _slStoreSel.innerHTML = `<option value="${s.store_id}">${escHtml(s.store_name||s.store_id)}</option>`;
         _slStoreSel.value = s.store_id;
         _slStoreSel.disabled = false;
       }
@@ -4594,7 +4619,7 @@ async function slOnMerchantChange() {
         storeSel.disabled = true;
       } else {
         storeSel.innerHTML = '<option value="">Select a store</option>' +
-          mStores.map(s => `<option value="${s._id}" data-city="${(s.city||'').toLowerCase()}" data-name="${s.store_name||''}">${s.store_name||s._id}</option>`).join('');
+          mStores.map(s => `<option value="${s._id}" data-city="${escHtml((s.city||'').toLowerCase())}" data-name="${escHtml(s.store_name||'')}">${escHtml(s.store_name||s._id)}</option>`).join('');
         storeSel.disabled = false;
         if (mStores.length === 1) { storeSel.value = mStores[0]._id; slOnStoreChange(); }
       }
@@ -4775,13 +4800,13 @@ async function loadNotifications() {
       return n.target || "—";
     };
     tbody.innerHTML = notifs.map(n => `<tr>
-      <td><strong>${n.title||"—"}</strong><br><span style="font-size:11px;color:var(--muted)">${(n.body||"").substring(0,50)}…</span></td>
-      <td style="font-size:12px;">${targetLabel(n)}<br><span style="font-size:10px;color:var(--muted)">topic: ${n.topic||"—"}</span></td>
+      <td><strong>${escHtml(n.title||"—")}</strong><br><span style="font-size:11px;color:var(--muted)">${escHtml((n.body||"").substring(0,50))}…</span></td>
+      <td style="font-size:12px;">${targetLabel(n)}<br><span style="font-size:10px;color:var(--muted)">topic: ${escHtml(n.topic||"—")}</span></td>
       <td style="font-size:12px;color:var(--muted)">${n.sent_at||n.created_at||"—"}</td>
       <td style="font-size:12px;text-align:center;">${n.processed||0} <span style="color:var(--danger)">/ ${n.failed||0}✗</span></td>
       <td>${statusBadge(n.status)}</td>
       <td style="text-align:center;">
-        <button onclick="deleteNotif('${n._id}')" title="Delete"
+        <button onclick="deleteNotif('${_secJs(n._id)}')" title="Delete"
           style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:16px;padding:2px 6px;border-radius:6px;"
           onmouseover="this.style.background='#fdecea'" onmouseout="this.style.background='none'">
           🗑️
@@ -5003,16 +5028,16 @@ function renderPagination(containerId, total, currentPage, onPage) {
   const start = (currentPage-1)*PAGE_SIZE+1;
   const end = Math.min(currentPage*PAGE_SIZE, total);
   let btns = "";
-  btns += `<button onclick="${onPage}(1)" ${currentPage===1?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">«</button>`;
-  btns += `<button onclick="${onPage}(${currentPage-1})" ${currentPage===1?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">‹</button>`;
+  btns += `<button onclick="${_secJs(onPage)}(1)" ${currentPage===1?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">«</button>`;
+  btns += `<button onclick="${_secJs(onPage)}(${currentPage-1})" ${currentPage===1?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">‹</button>`;
   // Show up to 5 page buttons
   let startP = Math.max(1, currentPage-2);
   let endP = Math.min(totalPages, startP+4);
   for (let p=startP; p<=endP; p++) {
-    btns += `<button onclick="${onPage}(${p})" class="btn-o" style="padding:3px 8px;font-size:11px;${p===currentPage?"background:var(--primary);color:white;":""}">${p}</button>`;
+    btns += `<button onclick="${_secJs(onPage)}(${_secJs(p)})" class="btn-o" style="padding:3px 8px;font-size:11px;${p===currentPage?"background:var(--primary);color:white;":""}">${p}</button>`;
   }
-  btns += `<button onclick="${onPage}(${currentPage+1})" ${currentPage===totalPages?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">›</button>`;
-  btns += `<button onclick="${onPage}(${totalPages})" ${currentPage===totalPages?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">»</button>`;
+  btns += `<button onclick="${_secJs(onPage)}(${currentPage+1})" ${currentPage===totalPages?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">›</button>`;
+  btns += `<button onclick="${_secJs(onPage)}(${_secJs(totalPages)})" ${currentPage===totalPages?"disabled":""} class="btn-o" style="padding:3px 8px;font-size:11px;">»</button>`;
   el.innerHTML = `<span style="font-size:12px;color:var(--muted)">${start}–${end} of ${total}</span><div style="display:flex;gap:4px;">${btns}</div>`;
 }
 
@@ -5101,12 +5126,12 @@ function _renderInfluencerReviews(reviews) {
   // the same _toIST() helper already used everywhere else in this
   // dashboard for a consistent, correctly-converted IST display.
   tbody.innerHTML = rows.length ? rows.map(r => `<tr>
-      <td>${r.influencer_name || ''}</td>
-      <td>${r.user_name || ''}</td>
+      <td>${escHtml(r.influencer_name || '')}</td>
+      <td>${escHtml(r.user_name || '')}</td>
       <td>⭐ ${r.rating ?? ''}</td>
-      <td>${r.text || ''}</td>
+      <td>${escHtml(r.text || '')}</td>
       <td>${_toIST(r.date)}</td>
-      <td><button class="btn-sm-danger" onclick="deleteInfluencerReview('${r._id}')">Delete</button></td>
+      <td><button class="btn-sm-danger" onclick="deleteInfluencerReview('${_secJs(r._id)}')">Delete</button></td>
     </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">Influencer reviews will appear here once the review system is available.</td></tr>`;
 }
 async function deleteInfluencerReview(id) {
@@ -5129,7 +5154,7 @@ async function loadProductReviews() {
     _prodReviewsCache = await r.json();
     _renderProductReviews(_prodReviewsCache);
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="6" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="color:#ef4444;text-align:center;padding:16px">Error: ${escHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -5151,10 +5176,10 @@ function _renderProductReviews(data) {
     const date = r.created_at ? r.created_at.substring(0,10) : "—";
     const text = (r.text||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     return `<tr>
-      <td><div style="font-weight:600;color:var(--text)">${r.product_title||r.product_id||"—"}</div></td>
-      <td><div style="font-size:13px;color:var(--text)">${r.store_name||"—"}</div></td>
-      <td><div style="font-size:13px;color:var(--text)">${r.user_name||"Anonymous"}</div>
-          <div style="font-size:11px;color:var(--muted)">${r.user_id||""}</div></td>
+      <td><div style="font-weight:600;color:var(--text)">${escHtml(r.product_title||r.product_id||"—")}</div></td>
+      <td><div style="font-size:13px;color:var(--text)">${escHtml(r.store_name||"—")}</div></td>
+      <td><div style="font-size:13px;color:var(--text)">${escHtml(r.user_name||"Anonymous")}</div>
+          <div style="font-size:11px;color:var(--muted)">${escHtml(r.user_id||"")}</div></td>
       <td><span style="color:${starColor};font-size:15px;letter-spacing:1px">${stars}</span>
           <span style="font-size:12px;color:var(--muted);margin-left:4px">${r.rating||0}/5</span></td>
       <td style="max-width:260px;font-size:13px;color:var(--text)">${text||"<em style='color:var(--muted)'>No text</em>"}</td>
@@ -5162,11 +5187,11 @@ function _renderProductReviews(data) {
       <td>
         <div style="display:flex;align-items:center;gap:8px;justify-content:center">
           <label class="rv-toggle" title="${r.visible !== false ? 'Visible in app' : 'Hidden in app'}">
-            <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleProductReviewVisibility('${r._id}',this)">
+            <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleProductReviewVisibility('${_secJs(r._id)}',this)">
             <span class="rv-slider"></span>
           </label>
           <button style="background:#c0392b;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1"
-            onclick="deleteProductReview('${r._id}','${(r.product_title||'').replace(/'/g,'')}')"
+            onclick="deleteProductReview('${_secJs(r._id)}','${_secJs((r.product_title||'').replace(/'/g,''))}')"
             title="Delete review">
             <i class="fas fa-trash"></i>
           </button>
@@ -5211,7 +5236,7 @@ async function loadReviews() {
     _reviewsCache = await r.json();
     _renderReviews(_reviewsCache);
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="5" style="color:#ef4444;text-align:center;padding:16px">Error: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" style="color:#ef4444;text-align:center;padding:16px">Error: ${escHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -5233,9 +5258,9 @@ function _renderReviews(data) {
     const date = r.created_at ? r.created_at.substring(0,10) : "—";
     const text = (r.text||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     return `<tr>
-      <td><div style="font-weight:600;color:var(--text)">${r.store_name||r.store_id||"—"}</div></td>
-      <td><div style="font-size:13px;color:var(--text)">${r.user_name||"Anonymous"}</div>
-          <div style="font-size:11px;color:var(--muted)">${r.user_id||""}</div></td>
+      <td><div style="font-weight:600;color:var(--text)">${escHtml(r.store_name||r.store_id||"—")}</div></td>
+      <td><div style="font-size:13px;color:var(--text)">${escHtml(r.user_name||"Anonymous")}</div>
+          <div style="font-size:11px;color:var(--muted)">${escHtml(r.user_id||"")}</div></td>
       <td><span style="color:${starColor};font-size:15px;letter-spacing:1px" title="${r.rating} / 5">${stars}</span>
           <span style="font-size:12px;color:var(--muted);margin-left:4px">${r.rating||0}/5</span></td>
       <td style="max-width:260px;font-size:13px;color:var(--text)">${text||"<em style='color:var(--muted)'>No text</em>"}</td>
@@ -5243,11 +5268,11 @@ function _renderReviews(data) {
       <td>
         <div style="display:flex;align-items:center;gap:8px;justify-content:center">
           <label class="rv-toggle" title="${r.visible !== false ? 'Visible in app' : 'Hidden in app'}">
-            <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleStoreReviewVisibility('${r._id}',this)">
+            <input type="checkbox" ${r.visible !== false ? "checked" : ""} onchange="toggleStoreReviewVisibility('${_secJs(r._id)}',this)">
             <span class="rv-slider"></span>
           </label>
           <button style="background:#c0392b;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1"
-            onclick="deleteReview('${r._id}','${(r.store_name||'').replace(/'/g,'')}')"
+            onclick="deleteReview('${_secJs(r._id)}','${_secJs((r.store_name||'').replace(/'/g,''))}')"
             title="Delete review">
             <i class="fas fa-trash"></i>
           </button>
@@ -5598,8 +5623,8 @@ function renderProductCards() {
     let lo = Math.max(1, _pcPage-3), hi = Math.min(pages, lo+maxBtns-1);
     if (hi-lo < maxBtns-1) lo = Math.max(1, hi-maxBtns+1);
     if (lo > 1) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(1)">1</button>${lo>2?'<span style="padding:4px 2px">…</span>':''}`;
-    for (let i=lo;i<=hi;i++) pgHtml += `<button ${btnStyle(i===_pcPage)} onclick="goVZPage(${i})">${i}</button>`;
-    if (hi < pages) pgHtml += `${hi<pages-1?'<span style="padding:4px 2px">…</span>':''}<button ${btnStyle(false)} onclick="goVZPage(${pages})">${pages}</button>`;
+    for (let i=lo;i<=hi;i++) pgHtml += `<button ${btnStyle(i===_pcPage)} onclick="goVZPage(${_secJs(i)})">${i}</button>`;
+    if (hi < pages) pgHtml += `${hi<pages-1?'<span style="padding:4px 2px">…</span>':''}<button ${btnStyle(false)} onclick="goVZPage(${_secJs(pages)})">${pages}</button>`;
     if (_pcPage < pages) pgHtml += `<button ${btnStyle(false)} onclick="goVZPage(${_pcPage+1})">Next ›</button>`;
     pgBar.innerHTML = pgHtml;
   }
@@ -5609,7 +5634,7 @@ function renderProductCards() {
     // Logo stored in _pcLogoMap to avoid huge base64 in onclick JSON
     const _logoSrc = _pcLogoMap[r._id] || r.logo || '';
     const logoHtml = _logoSrc
-      ? `<img src="${_logoSrc}" style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+      ? `<img src="${_secUrl(_logoSrc)}" style="width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid var(--border);" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
         + `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:none;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`
       : `<div style="width:44px;height:44px;background:var(--light);border-radius:10px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary);font-size:18px"></i></div>`;
 
@@ -5619,19 +5644,19 @@ function renderProductCards() {
     // - pureAdmin: Admin created, no merchant link → show Admin only
     // - adminLinked: Admin created, linked to merchant → show Admin + 🔗 Merchant
     // - merchant: submitted by merchant OR approved merchant product → show Merchant only (no Admin)
-    const phoneDisplay = r.merchant_phone ? `<div style="font-size:10px;color:var(--muted);font-family:monospace;margin-top:1px">📞 ${r.merchant_phone}</div>` : '';
+    const phoneDisplay = r.merchant_phone ? `<div style="font-size:10px;color:var(--muted);font-family:monospace;margin-top:1px">📞 ${escHtml(r.merchant_phone)}</div>` : '';
     const pureAdmin   = isAdmin && !r.merchant_name;
     const adminLinked = isAdmin && r.merchant_name;
     const creatorBadge = isProduct
       ? `<span style="background:#f0e8fe;color:#6b21a8;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-box" style="font-size:9px"></i> Products DB</span>`
-        + (r.merchant_name ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;font-weight:600">${r.merchant_name}</div>${phoneDisplay}` : '')
+        + (r.merchant_name ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;font-weight:600">${escHtml(r.merchant_name)}</div>${phoneDisplay}` : '')
       : pureAdmin
       ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>`
       : adminLinked
       ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-shield-alt" style="font-size:9px"></i> Admin</span>
-         <div style="font-size:11px;color:#1a56db;margin-top:3px;font-weight:600">🔗 ${r.merchant_name}</div>${phoneDisplay}`
+         <div style="font-size:11px;color:#1a56db;margin-top:3px;font-weight:600">🔗 ${escHtml(r.merchant_name)}</div>${phoneDisplay}`
       : `<span style="background:#e8f0fe;color:#1a56db;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600"><i class="fas fa-user" style="font-size:9px"></i> Merchant</span>
-         <div style="font-size:11px;color:var(--muted);margin-top:2px;font-weight:600">${r.merchant_name||''}</div>
+         <div style="font-size:11px;color:var(--muted);margin-top:2px;font-weight:600">${escHtml(r.merchant_name||'')}</div>
          ${phoneDisplay}`;
 
     const st = r.status;
@@ -5656,23 +5681,23 @@ function renderProductCards() {
 
     const isPending = (st==='pending'||st==='pending_approval');
     const approveBtn = (!isAdmin && isPending)
-      ? `<button class="btn-approve me-1" style="font-size:11px;padding:4px 10px" onclick="approveProductCard('${r._id}','${r._source}')">Approve</button>`
+      ? `<button class="btn-approve me-1" style="font-size:11px;padding:4px 10px" onclick="approveProductCard('${_secJs(r._id)}','${_secJs(r._source)}')">Approve</button>`
       : '';
 
     // Strip heavy base64 logo + _raw before embedding in onclick attribute
     const _safeR = Object.assign({}, r, {logo: '', _raw: null});
-    const viewJson = JSON.stringify(_safeR).replace(/"/g,'&quot;');
+    const viewJson = escHtml(JSON.stringify(_safeR));
     // Product-specific subtitle (price, category, discount)
     const productSub = isProduct
       ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">` +
         (r.price ? `₹${r.price} ` : '') +
         (r.discount ? `• ${r.discount}% OFF ` : '') +
-        (r.category ? `• ${r.category}` : '') +
+        (escHtml(r.category ? `• ${r.category}` : '')) +
         `</div>`
       : '';
-    const _pcCity = r.city ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${r.city}</span>` : `<span style="color:var(--muted);font-size:11px">—</span>`;
+    const _pcCity = r.city ? `<span style="background:#e8f4ef;color:#3E5F55;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${escHtml(r.city)}</span>` : `<span style="color:var(--muted);font-size:11px">—</span>`;
     const _pcStore = r.store_name
-      ? `<span style="font-size:12px;font-weight:600;color:var(--text)">${r.store_name}</span>`
+      ? `<span style="font-size:12px;font-weight:600;color:var(--text)">${escHtml(r.store_name)}</span>`
       : `<span style="color:var(--muted);font-size:11px">—</span>`;
     const _prodType = r.product_type || 'free';
     const _typeLabel = _prodType === 'paid' ? '🟣 Paid' : (_prodType === 'admin' ? '⚪ OffrO' : '🟢 Free');
@@ -5681,19 +5706,19 @@ function renderProductCards() {
     const typeBadge  = `<span style="background:${_typeBg};color:${_typeColor};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap">${_typeLabel}</span>`;
     return `<tr>
       <td>${logoHtml}</td>
-      <td><strong style="font-size:13px">${r.title||'—'}</strong>${productSub}<div style="font-size:11px;color:var(--muted);margin-top:1px">${r.text||''}</div></td>
+      <td><strong style="font-size:13px">${escHtml(r.title||'—')}</strong>${productSub}<div style="font-size:11px;color:var(--muted);margin-top:1px">${escHtml(r.text||'')}</div></td>
       <td>${creatorBadge}</td>
       <td>${typeBadge}</td>
       <td>${_pcStore}</td>
       <td>${_pcCity}</td>
-      <td style="font-size:12px;color:var(--muted)">${r.validity||'—'}</td>
+      <td style="font-size:12px;color:var(--muted)">${escHtml(r.validity||'—')}</td>
       <td>${statusBadge}${offTag}</td>
       <td style="font-size:12px;color:var(--muted);white-space:nowrap">${r.duration_days ? r.duration_days+' days' : '—'}</td>
       <td style="font-size:12px;white-space:nowrap">${paidCell}</td>
       <td>
         <button class="btn-o me-1" onclick='openVZViewModal(${viewJson})'>View</button>
         ${approveBtn}
-        <button class="btn-o" style="border:none;padding:4px 8px" onclick='openVZMoreMenu(event,"${r._id}","${r._source}","${st}")'><i class="fas fa-ellipsis-v"></i></button>
+        <button class="btn-o" style="border:none;padding:4px 8px" onclick='openVZMoreMenu(event,"${_secJs(r._id)}","${_secJs(r._source)}","${_secJs(st)}")'><i class="fas fa-ellipsis-v"></i></button>
       </td>
       <td style="font-size:11px;color:var(--muted);white-space:nowrap">${_toIST(r.created_at)}</td>
     </tr>`;
@@ -5797,8 +5822,8 @@ function openVZMoreMenu(evt, id, source, status) {
   menu.id = '_vzCtxMenu';
   menu.style.cssText = 'position:fixed;background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px 0;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:130px';
   menu.innerHTML = `
-    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--text)" onmouseenter="this.style.background='#f7faf8'" onmouseleave="this.style.background=''" onclick="openVZEdit('${id}','${source}');this.closest('#_vzCtxMenu').remove()"><i class="fas fa-pen me-2" style="color:var(--primary)"></i>Edit</div>
-    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--danger)" onmouseenter="this.style.background='#fde8e6'" onmouseleave="this.style.background=''" onclick="deleteProductCard('${id}','${source}');this.closest('#_vzCtxMenu').remove()"><i class="fas fa-trash me-2"></i>Delete</div>
+    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--text)" onmouseenter="this.style.background='#f7faf8'" onmouseleave="this.style.background=''" onclick="openVZEdit('${_secJs(id)}','${_secJs(source)}');this.closest('#_vzCtxMenu').remove()"><i class="fas fa-pen me-2" style="color:var(--primary)"></i>Edit</div>
+    <div style="padding:8px 16px;font-size:13px;cursor:pointer;color:var(--danger)" onmouseenter="this.style.background='#fde8e6'" onmouseleave="this.style.background=''" onclick="deleteProductCard('${_secJs(id)}','${_secJs(source)}');this.closest('#_vzCtxMenu').remove()"><i class="fas fa-trash me-2"></i>Delete</div>
   `;
   document.body.appendChild(menu);
   const rect = evt.target.getBoundingClientRect();
@@ -6184,7 +6209,7 @@ function _populateGcMerchants(selectedId) {
   let sel = document.getElementById("gc_merchant");
   sel.innerHTML = "<option value=''>None</option>";
   (merchantsList||[]).forEach(m => {
-    sel.innerHTML += `<option value="${m._id}" ${m._id===selectedId?"selected":""}>${m.name}</option>`;
+    sel.innerHTML += `<option value="${m._id}" ${m._id===selectedId?"selected":""}>${escHtml(m.name)}</option>`;
   });
 }
 
@@ -6360,7 +6385,7 @@ function onProductStoreChange(storeId) {
     // Find the store from allStoresList
     const store = (window.allStoresList||[]).find(s => s._id === storeId);
     if (store && store.image2) {
-        preview.innerHTML = `<img src="${store.image2}" style="max-width:160px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">
+        preview.innerHTML = `<img src="${_secUrl(store.image2)}" style="max-width:160px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none'">
         <small style="color:#6b8c7e;display:block;margin-top:4px;">This image will appear on the product card</small>`;
     } else {
         preview.innerHTML = `<small style="color:#f59e0b">No Image 2 found for this store. Please add it in Store settings.</small>`;
@@ -6373,7 +6398,7 @@ async function openProductCardModal() {
         try { const r = await fetch("/admin/stores", {credentials:"include"}); window.allStoresList = await r.json(); } catch(e) { window.allStoresList = []; }
     }
     const storeSel = document.getElementById("v_store");
-    storeSel.innerHTML = `<option value="">None</option>` + (window.allStoresList||[]).map(s=>`<option value="${s._id}">${s.store_name||s._id}</option>`).join("");
+    storeSel.innerHTML = `<option value="">None</option>` + (window.allStoresList||[]).map(s=>`<option value="${s._id}">${escHtml(s.store_name||s._id)}</option>`).join("");
     
     document.getElementById("edit_product_id").value = "";
     document.getElementById("v_title").value = "";
@@ -6427,14 +6452,14 @@ async function setRating(storeId, val, el) {  // FIX 2: async
 function storeImg(s) {
     const img = s.image_url || s.image || (s.images && s.images[0]) || "";
     if (!img) return `<div class="store-thumb-ph"><i class="fas fa-store"></i></div>`;
-    return `<img src="${img}" class="store-thumb" onerror="this.outerHTML='<div class=store-thumb-ph><i class=fas fa-store></i></div>'" referrerpolicy="no-referrer" crossorigin="anonymous">`;
+    return `<img src="${_secUrl(img)}" class="store-thumb" onerror="this.outerHTML='<div class=store-thumb-ph><i class=fas fa-store></i></div>'" referrerpolicy="no-referrer" crossorigin="anonymous">`;
 }
 
 function _populateMerchantSelect() {
     let select = document.getElementById("store_merchant");
     select.innerHTML = "<option value=''>Select merchant...</option>";
     merchantsList.forEach(m => {
-        select.innerHTML += `<option value="${m._id}">${m.name} (${m.phone})</option>`;
+        select.innerHTML += `<option value="${m._id}">${escHtml(m.name)} (${escHtml(m.phone)})</option>`;
     });
     select.onchange = function() {
         let m = merchantsList.find(x => x._id===this.value);
@@ -6450,7 +6475,7 @@ function _populateProductMerchants(selectedId) {
     let sel = document.getElementById("v_merchant");
     sel.innerHTML = "<option value=''>None</option>";
     merchantsList.forEach(m => {
-        sel.innerHTML += `<option value="${m._id}" ${m._id===selectedId?"selected":""}>${m.name}</option>`;
+        sel.innerHTML += `<option value="${m._id}" ${m._id===selectedId?"selected":""}>${escHtml(m.name)}</option>`;
     });
 }
 
@@ -6472,12 +6497,12 @@ function editStore(s) {
     const prev = document.getElementById("store_image_preview");
     const _sImgSrc = s.image_url || s.image || "";
     if (_sImgSrc) {
-        prev.innerHTML = `<img src="${_sImgSrc}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div style=\'width:80px;height:56px;border-radius:8px;background:#e8f5ee;display:flex;align-items:center;justify-content:center;font-size:22px;\'>🏪</div>')">`;
+        prev.innerHTML = `<img src="${_secUrl(_sImgSrc)}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div style=\'width:80px;height:56px;border-radius:8px;background:#e8f5ee;display:flex;align-items:center;justify-content:center;font-size:22px;\'>🏪</div>')">`;
     } else { prev.innerHTML = ""; }
     // Show image2 preview
     const prev2 = document.getElementById("store_image2_preview");
     if (s.image2) {
-        prev2.innerHTML = `<img src="${s.image2}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;margin-top:4px;" onerror="this.style.display='none'">`;
+        prev2.innerHTML = `<img src="${_secUrl(s.image2)}" style="max-width:120px;max-height:80px;border-radius:8px;border:1px solid #d4e8de;margin-top:4px;" onerror="this.style.display='none'">`;
     } else { prev2.innerHTML = ""; }
     _populateMerchantSelect();
     // Set merchant
@@ -6812,27 +6837,27 @@ async function loadMerchantBanners() {
         badge = '<span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:12px;font-size:11px;">⏳ Pending</span>';
       }
       const thumb = b.image_url
-        ? '<img src="' + b.image_url + '" style="width:80px;height:32px;object-fit:cover;border-radius:5px;border:1px solid var(--border)" onerror="this.outerHTML=\'<span style=color:var(--muted);font-size:11px>No img</span>\'">'
+        ? '<img src="' + _secUrl(b.image_url) + '" style="width:80px;height:32px;object-fit:cover;border-radius:5px;border:1px solid var(--border)" onerror="this.outerHTML=\'<span style=color:var(--muted);font-size:11px>No img</span>\'">'
         : '<span style="color:var(--muted);font-size:11px">—</span>';
       const storeName = b.store_name || '—';
       const city = b.city || '—';
       let actions;
       if (st === 'pending_approval' || st === 'pending') {
-        actions = '<button class="btn-p me-1" style="font-size:11px;padding:4px 10px" onclick="approveMerchantBanner(\'' + b._id + '\')">✅ Approve</button>'
-                + '<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="rejectMerchantBanner(\'' + b._id + '\')">❌ Reject</button>';
+        actions = '<button class="btn-p me-1" style="font-size:11px;padding:4px 10px" onclick="approveMerchantBanner(\'' + _secJs(b._id) + '\')">✅ Approve</button>'
+                + '<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="rejectMerchantBanner(\'' + _secJs(b._id) + '\')">❌ Reject</button>';
       } else if (st === 'approved') {
         const toggleLbl = b.is_active !== false ? '⏸ Turn Off' : '▶ Turn On';
-        actions = '<button class="btn-secondary me-1" style="font-size:11px;padding:4px 10px;background:#e9e9e9;border:none;border-radius:6px;cursor:pointer" onclick="toggleMerchantBanner(\'' + b._id + '\', this)">' + toggleLbl + '</button>'
-                + '<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantBanner(\'' + b._id + '\')">🗑 Remove</button>';
+        actions = '<button class="btn-secondary me-1" style="font-size:11px;padding:4px 10px;background:#e9e9e9;border:none;border-radius:6px;cursor:pointer" onclick="toggleMerchantBanner(\'' + _secJs(b._id) + '\', this)">' + toggleLbl + '</button>'
+                + '<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantBanner(\'' + _secJs(b._id) + '\')">🗑 Remove</button>';
       } else {
-        actions = '<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantBanner(\'' + b._id + '\')">🗑 Remove</button>';
+        actions = '<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantBanner(\'' + _secJs(b._id) + '\')">🗑 Remove</button>';
       }
       return '<tr>'
         + '<td>' + thumb + '</td>'
-        + '<td style="font-size:13px">' + (b.merchant_name||'—') + '</td>'
-        + '<td style="font-size:13px;font-weight:600">' + (b.title||'—') + '</td>'
-        + '<td style="font-size:12px;color:var(--primary);font-weight:600">' + storeName + '</td>'
-        + '<td style="font-size:12px;color:var(--muted)">' + city + '</td>'
+        + '<td style="font-size:13px">' + (escHtml(b.merchant_name||'—')) + '</td>'
+        + '<td style="font-size:13px;font-weight:600">' + (escHtml(b.title||'—')) + '</td>'
+        + '<td style="font-size:12px;color:var(--primary);font-weight:600">' + escHtml(storeName) + '</td>'
+        + '<td style="font-size:12px;color:var(--muted)">' + escHtml(city) + '</td>'
         + '<td style="font-size:12px">' + (b.duration_days||b.duration||30) + ' days</td>'
         + '<td style="font-size:13px">₹' + (b.amount||0) + '</td>'
         + '<td>' + badge + '</td>'
@@ -6840,7 +6865,7 @@ async function loadMerchantBanners() {
         + '<td>' + actions + '</td>'
         + '</tr>';
     }).join('');
-  } catch(e) { if(el) el.innerHTML = '<tr><td colspan="10" style="color:red;text-align:center">' + e.message + '</td></tr>'; }
+  } catch(e) { if(el) el.innerHTML = '<tr><td colspan="10" style="color:red;text-align:center">' + escHtml(e.message) + '</td></tr>'; }
 }
 
 
@@ -6952,25 +6977,25 @@ async function loadMerchantProducts() {
         ? `<span style="background:#e9e9e9;color:#555;padding:3px 10px;border-radius:12px;font-size:11px;">⏰ Expired</span>`
         : `<span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:12px;font-size:11px;">⏳ Pending</span>`;
       const logo = v.logo_url
-        ? `<img src="${v.logo_url}" style="width:36px;height:36px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.outerHTML='<i class=fas fa-gift style=color:var(--primary)></i>'">`
+        ? `<img src="${_secUrl(v.logo_url)}" style="width:36px;height:36px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.outerHTML='<i class=fas fa-gift style=color:var(--primary)></i>'">`
         : `<div style="width:36px;height:36px;background:var(--light);border-radius:8px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-gift" style="color:var(--primary)"></i></div>`;
       const actions = (st==='pending_approval'||st==='pending')
-        ? `<button class="btn-p me-1" style="font-size:11px;padding:4px 10px" onclick="approveMerchantProduct('${v._id}')">✅ Approve</button>
-           <button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="rejectMerchantProduct('${v._id}')">❌ Reject</button>`
-        : `<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantProduct('${v._id}')">Del</button>`;
+        ? `<button class="btn-p me-1" style="font-size:11px;padding:4px 10px" onclick="approveMerchantProduct('${_secJs(v._id)}')">✅ Approve</button>
+           <button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="rejectMerchantProduct('${_secJs(v._id)}')">❌ Reject</button>`
+        : `<button class="btn-d" style="font-size:11px;padding:4px 10px" onclick="deleteMerchantProduct('${_secJs(v._id)}')">Del</button>`;
       return `<tr>
         <td>${logo}</td>
-        <td style="font-size:13px;font-weight:600">${v.title||'—'}</td>
-        <td style="font-size:13px">${v.merchant_name||'—'}</td>
-        <td style="font-size:12px">${v.store_name||'—'}</td>
-        <td style="font-size:12px;color:var(--muted)">${v.city||'—'}</td>
-        <td style="font-size:12px">${v.validity||'—'}</td>
+        <td style="font-size:13px;font-weight:600">${escHtml(v.title||'—')}</td>
+        <td style="font-size:13px">${escHtml(v.merchant_name||'—')}</td>
+        <td style="font-size:12px">${escHtml(v.store_name||'—')}</td>
+        <td style="font-size:12px;color:var(--muted)">${escHtml(v.city||'—')}</td>
+        <td style="font-size:12px">${escHtml(v.validity||'—')}</td>
         <td>${badge}</td>
         <td>${actions}</td>
         <td style="font-size:11px;color:var(--muted)">${(v.created_at||'').replace('T',' ').slice(0,16)}</td>
       </tr>`;
     }).join('');
-  } catch(e) { if(el) el.innerHTML = `<tr><td colspan="8" style="color:red;text-align:center">${e.message}</td></tr>`; }
+  } catch(e) { if(el) el.innerHTML = `<tr><td colspan="8" style="color:red;text-align:center">${escHtml(e.message)}</td></tr>`; }
 }
 
 async function approveMerchantProduct(id) {
@@ -7121,7 +7146,7 @@ function renderTxnRows(rows) {
       : `<span style="background:#fff3cd;color:#856404;padding:3px 10px;border-radius:12px;font-size:11px;">○ Pending</span>`;
     const tp = inv.type || 'store';
     const tc = typeColor[tp] || '#3E5F55';
-    const typeBadge = `<span style="background:${tc}20;color:${tc};padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;text-transform:capitalize">${tp}</span>`;
+    const typeBadge = `<span style="background:${tc}20;color:${tc};padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;text-transform:capitalize">${escHtml(tp)}</span>`;
     const origAmt  = parseFloat(inv.original_amount || inv.base_price || 0);
     const discCode = inv.discount_code || '—';
     const discVal  = parseFloat(inv.discount_amount || 0);
@@ -7129,18 +7154,18 @@ function renderTxnRows(rows) {
     const gstAmt   = parseFloat(inv.gst || 0);
     const totalAmt = parseFloat(inv.total || 0);
     const dlBtn    = (inv.invoice_no && inv.invoice_no!=='PENDING' && inv.invoice_no!=='FREE')
-      ? `<button onclick="downloadInvoicePdf(${JSON.stringify(inv).replace(/"/g,'&quot;')})" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;"><i class="fas fa-download me-1"></i>PDF</button>`
+      ? `<button onclick="downloadInvoicePdf(${escHtml(JSON.stringify(inv))})" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;"><i class="fas fa-download me-1"></i>PDF</button>`
       : '—';
     return `<tr>
       <td style="font-size:12px">${(inv.created_at||'—').slice(0,10)}</td>
-      <td style="font-size:12px;font-weight:600;color:var(--primary)">${inv.invoice_no||'—'}</td>
-      <td style="font-size:13px">${inv.merchant_name||'—'}</td>
-      <td style="font-size:12px;color:var(--muted)">${inv.merchant_phone||'—'}</td>
-      <td style="font-size:12px">${inv.item_label||inv.store_name||'—'}</td>
+      <td style="font-size:12px;font-weight:600;color:var(--primary)">${escHtml(inv.invoice_no||'—')}</td>
+      <td style="font-size:13px">${escHtml(inv.merchant_name||'—')}</td>
+      <td style="font-size:12px;color:var(--muted)">${escHtml(inv.merchant_phone||'—')}</td>
+      <td style="font-size:12px">${escHtml(inv.item_label||inv.store_name||'—')}</td>
       <td>${typeBadge}</td>
-      <td style="font-size:12px">${inv.plan||'—'}</td>
+      <td style="font-size:12px">${escHtml(inv.plan||'—')}</td>
       <td style="font-size:13px">₹${origAmt.toFixed(2)}</td>
-      <td style="font-size:12px;color:var(--muted)">${discCode}</td>
+      <td style="font-size:12px;color:var(--muted)">${escHtml(discCode)}</td>
       <td style="font-size:12px;color:#c0392b">${discVal>0?'−₹'+discVal.toFixed(2):'—'}</td>
       <td style="font-size:13px">₹${finalAmt.toFixed(2)}</td>
       <td style="font-size:13px">₹${gstAmt.toFixed(2)}<br><span style="font-size:10px;color:var(--muted)">18%</span></td>
@@ -7213,8 +7238,8 @@ async function loadP2TopMerchants() {
     if (!Array.isArray(rows) || !rows.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--muted)">No data yet</td></tr>'; return; }
     tbody.innerHTML = rows.map((r,i) => `<tr>
       <td>${i+1}</td>
-      <td><strong>${r.merchant_name||'-'}</strong></td>
-      <td>${r.merchant_phone||'-'}</td>
+      <td><strong>${escHtml(r.merchant_name||'-')}</strong></td>
+      <td>${escHtml(r.merchant_phone||'-')}</td>
       <td><span class="badge-active">${r.product_count} products</span></td>
     </tr>`).join('');
   } catch(e) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:red">Error loading</td></tr>'; }
@@ -7228,13 +7253,13 @@ async function loadP2Expiry() {
     const rows = await r.json();
     if (!Array.isArray(rows) || !rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:14px;color:var(--muted)">No products expiring soon ✅</td></tr>'; return; }
     tbody.innerHTML = rows.map(row => `<tr>
-      <td><strong>${row.title||'-'}</strong></td>
-      <td>${row.merchant_name||'-'}</td>
-      <td>${row.merchant_phone||'-'}</td>
-      <td>${row.store_name||'-'}</td>
+      <td><strong>${escHtml(row.title||'-')}</strong></td>
+      <td>${escHtml(row.merchant_name||'-')}</td>
+      <td>${escHtml(row.merchant_phone||'-')}</td>
+      <td>${escHtml(row.store_name||'-')}</td>
       <td>${(row.end_date||'').slice(0,10)}</td>
       <td><span class="${row.days_left<=2?'badge-inactive':'badge-waiting'}">${row.days_left}d</span></td>
-      <td><button class="btn-o" onclick="adminExtendProduct('${row.id}')">+7 days</button></td>
+      <td><button class="btn-o" onclick="adminExtendProduct('${_secJs(row.id)}')">+7 days</button></td>
     </tr>`).join('');
   } catch(e) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:14px;color:red">Error loading</td></tr>'; }
 }
@@ -7441,7 +7466,7 @@ function renderAccountsPage() {
     return `<tr>
       <td><strong>${escHtml(a.full_name||'—')}</strong></td>
       <td style="font-family:monospace;font-size:12px;">${escHtml(a.mobile_number||'')}</td>
-      <td><span title="${a.account_id}" onclick="navigator.clipboard?.writeText('${a.account_id}');showToast('ID copied!','success')"
+      <td><span title="${a.account_id}" onclick="navigator.clipboard?.writeText('${_secJs(a.account_id)}');showToast('ID copied!','success')"
         style="font-size:10px;font-family:monospace;background:#f0f4f0;border:1px solid var(--border);border-radius:5px;padding:2px 6px;cursor:pointer;color:var(--primary)">
         #${shortId} 📋</span></td>
       <td>${escHtml(a.city||'—')}</td>
@@ -7452,15 +7477,15 @@ function renderAccountsPage() {
       <td style="font-size:12px;">${pts > 0 ? '⭐ '+pts : '—'}</td>
       <td><span class="${stCls}" style="background:${stBg};color:${a.status==='delete_requested'?'#856404':a.status==='deleted'?'#666':'#fff'};">${stLbl}</span></td>
       <td>
-        <button class="btn-sm-p" onclick="openAccountDetail('${a.account_id}','${escHtml(a.full_name||'')}')">👁 View</button>
+        <button class="btn-sm-p" onclick="openAccountDetail('${_secJs(a.account_id)}','${escHtml(a.full_name||'')}')">👁 View</button>
         ${a.status === 'delete_requested' ? `
-          <button class="btn-sm-p" style="background:#c0392b;font-size:10px;padding:3px 8px;margin-right:3px;" onclick="processDeletion('${a.account_id}','approve')">🗑 Approve Delete</button>
-          <button class="btn-sm-p" style="background:var(--primary);font-size:10px;padding:3px 8px;" onclick="processDeletion('${a.account_id}','reject')">↩ Reject</button>
+          <button class="btn-sm-p" style="background:#c0392b;font-size:10px;padding:3px 8px;margin-right:3px;" onclick="processDeletion('${_secJs(a.account_id)}','approve')">🗑 Approve Delete</button>
+          <button class="btn-sm-p" style="background:var(--primary);font-size:10px;padding:3px 8px;" onclick="processDeletion('${_secJs(a.account_id)}','reject')">↩ Reject</button>
         ` : (a.status === 'deleted' ? '' :
           `${(!a.roles?.includes('merchant') && (a.store_count||0) > 0)
-            ? `<button class="btn-sm-p" style="background:var(--primary);font-size:10px;padding:3px 8px;margin-right:3px;" onclick="grantMerchantRole('${a.account_id}','${escHtml(a.full_name||'')}')">🏪 Merchant</button>`
+            ? `<button class="btn-sm-p" style="background:var(--primary);font-size:10px;padding:3px 8px;margin-right:3px;" onclick="grantMerchantRole('${_secJs(a.account_id)}','${escHtml(a.full_name||'')}')">🏪 Merchant</button>`
             : ''}
-          <button class="btn-sm-p" style="background:#c0392b;" onclick="toggleAccountStatus('${a.account_id}','${a.status}')">
+          <button class="btn-sm-p" style="background:#c0392b;" onclick="toggleAccountStatus('${_secJs(a.account_id)}','${_secJs(a.status)}')">
             ${a.status==='active'?'🚫 Block':'✅ Unblock'}</button>`
         )}
       </td>
@@ -7497,10 +7522,7 @@ async function processDeletion(accountId, action) {
   }
 }
 
-function escHtml(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+// escHtml / _secJs / _secUrl are defined once, early in <head> (see 'XSS-safe output helpers').
 
 // BUG FIX (Round 6 — Issue 1, "User role appearing multiple times"):
 // investigation found the accounts API already returns each role once (the
@@ -7535,7 +7557,7 @@ const ROLE_LABELS = {
 function roleBadgeHtml(roles) {
   return dedupeRoles(roles).map(r => {
     const meta = ROLE_LABELS[r] || { emoji: '🔹', text: r ? (r.charAt(0).toUpperCase() + r.slice(1)) : 'Unknown', bg: '#7a8a99' };
-    return `<span class="badge me-1" style="background:${meta.bg};color:#fff;font-size:10px;margin-right:2px;">${meta.emoji} ${meta.text}</span>`;
+    return `<span class="badge me-1" style="background:${meta.bg};color:#fff;font-size:10px;margin-right:2px;">${escHtml(meta.emoji)} ${escHtml(meta.text)}</span>`;
   }).join('');
 }
 
@@ -7555,7 +7577,7 @@ async function openAccountDetail(accountId, name) {
     const d = await r.json();
     if (bodyEl) bodyEl.innerHTML = renderAccountDetailHTML(d);
   } catch(e) {
-    if (bodyEl) bodyEl.innerHTML = `<div class="text-center py-4 text-danger">Failed to load: ${e.message}</div>`;
+    if (bodyEl) bodyEl.innerHTML = `<div class="text-center py-4 text-danger">Failed to load: ${escHtml(e.message)}</div>`;
   }
 }
 
@@ -7575,7 +7597,7 @@ function renderAccountDetailHTML(d) {
       <td>${escHtml(inv.store_name||'—')}</td>
       <td>${escHtml(inv.plan||'—')}</td>
       <td>₹${(inv.total||0).toLocaleString('en-IN')}</td>
-      <td><span class="badge" style="background:${inv.status==='paid'?'#1a6640':inv.status==='pending'?'#e67e22':'#c0392b'};color:#fff;">${inv.status||'—'}</span></td>
+      <td><span class="badge" style="background:${inv.status==='paid'?'#1a6640':inv.status==='pending'?'#e67e22':'#c0392b'};color:#fff;">${escHtml(inv.status||'—')}</span></td>
       <td style="font-size:11px;color:var(--muted);">${(inv.created_at||'').substring(0,10)}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="text-center text-muted py-3">No invoices yet</td></tr>';
 
@@ -7590,20 +7612,20 @@ function renderAccountDetailHTML(d) {
 
     <!-- Action buttons -->
     <div class="d-flex gap-2 mb-4 flex-wrap">
-      <button class="btn-p" style="font-size:13px;" onclick="openWalletFromAcct('${acctId}','${acctName}')">
+      <button class="btn-p" style="font-size:13px;" onclick="openWalletFromAcct('${_secJs(acctId)}','${_secJs(acctName)}')">
         <i class="fas fa-history me-1"></i> Rewards History
       </button>
-      <button class="btn-o" style="font-size:13px;" onclick="openAddPointsFromAcct('${acctId}','${acctName}')">
+      <button class="btn-o" style="font-size:13px;" onclick="openAddPointsFromAcct('${_secJs(acctId)}','${_secJs(acctName)}')">
         <i class="fas fa-plus-circle me-1"></i> Add Points
       </button>
-      <button style="background:var(--danger);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="openDebitPointsFromAcct('${acctId}','${acctName}')">
+      <button style="background:var(--danger);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="openDebitPointsFromAcct('${_secJs(acctId)}','${_secJs(acctName)}')">
         <i class="fas fa-minus-circle me-1"></i> Debit Points
       </button>
       ${!(d.roles||[]).includes('merchant') ? `
-      <button style="background:#2e7d52;color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="grantMerchantRole('${acctId}','${escHtml(d.full_name||d.name||'')}')">
+      <button style="background:#2e7d52;color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="grantMerchantRole('${_secJs(acctId)}','${escHtml(d.full_name||d.name||'')}')">
         <i class="fas fa-store me-1"></i> Grant Merchant Role
       </button>` : ''}
-      <button style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="toggleAccountStatus('${acctId}','${d.status||"active"}')">
+      <button style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;" onclick="toggleAccountStatus('${_secJs(acctId)}','${_secJs(d.status||"active")}')">
         <i class="fas fa-${d.status==='blocked'?'lock-open':'lock'} me-1"></i> ${d.status==='blocked'?'Unblock':'Block'}
       </button>
     </div>
@@ -7641,7 +7663,7 @@ function renderAccountDetailHTML(d) {
         <div class="col-md-4"><span style="color:var(--muted);">City</span><br>${escHtml(d.city||'—')}</div>
         <div class="col-md-4 mt-3"><span style="color:var(--muted);">Roles</span><br>${roles}</div>
         <div class="col-md-4 mt-3"><span style="color:var(--muted);">Status</span><br>
-          <span class="badge" style="background:${d.status==='active'?'#1a6640':'#c0392b'};color:#fff;">${d.status||'active'}</span>
+          <span class="badge" style="background:${d.status==='active'?'#1a6640':'#c0392b'};color:#fff;">${escHtml(d.status||'active')}</span>
         </div>
         <div class="col-md-4 mt-3"><span style="color:var(--muted);">Area</span><br>${escHtml(d.area||'—')}</div>
       </div>
@@ -7676,13 +7698,13 @@ function renderAccountDetailHTML(d) {
                 ? `<span style="color:#1a6640;font-size:11px;">✅ ${escHtml(s.subscription.plan||'')} till ${s.subscription.end_date||''}</span>`
                 : `<span style="color:#c0392b;font-size:11px;">No plan</span>`;
               const approveBtn = (s.status==='waiting_approval'||s.status==='draft'&&s.subscription)
-                ? `<button class="btn-approve" onclick="approveStore('${s.store_id}')">✓ Approve</button>`
+                ? `<button class="btn-approve" onclick="approveStore('${_secJs(s.store_id)}')">✓ Approve</button>`
                 : '';
               return `<tr>
                 <td><strong>${escHtml(s.store_name||'—')}</strong></td>
                 <td>${escHtml(s.category||'—')}</td>
                 <td>${escHtml(s.city||'—')}</td>
-                <td><span style="background:${stColor};color:#fff;border-radius:5px;padding:2px 7px;font-size:11px;">${stLabel}</span></td>
+                <td><span style="background:${stColor};color:#fff;border-radius:5px;padding:2px 7px;font-size:11px;">${escHtml(stLabel)}</span></td>
                 <td>${s.product_count||0}</td>
                 <td>${subHtml}</td>
                 <td>${approveBtn}</td>
@@ -7743,7 +7765,7 @@ async function loadAdminBanners() {
     _adminBannersList = Array.isArray(data) ? data : [];
     renderAdminBanners();
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:20px">${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:20px">${escHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -7756,7 +7778,7 @@ function renderAdminBanners() {
   tbody.innerHTML = _adminBannersList.map(b => {
     const img = b.image_url || b.image || '';
     const imgHtml = img
-      ? `<img src="${img}" style="width:90px;height:55px;object-fit:cover;border-radius:7px;border:1px solid var(--border)">`
+      ? `<img src="${_secUrl(img)}" style="width:90px;height:55px;object-fit:cover;border-radius:7px;border:1px solid var(--border)">`
       : `<div style="width:90px;height:55px;border-radius:7px;background:#e8f5f0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">No image</div>`;
     const active = b.is_active !== false;
     const badge = active
@@ -7764,15 +7786,15 @@ function renderAdminBanners() {
       : `<span class="badge" style="background:#fef3f2;color:#c0392b;border:1px solid #f5c6c6;font-size:11px">Inactive</span>`;
     return `<tr>
       <td>${imgHtml}</td>
-      <td style="font-weight:600;color:var(--text)">${b.title || '<span style="color:var(--muted);font-style:italic">—</span>'}</td>
-      <td style="color:var(--muted);font-size:12px">${b.subtitle || '—'}</td>
-      <td style="font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.link_url ? `<a href="${b.link_url}" target="_blank" style="color:var(--primary)">${b.link_url}</a>` : '—'}</td>
+      <td style="font-weight:600;color:var(--text)">${b.title ? escHtml(b.title) : '<span style="color:var(--muted);font-style:italic">—</span>'}</td>
+      <td style="color:var(--muted);font-size:12px">${escHtml(b.subtitle || '—')}</td>
+      <td style="font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.link_url ? `<a href="${_secUrl(b.link_url)}" target="_blank" style="color:var(--primary)">${escHtml(b.link_url)}</a>` : '—'}</td>
       <td style="text-align:center">${b.sort_order ?? 0}</td>
       <td style="text-align:center;font-size:12px;color:var(--primary);font-weight:600">${(b.floating_store_ids||[]).length || '<span style="color:var(--muted)">Auto</span>'}</td>
       <td>${badge}</td>
       <td>
-        <button class="btn btn-sm" style="padding:4px 10px;font-size:12px" onclick='editAdminBanner(${JSON.stringify(b)})'>Edit</button>
-        <button class="btn btn-sm" style="padding:4px 10px;font-size:12px;background:var(--danger);color:#fff;border:none;margin-left:4px" onclick="deleteAdminBanner('${b.id}')">Delete</button>
+        <button class="btn btn-sm" style="padding:4px 10px;font-size:12px" onclick='editAdminBanner(${escHtml(JSON.stringify(b))})'>Edit</button>
+        <button class="btn btn-sm" style="padding:4px 10px;font-size:12px;background:var(--danger);color:#fff;border:none;margin-left:4px" onclick="deleteAdminBanner('${_secJs(b.id)}')">Delete</button>
       </td>
     </tr>`;
   }).join('');
@@ -7798,7 +7820,7 @@ function openAdminBannerModal(data) {
   const img = data?.image_url || '';
   const prev = document.getElementById('abm_img_preview');
   prev.innerHTML = img
-    ? `<img src="${img}" style="width:100%;height:100%;object-fit:cover;object-position:center">`
+    ? `<img src="${_secUrl(img)}" style="width:100%;height:100%;object-fit:cover;object-position:center">`
     : '<span style="color:#aaa;font-size:13px">No image selected</span>';
   document.getElementById('adminBannerModal').style.display = 'flex';
   // Populate floating stores picker
@@ -7820,7 +7842,7 @@ function previewAdminBannerImage(input) {
   const reader = new FileReader();
   reader.onload = e => {
     const prev = document.getElementById('abm_img_preview');
-    prev.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;object-position:center">`;
+    prev.innerHTML = `<img src="${escHtml(e.target.result)}" style="width:100%;height:100%;object-fit:cover;object-position:center">`;
   };
   reader.readAsDataURL(input.files[0]);
 }
@@ -7941,7 +7963,7 @@ function _renderAbmStoreCheckboxes(stores, selectedIds, filter) {
     const area = s.area ? ` · ${s.area}` : '';
     return `<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--text)">
       <input type="checkbox" value="${id}" ${checked} onchange="updateAbmCount()" style="width:15px;height:15px;accent-color:var(--primary)">
-      <span><strong>${s.store_name||'—'}</strong><span style="color:var(--muted)">${area}</span></span>
+      <span><strong>${escHtml(s.store_name||'—')}</strong><span style="color:var(--muted)">${escHtml(area)}</span></span>
     </label>`;
   }).join('');
   updateAbmCount();
@@ -8111,7 +8133,7 @@ function _renderDiTable(type, urls, exploreUrl) {
     const isBase64 = url && url.startsWith('data:');
     const isVideo  = !isBase64 && url && (/\.mp4(\?|$)/i.test(url) || /video\/mp4/i.test(url));
     const displayUrl = isBase64 ? '[Uploaded file — replace with a public HTTPS URL using the URL field below]' : url;
-    const safeUrl = (url || '').replace(/'/g, "\\'");
+    const safeUrl = (url || '');
     // Detect base64 video (mp4 uploaded but Cloudinary not configured → stored as data:video/mp4)
     const isBase64Video = isBase64 && url && url.startsWith('data:video');
     const previewCell = isBase64Video
@@ -8124,8 +8146,8 @@ function _renderDiTable(type, urls, exploreUrl) {
       : isBase64
         ? `<td style="padding:6px 10px;vertical-align:middle"><div style="width:56px;height:40px;background:#f5f5f5;border-radius:6px;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:9px;color:#999">IMG</div></td>`
         : isVideo
-          ? `<td style="padding:6px 10px;vertical-align:middle"><video src="${url}" style="width:80px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #ddd" muted playsinline autoplay loop preload="metadata"></video></td>`
-          : `<td style="padding:6px 10px;vertical-align:middle"><img src="${url}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd" onerror="this.style.display='none'"></td>`;
+          ? `<td style="padding:6px 10px;vertical-align:middle"><video src="${_secUrl(url)}" style="width:80px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #ddd" muted playsinline autoplay loop preload="metadata"></video></td>`
+          : `<td style="padding:6px 10px;vertical-align:middle"><img src="${_secUrl(url)}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd" onerror="this.style.display='none'"></td>`;
     const videoLabel = (isVideo || isBase64Video)
       ? `<span style="font-size:10px;background:#3E5F55;color:#fff;padding:2px 7px;border-radius:10px;margin-right:6px;font-weight:600">&#9654; VIDEO</span>`
       : '';
@@ -8133,7 +8155,7 @@ function _renderDiTable(type, urls, exploreUrl) {
     const urlDisplay = isBase64Video
       ? `<span style="color:#3E5F55;font-weight:600;font-style:normal">&#10003; Video file uploaded — replace with a Cloudinary/HTTPS URL below for permanent storage</span>`
       : isBase64
-        ? `<span style="color:#856404;font-style:italic;">${displayUrl}</span>`
+        ? `<span style="color:#856404;font-style:italic;">${escHtml(displayUrl)}</span>`
         : videoLabel + displayUrl;
     const urlCell = `<td style="padding:6px 10px;vertical-align:middle;word-break:break-all;font-size:12px;color:var(--muted)">
       ${urlDisplay}
@@ -8141,7 +8163,7 @@ function _renderDiTable(type, urls, exploreUrl) {
     const exploreCell = type === 'merchant_banner'
       ? `<td style="padding:6px 10px;vertical-align:middle;text-align:center">
            <input type="checkbox" ${url === exploreUrl ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer"
-             title="Explore City Name" onchange="diSetExplore('${safeUrl}', this.checked, this)">
+             title="Explore City Name" onchange="diSetExplore('${_secJs(safeUrl)}', this.checked, this)">
          </td>`
       : '';
     return `<tr>
@@ -8150,7 +8172,7 @@ function _renderDiTable(type, urls, exploreUrl) {
       ${exploreCell}
       <td style="padding:6px 10px;vertical-align:middle">
         <button class="btn btn-sm" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px"
-          onclick="diRemoveUrl('${type}','${safeUrl}')">
+          onclick="diRemoveUrl('${_secJs(type)}','${_secJs(safeUrl)}')">
           <i class="fas fa-trash-alt"></i>
         </button>
       </td>
@@ -8297,7 +8319,7 @@ async function loadPopupCampaigns() {
             ? c.image_url : '')
         : '';
       const preview = imgSrc
-        ? `<img src="${imgSrc}" style="width:60px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.display='none'">`
+        ? `<img src="${_secUrl(imgSrc)}" style="width:60px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.display='none'">`
         : `<div style="width:60px;height:80px;background:#f0f4f2;border-radius:8px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-image" style="color:#ccc"></i></div>`;
       const target = c.target === 'selected_city'
         ? `City: ${(c.cities||[]).join(', ') || '—'}`
@@ -8310,22 +8332,22 @@ async function loadPopupCampaigns() {
       return `<tr>
         <td>${preview}</td>
         <td><strong>${escHtml(c.name||'—')}</strong></td>
-        <td>${freqLabel[c.frequency]||c.frequency||'—'}</td>
+        <td>${escHtml(freqLabel[c.frequency]||c.frequency||'—')}</td>
         <td style="font-size:12px">${escHtml(target)}</td>
         <td style="font-size:12px">${start}</td>
         <td style="font-size:12px">${end}</td>
         <td style="text-align:center">
-          <input type="checkbox" ${c.is_active?'checked':''} onchange="togglePopupCampaign('${c.id}',this.checked)"
+          <input type="checkbox" ${c.is_active?'checked':''} onchange="togglePopupCampaign('${_secJs(c.id)}',this.checked)"
             style="width:18px;height:18px;accent-color:var(--primary);cursor:pointer;">
         </td>
         <td>
-          <button class="btn-o me-1" onclick="editPopupCampaign(${JSON.stringify(c).replace(/"/g,'&quot;')})"><i class="fas fa-edit"></i></button>
-          <button class="btn-d" onclick="deletePopupCampaign('${c.id}')"><i class="fas fa-trash"></i></button>
+          <button class="btn-o me-1" onclick="editPopupCampaign(${escHtml(JSON.stringify(c))})"><i class="fas fa-edit"></i></button>
+          <button class="btn-d" onclick="deletePopupCampaign('${_secJs(c.id)}')"><i class="fas fa-trash"></i></button>
         </td>
       </tr>`;
     }).join('');
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--danger)">${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--danger)">${escHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -8348,7 +8370,7 @@ function openPopupCampaignModal(data = null) {
   const prev = document.getElementById('pcm_img_preview');
   const imgUrl = data?.image_url || '';
   if (imgUrl && (imgUrl.startsWith('http') || imgUrl.startsWith('/popup-image'))) {
-    prev.innerHTML = `<img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover">`;
+    prev.innerHTML = `<img src="${_secUrl(imgUrl)}" style="width:100%;height:100%;object-fit:cover">`;
   } else {
     prev.innerHTML = '<span style="color:#aaa;font-size:13px">No image selected</span>';
   }
@@ -8370,7 +8392,7 @@ function closePopupCampaignModal() {
 function pcmPreviewUrl(url) {
   const prev = document.getElementById('pcm_img_preview');
   if (url && url.startsWith('http')) {
-    prev.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.innerHTML='<span style=color:#aaa;font-size:13px>Could not load image</span>'">`;
+    prev.innerHTML = `<img src="${_secUrl(url)}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.innerHTML='<span style=color:#aaa;font-size:13px>Could not load image</span>'">`;
   } else {
     prev.innerHTML = '<span style="color:#aaa;font-size:13px">No image selected</span>';
   }
@@ -8382,7 +8404,7 @@ function pcmPreviewFile(input) {
   const prev = document.getElementById('pcm_img_preview');
   const reader = new FileReader();
   reader.onload = e => {
-    prev.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover">`;
+    prev.innerHTML = `<img src="${escHtml(e.target.result)}" style="width:100%;height:100%;object-fit:cover">`;
     document.getElementById('pcm_image_url').value = '';
   };
   reader.readAsDataURL(file);
@@ -8558,7 +8580,7 @@ async function gcOnMerchantChange() {
         storeSel.disabled = true;
       } else {
         storeSel.innerHTML = '<option value="">Select a store</option>' +
-          mStores.map(s => `<option value="${s._id}" data-city="${(s.city||'').toLowerCase()}">${s.store_name||s._id}</option>`).join('');
+          mStores.map(s => `<option value="${s._id}" data-city="${escHtml((s.city||'').toLowerCase())}">${escHtml(s.store_name||s._id)}</option>`).join('');
         storeSel.disabled = false;
         if (mStores.length === 1) { storeSel.value = mStores[0]._id; gcOnStoreChange(); }
       }
@@ -8644,6 +8666,64 @@ function gcOnStoreChange() {
       <i class="fab fa-whatsapp" style="color:#25D366"></i> WhatsApp Live Chat
     </h5>
     <span style="font-size:12px;color:var(--muted)">Incoming messages from customers &middot; Manual replies only</span>
+    <button type="button" class="btn btn-sm btn-secondary" id="wa_tpl_toggle" onclick="waTplTogglePanel()" style="margin-left:auto;">
+      <i class="fas fa-vial"></i> WhatsApp Template Test
+    </button>
+  </div>
+
+  <!-- WhatsApp Template Test (separate from Live Chat; single recipient, dry-run first) -->
+  <div id="wa_tpl_panel" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:10px;flex-shrink:0;max-height:60vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+      <i class="fas fa-vial" style="color:var(--primary)"></i>
+      <strong style="color:var(--primary);">WhatsApp Template Test</strong>
+      <span style="font-size:12px;color:var(--muted);">Template <code>offro_merchant_invitation</code> &middot; English &middot; ONE recipient per test</span>
+    </div>
+    <div style="font-size:12px;color:var(--warning);margin-bottom:12px;">
+      This is a marketing template. Send only to a person who has explicitly opted in to WhatsApp messages from OffrO &mdash; a publicly listed business number is not consent.
+    </div>
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label" style="font-size:12px;font-weight:600;" for="wa_tpl_phone">Recipient phone (with country code)</label>
+        <input id="wa_tpl_phone" class="form-control form-control-sm" inputmode="tel" autocomplete="off" placeholder="919876543210" oninput="waTplInputsChanged()">
+        <small class="text-muted">One number only, digits with country code (e.g. 91&hellip;).</small>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" style="font-size:12px;font-weight:600;" for="wa_tpl_file">Header image</label>
+        <input id="wa_tpl_file" type="file" class="form-control form-control-sm" accept="image/jpeg,image/png,image/webp" onchange="waTplFileSelected(this)">
+        <small id="wa_tpl_upload_status" class="text-muted">JPEG/PNG/WebP, max 5 MB. Uploaded to WhatsApp when selected.</small>
+      </div>
+      <div class="col-md-4" id="wa_tpl_preview_col" style="display:none;">
+        <img id="wa_tpl_preview" alt="Header preview" style="max-height:74px;max-width:100%;border-radius:8px;border:1px solid var(--border);">
+      </div>
+      <div class="col-12">
+        <label class="form-label" style="font-size:12px;font-weight:600;" for="wa_tpl_note">Consent note (how and when this person opted in)</label>
+        <textarea id="wa_tpl_note" class="form-control form-control-sm" rows="2" maxlength="500" placeholder="e.g. Opted in via the merchant sign-up form on 2026-10-01" oninput="waTplInputsChanged()"></textarea>
+      </div>
+      <div class="col-12">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="wa_tpl_consent" onchange="waTplInputsChanged()">
+          <label class="form-check-label" for="wa_tpl_consent" style="font-size:13px;">
+            I confirm this recipient has <strong>explicitly opted in</strong> to receive WhatsApp marketing messages from OffrO.
+          </label>
+        </div>
+        <div class="form-check" style="margin-top:6px;">
+          <input class="form-check-input" type="checkbox" id="wa_tpl_dry" checked onchange="waTplInputsChanged()">
+          <label class="form-check-label" for="wa_tpl_dry" style="font-size:13px;">
+            <strong>Dry run</strong> &mdash; check everything with Meta but do <u>not</u> send a message (default).
+          </label>
+        </div>
+        <small id="wa_tpl_gate_hint" class="text-muted" style="display:none;"></small>
+      </div>
+      <div class="col-12" style="display:flex;gap:8px;align-items:center;">
+        <button type="button" id="wa_tpl_run" class="btn btn-sm btn-secondary" onclick="waTplRun()">
+          <i class="fas fa-vial"></i> Run dry-run
+        </button>
+        <button type="button" class="btn btn-sm" onclick="waTplReset()" style="background:none;border:1px solid var(--border);">Reset</button>
+      </div>
+      <div class="col-12">
+        <div id="wa_tpl_result" role="status" aria-live="polite"></div>
+      </div>
+    </div>
   </div>
 
   <div class="wa-chat-wrap" style="overflow:hidden;">
@@ -8742,6 +8822,184 @@ function gcOnStoreChange() {
 
 <script>
 // ══════════════════════════════════════════════════════
+//  WhatsApp Template Test — single recipient, dry-run first.
+//  Auth: same-origin cookies (credentials:'include'), exactly like Live Chat. No token is ever read,
+//  stored or logged here, and responses are rendered with textContent only.
+// ══════════════════════════════════════════════════════
+var _waTplMediaId = '';          // media_id returned by POST /admin/whatsapp/upload
+var _waTplUploadedName = '';
+var _waTplDryOkKey = '';         // inputs that passed a dry-run; real send needs an exact match
+var _waTplBusy = false;
+var _WA_TPL_MAX = 5 * 1024 * 1024;
+
+function waTplEl(id){ return document.getElementById(id); }
+
+function waTplTogglePanel(){
+  var p = waTplEl('wa_tpl_panel');
+  p.style.display = (p.style.display === 'none') ? 'block' : 'none';
+}
+
+function waTplNormalizePhone(raw){
+  raw = String(raw || '').trim();
+  if (/[,;\n\r|]/.test(raw) || raw.split(/\s+/).length > 3) return {err: 'Only ONE phone number is allowed.'};
+  var d = raw.replace(/[\s\-()]/g, '');
+  if (d.charAt(0) === '+') d = d.slice(1);
+  if (!/^[1-9][0-9]{7,14}$/.test(d)) return {err: 'Enter the number in international format with country code, e.g. 919876543210.'};
+  return {phone: d};
+}
+
+function waTplKey(){
+  var p = waTplNormalizePhone(waTplEl('wa_tpl_phone').value);
+  return [p.phone || '', _waTplMediaId, waTplEl('wa_tpl_note').value.trim(), waTplEl('wa_tpl_consent').checked ? '1' : '0'].join('|');
+}
+
+function waTplShow(kind, title, rows, lines){
+  var box = waTplEl('wa_tpl_result');
+  box.textContent = '';
+  var colors = {ok:'#1e7e34', err:'var(--danger)', info:'var(--muted)'};
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'border:1px solid '+(kind==='ok'?'#b7e1c1':kind==='err'?'#f1b9b3':'var(--border)')+';border-radius:10px;padding:10px 14px;font-size:13px;background:'+(kind==='ok'?'#f3fbf5':kind==='err'?'#fdf4f3':'#fafafa')+';';
+  var h = document.createElement('div');
+  h.style.cssText = 'font-weight:700;margin-bottom:6px;color:'+colors[kind]+';';
+  h.textContent = title;
+  wrap.appendChild(h);
+  (rows || []).forEach(function(r){
+    var d = document.createElement('div');
+    var k = document.createElement('span'); k.style.cssText = 'display:inline-block;min-width:150px;color:var(--muted);'; k.textContent = r[0];
+    var v = document.createElement('span'); v.textContent = r[1];
+    d.appendChild(k); d.appendChild(v); wrap.appendChild(d);
+  });
+  (lines || []).forEach(function(t){
+    var d = document.createElement('div'); d.textContent = t; wrap.appendChild(d);
+  });
+  box.appendChild(wrap);
+}
+
+// Anything the admin edits invalidates a previous dry-run, so a real send always follows a matching dry-run.
+function waTplInputsChanged(){ waTplRefreshControls(); }
+
+function waTplRefreshControls(){
+  var dry = waTplEl('wa_tpl_dry').checked;
+  var btn = waTplEl('wa_tpl_run');
+  var hint = waTplEl('wa_tpl_gate_hint');
+  var matched = _waTplDryOkKey && _waTplDryOkKey === waTplKey();
+  if (dry) {
+    btn.innerHTML = '<i class="fas fa-vial"></i> Run dry-run';
+    btn.className = 'btn btn-sm btn-secondary';
+    btn.disabled = _waTplBusy;
+    hint.style.display = 'none';
+  } else {
+    btn.innerHTML = '<i class="fab fa-whatsapp"></i> Send ONE real test message';
+    btn.className = 'btn btn-sm btn-success';
+    btn.disabled = _waTplBusy || !matched;
+    hint.style.display = 'block';
+    hint.style.color = matched ? '#1e7e34' : 'var(--danger)';
+    hint.textContent = matched ? 'Dry-run passed for these exact inputs. You will be asked to confirm before sending.'
+      : 'Sending is locked: run a successful dry-run with these exact inputs first (changing any field requires a new dry-run).';
+  }
+}
+
+async function waTplFileSelected(input){
+  var st = waTplEl('wa_tpl_upload_status');
+  var file = input.files && input.files[0];
+  _waTplMediaId = ''; _waTplUploadedName = ''; _waTplDryOkKey = '';
+  waTplEl('wa_tpl_preview_col').style.display = 'none';
+  waTplRefreshControls();
+  if (!file) { st.textContent = 'JPEG/PNG/WebP, max 5 MB. Uploaded to WhatsApp when selected.'; st.style.color = ''; return; }
+  if (['image/jpeg','image/png','image/webp'].indexOf(file.type) < 0) {
+    st.textContent = '❌ Unsupported file type. Use JPEG, PNG or WebP.'; st.style.color = 'var(--danger)'; input.value = ''; return;
+  }
+  if (file.size > _WA_TPL_MAX) { st.textContent = '❌ File too large (max 5 MB).'; st.style.color = 'var(--danger)'; input.value = ''; return; }
+  st.textContent = '⏳ Uploading to WhatsApp…'; st.style.color = 'var(--muted)';
+  try {
+    var fd = new FormData(); fd.append('file', file);
+    var r = await fetch('/admin/whatsapp/upload', {method: 'POST', credentials: 'include', body: fd});
+    var d = {}; try { d = await r.json(); } catch(e) {}
+    if (r.status === 401 || r.status === 403) { st.textContent = '❌ Session expired — please log in again.'; st.style.color = 'var(--danger)'; return; }
+    if (r.ok && d.ok && d.media_id) {
+      _waTplMediaId = String(d.media_id); _waTplUploadedName = file.name;
+      st.textContent = '✅ Uploaded — media id ' + _waTplMediaId + ' (valid ~30 days)'; st.style.color = '#1e7e34';
+      var url = URL.createObjectURL(file);
+      var img = waTplEl('wa_tpl_preview'); img.onload = function(){ URL.revokeObjectURL(url); }; img.src = url;
+      waTplEl('wa_tpl_preview_col').style.display = 'block';
+    } else {
+      st.textContent = '❌ Upload failed: ' + (typeof d.detail === 'string' ? d.detail : 'HTTP ' + r.status); st.style.color = 'var(--danger)';
+      input.value = '';
+    }
+  } catch (e) {
+    st.textContent = '❌ Upload error: network problem'; st.style.color = 'var(--danger)'; input.value = '';
+  }
+  waTplRefreshControls();
+}
+
+async function waTplRun(){
+  if (_waTplBusy) return;
+  var dry = waTplEl('wa_tpl_dry').checked;
+  var p = waTplNormalizePhone(waTplEl('wa_tpl_phone').value);
+  var note = waTplEl('wa_tpl_note').value.trim();
+  var problems = [];
+  if (p.err) problems.push(p.err);
+  if (!_waTplMediaId) problems.push('Upload a header image first.');
+  if (!waTplEl('wa_tpl_consent').checked) problems.push('Confirm that the recipient has explicitly opted in.');
+  if (note.length < 10) problems.push('Enter a consent note (at least 10 characters).');
+  if (problems.length) { waTplShow('err', 'Please fix the following', [], problems); return; }
+
+  var key = waTplKey();
+  if (!dry) {
+    if (_waTplDryOkKey !== key) { waTplShow('err', 'Run a successful dry-run with these exact inputs first.'); waTplRefreshControls(); return; }
+    var ok = window.confirm('Send ONE real WhatsApp marketing message?\n\nTemplate: offro_merchant_invitation\nRecipient: number ending ' + p.phone.slice(-4) +
+      '\n\nOnly continue if this person has explicitly opted in. This sends exactly one message and cannot be undone.');
+    if (!ok) return;
+  }
+
+  _waTplBusy = true; waTplRefreshControls();
+  waTplShow('info', dry ? '⏳ Running dry-run…' : '⏳ Sending…');
+  try {
+    var r = await fetch('/admin/whatsapp/template-test', {
+      method: 'POST', credentials: 'include', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({phone: p.phone, consent_confirmed: true, consent_note: note, header_media_id: _waTplMediaId, dry_run: dry})
+    });
+    var d = {}; try { d = await r.json(); } catch(e) {}
+    if (r.status === 401 || r.status === 403) {
+      var dis = typeof d.detail === 'string' && /disabled|WHATSAPP_TEMPLATE_TEST_ENABLED/i.test(d.detail);
+      waTplShow('err', dis ? 'Template test is switched off on the server' : 'Not authorised',
+        [], [dis ? d.detail : 'Your admin session has expired or you are not allowed to do this. Please log in again.']);
+    } else if (r.ok && d.ok) {
+      var rows = [['Template', (d.template || '') + ' (' + (d.language || '') + ')'], ['Meta template status', d.template_status || ''],
+                  ['Recipient', '•••• ' + (d.to_last4 || '')], ['Header image source', d.header_source === 'id' ? 'Uploaded media id' : (d.header_source || '')]];
+      if (d.dry_run) {
+        _waTplDryOkKey = key;
+        if (d.category) rows.splice(2, 0, ['Category', d.category]);
+        waTplShow('ok', '✅ Dry-run passed — nothing was sent', rows,
+          ['✔ Template is APPROVED with an image header and no variables', '✔ Phone number format valid', '✔ Consent confirmed and note provided',
+           '✔ Header image uploaded (media id attached)', 'To send for real, untick “Dry run”, then confirm.']);
+      } else {
+        _waTplDryOkKey = '';
+        rows.push(['Message id', d.message_id || '']);
+        waTplShow('ok', '✅ Message sent to WhatsApp (one message)', rows, ['Delivery status will arrive via the webhook. Run a new dry-run before any further test.']);
+        waTplEl('wa_tpl_dry').checked = true;
+      }
+    } else {
+      waTplShow('err', '❌ ' + (dry ? 'Dry-run failed' : 'Send failed') + ' (HTTP ' + r.status + ')', [],
+        [typeof d.detail === 'string' ? d.detail : 'Unexpected response from the server.']);
+    }
+  } catch (e) {
+    waTplShow('err', '❌ Network error', [], ['Could not reach the server. Nothing was confirmed as sent — check before retrying.']);
+  }
+  _waTplBusy = false; waTplRefreshControls();
+}
+
+function waTplReset(){
+  ['wa_tpl_phone','wa_tpl_note'].forEach(function(i){ waTplEl(i).value = ''; });
+  waTplEl('wa_tpl_file').value = ''; waTplEl('wa_tpl_consent').checked = false; waTplEl('wa_tpl_dry').checked = true;
+  waTplEl('wa_tpl_preview_col').style.display = 'none'; waTplEl('wa_tpl_result').textContent = '';
+  var st = waTplEl('wa_tpl_upload_status'); st.textContent = 'JPEG/PNG/WebP, max 5 MB. Uploaded to WhatsApp when selected.'; st.style.color = '';
+  _waTplMediaId = ''; _waTplUploadedName = ''; _waTplDryOkKey = ''; waTplRefreshControls();
+}
+</script>
+
+<script>
+// ══════════════════════════════════════════════════════
 //  WhatsApp Live Chat — Dashboard JS (Phase 1, no AI)
 // ══════════════════════════════════════════════════════
 
@@ -8773,7 +9031,7 @@ async function loadWaChats() {
     const el = document.getElementById('wa_customer_list');
     if (el) el.innerHTML =
       '<div style="padding:16px;color:red;font-size:12px;border:1px solid #ffcccc;margin:8px;border-radius:8px;">' +
-      '&#9888; Error loading chats:<br><code>' + e.message + '</code>' +
+      '&#9888; Error loading chats:<br><code>' + escHtml(e.message) + '</code>' +
       '<br><br><button onclick="loadWaChats()" style="font-size:11px;padding:4px 10px;cursor:pointer;">Retry</button></div>';
   }
 }
@@ -8792,17 +9050,17 @@ function renderWaCustomerList(customers) {
       : '';
     const initials = (c.name || 'U').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
     const ts       = c.last_message_time ? _waFormatTime(c.last_message_time) : '';
-    const preview  = (c.last_message || '').slice(0, 42) + ((c.last_message||'').length > 42 ? '…' : '');
-    return `<div onclick="openWaConversation('${c.customer_id}')"
+    const preview  = escHtml((c.last_message || '').slice(0, 42) + ((c.last_message||'').length > 42 ? '…' : ''));
+    return `<div onclick="openWaConversation('${_secJs(c.customer_id)}')"
       style="display:flex;gap:10px;padding:12px 14px;cursor:pointer;border-bottom:1px solid var(--border);align-items:center;
              background:${isActive ? '#e8f5e9' : '#fff'};${isActive ? 'border-left:3px solid #25D366;' : ''}
              transition:background .15s;"
-      onmouseover="if('${c.customer_id}'!==_waCurrentCustomerId)this.style.background='#f5f5f5'"
-      onmouseout="if('${c.customer_id}'!==_waCurrentCustomerId)this.style.background='#fff'">
-      <div style="width:40px;height:40px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff;flex-shrink:0;">${initials}</div>
+      onmouseover="if('${_secJs(c.customer_id)}'!==_waCurrentCustomerId)this.style.background='#f5f5f5'"
+      onmouseout="if('${_secJs(c.customer_id)}'!==_waCurrentCustomerId)this.style.background='#fff'">
+      <div style="width:40px;height:40px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff;flex-shrink:0;">${escHtml(initials)}</div>
       <div style="flex:1;min-width:0;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-weight:${c.unread_count>0?'700':'600'};font-size:13px;color:var(--text);">${c.name||'Unknown'}</span>
+          <span style="font-weight:${c.unread_count>0?'700':'600'};font-size:13px;color:var(--text);">${escHtml(c.name||'Unknown')}</span>
           <span style="font-size:10px;color:var(--muted);">${ts}</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
@@ -8895,7 +9153,7 @@ async function refreshConversation() {
   } catch(e) {
     console.error('[WA-Chat] refreshConversation error:', e);
     const el = document.getElementById('wa_messages');
-    if (el) el.innerHTML = '<div style="text-align:center;color:red;font-size:12px;margin-top:40px;">&#9888; ' + e.message + '</div>';
+    if (el) el.innerHTML = '<div style="text-align:center;color:red;font-size:12px;margin-top:40px;">&#9888; ' + escHtml(e.message) + '</div>';
   }
 }
 
@@ -8942,8 +9200,8 @@ function _waImageContent(m) {
   const captionHtml = captionText
     ? '<div style="font-size:12px;color:#555;margin-top:5px;word-break:break-word;">' + _waEscape(captionText) + '</div>'
     : '';
-  return '<a href="' + m.media_url + '" target="_blank" rel="noopener" style="display:block;">'
-    + '<img src="' + m.media_url + '" alt="Photo" loading="lazy" onerror="_waImgError(this)"'
+  return '<a href="' + _secUrl(m.media_url) + '" target="_blank" rel="noopener" style="display:block;">'
+    + '<img src="' + _secUrl(m.media_url) + '" alt="Photo" loading="lazy" onerror="_waImgError(this)"'
     + ' style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:zoom-in;object-fit:cover;">'
     + '</a>' + captionHtml;
 }
@@ -8988,7 +9246,7 @@ function _waRenderMsg(m) {
         <small style="font-size:9px;color:var(--muted);">${ts}</small>
       </div>
     </div>
-    ${_rbacCanDo('wa_chat','delete') ? '<button onclick="event.stopPropagation();deleteWaMessage(\''+msgId+'\')" class="wa-msg-del" style="position:absolute;top:-4px;right:-4px;background:rgba(192,57,43,.9);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:9px;cursor:pointer;opacity:0;transition:opacity .2s;display:flex;align-items:center;justify-content:center;padding:0;z-index:5;" title="Delete message"><i class="fas fa-times"></i></button>' : ''}
+    ${_rbacCanDo('wa_chat','delete') ? '<button onclick="event.stopPropagation();deleteWaMessage(\''+_secJs(msgId)+'\')" class="wa-msg-del" style="position:absolute;top:-4px;right:-4px;background:rgba(192,57,43,.9);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:9px;cursor:pointer;opacity:0;transition:opacity .2s;display:flex;align-items:center;justify-content:center;padding:0;z-index:5;" title="Delete message"><i class="fas fa-times"></i></button>' : ''}
   </div>`;
 }
 
@@ -9228,7 +9486,7 @@ async function deleteWaMessage(msgId) {
 // ── Add delete button on individual message hover ────────────────────────────
 function waMsgDeleteBtn(msgId) {
   if (!_rbacCanDo('wa_chat','delete')) return '';
-  return '<button onclick="event.stopPropagation();deleteWaMessage(\''+msgId+'\')" ' +
+  return '<button onclick="event.stopPropagation();deleteWaMessage(\''+_secJs(msgId)+'\')" ' +
     'style="position:absolute;top:2px;right:2px;background:rgba(192,57,43,.85);color:#fff;border:none;border-radius:4px;padding:2px 6px;font-size:10px;cursor:pointer;opacity:0;transition:opacity .2s;" ' +
     'onmouseenter="this.style.opacity=1" ' +
     'class="wa-msg-del"><i class="fas fa-trash-alt"></i></button>';
@@ -9268,7 +9526,7 @@ async function rbacLoadUsers() {
         let cities = (u.assigned_cities || []).join(", ") || "—";
         if (u.assigned_cities && u.assigned_cities.includes("*")) cities = "All Cities";
         let lastLogin = u.last_login_at ? new Date(u.last_login_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : "Never";
-        html += '<tr><td style="position:sticky;left:0;background:#fff;z-index:1"><strong>' + (u.full_name||"") + '</strong></td><td>' + (u.mobile||"") + '</td><td>' + (u.designation||"—") + '</td><td>' + (u.role_name||"—") + '</td><td style="font-size:11px">' + cities + '</td><td>' + statusBadge + '</td><td style="font-size:11px">' + lastLogin + '</td><td><button class="btn btn-sm" onclick="rbacEditUser(\''+u.id+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteUser(\''+u.id+'\',\''+u.full_name+'\')"><i class="fas fa-trash text-danger"></i></button></td></tr>';
+        html += '<tr><td style="position:sticky;left:0;background:#fff;z-index:1"><strong>' + (escHtml(u.full_name||"")) + '</strong></td><td>' + (escHtml(u.mobile||"")) + '</td><td>' + (escHtml(u.designation||"—")) + '</td><td>' + (escHtml(u.role_name||"—")) + '</td><td style="font-size:11px">' + escHtml(cities) + '</td><td>' + statusBadge + '</td><td style="font-size:11px">' + lastLogin + '</td><td><button class="btn btn-sm" onclick="rbacEditUser(\''+_secJs(u.id)+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteUser(\''+_secJs(u.id)+'\',\''+_secJs(u.full_name)+'\')"><i class="fas fa-trash text-danger"></i></button></td></tr>';
       }
     }
     document.getElementById("rbac_users_table").innerHTML = html;
@@ -9290,14 +9548,14 @@ async function rbacShowUserModal(userId) {
     let res = await fetch("/admin/auth/roles", { credentials: "include" });
     let roles = await res.json();
     let opts = '<option value="">Select Role...</option>';
-    for (let r of roles) opts += '<option value="' + r.id + '">' + r.role_name + '</option>';
+    for (let r of roles) opts += '<option value="' + r.id + '">' + escHtml(r.role_name) + '</option>';
     document.getElementById("rbac_user_role").innerHTML = opts;
   } catch (e) { console.error("rbacLoadRoles for modal", e); }
 
   // Render city checkboxes
   let cityHtml = "";
   for (let c of RBAC_CITIES) {
-    cityHtml += '<label style="display:flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" value="' + c + '" class="rbac-city-chk"> ' + c + '</label>';
+    cityHtml += '<label style="display:flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" value="' + escHtml(c) + '" class="rbac-city-chk"> ' + escHtml(c) + '</label>';
   }
   cityHtml += '<label style="display:flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--accent);border-radius:8px;cursor:pointer;font-size:13px;background:var(--light)"><input type="checkbox" value="*" class="rbac-city-chk" onchange="document.querySelectorAll(\'.rbac-city-chk\').forEach(c=>{if(c.value!==\'*\')c.disabled=this.checked})"> All Cities (Super Admin)</label>';
   document.getElementById("rbac_city_checkboxes").innerHTML = cityHtml;
@@ -9392,8 +9650,8 @@ async function rbacLoadRoles() {
       for (let mod of RBAC_MODULES) { for (let act of RBAC_ACTIONS) { if (r.permissions[mod] && r.permissions[mod][act]) permCount++; } }
       let permPct = Math.round((permCount / permTotal) * 100);
       let typeBadge = r.is_system_role ? '<span style="background:var(--light);color:var(--primary);padding:2px 10px;border-radius:20px;font-size:10px;font-weight:700">SYSTEM</span>' : '<span style="background:#f0f0f0;color:var(--muted);padding:2px 10px;border-radius:20px;font-size:10px;font-weight:700">CUSTOM</span>';
-      let editBtn = r.is_system_role ? '<button class="btn btn-sm" onclick="rbacEditRole(\''+r.id+'\')"><i class="fas fa-edit"></i></button>' : '<button class="btn btn-sm" onclick="rbacEditRole(\''+r.id+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteRole(\''+r.id+'\',\''+r.role_name+'\')"><i class="fas fa-trash text-danger"></i></button>';
-      html += '<tr><td><strong>' + r.role_name + '</strong></td><td style="font-size:12px">' + (r.description||"—") + '</td><td><div style="background:#e0e0e0;border-radius:10px;height:8px;width:100px;overflow:hidden"><div style="background:var(--primary);height:8px;border-radius:10px;width:' + permPct + '%"></div></div><small style="color:var(--muted)">' + permPct + '% (' + permCount + '/' + permTotal + ')</small></td><td>' + typeBadge + '</td><td>' + editBtn + '</td></tr>';
+      let editBtn = r.is_system_role ? '<button class="btn btn-sm" onclick="rbacEditRole(\''+_secJs(r.id)+'\')"><i class="fas fa-edit"></i></button>' : '<button class="btn btn-sm" onclick="rbacEditRole(\''+_secJs(r.id)+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteRole(\''+_secJs(r.id)+'\',\''+_secJs(r.role_name)+'\')"><i class="fas fa-trash text-danger"></i></button>';
+      html += '<tr><td><strong>' + escHtml(r.role_name) + '</strong></td><td style="font-size:12px">' + (escHtml(r.description||"—")) + '</td><td><div style="background:#e0e0e0;border-radius:10px;height:8px;width:100px;overflow:hidden"><div style="background:var(--primary);height:8px;border-radius:10px;width:' + permPct + '%"></div></div><small style="color:var(--muted)">' + permPct + '% (' + permCount + '/' + permTotal + ')</small></td><td>' + typeBadge + '</td><td>' + editBtn + '</td></tr>';
     }
     document.getElementById("rbac_roles_table").innerHTML = html || '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No roles found</td></tr>';
   } catch (e) { console.error("rbacLoadRoles", e); }
@@ -9427,12 +9685,12 @@ function rbacRenderPermMatrix(existing) {
   let html = "";
   for (let mod of RBAC_MODULES) {
     let p = existing[mod] || {};
-    html += '<tr><td class="text-start fw-bold" style="font-size:12px">' + mod + '</td>';
+    html += '<tr><td class="text-start fw-bold" style="font-size:12px">' + escHtml(mod) + '</td>';
     for (let act of RBAC_ACTIONS) {
       let checked = p[act] ? "checked" : "";
-      html += '<td><input type="checkbox" class="form-check-input perm-chk" data-mod="' + mod + '" data-act="' + act + '" ' + checked + '></td>';
+      html += '<td><input type="checkbox" class="form-check-input perm-chk" data-mod="' + escHtml(mod) + '" data-act="' + escHtml(act) + '" ' + checked + '></td>';
     }
-    html += '<td><input type="checkbox" class="form-check-input perm-all" data-mod="' + mod + '" onchange="rbacToggleRow(this)"></td></tr>';
+    html += '<td><input type="checkbox" class="form-check-input perm-all" data-mod="' + escHtml(mod) + '" onchange="rbacToggleRow(this)"></td></tr>';
   }
   document.getElementById("rbac_perm_matrix").innerHTML = html;
 }
@@ -9500,7 +9758,7 @@ async function rbacLoadLogs() {
     let html = "";
     for (let log of data.logs) {
       let actionColor = log.action.includes("FAIL") || log.action.includes("LOCKOUT") || log.action === "DELETE" ? "var(--danger)" : log.action === "LOGIN_SUCCESS" ? "#2d8a56" : "var(--text)";
-      html += '<tr><td style="font-size:11px">' + (log.timestamp ? new Date(log.timestamp && !log.timestamp.endsWith('Z') ? log.timestamp + 'Z' : log.timestamp).toLocaleString('en-IN', {timeZone:'Asia/Kolkata',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : "—") + '</td><td>' + (log.user_name||"—") + '</td><td style="font-size:11px">' + (log.mobile||"—") + '</td><td>' + (log.module||"—") + '</td><td style="font-weight:600;color:' + actionColor + '">' + (log.action||"—") + '</td><td style="font-size:11px">' + (log.record_name||"—") + '</td><td>' + (log.city||"—") + '</td><td style="font-size:11px">' + (log.ip_address||"—") + '</td></tr>';
+      html += '<tr><td style="font-size:11px">' + (log.timestamp ? new Date(log.timestamp && !log.timestamp.endsWith('Z') ? log.timestamp + 'Z' : log.timestamp).toLocaleString('en-IN', {timeZone:'Asia/Kolkata',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : "—") + '</td><td>' + (escHtml(log.user_name||"—")) + '</td><td style="font-size:11px">' + (escHtml(log.mobile||"—")) + '</td><td>' + (escHtml(log.module||"—")) + '</td><td style="font-weight:600;color:' + actionColor + '">' + (escHtml(log.action||"—")) + '</td><td style="font-size:11px">' + (escHtml(log.record_name||"—")) + '</td><td>' + (escHtml(log.city||"—")) + '</td><td style="font-size:11px">' + (escHtml(log.ip_address||"—")) + '</td></tr>';
     }
     document.getElementById("rbac_logs_table").innerHTML = html || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">No logs found</td></tr>';
     document.getElementById("rbac_logs_count").innerText = data.total + " total logs";
