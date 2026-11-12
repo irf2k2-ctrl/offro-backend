@@ -1795,3 +1795,174 @@ def test_webhook_legitimately_superseded_event_sends_no_confirmation(client, scr
     monkeypatch.setattr(C, "db", _DupDb(_db(), None))
     assert post(client, payload(text="START", msg_id="wamid.D8", ts="1762843200")).status_code == 200
     assert calls == []
+
+
+# ═════════════ Event timestamp validation (future timestamps are rejected for consent ordering) ═════════════
+import time as _time
+import types as _types
+
+NOW = 1_800_000_000          # frozen server clock for the unit tests below
+
+
+@pytest.fixture
+def frozen_now(monkeypatch):
+    monkeypatch.setattr(C, "time", _types.SimpleNamespace(time=lambda: float(NOW)))
+    return NOW
+
+
+def _real_future(seconds):
+    return str(int(_time.time()) + seconds)
+
+
+def _contact():
+    return _db().wa_contacts.find_one({"_id": SENDER})
+
+
+def _ledger():
+    return _db().wa_consent_events.count_documents({})
+
+
+def test_tolerance_constant_is_five_minutes():
+    assert C.FUTURE_TOLERANCE_SECONDS == 300
+
+
+@pytest.mark.parametrize("offset", [-86400 * 30, -3600, -1, 0])
+def test_legitimate_past_and_current_timestamps_are_accepted(frozen_now, offset):
+    assert C.record_opt_out(SENDER, "STOP", "wamid.T%d" % (-offset), str(NOW + offset), whatsapp_id=True) == "applied"
+    assert _contact()["consent_seq"] == (NOW + offset) * 2 + 1
+
+
+@pytest.mark.parametrize("offset", [1, 60, 299, 300])
+def test_timestamps_within_the_five_minute_tolerance_are_accepted(frozen_now, offset):
+    assert C.record_opt_in(SENDER, "START", "wamid.W%d" % offset, str(NOW + offset), whatsapp_id=True) == "applied"
+    assert _contact()["status"] == "opted_in" and _contact()["consent_seq"] == (NOW + offset) * 2
+
+
+@pytest.mark.parametrize("offset", [301, 600, 3600, 86400 * 365])
+@pytest.mark.parametrize("fn", ["record_opt_out", "record_opt_in"])
+def test_timestamps_beyond_tolerance_are_rejected_before_any_write(frozen_now, offset, fn):
+    with pytest.raises(C.InvalidTimestampError):
+        getattr(C, fn)(SENDER, "x", "wamid.X%d" % offset, str(NOW + offset), whatsapp_id=True)
+    assert _contact() is None and _ledger() == 0                        # nothing created, nothing recorded
+    assert not issubclass(C.InvalidTimestampError, ValueError)          # never confused with 'invalid phone'
+
+
+def test_rejected_timestamp_is_not_clamped_to_now(frozen_now):
+    with pytest.raises(C.InvalidTimestampError):
+        C.record_opt_out(SENDER, "STOP", "wamid.NC", str(NOW + 10_000), whatsapp_id=True)
+    assert _contact() is None and C.consent_status(SENDER) == "unknown"
+
+
+def test_far_future_12_digit_timestamp_is_rejected(frozen_now):
+    with pytest.raises(C.InvalidTimestampError):
+        C.record_opt_in(SENDER, "START", "wamid.FF", "999999999999", whatsapp_id=True)
+    assert C.may_send_marketing(SENDER) is False
+
+
+def test_forged_far_future_start_cannot_create_opt_in(frozen_now):
+    with pytest.raises(C.InvalidTimestampError):
+        C.record_opt_in(SENDER, "START", "wamid.FS", "999999999999", whatsapp_id=True)
+    assert C.consent_status(SENDER) == "unknown" and C.may_send_marketing(SENDER) is False and _ledger() == 0
+
+
+def test_forged_far_future_stop_cannot_lock_out_a_legitimate_later_start(frozen_now):
+    with pytest.raises(C.InvalidTimestampError):
+        C.record_opt_out(SENDER, "STOP", "wamid.FL", "999999999999", whatsapp_id=True)
+    assert C.record_opt_in(SENDER, "START", "wamid.LS", str(NOW + 5), whatsapp_id=True) == "applied"
+    assert C.consent_status(SENDER) == "opted_in"                       # the genuine START is not 'superseded'
+
+
+@pytest.mark.parametrize("existing,forged_fn,forged_status", [
+    ("record_opt_in", "record_opt_out", "opted_in"),
+    ("record_opt_out", "record_opt_in", "opted_out"),
+])
+def test_existing_consent_is_unchanged_by_an_invalid_timestamp_event(frozen_now, existing, forged_fn, forged_status):
+    getattr(C, existing)(SENDER, "x", "wamid.E1", str(NOW - 100), whatsapp_id=True)
+    before, n = _contact(), _ledger()
+    with pytest.raises(C.InvalidTimestampError):
+        getattr(C, forged_fn)(SENDER, "x", "wamid.E2", str(NOW + 10_000), whatsapp_id=True)
+    after = _contact()
+    assert after == before and after["status"] == forged_status and _ledger() == n
+
+
+def test_legitimate_ordering_idempotency_and_same_second_stop_priority_are_preserved(frozen_now):
+    t = str(NOW - 50)
+    C.record_opt_in(SENDER, "START", "wamid.O1", t, whatsapp_id=True)
+    C.record_opt_out(SENDER, "STOP", "wamid.O2", t, whatsapp_id=True)           # same second: STOP wins
+    assert C.consent_status(SENDER) == "opted_out"
+    assert C.record_opt_in(SENDER, "START", "wamid.O3", t, whatsapp_id=True) == "superseded"
+    assert C.record_opt_out(SENDER, "STOP", "wamid.O2", t, whatsapp_id=True) == "applied"      # idempotent retry
+    assert _db().wa_consent_events.count_documents({"_id": "opt_out:wamid.O2"}) == 1
+    assert C.record_opt_in(SENDER, "START", "wamid.O4", str(NOW - 10), whatsapp_id=True) == "applied"
+    assert C.record_opt_out(SENDER, "STOP", "wamid.O5", str(NOW - 20), whatsapp_id=True) == "superseded"
+    assert C.consent_status(SENDER) == "opted_in"
+
+
+@pytest.mark.parametrize("ts", ["", None, "abc", "12.5", "1234567890123", "-5"])
+def test_missing_or_malformed_timestamp_keeps_existing_receive_time_behaviour(frozen_now, ts):
+    assert C.record_opt_out(SENDER, "STOP", "wamid.M%s" % abs(hash(str(ts))), ts, whatsapp_id=True) == "applied"
+    assert _contact()["consent_seq"] == NOW * 2 + 1
+
+
+# ── webhook level: nothing is silently mishandled ──────────────────────────────
+
+def test_webhook_forged_future_start_changes_nothing_sends_nothing_and_is_monitored(client, sent, caplog):
+    r = post(client, payload(text="START", msg_id="wamid.WF1", ts=_real_future(3600)))
+    assert r.status_code == 200                                         # retrying identical bytes cannot help
+    assert _contact() is None and _ledger() == 0 and sent == []         # no consent, no confirmation, no reply
+    assert len(chats()) == 1                                            # still visible in Live Chat
+    assert any(rec.levelname == "ERROR" and "[WA-CONSENT-INVALID-TIMESTAMP]" in rec.getMessage() for rec in caplog.records)
+    assert SENDER not in caplog.text and ev("msg:wamid.WF1")["state"] == "done"
+
+
+def test_webhook_future_stop_is_never_silent_never_a_confirmation_and_never_opt_in(client, sent, caplog):
+    r = post(client, payload(text="STOP", msg_id="wamid.WF2", ts=_real_future(3600)))
+    assert r.status_code == 200
+    assert sent == [(SENDER, C.STOP_FAILURE_NOTICE)]                    # told it was NOT processed
+    assert C.STOP_CONFIRMATION not in [m for _, m in sent] and C.START_CONFIRMATION not in [m for _, m in sent]
+    assert _contact() is None and C.may_send_marketing(SENDER) is False and _ledger() == 0
+    assert "[WA-CONSENT-INVALID-TIMESTAMP]" in caplog.text and "[WA-CONSENT-FAILURE]" not in caplog.text
+    assert ev("msg:wamid.WF2")["consent_failed"] is True and ev("msg:wamid.WF2")["notice_sent"] is True
+
+
+def test_webhook_future_stop_does_not_clear_existing_opt_in_but_user_is_told(client, sent):
+    post(client, payload(text="START", msg_id="wamid.WF3", ts=str(int(_time.time()) - 60)))
+    sent.clear()
+    before = _contact()
+    post(client, payload(text="STOP", msg_id="wamid.WF4", ts=_real_future(3600)))
+    assert _contact() == before and sent == [(SENDER, C.STOP_FAILURE_NOTICE)]
+
+
+def test_webhook_forged_far_future_stop_cannot_block_the_real_start(client, sent):
+    post(client, payload(text="STOP", msg_id="wamid.WF5", ts="4102444800"))              # forged, year 2100
+    assert _contact() is None
+    post(client, payload(text="START", msg_id="wamid.WF6", ts=str(int(_time.time()))))
+    assert _contact()["status"] == "opted_in" and sent[-1] == (SENDER, C.START_CONFIRMATION)
+
+
+def test_webhook_within_tolerance_future_timestamp_is_processed_normally(client, sent):
+    post(client, payload(text="STOP", msg_id="wamid.WF7", ts=_real_future(120)))
+    assert _contact()["status"] == "opted_out" and sent == [(SENDER, C.STOP_CONFIRMATION)]
+
+
+def test_webhook_future_stop_notice_retryable_asks_meta_to_retry_uncertain_does_not(client, scripted):
+    calls, outcomes = scripted
+    outcomes.append(OUT_RETRYABLE)
+    body = payload(text="STOP", msg_id="wamid.WF8", ts=_real_future(3600))
+    assert post(client, body).status_code == 500
+    assert post(client, body).status_code == 200 and calls == [C.STOP_FAILURE_NOTICE] * 2
+    outcomes.append(OUT_UNCERTAIN)
+    assert post(client, payload(text="STOP", msg_id="wamid.WF9", ts=_real_future(3600))).status_code == 200
+
+
+def test_webhook_duplicate_future_stop_is_still_one_notice(client, sent):
+    body = payload(text="STOP", msg_id="wamid.WF10", ts=_real_future(3600))
+    post(client, body)
+    post(client, body)
+    assert sent == [(SENDER, C.STOP_FAILURE_NOTICE)]
+
+
+@pytest.mark.parametrize("word", ["UNSUBSCRIBE", "cancel", "End", "QUIT"])
+def test_webhook_every_stop_keyword_with_future_timestamp_is_handled_the_same_way(client, sent, word):
+    post(client, payload(text=word, msg_id="wamid.K" + word, ts=_real_future(3600)))
+    assert sent == [(SENDER, C.STOP_FAILURE_NOTICE)] and _contact() is None

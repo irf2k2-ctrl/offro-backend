@@ -31,17 +31,18 @@ Nothing else changes: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHAT
 1. Merge/deploy this change to **Staging** (your decision; nothing is deployed by the assistant).
 2. In Railway → Staging service → Variables, add `WHATSAPP_APP_SECRET` (paste from Meta) and set
    `WHATSAPP_WEBHOOK_SIGNATURE_MODE=log`. Railway restarts the service.
-3. Confirm the Meta webhook for the number you are testing actually points at the **Staging** URL. If Meta's webhook
-   points at Production, Staging receives no real traffic and nothing below can be verified.
-4. From a phone you own, send a normal WhatsApp message to the staging-connected number.
-   Expected in Staging logs: `Signature check (log mode): ok`, `Received messages=1 statuses=0 errors=0`,
-   a masked sender (`***1234`), the usual welcome reply, and the message in Live Chat.
-   Delivery receipts for messages sent from Staging (statuses) should also log `ok`.
-5. Look for any `mismatch`, `header_missing` or `secret_missing`. **Zero of these across real traffic** (messages and
-   statuses, over a few hours) is the condition for moving on. `mismatch` on every request usually means the secret is
-   from a different Meta app than the one that owns the webhook subscription.
-6. Only after step 5 and your explicit approval: set `WHATSAPP_WEBHOOK_SIGNATURE_MODE=enforce`, send another test
-   message (must still arrive), and confirm unsigned requests get 403.
+3. **Do not change the Meta webhook callback URL or subscription.** In this Offro setup Meta points to Production,
+   and there is no separate staging-connected test number. Staging will therefore receive no real Meta message/status
+   callbacks; an empty Staging signature-log search is expected and is NOT a failure.
+4. Verify Staging deployment health and run the automated signature/consent/webhook test suite. These tests cover
+   valid and invalid HMAC signatures using the exact raw request bytes, missing headers/secrets, STOP/START handling,
+   retry behaviour and Live Chat compatibility. They are code-level tests, not proof of live Meta traffic.
+5. For the Production rollout, keep `WHATSAPP_WEBHOOK_SIGNATURE_MODE=log` initially and set the correct Meta App Secret
+   in the Production Railway service. Do not enable `enforce` yet. The existing Production callback remains unchanged;
+   live requests will then produce signature-check logs in Production while remaining accepted.
+6. Review real Production signature logs for `ok` and investigate any `mismatch`, `header_missing` or `secret_missing`.
+   Only after sufficient clean real traffic and your explicit approval should `enforce` be considered. Enabling it with
+   an incorrect/missing secret can stop Live Chat intake.
 7. Rollback at any time: set the mode back to `log` or `off` in Railway (no code change or redeploy needed).
 
 ## Responses and retries
@@ -73,6 +74,9 @@ Nothing else changes: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHAT
 * `[WA-CONSENT-FAILURE]` (ERROR) — a STOP/START could not be saved. The user was told "We couldn't process your request.
   Please reply STOP again." (or the START equivalent); no confirmation was sent. `wa_webhook_events` holds a
   `consent_failed` marker where the database allowed it.
+* `[WA-CONSENT-INVALID-TIMESTAMP]` (ERROR) — a STOP/START carried a timestamp more than 5 minutes ahead of server time. Consent
+  was NOT changed. A START gets no reply; a STOP gets "We couldn't process your request. Please reply STOP again." Repeated
+  hits from one number may be a forged request (check signature mode) or a skewed server clock.
 * `[WA-EVENT-ABANDONED]` (ERROR) — an event stalled past its lease and exhausted its attempts; it was not processed.
 * `[WA-REPLY-UNCERTAIN]` / `[WA-REPLY-REJECTED]` (ERROR) — an automatic reply's delivery could not be confirmed (not
   resent) / was refused by Meta (code only).

@@ -422,6 +422,20 @@ def _handle_consent_keyword(keyword: str, sender: str, msg: dict, key: str, may_
     except ValueError:
         logger.warning("[WA-Webhook] %s keyword from an invalid phone number ignored", event)
         return "ok"
+    except consent.InvalidTimestampError:
+        # Timestamp more than 5 minutes ahead of server time (forged, or a badly skewed clock). NOTHING was written:
+        # consent is unchanged and nothing is confirmed. Retrying the same bytes cannot help, so no Meta retry.
+        # START: no reply at all (never message someone on the strength of an unverifiable opt-in).
+        # STOP : never silently dropped - the sender is told it was NOT processed ("please reply STOP again") and a
+        #        monitored line is logged so a genuine STOP can be actioned by hand if it keeps recurring.
+        logger.error("[WA-CONSENT-INVALID-TIMESTAMP] event=%s phone=%s msg_id=%s ts=%s — future timestamp, "
+                     "consent NOT changed", event, mask_phone(sender), msg.get("id", ""),
+                     str(msg.get("timestamp", ""))[:12])
+        if not stop:
+            return "ok"
+        res = _auto_reply(key, token, sender, consent.STOP_FAILURE_NOTICE) if may_reply else "blocked"
+        consent.note_consent_failure(key, keyword, res in ("sent", "already"), token)
+        return "retry" if res == "retryable" else "ok"
     except Exception as e:
         # Monitored line: alert on "[WA-CONSENT-FAILURE]".
         logger.error("[WA-CONSENT-FAILURE] event=%s phone=%s msg_id=%s error=%s — no confirmation sent",

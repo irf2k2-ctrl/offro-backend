@@ -14,6 +14,8 @@ Rules:
   * No existing merchant/customer/Live Chat record is ever imported or marked opted-in here. A contact
     gets a wa_contacts doc ONLY when that person themselves sends STOP-type or START.
   * wa_contacts is the single source of truth for consent. The ledger is evidence/audit, never state.
+  * A consent event whose timestamp is more than 5 minutes ahead of the server's UTC time is REJECTED before any
+    write (InvalidTimestampError) - it cannot create, overwrite or supersede consent. Not clamped.
   * Ordering: every consent write carries consent_seq = wa_timestamp*2 + (1 for opt-out, 0 for opt-in) and is
     applied only if it is not older than the stored one, in ONE atomic conditional update. A late/older
     event can never overwrite a newer one; on an equal timestamp the opt-out wins.
@@ -48,6 +50,7 @@ CONTACTS = "wa_contacts"
 EVENTS = "wa_consent_events"
 WEBHOOK_EVENTS = "wa_webhook_events"
 WEBHOOK_EVENT_TTL_SECONDS = 30 * 24 * 3600
+FUTURE_TOLERANCE_SECONDS = 300        # an event timestamp more than 5 min ahead of server UTC time is REJECTED
 MAX_ATTEMPTS = 3                      # initial delivery + 2 Meta retries per message
 LEASE_SECONDS = 120                   # a 'processing' claim not finished within this is considered crashed
 
@@ -68,6 +71,12 @@ START_FAILURE_NOTICE = "We couldn't process your request. Please reply START aga
 
 class ConsentWriteError(Exception):
     """A consent write was not acknowledged by the database."""
+
+
+class InvalidTimestampError(Exception):
+    """The event's timestamp is more than FUTURE_TOLERANCE_SECONDS ahead of the server's UTC time. Raised BEFORE any
+    write, so such an event can never create, overwrite or supersede consent. Deliberately NOT a ValueError (that
+    means 'invalid phone' to callers) and never clamped to 'now': the event is rejected, not repaired."""
 
 
 # ── Canonical phone numbers ────────────────────────────────────────────────────
@@ -187,8 +196,18 @@ def _evidence(keyword_text, message_id, wa_timestamp) -> dict:
 
 
 def _event_ts(wa_timestamp) -> int:
+    """Ordering timestamp (unix seconds) of a Meta event.
+      * 1-12 digit value up to now + FUTURE_TOLERANCE_SECONDS -> used as is (Meta timestamps, small clock skew)
+      * more than that in the future                           -> InvalidTimestampError (never clamped)
+      * missing / non-numeric (Meta always sends one)          -> server receive time, as before
+    Very old values are harmless: they can only lose to newer consent state."""
     s = str(wa_timestamp or "").strip()
-    return int(s) if re.fullmatch(r"[0-9]{1,12}", s) else int(time.time())
+    if re.fullmatch(r"[0-9]{1,12}", s):
+        ts = int(s)
+        if ts > time.time() + FUTURE_TOLERANCE_SECONDS:
+            raise InvalidTimestampError("event timestamp is in the future")
+        return ts
+    return int(time.time())
 
 
 def _write_contact(p, status, seq, ev, now) -> str:
