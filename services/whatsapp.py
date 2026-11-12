@@ -13,6 +13,8 @@ import logging
 import requests
 import io
 
+from services.wa_webhook_security import mask_phone, safe_error, exc_summary
+
 logger = logging.getLogger("offro.whatsapp")
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -65,17 +67,80 @@ def send_whatsapp_message(phone_number: str, message: str) -> dict:
         data = resp.json()
         if resp.status_code == 200 and "messages" in data:
             msg_id = data["messages"][0].get("id", "")
-            logger.info("[WA] ✅ Message sent to %s — id=%s", phone, msg_id)
+            logger.info("[WA] ✅ Message sent to %s — id=%s", mask_phone(phone), msg_id)
             return {"ok": True, "message_id": msg_id}
         else:
             error_msg = data.get("error", {}).get("message", str(data))
-            logger.error("[WA] ❌ Failed to send to %s — %s", phone, error_msg)
+            logger.error("[WA] ❌ Failed to send to %s — %s", mask_phone(phone), safe_error(error_msg))
             return {"ok": False, "error": error_msg}
     except requests.exceptions.Timeout:
         return {"ok": False, "error": "Request timed out"}
     except Exception as e:
-        logger.exception("[WA] ❌ Unexpected error sending to %s", phone)
+        logger.error("[WA] ❌ Unexpected error sending to %s (%s)", mask_phone(phone), exc_summary(e))
         return {"ok": False, "error": str(e)}
+
+
+# ── Outcome-classified text send (used ONLY by the webhook auto-reply path) ──────
+# send_whatsapp_message() above is unchanged: it returns only {ok, error} and cannot tell a Meta rejection from a
+# timeout (a timed-out send may in fact have been delivered). This additive variant classifies the outcome:
+#   sent                 HTTP 200 with a message id
+#   rejected_retryable   Meta DEFINITIVELY refused it and the refusal is temporary: HTTP 429, or error code
+#                        4 / 80007 (API rate limit), 130429 (throughput), 131056 (pair rate limit)
+#   rejected_permanent   any other definitive refusal (other 4xx) or WhatsApp not configured - nothing was sent
+#   uncertain            timeout, connection loss, 5xx, 200 without a message id, unparseable response -
+#                        the message MAY have been delivered; callers must never auto-resend
+# Returns {"ok", "outcome", "message_id"?, "error_code"?}. Error TEXT is never returned or logged.
+RETRYABLE_REJECTION_CODES = frozenset({4, 80007, 130429, 131056})
+
+
+def classify_send_response(status_code, data) -> tuple:
+    """-> (outcome, error_code or None). Pure function so every branch is testable without a network."""
+    code = None
+    if isinstance(data, dict) and isinstance(data.get("error"), dict):
+        c = data["error"].get("code")
+        code = c if isinstance(c, int) and not isinstance(c, bool) else None
+    if status_code == 200:
+        if isinstance(data, dict) and isinstance(data.get("messages"), list) and data["messages"] \
+                and isinstance(data["messages"][0], dict) and data["messages"][0].get("id"):
+            return "sent", None
+        return "uncertain", code
+    if status_code == 429:
+        return "rejected_retryable", code
+    if isinstance(status_code, int) and 400 <= status_code < 500:
+        if not isinstance(data, dict):
+            return "uncertain", None
+        return ("rejected_retryable" if code in RETRYABLE_REJECTION_CODES else "rejected_permanent"), code
+    return "uncertain", code            # 5xx, 3xx, anything unexpected
+
+
+def send_whatsapp_message_checked(phone_number: str, message: str) -> dict:
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        logger.error("[WA] WhatsApp env vars not configured — message NOT sent.")
+        return {"ok": False, "outcome": "rejected_permanent", "error_code": None}
+    phone = phone_number.replace("+", "").replace(" ", "").replace("-", "")
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type":    "individual",
+        "to":                phone,
+        "type":              "text",
+        "text":              {"preview_url": False, "body": message},
+    }
+    try:
+        resp = requests.post(_messages_url(), headers=_headers(), json=payload, timeout=10)
+    except Exception as e:              # timeout / connection loss: the request may have reached Meta
+        logger.error("[WA] ❌ Send to %s outcome uncertain (%s)", mask_phone(phone), exc_summary(e))
+        return {"ok": False, "outcome": "uncertain", "error_code": None}
+    try:
+        data = resp.json()
+    except Exception:
+        data = None
+    outcome, code = classify_send_response(resp.status_code, data)
+    if outcome == "sent":
+        mid = data["messages"][0].get("id", "")
+        logger.info("[WA] ✅ Message sent to %s — id=%s", mask_phone(phone), mid)
+        return {"ok": True, "outcome": "sent", "message_id": mid}
+    logger.error("[WA] ❌ Send to %s %s — http=%s code=%s", mask_phone(phone), outcome, resp.status_code, code)
+    return {"ok": False, "outcome": outcome, "error_code": code}
 
 
 def send_whatsapp_template(phone_number, template_name, language_code="en", components=None):
@@ -166,7 +231,7 @@ def fetch_media_url(media_id: str) -> dict:
             }
         return {"ok": False, "error": data.get("error", {}).get("message", str(data))}
     except Exception as e:
-        logger.exception("[WA] fetch_media_url error for id=%s", media_id)
+        logger.error("[WA] fetch_media_url error for id=%s (%s)", media_id, exc_summary(e))
         return {"ok": False, "error": str(e)}
 
 
@@ -199,7 +264,7 @@ def download_media(media_url: str) -> dict:
             }
         return {"ok": False, "error": "HTTP " + str(resp.status_code)}
     except Exception as e:
-        logger.exception("[WA] download_media error")
+        logger.error("[WA] download_media error (%s)", exc_summary(e))
         return {"ok": False, "error": str(e)}
 
 
@@ -241,7 +306,7 @@ def upload_media_to_whatsapp(file_bytes: bytes, mime_type: str, filename: str = 
             return {"ok": True, "media_id": media_id}
         return {"ok": False, "error": data.get("error", {}).get("message", str(data))}
     except Exception as e:
-        logger.exception("[WA] upload_media_to_whatsapp error")
+        logger.error("[WA] upload_media_to_whatsapp error (%s)", exc_summary(e))
         return {"ok": False, "error": str(e)}
 
 
@@ -280,11 +345,11 @@ def send_whatsapp_image(phone_number: str, media_id: str, caption: str = "") -> 
         data = resp.json()
         if resp.status_code == 200 and "messages" in data:
             msg_id = data["messages"][0].get("id", "")
-            logger.info("[WA] ✅ Image sent to %s — msg_id=%s media_id=%s", phone, msg_id, media_id)
+            logger.info("[WA] ✅ Image sent to %s — msg_id=%s media_id=%s", mask_phone(phone), msg_id, media_id)
             return {"ok": True, "message_id": msg_id}
         error_msg = data.get("error", {}).get("message", str(data))
-        logger.error("[WA] ❌ Image send failed to %s — %s", phone, error_msg)
+        logger.error("[WA] ❌ Image send failed to %s — %s", mask_phone(phone), safe_error(error_msg))
         return {"ok": False, "error": error_msg}
     except Exception as e:
-        logger.exception("[WA] send_whatsapp_image error")
+        logger.error("[WA] send_whatsapp_image error (%s)", exc_summary(e))
         return {"ok": False, "error": str(e)}
