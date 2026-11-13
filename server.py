@@ -92,7 +92,14 @@ def download_admin_dashboard(request: Request):
     # Was public. The dashboard source is now only downloadable with a valid admin session.
     token = request.cookies.get("admin_token") or \
             request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not token or not (db.dashboard_users.find_one({"token": token}) or db.admins.find_one({"token": token})):
+    if not token:
+        return JSONResponse(status_code=401, content={"detail": "Admin login required"})
+    du = db.dashboard_users.find_one({"token": token})
+    if du:
+        # Same rule as routers.admin.get_current_admin: disabled / suspended accounts are refused.
+        if du.get("status") in ("disabled", "suspended"):
+            return JSONResponse(status_code=403, content={"detail": "Account is " + du.get("status", "disabled")})
+    elif not db.admins.find_one({"token": token}):
         return JSONResponse(status_code=401, content={"detail": "Admin login required"})
     return FileResponse(
         path="templates/admin_dashboard.html",
@@ -100,6 +107,63 @@ def download_admin_dashboard(request: Request):
         filename="admin_dashboard.html",
         headers={"Content-Disposition": "attachment; filename=admin_dashboard.html"}
     )
+
+# ── Public gift-voucher endpoint ──
+@app.get("/gift-vouchers")
+def public_gift_vouchers():
+    # Phase 1: Only Premium products shown in Discover Products (exclude standard/subscription-linked)
+    docs = list(db.gift_vouchers.find(
+        {"is_active": True, "product_type": {"$ne": "standard"}}
+    ).sort("_id", -1))
+    result = []
+    for v in docs:
+        # Voucher image: proxy if base64
+        logo = v.get("logo","") or ""
+        vid  = str(v["_id"])
+        if logo.startswith("data:image"):
+            logo_out = f"/voucher-image/{vid}"
+        elif logo.startswith("http"):
+            logo_out = logo
+        else:
+            logo_out = ""
+        result.append({
+            "id":       vid,
+            "title":    v.get("title", ""),
+            "price":    str(v.get("price", v.get("value", ""))),
+            "text":     v.get("text", ""),
+            "validity": v.get("validity", ""),
+            "logo":     logo_out,
+        })
+    return result
+
+
+# ── Voucher image proxy ──
+@app.get("/voucher-image/{vid}")
+def get_voucher_image(vid: str):
+    from fastapi.responses import Response
+    from fastapi import HTTPException
+    from bson import ObjectId
+    try:
+        doc = db.gift_vouchers.find_one({"_id": ObjectId(vid)}, {"logo": 1})
+    except Exception:
+        raise HTTPException(400, "Bad id")
+    if not doc:
+        raise HTTPException(404, "Not found")
+    raw = doc.get("logo","") or ""
+    if not raw.startswith("data:image"):
+        raise HTTPException(404, "No image")
+    match = re.match(r"data:([^;]+);base64,(.+)", raw, re.DOTALL)
+    if not match:
+        raise HTTPException(400, "Bad image data")
+    mime    = match.group(1)
+    b64data = match.group(2)
+    try:
+        img_bytes = base64.b64decode(b64data)
+    except Exception:
+        raise HTTPException(500, "Decode error")
+    return Response(content=img_bytes, media_type=mime,
+        headers={"Cache-Control": "public, max-age=86400", "Content-Length": str(len(img_bytes))})
+
 
 # ── Combined home-data endpoint — single call replaces 5 parallel calls ──
 @app.get("/home-data")
@@ -115,6 +179,26 @@ def get_home_data(
     stores_resp = get_stores(city=city, category=category, limit=limit, skip=skip)
     cats = get_categories()
 
+    # Gift vouchers — lightweight (no base64, just proxy URLs)
+    gv_docs = list(db.gift_vouchers.find({"is_active": True}).sort("_id", -1))
+    gift_vouchers = []
+    for v in gv_docs:
+        logo = v.get("logo","") or ""
+        vid  = str(v["_id"])
+        if logo.startswith("data:image"):
+            logo_out = f"/voucher-image/{vid}"
+        elif logo.startswith("http"):
+            logo_out = logo
+        else:
+            logo_out = ""
+        gift_vouchers.append({
+            "id":       vid,
+            "title":    v.get("title",""),
+            "text":     v.get("text",""),
+            "validity": v.get("validity",""),
+            "logo":     logo_out,
+        })
+
     # Promo sliders
     ps_docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
     promo_sliders = [{"id":str(p["_id"]),"title":p.get("title",""),"image_url":p.get("image_url",""),
@@ -125,6 +209,7 @@ def get_home_data(
         "total":        stores_resp.get("total", 0),
         "has_more":     stores_resp.get("has_more", False),
         "categories":   cats,
+        "gift_vouchers": gift_vouchers,
         "promo_sliders": promo_sliders,
     }
 
@@ -230,7 +315,7 @@ def startup():
         collaborations.ensure_indexes()
     except Exception as e:
         print(f"⚠️  collaboration indexes skipped: {e}")
-    # WhatsApp consent + webhook de-dupe collections (new, Phase 1): indexes only, no data is created or read.
+    # WhatsApp consent + webhook de-dupe collections (Phase 1)
     try:
         from services import wa_consent as _wa_consent
         if not _wa_consent.ensure_indexes_safe():
