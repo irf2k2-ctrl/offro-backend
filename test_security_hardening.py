@@ -139,3 +139,42 @@ def test_templates_define_escape_helpers_and_use_them(f):
     # no inline handler may interpolate a raw name/title/phone field
     for m in re.finditer(r"""on[a-z]+="[^"]*\$\{[^}]*\.(name|store_name|title|phone|email|city|full_name)\b[^}]*\}""", s):
         assert "_secJs(" in m.group(0) or "escHtml(" in m.group(0), m.group(0)[:100]
+
+
+# ── fix/production-security-and-products: disabled users, Production-specific behaviour preserved ──
+@pytest.mark.parametrize("status", ["disabled", "suspended"])
+def test_download_rejects_disabled_or_suspended_dashboard_user(status):
+    db.dashboard_users.insert_one({"full_name": "x", "token": "tok-" + status, "status": status})
+    r = client().get("/download/admin_dashboard", cookies={"admin_token": "tok-" + status})
+    assert r.status_code == 403
+    assert client().get("/download/admin_dashboard", headers={"Authorization": "Bearer tok-" + status}).status_code == 403
+
+
+def test_download_allows_active_dashboard_user():
+    db.dashboard_users.insert_one({"full_name": "x", "token": "tok-active", "status": "active"})
+    assert client().get("/download/admin_dashboard", cookies={"admin_token": "tok-active"}).status_code == 200
+    assert client().get("/download/admin_dashboard", headers={"Authorization": "Bearer "}).status_code == 401
+
+
+def test_all_five_product_collab_routers_and_startup_calls_present():
+    paths = {r.path for r in server.app.routes}
+    assert any(p.startswith("/merchant/collab") for p in paths)
+    assert any(p.startswith("/influencer/opportunities") for p in paths)
+    assert any(p.startswith("/products-public") for p in paths)
+    assert any(p.startswith("/merchant/products") for p in paths)
+    assert any(p.startswith("/admin/products") for p in paths)
+    src = open(os.path.join(os.path.dirname(server.__file__), "server.py")).read()
+    for needle in ("include_router(collaborations.merchant_router", "include_router(collaborations.influencer_router",
+                   "_products_svc.ensure_settings()", "_products_svc.ensure_indexes()", "collaborations.ensure_indexes()"):
+        assert needle in src, needle
+
+
+def test_production_specific_features_preserved():
+    paths = {r.path for r in server.app.routes}
+    assert "/gift-vouchers" in paths and "/voucher-image/{vid}" in paths
+    assert "/admin/auth/login" in paths and "/admin/login" in paths     # RBAC / OTP admin login routes
+    root = os.path.dirname(server.__file__)
+    login = open(os.path.join(root, "templates", "admin_login.html")).read()
+    assert "otp" in login.lower()                                        # Production OTP admin login page kept
+    src = open(os.path.join(root, "server.py")).read()
+    assert "gift_vouchers" in src and "_ensure_otp_indexes" in src
