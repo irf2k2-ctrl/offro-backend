@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File
 from fastapi.responses import JSONResponse, Response
 from bson import ObjectId
 from database import db
+from services.wa_webhook_security import mask_phone, safe_error, exc_summary
 from services.whatsapp import (
     send_whatsapp_message,
     send_whatsapp_image,
@@ -151,7 +152,7 @@ def _fetch_and_store_media(chat_doc_id: str, media_id: str):
         meta_result = fetch_media_url(media_id)
         if not meta_result.get("ok"):
             logger.warning("[WA-Chat] ⚠️ fetch_media_url failed for id=%s: %s",
-                           media_id, meta_result.get("error"))
+                           media_id, safe_error(meta_result.get("error")))
             return
 
         temp_url  = meta_result["url"]
@@ -161,7 +162,7 @@ def _fetch_and_store_media(chat_doc_id: str, media_id: str):
         dl_result = download_media(temp_url)
         if not dl_result.get("ok"):
             logger.warning("[WA-Chat] ⚠️ download_media failed for id=%s: %s",
-                           media_id, dl_result.get("error"))
+                           media_id, safe_error(dl_result.get("error")))   # may contain the signed Meta URL
             return
 
         image_bytes  = dl_result["data"]
@@ -178,7 +179,7 @@ def _fetch_and_store_media(chat_doc_id: str, media_id: str):
         logger.info("[WA-Chat] ✅ Incoming image fully stored — id=%s bytes=%d", media_id, len(image_bytes))
 
     except Exception as e:
-        logger.exception("[WA-Chat] _fetch_and_store_media error for id=%s: %s", media_id, e)
+        logger.error("[WA-Chat] _fetch_and_store_media error for id=%s (%s)", media_id, exc_summary(e))
 
 
 # ── GET /admin/whatsapp/media/{media_id} — serve stored media permanently ─────
@@ -267,9 +268,11 @@ def store_incoming_message(phone: str, name: str, whatsapp_id: str,
             {"_id": ObjectId(cid)},
             {"$inc": {"unread_count": 1}}
         )
-        logger.info("[WA-Chat] 💾 Stored %s from %s (%s) cid=%s", msg_type, phone, name, cid)
+        logger.info("[WA-Chat] 💾 Stored %s from %s cid=%s", msg_type, mask_phone(phone), cid)
+        return True
     except Exception as e:
-        logger.exception("[WA-Chat] ❌ Failed to store incoming message: %s", e)
+        logger.error("[WA-Chat] ❌ Failed to store incoming message (%s)", exc_summary(e))
+        return False       # (was None) lets the webhook ask Meta to retry; other callers ignore the value
 
 
 # ── GET /admin/whatsapp/chats ─────────────────────────────────────────────────
@@ -449,7 +452,7 @@ async def upload_media(file: UploadFile = File(...), a=Depends(get_current_admin
     try:
         preview_url = _store_media_in_db(media_id, file_bytes, mime_type)
     except Exception as e:
-        logger.warning("[WA-Chat] Could not store admin upload locally: %s", e)
+        logger.warning("[WA-Chat] Could not store admin upload locally (%s)", exc_summary(e))
         # Non-fatal — outgoing still sends fine, just no preview
 
     logger.info("[WA-Chat] 📤 Admin uploaded media — id=%s size=%d preview=%s", media_id, len(file_bytes), preview_url)
