@@ -315,6 +315,13 @@ def startup():
         collaborations.ensure_indexes()
     except Exception as e:
         print(f"⚠️  collaboration indexes skipped: {e}")
+    # WhatsApp consent + webhook de-dupe collections (Phase 1)
+    try:
+        from services import wa_consent as _wa_consent
+        if not _wa_consent.ensure_indexes_safe():
+            print("⚠️  WhatsApp consent indexes skipped (see logs)")
+    except Exception as e:
+        print(f"⚠️  WhatsApp consent indexes skipped ({type(e).__name__})")
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
         from routers.otp_service import _ensure_otp_indexes
