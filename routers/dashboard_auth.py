@@ -38,7 +38,8 @@ ALL_MODULES = [
     "Accounts", "Stores", "Products", "Banners", "Admin Banners", "Popup Campaigns",
     "Payments", "Gift Vouchers", "Notifications", "Categories", "Pricing & GST",
     "Reviews", "Discounts", "Terms & Conditions", "Policies",
-    "Social Media", "Live Chat", "Default Images", "User Management"
+    "Social Media", "Live Chat", "Default Images", "User Management",
+    "WhatsApp Campaigns",   # dedicated module (Phase 2A): never granted to an existing/seeded role except Super Admin
 ]
 
 ALL_ACTIONS = ["view", "add", "edit", "delete", "approve", "export"]
@@ -422,10 +423,12 @@ def seed_rbac():
         for mod in ALL_MODULES:
             admin_perms[mod] = {act: True for act in ALL_ACTIONS}
         admin_perms["User Management"] = {act: (act == "view") for act in ALL_ACTIONS}
+        admin_perms["WhatsApp Campaigns"] = {act: False for act in ALL_ACTIONS}     # explicit grant only
 
         readonly_perms = {}
         for mod in ALL_MODULES:
             readonly_perms[mod] = {act: (act == "view") for act in ALL_ACTIONS}
+        readonly_perms["WhatsApp Campaigns"] = {act: False for act in ALL_ACTIONS}  # explicit grant only
 
         sales_perms = {}
         for mod in ALL_MODULES:

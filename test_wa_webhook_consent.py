@@ -1031,7 +1031,11 @@ def test_ensure_indexes_creates_expected_indexes_and_is_idempotent():
 def test_no_campaign_collections_or_bulk_endpoints_in_phase_1():
     import server
     paths = {getattr(r, "path", "") for r in server.app.routes}
-    assert not any("campaign" in p.lower() and "whatsapp" in p.lower() for p in paths)
+    # Phase 2A (permission-gated admin foundations) legitimately adds /admin/whatsapp-campaigns/*; what must still be
+    # true is that no sending / bulk endpoint exists. test_wa_campaigns_foundation.py pins the exact route set.
+    camp = {p for p in paths if "campaign" in p.lower() and "whatsapp" in p.lower()}
+    assert all(p.startswith("/admin/whatsapp-campaigns/") for p in camp)
+    assert not any(w in p.lower() for p in camp for w in ("bulk", "launch", "run", "start", "execute", "send-"))
     src = open(C.__file__, encoding="utf-8").read()
     assert "wa_campaign" not in src
 

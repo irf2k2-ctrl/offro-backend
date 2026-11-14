@@ -32,6 +32,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from database import db
 from routers.wa_chat import get_current_admin
 from services import whatsapp as wa
+from services import wa_campaign_audit as campaign_audit
+from services import wa_consent as consent
 
 logger = logging.getLogger("offro.wa_template_test")
 router = APIRouter(tags=["WhatsApp Template Test"])
@@ -146,6 +148,23 @@ def _enforce_limits(admin, phone: str) -> None:
         raise HTTPException(429, "This number already received (or is receiving) the test template in the last 24 hours")
 
 
+def _enforce_not_opted_out(admin, phone: str) -> None:
+    """Phase 2A: a number that has opted out (STOP) can never receive a test template, whatever the admin attests.
+    Fails CLOSED: if the consent store cannot be read, nothing is sent. Runs before any Meta call and before the
+    send-limit bookkeeping, so a blocked attempt consumes no quota."""
+    try:
+        status = consent.consent_status(phone)
+    except Exception:
+        raise HTTPException(503, "Could not verify this recipient's WhatsApp opt-out status - not sending")
+    # status 'invalid' = the consent normalizer cannot canonicalize this number (e.g. '91' + 11 digits). Phase 1 refuses
+    # to record consent for such numbers, so no opt-out can exist for them: nothing to block, behaviour unchanged.
+    if status == "opted_out":
+        campaign_audit.record("template_test.blocked_opted_out", campaign_audit.admin_ref(admin), outcome="blocked",
+                              target=campaign_audit.phone_ref(phone))
+        raise HTTPException(409, "This number has opted out of OffrO WhatsApp messages (STOP). It cannot be messaged "
+                                 "until the person sends START themselves")
+
+
 @router.post("/whatsapp/template-test")
 async def send_template_test(request: Request, a=Depends(get_current_admin)):
     """Body: {"phone": "919876543210", "consent_confirmed": true, "consent_note": "...",
@@ -167,6 +186,7 @@ async def send_template_test(request: Request, a=Depends(get_current_admin)):
         raise HTTPException(400, "consent_note is required (how/when this recipient opted in)")
     kind, image = _header_param(body)
     dry_run = body.get("dry_run") is True
+    _enforce_not_opted_out(a, phone)
 
     tpl = fetch_template_status()
     check_template_shape(tpl)

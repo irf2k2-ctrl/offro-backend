@@ -33,6 +33,7 @@ PHASE 2 MANDATORY REQUIREMENTS (not implemented here - no campaign sending exist
   3. If the consent database is unavailable (consent_status raises), sending FAILS CLOSED - nothing is sent.
   4. The existing POST /admin/whatsapp/template-test must enforce the same check before sending.
 """
+import hashlib
 import logging
 import re
 import time
@@ -282,6 +283,105 @@ def record_opt_in(phone, keyword_text="", message_id="", wa_timestamp="", whatsa
     ev = _evidence(keyword_text, message_id, wa_timestamp)
     _append_event(p, "opt_in", seq, ev, now)
     return _write_contact(p, "opted_in", seq, ev, now)
+
+
+# ── Admin-recorded consent (Phase 2A) ───────────────────────────────────────────
+#
+# Consent a person gave OUTSIDE WhatsApp, recorded by an administrator WITH EVIDENCE. Hard rules:
+#   * source, an evidence reference, the time the consent was given, an explicit attestation and the acting
+#     administrator's identity (taken from the authenticated session by the caller) are ALL mandatory;
+#   * it can NEVER override an opt-out: if the number is opted out (under any storage variant) it is refused, and the
+#     contact write itself is conditional (status != opted_out), so a STOP that arrives concurrently also wins. Only
+#     the customer's own START can restore consent after a STOP;
+#   * consent_seq of a contact created here is 0, so ANY later customer event (STOP or START) applies normally and
+#     a late STOP can never be 'superseded' by an admin record;
+#   * an existing opted_in contact is left untouched (only an evidence row is appended);
+#   * ledger row first, then contact (a failure can only leave extra evidence, never consent without evidence).
+
+ADMIN_CONSENT_SOURCES = frozenset({"signup_form", "written_form", "email", "in_person", "phone_call",
+                                   "whatsapp_optin_message", "other"})
+
+
+class AdminConsentError(Exception):
+    """Admin-recorded consent refused. .code: invalid_phone | invalid_source | evidence_required |
+    invalid_timestamp | attestation_required | admin_required | opted_out"""
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def _parse_consent_time(value):
+    """ISO-8601 string (or datetime) -> naive UTC datetime, or None if invalid / more than 5 minutes in the future."""
+    from datetime import timezone, timedelta
+    try:
+        if isinstance(value, datetime):
+            dt = value
+        else:
+            dt = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    if dt > datetime.utcnow() + timedelta(seconds=FUTURE_TOLERANCE_SECONDS) or dt.year < 2000:
+        return None
+    return dt
+
+
+def record_admin_consent(phone, source, evidence_ref, consented_at, admin, attested, note="") -> dict:
+    """Returns {"result": "recorded" | "already_opted_in", "phone_last4", "event_id"}. Raises AdminConsentError for a
+    refused request; database errors (and ConsentWriteError) propagate - nothing is reported as saved unless it was."""
+    admin = admin if isinstance(admin, dict) else {}
+    if not str(admin.get("id", "")).strip():
+        raise AdminConsentError("admin_required")
+    p = normalize_phone(phone)
+    if not p:
+        raise AdminConsentError("invalid_phone")
+    if source not in ADMIN_CONSENT_SOURCES:
+        raise AdminConsentError("invalid_source")
+    ref = str(evidence_ref or "").strip()
+    if len(ref) < 6:
+        raise AdminConsentError("evidence_required")
+    when = _parse_consent_time(consented_at)
+    if when is None:
+        raise AdminConsentError("invalid_timestamp")
+    if attested is not True:
+        raise AdminConsentError("attestation_required")
+
+    if consent_status(p) == "opted_out":          # raises on a database error: fail closed
+        raise AdminConsentError("opted_out")
+
+    now = datetime.utcnow()
+    ref, note = ref[:300], str(note or "").strip()[:500]
+    ev = {"source": "admin_recorded", "consent_source": source, "evidence_ref": ref, "note": note,
+          "consented_at": when.isoformat(), "recorded_at": now.isoformat(), "attested": True,
+          "admin_id": str(admin.get("id", ""))[:60], "admin_name": str(admin.get("name", ""))[:80],
+          "admin_role": str(admin.get("role", ""))[:60], "message_id": ""}
+    event_id = "admin_opt_in:" + hashlib.sha256("|".join([p, source, ref, when.isoformat()]).encode()).hexdigest()[:32]
+
+    try:                                           # idempotent: the same evidence recorded twice is ONE row
+        res = db[EVENTS].insert_one({"_id": event_id, "phone": p, "phone_last4": p[-4:], "event": "admin_opt_in",
+                                     "at": now, "consent_seq": 0, **ev})
+        if not res.acknowledged:
+            raise ConsentWriteError("ledger write not acknowledged")
+    except DuplicateKeyError:
+        pass
+
+    try:
+        res = db[CONTACTS].update_one(
+            {"_id": p, "status": {"$ne": "opted_out"}},
+            {"$setOnInsert": {"phone": p, "phone_last4": p[-4:], "status": "opted_in", "opted_in_at": now,
+                              "updated_at": now, "consent_seq": 0, "last_consent": ev, "created_at": now}},
+            upsert=True)
+    except DuplicateKeyError:
+        stored = db[CONTACTS].find_one({"_id": p}, {"status": 1})
+        if stored and stored.get("status") == "opted_out":
+            raise AdminConsentError("opted_out")   # a STOP won the race
+        raise ConsentWriteError("contact write conflict (duplicate key)")
+    if not res.acknowledged:
+        raise ConsentWriteError("contact write not acknowledged")
+    return {"result": "recorded" if res.upserted_id is not None else "already_opted_in",
+            "phone_last4": p[-4:], "event_id": event_id}
 
 
 def consent_status(phone) -> str:

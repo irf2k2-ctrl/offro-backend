@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
-from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, dashboard_auth, maps, smart_link
+from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, wa_campaigns, dashboard_auth, maps, smart_link
 from routers import merchant_products, admin_products, public_products, collaborations
 from database import db
 import base64, io, re, html as _html
@@ -40,6 +40,7 @@ app.include_router(popup_campaigns.router)
 app.include_router(webhook.router)          # WhatsApp Cloud API webhook — no prefix
 app.include_router(wa_chat.router, prefix="/admin")  # WhatsApp Live Chat admin API
 app.include_router(wa_template_test.router, prefix="/admin")  # single-recipient template TEST (off unless WHATSAPP_TEMPLATE_TEST_ENABLED=1)
+app.include_router(wa_campaigns.router, prefix="/admin")  # WhatsApp Campaign Manager 2A: permission-gated admin API; sends nothing
 app.include_router(dashboard_auth.router, prefix="/admin")  # RBAC dashboard auth — /admin/auth/*
 app.include_router(maps.router)
 app.include_router(smart_link.router)  # /open smart link + /.well-known app-link files
@@ -322,6 +323,13 @@ def startup():
             print("⚠️  WhatsApp consent indexes skipped (see logs)")
     except Exception as e:
         print(f"⚠️  WhatsApp consent indexes skipped ({type(e).__name__})")
+    # WhatsApp campaign audit collection (Phase 2A): indexes only; sending stays disabled unless explicitly enabled.
+    try:
+        from services import wa_campaign_audit as _wa_camp_audit
+        if not _wa_camp_audit.ensure_indexes_safe():
+            print("⚠️  WhatsApp campaign audit indexes skipped (see logs)")
+    except Exception as e:
+        print(f"⚠️  WhatsApp campaign audit indexes skipped ({type(e).__name__})")
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
         from routers.otp_service import _ensure_otp_indexes
