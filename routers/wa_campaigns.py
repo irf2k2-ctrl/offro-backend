@@ -18,6 +18,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 
+from routers import wa_campaign_audience
 from routers.dashboard_auth import require_permission
 from services import wa_campaign_audit as audit
 from services import wa_campaign_settings as settings
@@ -31,6 +32,7 @@ MODULE = "WhatsApp Campaigns"
 MAX_ELIGIBILITY_BATCH = 200
 
 router = APIRouter(prefix="/whatsapp-campaigns", tags=["WhatsApp Campaigns"])
+router.include_router(wa_campaign_audience.router)          # Phase 2B audience management (no sending)
 
 
 async def _json_object(request: Request) -> dict:

@@ -709,7 +709,10 @@ def test_server_registers_the_router_and_startup_index_creation():
     paths = {getattr(r, "path", "") for r in server.app.routes}
     assert "/admin/whatsapp-campaigns/consent" in paths and "/admin/whatsapp-campaigns/config" in paths
     mine = {p for p in paths if p.startswith("/admin/whatsapp-campaigns")}
-    assert mine == {"/admin/whatsapp-campaigns/" + x for x in ("config", "sending", "consent", "eligibility", "audit")}
+    foundation = {"/admin/whatsapp-campaigns/" + x for x in ("config", "sending", "consent", "eligibility", "audit")}
+    assert foundation <= mine
+    # Phase 2B adds audience management only (see test_wa_campaign_audience.py for the exact route set)
+    assert all(p.startswith("/admin/whatsapp-campaigns/audience/") for p in mine - foundation)
     src = open("server.py", encoding="utf-8").read()
     assert "_wa_camp_audit.ensure_indexes_safe()" in src and "WhatsApp campaign audit indexes skipped ({type(e).__name__})" in src
 
