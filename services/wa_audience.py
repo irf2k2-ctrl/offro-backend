@@ -449,9 +449,20 @@ DUP_MERCHANT = "duplicate_of_merchant"
 DUP_REPEAT = "duplicate_recipient"
 
 
-def build_preview(merchant_sel=None, import_ids=None, admin=None, page=1, page_size=50, status="all") -> dict:
+def _merchant_ctx(m) -> dict:
+    """Template-variable context of a merchant recipient. A merchant with several stores uses the first store by
+    (name, id) so the value is deterministic."""
+    stores = sorted(m.get("stores") or [], key=lambda s: (s["store_name"].casefold(), s["store_id"]))
+    first = stores[0] if stores else {}
+    return {"merchant_name": m.get("name", ""), "store_name": first.get("store_name", ""),
+            "store_city": first.get("city", ""), "store_area": first.get("area", "")}
+
+
+def build_preview(merchant_sel=None, import_ids=None, admin=None, page=1, page_size=50, status="all", collect=None) -> dict:
     """Combine merchants + imports into ONE recipient list (deduped by canonical number), check eligibility for every
-    recipient, and return counts plus a page of masked rows. Stateless: nothing is stored or sent."""
+    recipient, and return counts plus a page of masked rows. Stateless: nothing is stored or sent.
+    collect: optional list; when given, one INTERNAL record per recipient (canonical phone, eligibility, merchant context)
+    is appended in the same order - used by the campaign snapshot (Phase 2D). The returned payload is unchanged."""
     merchant_sel = merchant_sel if isinstance(merchant_sel, dict) else None
     import_ids = [str(i) for i in (import_ids or [])]
     if not merchant_sel and not import_ids:
@@ -471,7 +482,8 @@ def build_preview(merchant_sel=None, import_ids=None, admin=None, page=1, page_s
     for m in merchants:
         row = {"source": "merchant", "ref": m["merchant_id"], "name": m["name"], "phone_raw": m["phone"],
                "canonical": C.normalize_phone(m["phone"]), "forced_reason": "" if m["qualifies"] else m["reason"],
-               "duplicate_status": DUP_NONE, "store_count": len(m["stores"]), "matched_merchant": None}
+               "duplicate_status": DUP_NONE, "store_count": len(m["stores"]), "matched_merchant": None,
+               "ctx": _merchant_ctx(m)}
         if m["qualifies"] and row["canonical"]:
             if row["canonical"] in seen:
                 row["duplicate_status"] = DUP_REPEAT
@@ -494,7 +506,8 @@ def build_preview(merchant_sel=None, import_ids=None, admin=None, page=1, page_s
             row = {"source": "custom", "ref": "%s#%s" % (str(d["_id"]), r["row"]), "name": r.get("name", ""),
                    "phone_raw": c, "canonical": c, "forced_reason": "", "duplicate_status": DUP_NONE, "store_count": 0,
                    "matched_merchant": ({"merchant_id": str(match[0]["_id"]), "name": str(match[0].get("name") or "")}
-                                        if match else None)}
+                                        if match else None),
+                   "ctx": {"recipient_name": r.get("name", "")}}
             if c in merchant_canon:
                 row["duplicate_status"] = DUP_MERCHANT
             elif c in seen:
@@ -528,6 +541,9 @@ def build_preview(merchant_sel=None, import_ids=None, admin=None, page=1, page_s
         t["eligible"] += 1 if eligible else 0
         if not eligible:
             by_reason[reason] = by_reason.get(reason, 0) + 1
+        if collect is not None:
+            collect.append({"canonical": r["canonical"], "source": r["source"], "ref": r["ref"], "name": r["name"],
+                            "eligible": eligible, "reason": reason, "basis": basis, "ctx": r["ctx"]})
         out.append({"source": r["source"], "ref": r["ref"], "name": r["name"],
                     "phone_masked": mask_phone(r["phone_raw"]), "eligible": eligible,
                     "exclusion_reason": "" if eligible else reason, "consent_source": basis, "opted_out": opted_out,

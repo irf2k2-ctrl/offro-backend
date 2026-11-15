@@ -330,6 +330,13 @@ def startup():
             print("⚠️  WhatsApp campaign audit indexes skipped (see logs)")
     except Exception as e:
         print(f"⚠️  WhatsApp campaign audit indexes skipped ({type(e).__name__})")
+    # WhatsApp campaign collections (Phase 2D): indexes only on NEW collections; nothing is processed or sent at startup.
+    try:
+        from services import wa_campaign_manager as _wa_camp_mgr
+        if not _wa_camp_mgr.ensure_indexes_safe():
+            print("⚠️  WhatsApp campaign indexes skipped (see logs)")
+    except Exception as e:
+        print(f"⚠️  WhatsApp campaign indexes skipped ({type(e).__name__})")
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
         from routers.otp_service import _ensure_otp_indexes

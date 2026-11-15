@@ -86,10 +86,11 @@ class TemplateSyncError(Exception):
         "too_many_templates": "More templates than the sync limit. Nothing was changed.",
         "sync_busy": "A sync ran very recently or is in progress. Wait a moment and try again.",
         "storage_failed": "The template cache could not be updated.",
+        "template_not_found": "The template was not found at Meta (it may have been deleted).",
     }
     HTTP = {"not_configured": 503, "meta_auth_failed": 502, "meta_permission_denied": 502, "meta_rate_limited": 429,
             "meta_unreachable": 504, "meta_error": 502, "meta_bad_response": 502, "too_many_templates": 502,
-            "sync_busy": 429, "storage_failed": 503}
+            "sync_busy": 429, "storage_failed": 503, "template_not_found": 404}
 
     def __init__(self, code, meta_code=None):
         super().__init__(code)
@@ -119,36 +120,70 @@ def _classify_meta_error(status, data):
 
 # ── Meta fetch ─────────────────────────────────────────────────────────────────
 
-def fetch_from_meta() -> list:
-    """All message templates of the configured WABA (read-only). Raises TemplateSyncError; never partial results."""
+def _meta_get(params: dict) -> dict:
+    """One read-only GET of the WABA's message_templates. Returns the decoded JSON object; raises TemplateSyncError."""
     if not wa.WHATSAPP_ACCESS_TOKEN or not wa.WHATSAPP_PHONE_NUMBER_ID or not wa.WHATSAPP_BUSINESS_ACCOUNT_ID:
         raise TemplateSyncError("not_configured")
     url = "%s/%s/message_templates" % (wa._GRAPH_BASE, wa.WHATSAPP_BUSINESS_ACCOUNT_ID)
+    try:
+        resp = requests.get(url, headers=wa._auth_headers(), params=params, timeout=(5, 15))
+    except Exception as e:
+        logger.error("[WA-Templates] Meta request failed (%s)", exc_summary(e))
+        raise TemplateSyncError("meta_unreachable")
+    try:
+        data = resp.json()
+    except Exception:
+        data = None
+    if resp.status_code != 200:
+        err = _classify_meta_error(resp.status_code, data)
+        logger.error("[WA-Templates] Meta returned http=%s code=%s", resp.status_code, err.meta_code)
+        raise err
+    if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+        raise TemplateSyncError("meta_bad_response")
+    return data
+
+
+def fetch_from_meta() -> list:
+    """All message templates of the configured WABA (read-only). Raises TemplateSyncError; never partial results."""
     out, after = [], None
     for _page in range(MAX_PAGES):
         params = {"fields": FIELDS, "limit": PAGE_LIMIT}
         if after:
             params["after"] = after                      # cursor only: Meta's `paging.next` URL is never followed
-        try:
-            resp = requests.get(url, headers=wa._auth_headers(), params=params, timeout=(5, 15))
-        except Exception as e:
-            logger.error("[WA-Templates] Meta request failed (%s)", exc_summary(e))
-            raise TemplateSyncError("meta_unreachable")
-        try:
-            data = resp.json()
-        except Exception:
-            data = None
-        if resp.status_code != 200:
-            err = _classify_meta_error(resp.status_code, data)
-            logger.error("[WA-Templates] Meta returned http=%s code=%s", resp.status_code, err.meta_code)
-            raise err
-        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
-            raise TemplateSyncError("meta_bad_response")
+        data = _meta_get(params)
         out.extend(t for t in data["data"] if isinstance(t, dict))
         after = ((data.get("paging") or {}).get("cursors") or {}).get("after") if (data.get("paging") or {}).get("next") else None
         if not after:
             return out
     raise TemplateSyncError("too_many_templates")
+
+
+def fetch_live_template(name: str, language: str) -> dict:
+    """The CURRENT Meta definition of one template (read-only). Raises TemplateSyncError('template_not_found') if absent."""
+    data = _meta_get({"name": name, "fields": FIELDS, "limit": 50})
+    for t in data["data"]:
+        if isinstance(t, dict) and t.get("name") == name and t.get("language") == language:
+            return t
+    raise TemplateSyncError("template_not_found")
+
+
+def verify_live(doc: dict) -> list:
+    """Re-check a cached template against Meta RIGHT NOW. Returns the list of problems ([] = still usable).
+    Meta errors propagate as TemplateSyncError (callers must treat them as 'not verified' = do not send)."""
+    raw = fetch_live_template(doc["name"], doc["language"])
+    problems = []
+    if str(raw.get("status") or "").upper() != "APPROVED":
+        problems.append("live_status_not_approved")
+    if str(raw.get("category") or "").upper() not in CAMPAIGN_CATEGORIES:
+        problems.append("live_category_not_allowed")
+    comps = raw.get("components") if isinstance(raw.get("components"), list) else []
+    live_hash = content_hash(comps)
+    cu = doc.get("campaign_use") or {}
+    if live_hash != doc.get("content_hash") or live_hash != cu.get("mapped_hash"):
+        problems.append("template_changed_since_sync")
+    if not parse_template(raw)["campaign_supported"]:
+        problems.append("live_unsupported_components")
+    return problems
 
 
 # ── parsing ────────────────────────────────────────────────────────────────────

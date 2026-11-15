@@ -546,7 +546,8 @@ def test_audience_routes_are_namespaced_and_read_or_store_only():
     assert paths == {("GET", "/audience/filters"), ("GET", "/audience/merchants"), ("POST", "/audience/imports"),
                      ("POST", "/audience/imports/csv"), ("GET", "/audience/imports"), ("GET", "/audience/imports/{import_id}"),
                      ("DELETE", "/audience/imports/{import_id}"), ("POST", "/audience/preview")}
-    full = {r.path for r in app.routes if "audience" in r.path}
+    # (Phase 2D adds /campaigns/{id}/audience-preview, which is asserted in test_wa_campaign_lifecycle.py)
+    full = {r.path for r in app.routes if "audience" in r.path and "/campaigns/" not in r.path}
     assert full and all(p.startswith("/admin/whatsapp-campaigns/audience/") for p in full)
 
 
