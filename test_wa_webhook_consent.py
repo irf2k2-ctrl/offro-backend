@@ -1035,7 +1035,8 @@ def test_no_campaign_collections_or_bulk_endpoints_in_phase_1():
     # true is that no sending / bulk endpoint exists. test_wa_campaigns_foundation.py pins the exact route set.
     camp = {p for p in paths if "campaign" in p.lower() and "whatsapp" in p.lower()}
     assert all(p.startswith("/admin/whatsapp-campaigns/") for p in camp)
-    assert not any(w in p.lower() for p in camp for w in ("bulk", "launch", "run", "start", "execute", "send-"))
+    # Phase 2E adds run CONTROLS (pause/resume/cancel-run/run-config/stats); there is still no bulk / launch / send-now endpoint.
+    assert not any(w in p.lower() for p in camp for w in ("bulk", "launch", "execute", "send-", "start"))
     src = open(C.__file__, encoding="utf-8").read()
     assert "wa_campaign" not in src
 

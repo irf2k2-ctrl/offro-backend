@@ -120,7 +120,7 @@ async def create_campaign(request: Request, user: dict = Depends(require_permiss
 
 
 @router.get("")
-async def list_campaigns(status: str = Query("", pattern="^(|draft|ready|scheduled|cancelled|completed)$"),
+async def list_campaigns(status: str = Query("", pattern="^(|draft|ready|scheduled|running|paused|cancelled|completed)$"),
                          page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
                          user: dict = Depends(require_permission(MODULE, "view"))):
     q = {"status": status} if status else {}

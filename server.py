@@ -337,6 +337,16 @@ def startup():
             print("⚠️  WhatsApp campaign indexes skipped (see logs)")
     except Exception as e:
         print(f"⚠️  WhatsApp campaign indexes skipped ({type(e).__name__})")
+    # WhatsApp campaign worker + delivery tracking (Phase 2E/2F). The delivery handler is passive; the worker thread starts ONLY when
+    # WA_CAMPAIGN_WORKER_ENABLED is on (default OFF, refused on Production) and still re-checks every gate before every message.
+    try:
+        from services import wa_campaign_worker as _wa_worker
+        from services import wa_delivery as _wa_delivery
+        _wa_worker.ensure_indexes_safe()
+        _wa_delivery.register()
+        _wa_worker.start_worker_if_enabled()
+    except Exception as e:
+        print(f"⚠️  WhatsApp worker setup skipped ({type(e).__name__})")
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
         from routers.otp_service import _ensure_otp_indexes
