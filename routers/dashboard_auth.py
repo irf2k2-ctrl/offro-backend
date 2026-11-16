@@ -323,6 +323,12 @@ def _failure(step: str, exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=_GENERIC_FAILURE + " (ref " + ref + ")")
 
 
+def _mobile_for_challenge(user_id):
+    """Mobile of an ACTIVE admin account (None if missing / disabled / suspended): the number a widget OTP must be verified for."""
+    u = db.dashboard_users.find_one({"_id": user_id}, {"mobile": 1, "status": 1})
+    return u.get("mobile") if u and u.get("status") not in ("disabled", "suspended") else None
+
+
 def _client_ip(request: Request) -> str:
     """Client IP for rate limiting. Behind Railway's proxy request.client is the proxy, so use the right-most X-Forwarded-For entry
     (the one the trusted edge appended; left-hand entries can be forged by the caller)."""
@@ -447,9 +453,14 @@ async def login(data: dict, request: Request, response: Response):
             log_activity(request, user["_id"], user.get("full_name", ""), mobile, "Auth", "OTP_SEND_FAILED", record_name=started.get("reason", ""))
             if started.get("reason") == "rate_limited":
                 raise HTTPException(status_code=429, detail=_GENERIC_THROTTLED)
+            if started.get("reason") == "not_configured":        # the MSG91 widget is not configured here: refuse; there is NO fallback code
+                ref = secrets.token_hex(4)
+                print("[2FA] login refused: MSG91 widget not configured ref=" + ref)
+                raise HTTPException(status_code=503, detail=_GENERIC_SEND + " (ref " + ref + ")")
             raise HTTPException(status_code=503, detail=_GENERIC_SEND)
         return {"otp_required": True, "challenge_id": started["token"], "otp_length": OTP_LENGTH, "mobile_masked": started["mobile_masked"],
-                "otp_expires_in": started["expires_in"], "resend_available_in": started["resend_in"]}
+                "otp_expires_in": started["expires_in"], "resend_available_in": started["resend_in"],
+                "provider": started.get("provider", "local")}
     except HTTPException:
         raise
     except Exception as e:
@@ -470,7 +481,18 @@ async def verify_otp(data: dict, request: Request, response: Response):
         wait = _lim.verify_cooldown(ip)
         if wait > 0:
             raise HTTPException(status_code=429, detail=_lim.wait_message(wait))
-        result = _otp.verify_challenge(challenge_id if isinstance(challenge_id, str) else "", otp.strip() if isinstance(otp, str) else "")
+        cid = challenge_id if isinstance(challenge_id, str) else ""
+        if _otp.challenge_provider(cid) == "widget":
+            # Widget challenge: the browser's own "verified" result is NEVER trusted. Only the MSG91 access token counts, and the server asks
+            # MSG91 itself whether it is genuine and belongs to this account's number (services/admin_login_otp.verify_widget).
+            access_token = data.get("access_token") if isinstance(data, dict) else None
+            result = _otp.verify_widget(cid, access_token.strip() if isinstance(access_token, str) else "", _mobile_for_challenge)
+            if not result.get("ok") and result.get("reason") == "unavailable":
+                ref = secrets.token_hex(4)
+                print("[2FA] widget verification unavailable ref=" + ref)
+                raise HTTPException(status_code=503, detail=_GENERIC_FAILURE + " (ref " + ref + ")")
+        else:
+            result = _otp.verify_challenge(cid, otp.strip() if isinstance(otp, str) else "")
         if not result.get("ok"):
             _lim.record_verify_failure(ip)
             raise HTTPException(status_code=401, detail=_GENERIC_OTP)
@@ -498,6 +520,61 @@ async def verify_otp(data: dict, request: Request, response: Response):
         raise _failure("verify", e)
 
 
+def _widget_limits(request: Request):
+    ip = _client_ip(request)
+    if _otp.throttle_hit("resend_ip", ip, 15) > _otp.IP_VERIFY_LIMIT:
+        raise HTTPException(status_code=429, detail=_GENERIC_THROTTLED)
+    return ip
+
+
+@router.post("/otp-request")
+async def otp_request(data: dict, request: Request):
+    """Widget mode: permission to ask the MSG91 widget to send (first call) or resend (later calls) the code for this challenge. Returns the
+    verification identifier (91 + the account's own mobile, derived server-side from the challenge: the browser cannot choose it) and the PUBLIC
+    widget config. Enforces the 30 s cooldown, the 3-resend cap, the SMS budget and the challenge lifetime."""
+    try:
+        ip = _widget_limits(request)
+        cid = data.get("challenge_id") if isinstance(data, dict) else None
+        result = _otp.request_send(cid if isinstance(cid, str) else "", _mobile_for_challenge, ip)
+        headers = {"Cache-Control": "no-store"}
+        if result.get("ok"):
+            return JSONResponse({"identifier": result["identifier"], "widget": result["widget"], "first": result["first"],
+                                 "otp_expires_in": result["expires_in"], "resend_available_in": result["resend_in"]}, headers=headers)
+        reason = result.get("reason")
+        if reason == "cooldown":
+            raise HTTPException(status_code=429, detail="Please wait before requesting another code.")
+        if reason == "rate_limited":
+            raise HTTPException(status_code=429, detail=_GENERIC_THROTTLED)
+        if reason == "not_configured":
+            ref = secrets.token_hex(4)
+            print("[2FA] otp-request refused: MSG91 widget not configured ref=" + ref)
+            raise HTTPException(status_code=503, detail=_GENERIC_SEND + " (ref " + ref + ")")
+        raise HTTPException(status_code=401, detail="This sign-in has expired. Please sign in again.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _failure("otp-request", e)
+
+
+@router.post("/otp-failed")
+async def otp_failed(data: dict, request: Request):
+    """Widget mode: the page reports that the widget rejected a typed code. This can ONLY use up attempts (5 locks the challenge); it can never
+    grant anything, so it is safe to accept from an untrusted browser. Returns the attempts left."""
+    try:
+        ip = _widget_limits(request)
+        cid = data.get("challenge_id") if isinstance(data, dict) else None
+        if _otp.throttle_hit("verify_ip", ip, 15) > _otp.IP_VERIFY_LIMIT:
+            raise HTTPException(status_code=429, detail=_GENERIC_THROTTLED)
+        result = _otp.report_failed_code(cid if isinstance(cid, str) else "")
+        if result.get("ok") is False and result.get("reason") == "invalid" and "remaining" in result:
+            return {"remaining": result["remaining"]}
+        raise HTTPException(status_code=401, detail="This sign-in has expired. Please sign in again.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _failure("otp-failed", e)
+
+
 @router.get("/device-status")
 async def device_status(request: Request):
     """Lets the login page pre-tick 'Remember this device' when THIS browser already holds a valid trusted-device token. Reveals only a yes/no
@@ -520,11 +597,7 @@ async def resend_otp(data: dict, request: Request):
         if _otp.throttle_hit("resend_ip", ip, 15) > _otp.IP_VERIFY_LIMIT:
             raise HTTPException(status_code=429, detail=_GENERIC_THROTTLED)
 
-        def _mobile(user_id):
-            u = db.dashboard_users.find_one({"_id": user_id}, {"mobile": 1, "status": 1})
-            return u.get("mobile") if u and u.get("status") not in ("disabled", "suspended") else None
-
-        result = _otp.resend_challenge(challenge_id if isinstance(challenge_id, str) else "", _mobile, ip, _admin_template_id())
+        result = _otp.resend_challenge(challenge_id if isinstance(challenge_id, str) else "", _mobile_for_challenge, ip, _admin_template_id())
         if result.get("ok"):
             return {"message": "A new code has been sent.", "otp_expires_in": result["expires_in"], "resend_available_in": result["resend_in"]}
         reason = result.get("reason")
