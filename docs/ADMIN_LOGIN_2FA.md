@@ -27,7 +27,7 @@ skipped the OTP.
 | SMS rate limits | 5 per mobile number per hour, 10 per client IP per hour (first send and resends) |
 | Other IP limits | 30 PIN-step requests and 30 verify/resend requests per IP per 15 minutes |
 | Account lockout | unchanged (5 wrong PINs, 15 minutes); unknown numbers get the same lockout response |
-| Trusted device | no longer honoured or created; a stale `offro_trusted` cookie is cleared on successful verify. Existing records stay listable/revocable |
+| Trusted device | superseded in Patch C by hash-only, opt-in "Remember this device" (see the Patch C section). The old plain-token `trusted_devices` records are ignored |
 | Everyone | Super Admin included: OTP is mandatory |
 | Errors | one generic message for unknown number / wrong PIN / disabled account; one generic message for wrong, expired, used or unknown OTP; unexpected errors return a fixed friendly text, never exception text |
 | SMS failure | 503 "We could not send the verification code", challenge marked `send_failed`, no session, SMS provider text never shown |
@@ -94,3 +94,20 @@ The environment *name* is not used (the Staging environment was once named `prod
 Startup logs `[2FA] admin OTP test mode: ACTIVE|INACTIVE (<code>)`. Codes: flag_off, not_on_railway, project_mismatch, environment_mismatch,
 service_mismatch, domain_mismatch, database_unverified, database_mismatch, allow_list_empty, check_error.
 If the Staging service is ever recreated, update the constants (test mode stays off until then).
+
+## Patch C: Remember this device and login limits
+
+**Remember this device.** Unticked: PIN + SMS code every time. Ticked: the first sign-in uses PIN + code, then the browser
+receives an `offro_td` cookie (HttpOnly, SameSite=Lax, Secure over HTTPS, path `/admin/auth`, 30 days). Later sign-ins
+from that browser need the PIN only. The server stores only a SHA-256 hash of a 256-bit random token, bound to the admin.
+The tick box is a request, never proof: a device is registered only after a successful OTP verification.
+Revoked automatically on PIN change/reset, mobile or role change, deactivation, deletion; also via logout (`keep_trusted=false`)
+and the device list endpoints. Super Admin is excluded unless `ADMIN_TRUSTED_DEVICE_SUPER_ADMIN=1`.
+Optional variables: `ADMIN_TRUSTED_DEVICE_DAYS` (default 30, 0 = off, max 90).
+
+**Login limits.** Only failures count. SMS sends are tied to their challenge and released when it completes, and are not
+counted at all in Staging test mode (no SMS is sent). Wrong PIN: per mobile+IP 5 free then 1/2/5/15/30 min; per account
+ceiling at 15; per IP ceiling at 30. Wrong OTP: per account 10, and per IP 20 failures. Abandoned sends: 10/account and
+20/IP per hour. A correct PIN clears the pair counter; a completed sign-in or PIN reset clears the account counters.
+Root cause of the lockouts: every PIN-stage login consumed the shared SMS budget (5/hour per mobile, 10/hour per IP) and
+nothing released it, even in test mode.

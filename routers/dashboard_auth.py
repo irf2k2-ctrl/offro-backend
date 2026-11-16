@@ -29,11 +29,13 @@ PBKDF2_ITERATIONS = 100_000
 # ── 2FA / OTP settings: the OTP rules (4 digits, 5 min expiry, 30 s resend cooldown, 5 attempts, rate limits) live in
 #    services/admin_login_otp.py; OTP_* below are re-exported for anything that imported them from here.
 from services import admin_login_otp as _otp
+from services import admin_login_limits as _lim
+from services import admin_trusted_devices as _td
 OTP_LENGTH = _otp.OTP_LENGTH
 OTP_EXPIRY_MINUTES = _otp.OTP_EXPIRY_MINUTES
 OTP_MAX_ATTEMPTS = _otp.OTP_MAX_ATTEMPTS
 OTP_RESEND_SECONDS = _otp.OTP_RESEND_SECONDS
-TRUSTED_DEVICE_COOKIE = "offro_trusted"      # legacy cookie: no longer honoured (see docs/ADMIN_LOGIN_2FA.md); only cleared
+TRUSTED_DEVICE_COOKIE = "offro_trusted"      # OLD cookie (plain tokens): never honoured, only cleared. The current cookie is services/admin_trusted_devices.COOKIE
 
 ALL_MODULES = [
     "Accounts", "Stores", "Products", "Banners", "Admin Banners", "Popup Campaigns",
@@ -282,7 +284,7 @@ def seed_rbac():
         db.activity_logs.create_index("user_id")
         db.activity_logs.create_index("module")
         # 2FA collections
-        db.trusted_devices.create_index("token", unique=True)
+        db.trusted_devices.create_index("token", unique=True)       # old collection (plain tokens): kept as is, never read
         # Admin 2FA OTP sessions (standalone collection)
         try:
             db.admin_otp_sessions.create_index("mobile")
@@ -297,6 +299,7 @@ def seed_rbac():
         db.trusted_devices.create_index("user_id")
         db.trusted_devices.create_index("expires_at")
         _otp.ensure_indexes()               # admin_login_challenges + admin_auth_throttle (new collections; TTL-purged)
+        _td.ensure_indexes()                # admin_trusted_devices (hashed tokens)
     except Exception as e:
         print("[RBAC] Index creation (may already exist): " + str(e))
 
@@ -339,25 +342,55 @@ def _user_payload(user: dict, role_name: str) -> dict:
             "designation": user.get("designation", ""), "role": role_name}
 
 
+def _role_name(user: dict) -> str:
+    role = db.dashboard_roles.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
+    return role["role_name"] if role else "Unknown"
+
+
+def _issue_session(user: dict, response: Response, role_name: str, event: str, request: Request) -> dict:
+    """The ONE place an admin session is created. Callers have already proven the PIN and either a server-checked OTP or a valid trusted device."""
+    session_token = secrets.token_urlsafe(32)
+    db.dashboard_users.update_one({"_id": user["_id"]}, {"$set": {
+        "token": session_token, "login_attempts": 0, "lockout_until": None,
+        "last_login_at": datetime.utcnow(), "last_active_at": datetime.utcnow(), "updated_at": datetime.utcnow()}})
+    log_activity(request, user["_id"], user.get("full_name", ""), user.get("mobile", ""), "Auth", event)
+    response.set_cookie(key="admin_token", value=session_token, httponly=True, samesite="Lax", secure=False,
+                        max_age=3600 * SESSION_MAX_HOURS)       # the security middleware adds Secure on HTTPS (unchanged)
+    _clear_trusted_cookie(response)                              # the OLD plain-token cookie, if any
+    _lim.clear_account(user.get("mobile", ""))                   # fully signed in: wrong-PIN / wrong-code history is forgiven
+    return {"message": "Login successful", "otp_required": False, "user": _user_payload(user, role_name)}
+
+
+def _set_device_cookie(response: Response, token: str):
+    response.set_cookie(key=_td.COOKIE, value=token, httponly=True, samesite="strict", secure=False, path=_td.COOKIE_PATH,
+                        max_age=86400 * _td.lifetime_days())    # Secure is added over HTTPS by the security middleware
+
+
+def _clear_device_cookie(response: Response):
+    response.delete_cookie(_td.COOKIE, path=_td.COOKIE_PATH, samesite="strict")
+
+
 @router.post("/login")
 async def login(data: dict, request: Request, response: Response):
-    """Step 1: mobile + PIN. On success returns an OTP challenge ONLY: no session, no cookie, no token.
+    """Step 1: mobile + PIN (always required). Without a trusted device this returns an OTP challenge ONLY: no session, no cookie, no token.
+    A valid trusted device for THIS account (and remember_device=true) skips the SMS OTP; anything else needs it.
     Every failure is the same generic message so the response never reveals whether the number is registered."""
     try:
         mobile = str(data.get("mobile", "")).strip() if isinstance(data, dict) else ""
         pin = str(data.get("pin", "")).strip() if isinstance(data, dict) else ""
+        remember = isinstance(data, dict) and data.get("remember_device") is True       # a REQUEST only; it proves nothing
         ip = _client_ip(request)
         if not mobile or not pin or len(mobile) > 20 or len(pin) > 12:
             raise HTTPException(status_code=400, detail="Please enter your mobile number and PIN.")
-        mkey = _otp.mobile_key(mobile)
 
-        if _otp.throttle_hit("login_ip", ip, 15) > _otp.IP_LOGIN_LIMIT:
+        if _otp.throttle_hit("login_ip", ip, 15) > _otp.IP_LOGIN_LIMIT:          # coarse flood cap only; failures have their own limits
             raise HTTPException(status_code=429, detail=_GENERIC_THROTTLED)
 
+        wait = _lim.pin_cooldown(mobile, ip)
+        if wait > 0:
+            raise HTTPException(status_code=429, detail=_lim.wait_message(wait))
         user = db.dashboard_users.find_one({"mobile": mobile})
-        locked = bool(user and user.get("lockout_until") and user["lockout_until"] > datetime.utcnow())
-        # Numbers that are not accounts get the same lockout behaviour, driven by a per-mobile failure budget.
-        if locked or (not user and _otp.throttle_count("pin_fail", mkey, _otp.PIN_FAIL_WINDOW_MINUTES) >= _otp.PIN_FAIL_LIMIT):
+        if user and user.get("lockout_until") and user["lockout_until"] > datetime.utcnow():       # a lock set by an older version / an administrator
             raise HTTPException(status_code=429, detail=_GENERIC_THROTTLED)
 
         pin_ok = False
@@ -371,23 +404,43 @@ async def login(data: dict, request: Request, response: Response):
             pin_ok = False                                           # same generic answer as a wrong PIN
 
         if not pin_ok:
+            _lim.record_pin_failure(mobile, ip)                      # failures (and only failures) feed the limits
             if user:
-                new_attempts = user.get("login_attempts", 0) + 1
-                updates = {"login_attempts": new_attempts}
-                if new_attempts >= MAX_LOGIN_ATTEMPTS:
-                    updates["lockout_until"] = datetime.utcnow() + timedelta(minutes=LOCKOUT_MINUTES)
-                    log_activity(request, user["_id"], user.get("full_name", ""), mobile, "Auth", "LOCKOUT")
-                else:
-                    log_activity(request, user["_id"], user.get("full_name", ""), mobile, "Auth", "LOGIN_FAIL",
-                                 record_name="Attempt " + str(new_attempts) + "/" + str(MAX_LOGIN_ATTEMPTS))
-                db.dashboard_users.update_one({"_id": user["_id"]}, {"$set": updates})
+                db.dashboard_users.update_one({"_id": user["_id"]}, {"$inc": {"login_attempts": 1}, "$set": {"last_failed_at": datetime.utcnow()}})
+                log_activity(request, user["_id"], user.get("full_name", ""), mobile, "Auth", "LOGIN_FAIL")
             else:
-                _otp.throttle_hit("pin_fail", mkey, _otp.PIN_FAIL_WINDOW_MINUTES)
                 log_activity(request, None, "Unknown", "", "Auth", "LOGIN_FAIL", record_name="Account not found")
+            wait = _lim.pin_cooldown(mobile, ip)
+            if wait > 0:
+                if user:
+                    log_activity(request, user["_id"], user.get("full_name", ""), mobile, "Auth", "LOCKOUT", record_name=str(wait) + "s")
+                raise HTTPException(status_code=429, detail=_lim.wait_message(wait))
             raise HTTPException(status_code=401, detail=_GENERIC_CREDENTIALS)
 
+        _lim.clear_pin_failures_here(mobile, ip)                     # a correct PIN: typos from this place are forgiven
+        wait = _lim.otp_cooldown(user["_id"])                        # too many wrong CODES on this account recently: no new code for a while
+        if wait > 0:
+            raise HTTPException(status_code=429, detail=_lim.wait_message(wait))
+
+        # ── trusted device: skips the SMS OTP only, and only for THIS account on a still-valid, non-revoked device ──
+        role_name = _role_name(user)
+        device_allowed = _td.allowed_for(role_name)
+        device_cookie = request.cookies.get(_td.COOKIE)
+        if device_allowed and device_cookie:
+            device = _td.find_valid(device_cookie, user["_id"])
+            if device and remember:
+                _td.touch(device["_id"])
+                body = _issue_session(user, response, role_name, "TRUSTED_DEVICE_LOGIN", request)
+                body["device_trusted"] = True
+                return body
+            if device and not remember:                              # the box was unticked on a remembered browser: forget it, OTP as normal
+                _td.revoke_token(device_cookie)
+                _clear_device_cookie(response)
+                log_activity(request, user["_id"], user.get("full_name", ""), mobile, "Auth", "TRUSTED_DEVICE_FORGOTTEN")
+
         # PIN verified. NO session is created here: an OTP challenge is started and the browser must complete it.
-        started = _otp.start_challenge(user, mobile, ip, request.headers.get("user-agent", ""), _admin_template_id())
+        started = _otp.start_challenge(user, mobile, ip, request.headers.get("user-agent", ""), _admin_template_id(),
+                                       remember=bool(remember and device_allowed))
         if started.get("ok"):
             log_activity(request, user["_id"], user.get("full_name", ""), mobile, "Auth", "OTP_SENT")
         else:
@@ -406,15 +459,20 @@ async def login(data: dict, request: Request, response: Response):
 @router.post("/verify-otp")
 async def verify_otp(data: dict, request: Request, response: Response):
     """Step 2: challenge_id + 4-digit OTP. The server alone decides; any browser-supplied 'verified' flag, mobile or trust option is
-    ignored. The session cookie is created only here, only for the single caller that consumes the challenge."""
+    ignored here (the trust request was recorded on the challenge at the PIN step). The session cookie is created only here, only for the
+    single caller that consumes the challenge."""
     try:
         challenge_id = data.get("challenge_id") if isinstance(data, dict) else None
         otp = data.get("otp") if isinstance(data, dict) else None
         ip = _client_ip(request)
         if _otp.throttle_hit("verify_ip", ip, 15) > _otp.IP_VERIFY_LIMIT:
             raise HTTPException(status_code=429, detail=_GENERIC_THROTTLED)
+        wait = _lim.verify_cooldown(ip)
+        if wait > 0:
+            raise HTTPException(status_code=429, detail=_lim.wait_message(wait))
         result = _otp.verify_challenge(challenge_id if isinstance(challenge_id, str) else "", otp.strip() if isinstance(otp, str) else "")
         if not result.get("ok"):
+            _lim.record_verify_failure(ip)
             raise HTTPException(status_code=401, detail=_GENERIC_OTP)
 
         user = db.dashboard_users.find_one({"_id": result["user_id"]})
@@ -422,20 +480,34 @@ async def verify_otp(data: dict, request: Request, response: Response):
                 user.get("lockout_until") and user["lockout_until"] > datetime.utcnow()):
             raise HTTPException(status_code=401, detail=_GENERIC_OTP)
 
-        session_token = secrets.token_urlsafe(32)
-        db.dashboard_users.update_one({"_id": user["_id"]}, {"$set": {
-            "token": session_token, "login_attempts": 0, "lockout_until": None,
-            "last_login_at": datetime.utcnow(), "last_active_at": datetime.utcnow(), "updated_at": datetime.utcnow()}})
-        log_activity(request, user["_id"], user.get("full_name", ""), user.get("mobile", ""), "Auth", "OTP_VERIFIED")
-        role = db.dashboard_roles.find_one({"_id": user["role_id"]}) if user.get("role_id") else None
-        response.set_cookie(key="admin_token", value=session_token, httponly=True, samesite="Lax", secure=False,
-                            max_age=3600 * SESSION_MAX_HOURS)       # the security middleware adds Secure on HTTPS (unchanged)
-        _clear_trusted_cookie(response)
-        return {"message": "Login successful", "otp_required": False, "user": _user_payload(user, role["role_name"] if role else "Unknown")}
+        role_name = _role_name(user)
+        body = _issue_session(user, response, role_name, "OTP_VERIFIED", request)
+        trusted = False
+        if result.get("remember") and _td.allowed_for(role_name):
+            try:
+                _set_device_cookie(response, _td.register(user["_id"], ip, request.headers.get("user-agent", "")))
+                log_activity(request, user["_id"], user.get("full_name", ""), user.get("mobile", ""), "Auth", "TRUSTED_DEVICE_ADDED")
+                trusted = True
+            except Exception as e:                                   # the sign-in itself succeeded; the device just is not remembered
+                print("[2FA] trusted device not registered type=" + type(e).__name__)
+        body["device_trusted"] = trusted
+        return body
     except HTTPException:
         raise
     except Exception as e:
         raise _failure("verify", e)
+
+
+@router.get("/device-status")
+async def device_status(request: Request):
+    """Lets the login page pre-tick 'Remember this device' when THIS browser already holds a valid trusted-device token. Reveals only a yes/no
+    about the caller's own cookie: no account, no token, no list."""
+    ok = False
+    device = _td.find_valid(request.cookies.get(_td.COOKIE))
+    if device:
+        user = db.dashboard_users.find_one({"_id": device["user_id"]}, {"status": 1, "role_id": 1})
+        ok = bool(user and user.get("status") not in ("disabled", "suspended") and _td.allowed_for(_role_name(user)))
+    return JSONResponse({"remembered": ok}, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/resend-otp")
@@ -473,7 +545,7 @@ async def resend_otp(data: dict, request: Request):
 async def logout(request: Request, response: Response, data: dict = None):
     """
     Logout — clears session token and cookie.
-    Trusted device cookie is preserved unless keep_trusted=false is sent.
+    The trusted-device cookie is preserved unless keep_trusted=false is sent.
     """
     token = request.cookies.get("admin_token") or \
             (data.get("token", "") if data else "") or \
@@ -489,15 +561,11 @@ async def logout(request: Request, response: Response, data: dict = None):
     # Clear session cookie
     response.delete_cookie("admin_token", samesite="Lax")
 
-    # Check if we should also clear trusted device
-    keep_trusted = True
+    # "Log out and forget this device": keep_trusted=false revokes THIS browser's trusted-device token (by hash) and clears its cookie.
+    # A plain logout keeps the device trusted (PIN is still required next time). Logout never touches any failure counter.
     if data and data.get("keep_trusted") is False:
-        keep_trusted = False
-
-    if not keep_trusted:
-        trusted_token = request.cookies.get(TRUSTED_DEVICE_COOKIE)
-        if trusted_token:
-            db.trusted_devices.delete_one({"token": trusted_token})
+        _td.revoke_token(request.cookies.get(_td.COOKIE))
+        _clear_device_cookie(response)
         _clear_trusted_cookie(response)
 
     return {"message": "Logged out successfully"}
@@ -529,14 +597,16 @@ async def list_trusted_devices(
     request: Request,
     user: dict = Depends(get_current_dashboard_user)
 ):
-    """List all trusted devices for the current user."""
-    devices = list(db.trusted_devices.find({
+    """List the current user's trusted devices. Never returns a token or its hash; `current` marks this browser."""
+    current = _td.find_valid(request.cookies.get(_td.COOKIE), user["_id"])
+    devices = list(db[_td.COLLECTION].find({
         "user_id": user["_id"],
         "expires_at": {"$gt": datetime.utcnow()}
     }).sort("created_at", -1))
 
     return [{
         "id": str(d["_id"]),
+        "current": bool(current and current["_id"] == d["_id"]),
         "ip_address": d.get("ip_address", ""),
         "user_agent": d.get("user_agent", ""),
         "created_at": d.get("created_at").isoformat() if d.get("created_at") else None,
@@ -551,15 +621,15 @@ async def revoke_trusted_device(
     request: Request,
     user: dict = Depends(get_current_dashboard_user)
 ):
-    """Revoke a trusted device by its ID."""
+    """Revoke one of the current user's trusted devices by its ID (that browser needs the OTP again)."""
     if not ObjectId.is_valid(device_id):
         raise HTTPException(status_code=400, detail="Invalid device ID")
 
-    device = db.trusted_devices.find_one({"_id": ObjectId(device_id), "user_id": user["_id"]})
+    device = db[_td.COLLECTION].find_one({"_id": ObjectId(device_id), "user_id": user["_id"]})
     if not device:
         raise HTTPException(status_code=404, detail="Trusted device not found")
 
-    db.trusted_devices.delete_one({"_id": ObjectId(device_id)})
+    db[_td.COLLECTION].delete_one({"_id": ObjectId(device_id)})
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
@@ -576,16 +646,16 @@ async def revoke_all_trusted_devices(
     request: Request,
     user: dict = Depends(get_current_dashboard_user)
 ):
-    """Revoke all trusted devices for the current user."""
-    result = db.trusted_devices.delete_many({"user_id": user["_id"]})
+    """Revoke all of the current user's trusted devices."""
+    count = _td.revoke_all(user["_id"])
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
         "Auth", "REVOKE_ALL_TRUSTED_DEVICES",
-        record_name=str(result.deleted_count) + " devices"
+        record_name=str(count) + " devices"
     )
 
-    return {"message": "Revoked " + str(result.deleted_count) + " trusted device(s)"}
+    return {"message": "Revoked " + str(count) + " trusted device(s)"}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -726,6 +796,8 @@ async def update_user(
         raise HTTPException(status_code=400, detail="No fields to update")
 
     updates["updated_at"] = datetime.utcnow()
+    # Security-sensitive change (PIN, mobile, role, deactivation/suspension): every trusted device of this account stops working.
+    revoke_devices = any(k in updates for k in ("pin", "mobile", "role_id")) or (updates.get("status") not in (None, "active"))
 
     before_snapshot = {
         "full_name": existing.get("full_name"),
@@ -737,6 +809,10 @@ async def update_user(
     }
 
     db.dashboard_users.update_one({"_id": ObjectId(user_id)}, {"$set": updates})
+    if revoke_devices:
+        _td.revoke_all(ObjectId(user_id))
+    if "pin" in updates:                                             # an administrator reset: forgive wrong-PIN / wrong-code counters too
+        _lim.clear_account(existing.get("mobile", ""))
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
@@ -773,6 +849,8 @@ async def reset_pin(
         {"$set": {"pin": hash_pin(new_pin), "updated_at": datetime.utcnow(),
                   "login_attempts": 0, "lockout_until": None}}
     )
+    _td.revoke_all(ObjectId(user_id))                                # a new PIN invalidates every remembered browser
+    _lim.clear_account(existing.get("mobile", ""))
 
     log_activity(
         request, user["_id"], user["full_name"], user["mobile"],
@@ -805,7 +883,8 @@ async def delete_user(
         if super_admin_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot delete the last Super Admin")
 
-    # Also revoke all trusted devices for this user
+    # Also revoke all trusted devices for this user (current collection; the old one is cleaned the same way)
+    _td.revoke_all(ObjectId(user_id))
     db.trusted_devices.delete_many({"user_id": ObjectId(user_id)})
 
     db.dashboard_users.delete_one({"_id": ObjectId(user_id)})

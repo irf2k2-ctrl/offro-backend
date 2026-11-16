@@ -119,6 +119,10 @@ body {
         </div>
         <div class="hint">Enter your 4 or 6 digit security PIN</div>
     </div>
+    <div class="mb-3 text-start" style="display:flex;align-items:flex-start;gap:8px;">
+        <input type="checkbox" id="rememberDevice" style="margin-top:3px;">
+        <label for="rememberDevice" class="hint" style="margin:0;cursor:pointer;">Remember this device for 30 days. You will still enter your PIN; the SMS code is skipped on this browser.</label>
+    </div>
     <button class="btn-main" id="loginBtn" onclick="login()">
         <i class="fas fa-sign-in-alt me-1"></i> Login to Dashboard
     </button>
@@ -185,6 +189,16 @@ function friendly(res, data, fallback) {
     return fallback;
 }
 
+// Pre-tick "Remember this device" when this browser already holds a valid trusted-device token (a yes/no about this browser only).
+// Unticking it makes the next sign-in forget the device and ask for the SMS code.
+(async function () {
+    try {
+        let r = await fetch("/admin/auth/device-status", { credentials: "include" });
+        let d = await readJson(r);
+        if (r.ok && d && d.remembered === true) document.getElementById("rememberDevice").checked = true;
+    } catch (e) { /* the checkbox simply stays unticked */ }
+})();
+
 // ═══ Step 1: Login ═══
 async function login() {
     let mobile = document.getElementById("mobile").value.trim();
@@ -207,7 +221,7 @@ async function login() {
         res = await fetch("/admin/auth/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mobile, pin }),
+            body: JSON.stringify({ mobile, pin, remember_device: document.getElementById("rememberDevice").checked }),
             credentials: "include"
         });
     } catch (err) {
@@ -218,6 +232,11 @@ async function login() {
     }
     let data = await readJson(res);
     if (!transientFailure(res)) document.getElementById("pin").value = "";
+    if (res.ok && data && data.otp_required === false && data.user) {          // trusted device: PIN was enough, the server created the session
+        btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' + (data.user.full_name || 'Admin') + '!';
+        setTimeout(() => { window.location.href = "/admin/dashboard"; }, 400);
+        return;
+    }
     if (!res.ok || !data || !data.otp_required || !data.challenge_id) {
         msgEl.innerText = friendly(res, data, "Sign-in failed. Please try again.");
         showRetry("retryBtn", transientFailure(res) || res.status === 503);

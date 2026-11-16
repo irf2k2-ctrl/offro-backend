@@ -151,18 +151,20 @@ def test_unknown_number_wrong_pin_and_disabled_account_give_one_identical_answer
     assert sms.sent == []                                                                  # no SMS without a correct PIN
 
 
-def test_lockout_is_preserved_and_looks_the_same_for_unknown_numbers(sms):
+def test_a_cooldown_starts_after_five_wrong_pins_and_looks_the_same_for_unknown_numbers(sms):
     mk_user()
     c = client()
-    for _ in range(5):
+    for _ in range(4):
         assert login(c, MOBILE, "0000").status_code == 401
-    known = login(c, MOBILE, PIN)                                                          # correct PIN, but locked
-    for _ in range(5):
+    assert login(c, MOBILE, "0000").status_code == 429                                    # the 5th failure starts the cooldown
+    known = login(c, MOBILE, PIN)                                                          # correct PIN, but still cooling down
+    for _ in range(4):
         assert login(c, "9000000177", "0000").status_code == 401
+    assert login(c, "9000000177", "0000").status_code == 429
     unknown = login(c, "9000000177", PIN)
     assert known.status_code == unknown.status_code == 429 and known.json() == unknown.json()
-    assert sms.sent == []
-    assert DB.dashboard_users.find_one({"mobile": MOBILE})["lockout_until"] > datetime.utcnow()
+    assert "try again in about" in known.json()["detail"]
+    assert sms.sent == []                                                                  # (progressive delays and counters: test_security_admin_login_limits.py)
 
 
 def test_malformed_inputs_get_friendly_errors_not_exceptions(sms):
@@ -518,21 +520,21 @@ def test_resend_needs_a_challenge_a_mobile_number_alone_cannot_trigger_an_sms(sm
 def test_per_account_sms_limit(sms, monkeypatch):
     mk_user()
     codes = []
-    for i in range(7):
+    for i in range(12):
         c = client()
         # different IPs so only the per-account limit can trigger
         r = c.post("/admin/auth/login", json={"mobile": MOBILE, "pin": PIN}, headers={"x-forwarded-for": "10.0.0.%d" % i})
         codes.append(r.status_code)
-    assert codes[:5] == [200] * 5 and codes[5:] == [429, 429]
-    assert len(sms.sent) == 5
+    assert codes[:10] == [200] * 10 and codes[10:] == [429, 429]            # sign-ins that never complete use the budget; completed ones give it back
+    assert len(sms.sent) == 10
 
 
 def test_per_ip_sms_limit(sms):
-    for i in range(12):
+    for i in range(22):
         mk_user(mobile="90000002%02d" % i)
     codes = [client().post("/admin/auth/login", json={"mobile": "90000002%02d" % i, "pin": PIN}, headers={"x-forwarded-for": "9.9.9.9"}).status_code
-             for i in range(12)]
-    assert codes[:10] == [200] * 10 and codes[10:] == [429, 429] and len(sms.sent) == 10
+             for i in range(22)]
+    assert codes[:20] == [200] * 20 and codes[20:] == [429, 429] and len(sms.sent) == 20
 
 
 def test_per_ip_limit_on_pin_guessing_and_otp_guessing(sms):

@@ -335,10 +335,10 @@ def test_resend_cooldown_cap_and_it_reissues_the_same_fixed_code_without_sms(sms
     assert verify(c, cid, CODE).status_code == 200
 
 
-def test_sms_rate_limits_still_count_in_test_mode(sms):
+def test_the_sms_budget_is_not_used_up_in_test_mode_because_no_sms_is_sent(sms):
     mk_user()
-    codes = [login(client(), **{"x-forwarded-for": "10.0.0.%d" % i}).status_code for i in range(7)]
-    assert codes[:5] == [200] * 5 and codes[5:] == [429, 429]
+    codes = [login(client(), **{"x-forwarded-for": "10.0.0.%d" % i}).status_code for i in range(15)]
+    assert codes == [200] * 15 and sms.sent == [] and DB.admin_auth_throttle.count_documents({"kind": "otp_send_acct"}) == 0
 
 
 def test_a_test_challenge_stops_working_if_test_mode_stops_verifying(sms, monkeypatch):

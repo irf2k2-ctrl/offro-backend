@@ -25,12 +25,10 @@ OTP_RESEND_SECONDS = 30           # cooldown between sends for one challenge
 OTP_MAX_ATTEMPTS = 5              # wrong codes per challenge (cumulative across resends)
 CHALLENGE_MAX_RESENDS = 3         # extra sends per challenge
 CHALLENGE_MAX_AGE_MINUTES = 15    # absolute lifetime of one challenge, resends included
-SEND_LIMIT_PER_ACCOUNT_HOUR = 5   # SMS sends (first + resends) per mobile number
-SEND_LIMIT_PER_IP_HOUR = 10       # SMS sends per client IP
-PIN_FAIL_LIMIT = 5                # per-mobile wrong-PIN budget for numbers that are not accounts (mirrors the account lockout)
-PIN_FAIL_WINDOW_MINUTES = 15
-IP_LOGIN_LIMIT = 30               # PIN-stage requests per IP per 15 minutes
-IP_VERIFY_LIMIT = 30              # OTP-verify requests per IP per 15 minutes
+SEND_LIMIT_PER_ACCOUNT_HOUR = 10  # SMS sends (first + resends) per mobile number that were NOT followed by a successful sign-in (see throttle_release)
+SEND_LIMIT_PER_IP_HOUR = 20       # same, per client IP
+IP_LOGIN_LIMIT = 200              # coarse cap on ALL PIN-stage requests per IP per 15 minutes (flood protection only; failures have their own, tighter limits in admin_login_limits)
+IP_VERIFY_LIMIT = 200             # coarse cap on ALL OTP-verify / resend requests per IP per 15 minutes
 PBKDF2_ITERATIONS = 100_000
 
 CHALLENGES = "admin_login_challenges"
@@ -89,11 +87,17 @@ def ensure_indexes():
 
 
 # ── throttling (shared by the PIN stage, the OTP sends and the OTP verifies) ─────────────────────────────
-def throttle_hit(kind: str, key: str, window_minutes: int) -> int:
+def throttle_hit(kind: str, key: str, window_minutes: int, ref: str = None, group: str = None) -> int:
     """Record one event and return how many events (including this one) this key has in the window. Insert-then-count, so
-    concurrent requests cannot all slip under a check-then-insert race."""
+    concurrent requests cannot all slip under a check-then-insert race. `ref` ties an event to one challenge (released when that
+    sign-in succeeds); `group` lets an admin reset clear every counter of one mobile number."""
     now = _now()
-    db[THROTTLE].insert_one({"kind": kind, "key": key, "at": now, "purge_at": now + timedelta(minutes=window_minutes + 5)})
+    doc = {"kind": kind, "key": key, "at": now, "purge_at": now + timedelta(minutes=window_minutes + 5)}
+    if ref:
+        doc["ref"] = ref
+    if group:
+        doc["group"] = group
+    db[THROTTLE].insert_one(doc)
     return db[THROTTLE].count_documents({"kind": kind, "key": key, "at": {"$gte": now - timedelta(minutes=window_minutes)}})
 
 
@@ -105,10 +109,17 @@ def throttle_clear(kind: str, key: str):
     db[THROTTLE].delete_many({"kind": kind, "key": key})
 
 
-def _send_limited(mkey: str, ip: str) -> bool:
-    """True if a new SMS may be sent now (and records the send)."""
-    acct = throttle_hit("otp_send_acct", mkey, 60)
-    ipn = throttle_hit("otp_send_ip", ip, 60)
+def throttle_release(ref: str):
+    """A sign-in that completed (correct OTP) gives its own SMS sends back: successful logins must never use up the budget that exists
+    to stop SMS spam and guessing. Only the events tied to that one challenge are removed."""
+    if ref:
+        db[THROTTLE].delete_many({"ref": ref})
+
+
+def _send_limited(mkey: str, ip: str, ref: str = None) -> bool:
+    """True if a new SMS may be sent now (and records the send, tied to `ref` so a completed sign-in can release it)."""
+    acct = throttle_hit("otp_send_acct", mkey, 60, ref=ref, group=mkey)
+    ipn = throttle_hit("otp_send_ip", ip, 60, ref=ref)
     return acct <= SEND_LIMIT_PER_ACCOUNT_HOUR and ipn <= SEND_LIMIT_PER_IP_HOUR
 
 
@@ -123,24 +134,26 @@ def _new_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def start_challenge(user, mobile: str, ip: str, user_agent: str, template_id: str = "") -> dict:
+def start_challenge(user, mobile: str, ip: str, user_agent: str, template_id: str = "", remember: bool = False) -> dict:
     """Create a challenge and send the first OTP. `user` is the dashboard user document, or None for an unknown mobile number
     (dummy challenge: nothing is sent, the response is identical). Returns:
         {"ok": True, "token", "expires_in", "resend_in", "mobile_masked"}  or
         {"ok": False, "reason": "rate_limited" | "send_failed"}"""
     mkey = mobile_key(mobile)
-    if not _send_limited(mkey, ip):
-        return {"ok": False, "reason": "rate_limited"}
     now = _now()
     token = _new_token()
     salt = secrets.token_hex(16)
     token_hash = _sha(token)
     # Staging-only test OTP (services/admin_otp_test_mode.py): only when the Staging identity is verified AND this admin is allow-listed.
     test = bool(user) and TM.applies_to(mobile)
+    # The SMS budget exists to stop SMS spam and cost, so it only counts real sends (test mode sends none).
+    if not test and not _send_limited(mkey, ip, ref=token_hash):
+        return {"ok": False, "reason": "rate_limited"}
     otp = TM.TEST_OTP if test else generate_otp()
     doc = {
         "token_hash": token_hash,
         "test_mode": test,
+        "remember": bool(remember),            # the user asked to trust this browser; honoured ONLY after the OTP is verified
         "user_id": user["_id"] if user else None,
         "dummy": user is None,
         "mobile_key": mkey,
@@ -201,6 +214,8 @@ def verify_challenge(token: str, otp: str) -> dict:
     candidate = hash_otp(otp, reserved["salt"], reserved["_id"], reserved["user_id"])
     good = (not reserved.get("dummy")) and hmac.compare_digest(candidate, reserved.get("otp_hash", ""))
     if not good:
+        if not reserved.get("dummy") and reserved.get("user_id") is not None:
+            throttle_hit("otp_fail_acct", str(reserved["user_id"]), 60, group=reserved.get("mobile_key"))     # wrong codes per account, across challenges
         remaining = max(0, OTP_MAX_ATTEMPTS - reserved["attempts"])
         if remaining == 0:
             db[CHALLENGES].update_one({"_id": reserved["_id"], "status": "pending"}, {"$set": {"status": "locked"}})
@@ -210,7 +225,8 @@ def verify_challenge(token: str, otp: str) -> dict:
         {"$set": {"status": "verified", "verified_at": _now(), "otp_hash": None}}, return_document=True)
     if not won:                                                  # lost a concurrent race, or it expired between the steps
         return dict(FAIL)
-    return {"ok": True, "user_id": won["user_id"]}
+    throttle_release(won.get("token_hash"))                     # a completed sign-in does not consume the SMS budget
+    return {"ok": True, "user_id": won["user_id"], "remember": bool(won.get("remember"))}
 
 
 def resend_challenge(token: str, mobile_lookup, ip: str, template_id: str = "") -> dict:
@@ -229,7 +245,7 @@ def resend_challenge(token: str, mobile_lookup, ip: str, template_id: str = "") 
     since = (now - doc["last_sent_at"]).total_seconds()
     if since < OTP_RESEND_SECONDS:
         return {"ok": False, "reason": "cooldown", "retry_in": int(OTP_RESEND_SECONDS - since) + 1}
-    if not _send_limited(doc["mobile_key"], ip):
+    if not test and not _send_limited(doc["mobile_key"], ip, ref=doc["token_hash"]):
         return {"ok": False, "reason": "rate_limited"}
     salt = secrets.token_hex(16)
     otp = TM.TEST_OTP if test else generate_otp()
