@@ -190,9 +190,9 @@ def test_the_module_uses_the_dashboards_design_tokens_and_namespaced_classes():
     css = read(CSS_PATH)
     for var in ("--primary", "--muted", "--border", "--danger", "--warning"):
         assert var in css
-    assert not re.search(r"(^|\n)\s*(body|html|\.sidebar|\.main|\.table-wrap|\.btn-p|\.btn-o|\.section)\b[^{]*\{", css)   # never restyles existing UI
+    assert not re.search(r"(^|\n)\s*(body|html|\.sidebar|\.main|\.table-wrap|\.btn-p|\.btn-o|\.section(?!\.wac\.active))\b[^{]*\{", css)   # never restyles existing UI
     for sel in re.findall(r"(?m)^([^\s@/*][^{]*)\{", css):
-        assert all(part.strip().startswith(".wac") for part in sel.split(",")), sel
+        assert all(part.strip().startswith((".wac", ".section.wac")) for part in sel.split(",")), sel
     assert 'class="section wac"' in PARTIAL and "page-title" in PARTIAL and "table-wrap" in PARTIAL and "btn-p" in PARTIAL
     for sid in ("wac_denied", "wac_body", "wac_cards", "wac_chips", "wac_list", "wac_prev", "wac_next", "wac_count", "wac_refresh", "wac_list_msg"):
         assert 'id="%s"' % sid in PARTIAL, sid
@@ -250,3 +250,29 @@ def test_the_test_send_production_guard_gap_is_documented_as_a_separate_backend_
     doc = read(os.path.join(ROOT, "docs", "WHATSAPP_PHASE2G_BACKEND_SAFETY_TASKS.md"))
     assert "send_test_message" in doc and "no such guard" in doc and "production_blocked()" in doc
     assert "before any Production sending is enabled" in doc
+
+
+# ── layout frame (the partial is included OUTSIDE the dashboard's .main wrapper) ────────────────────
+
+def test_the_section_supplies_its_own_frame_clear_of_the_fixed_sidebar():
+    css = read(CSS_PATH)
+    # the dashboard's sidebar is 230px and its .main wrapper closes before the include; the module must offset itself
+    assert re.search(r"\.sidebar\{width:230px;", DASH)
+    assert DASH.index("{% include \"partials/wa_campaigns.html\" %}") > DASH.index('<div class="main">')
+    frame = re.search(r"\.section\.wac\.active\{([^}]*)\}", css).group(1)
+    assert "position:absolute" in frame and "top:0" in frame and "left:230px" in frame and "right:0" in frame and "padding:24px" in frame
+    assert re.search(r"@media \(max-width:768px\)\{\.section\.wac\.active\{left:0;", css)     # same breakpoint as the dashboard's own .main rule
+    assert "@media (max-width: 768px)" in DASH or "@media (max-width:768px)" in DASH
+    # only the active module section is positioned; an inactive one keeps the dashboard's display:none
+    assert not re.search(r"(^|\n)\.wac\{[^}]*position", css) and "display:none" in DASH
+
+
+def test_the_overview_cards_use_a_one_two_three_column_grid_without_bootstrap_negative_margins():
+    css = read(CSS_PATH)
+    assert re.search(r"\.wac \.wac-cards\{display:grid;grid-template-columns:1fr;", css)
+    assert re.search(r"@media \(min-width:560px\)\{\.wac \.wac-cards\{grid-template-columns:repeat\(2,", css)
+    assert re.search(r"@media \(min-width:1200px\)\{\.wac \.wac-cards\{grid-template-columns:repeat\(3,", css)
+    assert re.search(r"\.wac \.wac-cards\{[^}]*margin:0;", css)                                       # no .row negative margin overflow
+    assert ".wac-cards>:only-child{grid-column:1/-1;}" in css                                         # the loading placeholder spans the grid
+    assert "min-height:96px" in css and "overflow-wrap:anywhere" in css
+    assert ".wac .table-wrap{max-width:100%;}" in css

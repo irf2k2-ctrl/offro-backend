@@ -1,4 +1,21 @@
 /* WhatsApp Campaigns (Phase 2G). Uses the dashboard's own CSS variables (--primary, --muted, --border, --danger, --warning). */
+
+/* page frame. This section is included OUTSIDE the dashboard's .main wrapper (like #section-wa_chat), and .main (min-height:100vh) stays
+   in the flow as an empty block above it. So the active section is placed absolutely at the top of the page, clear of the fixed 230px
+   sidebar, with .main's 24px padding. An absolutely positioned box still extends the page's scroll height. Mirrors the dashboard's
+   768px breakpoint, where the sidebar is hidden. */
+.section.wac.active{position:absolute;top:0;left:230px;right:0;margin:0;padding:24px;min-width:0;overflow-x:hidden;}
+@media (max-width:768px){.section.wac.active{left:0;padding:16px;}}
+/* overview cards: responsive grid (1 column on narrow, 2 on medium, 3 on wide desktops); overrides the Bootstrap row/col widths in markup */
+.wac .wac-cards{display:grid;grid-template-columns:1fr;gap:14px;margin:0;}
+.wac .wac-cards>*{width:auto;max-width:none;min-width:0;margin:0;padding:0;}
+.wac .wac-cards>:only-child{grid-column:1/-1;}
+@media (min-width:560px){.wac .wac-cards{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media (min-width:1200px){.wac .wac-cards{grid-template-columns:repeat(3,minmax(0,1fr));}}
+.wac .wac-card{min-height:96px;overflow-wrap:anywhere;}
+.wac .section-header{align-items:center;}
+.wac .table-wrap{max-width:100%;}
+.wac .wac-pager{max-width:100%;}
 .wac .wac-h{font-size:14px;font-weight:700;color:var(--primary);}
 .wac .wac-muted{color:var(--muted);font-size:12px;}
 .wac .wac-notice{background:#f2f7f5;border:1px solid var(--border);border-radius:10px;padding:9px 13px;font-size:12px;color:var(--muted);margin-bottom:16px;}
