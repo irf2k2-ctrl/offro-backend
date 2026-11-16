@@ -104,14 +104,14 @@ models single-operation atomicity; they prove the application never splits a cla
 guarantee itself. That is verified on a real server with the procedure below.
 
 ## 9. Staging concurrency verification procedure (real MongoDB, no WhatsApp)
-Prerequisites: Staging only; never run against Production's database. 1) On a Staging shell with the backend checked out, export the
-Staging connection string as `CONC_MONGO_URL` (do not paste it anywhere). 2) `python tools/wa_staging_concurrency_check.py
---yes-this-is-staging --processes 8 --recipients 2000`. It creates and drops its own database `wa_conc_check_<id>`; no application
-collection is touched and no message is sent. 3) Expect five PASS lines (exact-once claims, single lease holder, rate ≤ limit, status
-convergence to `read`, recovery split 5/5) and `RESULT: ALL PASS`; repeat 3×, and once with `--processes 16`. 4) Optional end-to-end
-Staging drill (needs your explicit approval first): worker env on Staging only, kill switch on, `WA_CAMPAIGN_TEST_NUMBERS` = your own
-number, schedule a 2-recipient campaign in test mode, watch `/worker/status`, `/campaigns/{id}/stats`, flip the kill switch mid-run and
-confirm auto-pause, send STOP from the test phone and confirm the next message is cancelled with reason `opted_out`.
+The full step-by-step Windows procedure (secure URL entry, target fingerprint check, expected output, failure interpretation, cleanup and
+the pass/fail checklist) is in `docs/WHATSAPP_STAGING_CONCURRENCY_PROCEDURE.md`. Summary: `tools/wa_staging_concurrency_check.py` runs the worker's
+claim / lease / recovery / rate-limit / delivery-status functions from 8–16 processes in a throw-away database `wa_conc_check_<id>` on the Staging
+MongoDB (never `offro_db`, never Production) or, with `--target isolated`, on a fresh dedicated MongoDB. You confirm the target yourself by comparing
+host AND port with Railway (`--show-target --reveal-host`); the `--expect-target` fingerprint is only a typo guard. Cleanup drops only databases proven
+to be owned by the tool (ownership marker), never by name prefix alone. Eight checks must pass
+three times, then the optional end-to-end drill: worker env on Staging only, kill switch on, `WA_CAMPAIGN_TEST_NUMBERS` = your own number, a
+2-recipient test-mode campaign, kill switch flipped mid-run (auto-pause) and a STOP from the test phone (next message cancelled, reason `opted_out`) – the drill needs your explicit approval first.
 
 ## 10. Follow-up safety corrections (applied on top of the original 2E/2F patch)
 1. **Template readiness before every message.** `T.verify_live()` is called in `process_recipient()` for each message (after the

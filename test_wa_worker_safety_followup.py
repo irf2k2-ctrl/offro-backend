@@ -361,7 +361,7 @@ def test_rate_window_and_bound_are_consistent():
     assert S.rate_lower_bound(5, 3) == 10                      # and must contain at least 2 FULL buckets (sanity: tokens do flow)
     src = inspect.getsource(S._rate_proc)
     assert "sec_start + 3" not in src and "RATE_WINDOW_SECONDS" in src and "start_at" in src
-    assert "start_at + 2" not in inspect.getsource(S.main) and "RATE_START_DELAY" in inspect.getsource(S.main)
+    assert "start_at + 2" not in inspect.getsource(S.run_checks) and "RATE_START_DELAY" in inspect.getsource(S.run_checks)
 
 
 def test_runner_collects_results_from_healthy_children():
@@ -440,8 +440,15 @@ def test_crash_in_one_child_fails_fast_even_while_another_child_hangs(tmp_path):
     assert not [p for p in mp.active_children() if p.is_alive()]
 
 
-def test_main_turns_a_runner_failure_into_a_failed_check_not_a_hang(monkeypatch, capsys):
+def test_main_turns_a_runner_failure_into_a_failed_check_not_a_hang(monkeypatch, capsys, tmp_path):
     S = _script()
+    # run_checks() creates a local ownership record first. Keep it in a temp folder and out of the host's real Windows ACL policy
+    # (and out of the real %USERPROFILE%); the Windows policy has its own tests in test_wa_staging_concurrency_script.py.
+    monkeypatch.setattr(S, "_is_windows", lambda: False)
+    monkeypatch.setenv("CONC_OWNER_DIR", str(tmp_path / "own"))
+    monkeypatch.setattr(S, "_icacls", lambda *a, **k: (_ for _ in ()).throw(AssertionError("real icacls")))
+    monkeypatch.setattr(S, "_whoami", lambda *a, **k: (_ for _ in ()).throw(AssertionError("real whoami")))
+    import argparse
     import mongomock
     client = mongomock.MongoClient()
 
@@ -451,7 +458,7 @@ def test_main_turns_a_runner_failure_into_a_failed_check_not_a_hang(monkeypatch,
         return db, M, W
     monkeypatch.setattr(S, "_setup", fake_setup)
     monkeypatch.setattr(S, "_run", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("child exited with code 1")))
-    monkeypatch.setattr("sys.argv", ["x", "--yes-this-is-staging", "--processes", "2", "--recipients", "5"])
-    with pytest.raises(SystemExit) as e:
-        S.main()
-    assert e.value.code == 1 and "FAIL" in capsys.readouterr().out
+    code = S.run_checks(argparse.Namespace(processes=2, recipients=5))
+    out = capsys.readouterr().out
+    assert code == 1 and "FAIL" in out and "child exited with code 1" in out
+    assert list((tmp_path / "own").glob("*.json")) == []                       # the run cleaned up after itself (record removed after the verified drop)
