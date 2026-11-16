@@ -1,3 +1,7 @@
+> **Superseded in part (Widget patch):** real admin sign-ins no longer send the SMS from this server. They use the existing MSG91 OTP Widget
+> (OFFROOTP) driven by the login page and verified by the server through `verifyAccessToken`. See "MSG91 Widget login" at the end of this file.
+> The challenge, attempt, resend, rate-limit, trusted-device and Staging test-mode rules below still apply.
+
 # Admin login: server-side 4-digit SMS OTP (security fix)
 
 Base: staging `636fb1b`. Adds no Railway variables and no credentials: SMS uses the existing `MSG91_AUTH_KEY`,
@@ -111,3 +115,44 @@ ceiling at 15; per IP ceiling at 30. Wrong OTP: per account 10, and per IP 20 fa
 20/IP per hour. A correct PIN clears the pair counter; a completed sign-in or PIN reset clears the account counters.
 Root cause of the lockouts: every PIN-stage login consumed the shared SMS budget (5/hour per mobile, 10/hour per IP) and
 nothing released it, even in test mode.
+
+## MSG91 Widget login (replaces the SendOTP-API route)
+
+Why: the customer app already sends OTPs through the MSG91 OTP Widget (OFFROOTP), which needs no separate DLT template/sender for the OTP SMS.
+Admin login now uses the same widget, independently of the customer app (nothing in the customer app, its endpoints or the MSG91 widget settings changes).
+
+Flow:
+1. `POST /admin/auth/login` (mobile + PIN). Wrong PIN: nothing is started. Correct PIN: a challenge (`provider: "widget"`) is created and the response carries
+   `challenge_id` and `provider`. No OTP exists on the server and no SMS is sent by it.
+2. The page calls `POST /admin/auth/otp-request` with the challenge id. The server answers with the identifier (`91` + the ACCOUNT's own mobile, derived
+   from the challenge, never from the browser) and the PUBLIC widget config. The first call is the send; later calls are resends. The 30 s cooldown,
+   3-resend cap and SMS budget are enforced here.
+3. The page loads `https://verify.msg91.com/otp-provider.js` (`exposeMethods: true`) and calls `window.sendOtp(identifier, ok, fail)` /
+   `window.retryOtp(null, ok, fail)` / `window.verifyOtp(code, ok, fail)`.
+4. On a correct code the widget returns an access token. The page posts `{challenge_id, access_token}` to `POST /admin/auth/verify-otp`. A wrong code is
+   reported to `POST /admin/auth/otp-failed`, which can only spend attempts (5 locks the challenge).
+5. The server calls `POST https://control.msg91.com/api/v5/widget/verifyAccessToken` with `{authkey, access-token}` and requires, in this order: the challenge is a pending,
+   unexpired widget challenge of an active account; an attempt is reserved atomically (cap 5); MSG91 confirms the token (HTTP 200 with `type:"error"`, `code 201`,
+   non-JSON, anything unclear = refused); the verified number equals this account's number exactly; the token is not older than the challenge nor expired;
+   the token has never been accepted before (`admin_widget_tokens`, sha256, unique index plus an explicit check); the challenge is consumed atomically.
+   Only then `_issue_session` creates the session and cookie. A browser-side "verified" flag, a typed code or a token for another number never works.
+6. MSG91 unreachable, or a confirmed token that does not say which number it was for: HTTP 503 with a reference id, NO attempt is used, NO session.
+
+Configuration (Railway variable NAMES; set per environment, values stay in Railway):
+- `MSG91_WIDGET_ID` (the OFFROOTP widget id), `MSG91_WIDGET_TOKEN_AUTH` (the widget's PUBLIC tokenAuth, which is sent to the browser by design)
+- `MSG91_AUTH_KEY` (server key, already present; used ONLY for verifyAccessToken, never sent to a browser, never logged). If MSG91 IP security is on for this key,
+  Railway's outbound IP must be allowed or verification answers "auth" (logged as a clear 503).
+Any of the three missing: login answers 503 with a reference; there is NO fallback code.
+
+Staging and Production:
+- Staging test mode (fixed code 1234) is unchanged: only for allow-listed numbers on the verified Staging service, `provider: "local"`, no widget involved.
+- Production can never use it (all five identity checks still fail closed) and `REAL_PROVIDER` is a code constant, not configuration. To test the real widget on
+  Staging use an admin that is NOT in `ADMIN_OTP_TEST_MOBILES`.
+
+Known limits (honest list):
+- The browser talks to MSG91 directly, so the server cannot count wrong codes itself. The 5-attempt cap is enforced for honest clients (the page reports each failure);
+  a hostile client's real brake is MSG91's own attempt limit on the widget. Check that limit in the MSG91 dashboard.
+- `verifyAccessToken`'s reply format is not documented in the material available. `services/msg91_widget.parse_verified_identifier` looks in the reply, then in the token's
+  claims, and refuses to sign in if neither names the number. The first Staging run logs the reply SHAPE (key names and types only) to settle this.
+- The login page's CSP (only that page) allows `*.msg91.com` and common captcha hosts. Confirm in the browser console on Staging.
+- OTP length/expiry are widget settings. The page has four boxes; if the widget issues 6 digits, set the widget to 4 or the page needs six boxes.
