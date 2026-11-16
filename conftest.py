@@ -27,6 +27,15 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _explicit_test_environment(monkeypatch):
+    """Tests run as an explicitly identified non-production environment (unknown environments now fail closed). Tests of the
+    environment guard itself override or remove this."""
+    monkeypatch.setenv("WA_CAMPAIGN_ENVIRONMENT", "staging")
+    for n in ("RAILWAY_ENVIRONMENT_NAME", "RAILWAY_ENVIRONMENT", "APP_ENV", "ENVIRONMENT", "ENV"):
+        monkeypatch.delenv(n, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _clean_db():
     """Every test starts from an empty database."""
     db = sys.modules["database"].db

@@ -161,6 +161,38 @@ def send_whatsapp_template(phone_number, template_name, language_code="en", comp
         return {"ok": False, "error": str(e)}
 
 
+def send_whatsapp_template_checked(phone_number, template_name, language_code, components=None) -> dict:
+    """Template send with the Phase 1 outcome classification (sent / rejected_retryable / rejected_permanent / uncertain).
+    Returns {"ok", "outcome", "message_id"?, "error_code"?}; error TEXT is never returned or logged. A timeout or a 5xx is
+    'uncertain' (the message may have been delivered) - callers must NEVER auto-resend it. Additive: the original
+    send_whatsapp_template() above is unchanged. Used by the campaign TEST send (Phase 2D)."""
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        logger.error("[WA] WhatsApp env vars not configured - template NOT sent.")
+        return {"ok": False, "outcome": "rejected_permanent", "error_code": None}
+    phone = str(phone_number).replace("+", "").replace(" ", "").replace("-", "")
+    template_payload = {"name": template_name, "language": {"code": language_code}}
+    if components:
+        template_payload["components"] = components
+    payload = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": phone, "type": "template",
+               "template": template_payload}
+    try:
+        resp = requests.post(_messages_url(), headers=_headers(), json=payload, timeout=10)
+    except Exception as e:
+        logger.error("[WA] Template send to %s outcome uncertain (%s)", mask_phone(phone), exc_summary(e))
+        return {"ok": False, "outcome": "uncertain", "error_code": None}
+    try:
+        data = resp.json()
+    except Exception:
+        data = None
+    outcome, code = classify_send_response(resp.status_code, data)
+    if outcome == "sent":
+        mid = data["messages"][0].get("id", "")
+        logger.info("[WA] Template %s sent to %s - id=%s", template_name, mask_phone(phone), mid)
+        return {"ok": True, "outcome": "sent", "message_id": mid}
+    logger.error("[WA] Template send to %s %s - http=%s code=%s", mask_phone(phone), outcome, resp.status_code, code)
+    return {"ok": False, "outcome": outcome, "error_code": code}
+
+
 def notify_merchant_store_approved(merchant_phone, store_name):
     msg = ("✅ *OffrO Update*\n\nYour store *" + store_name + "* has been approved and is now live on the OffrO app!\n\n"
            "Customers can now discover your store and avail your offers.\n\n"

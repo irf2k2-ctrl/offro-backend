@@ -52,11 +52,7 @@ def get_current_admin(request: Request):
         if du.get("status") in ("disabled", "suspended"):
             raise HTTPException(403, "Account is " + str(du.get("status", "disabled")))
         return du
-    # Fallback: legacy admin (username+password login)
-    a = db.admins.find_one({"token": token})
-    if not a:
-        raise HTTPException(403, "Invalid session")
-    return a
+    raise HTTPException(403, "Invalid session")        # legacy admins.token sessions were retired (Patch B)
 
 
 # ── DB helpers ─────────────────────────────────────────────────────────────────

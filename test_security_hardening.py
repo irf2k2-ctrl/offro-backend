@@ -63,15 +63,32 @@ def test_security_headers_on_json_and_csp_only_on_html():
 
 # ── Secure cookie ──
 def _login(c, extra=None):
-    db.admins.insert_one({"username": "u", "password": "p"})
-    return c.post("/admin/login", json={"username": "u", "password": "p"}, headers=extra or {})
+    """Complete the real admin sign-in (PIN, then the server-checked SMS code; the SMS transport is mocked) so a session cookie is set."""
+    import sys
+    from routers import dashboard_auth as DA
+    from services import admin_login_otp as OTP
+    sdb = sys.modules["database"].db            # the shared fake database the auth router uses (this file's own `db` only patches server/admin)
+    sent = []
+    original = OTP._send_sms
+    OTP._send_sms = lambda mobile, otp, tpl: (sent.append(otp), {"ok": True})[1]
+    try:
+        for coll in ("admin_login_challenges", "admin_auth_throttle"):
+            sdb[coll].delete_many({})
+        sdb.dashboard_users.delete_many({"mobile": "9000000999"})
+        sdb.dashboard_users.insert_one({"mobile": "9000000999", "full_name": "U", "pin": DA.hash_pin("1234"), "status": "active"})
+        h = extra or {}
+        lr = c.post("/admin/auth/login", json={"mobile": "9000000999", "pin": "1234"}, headers=h)
+        assert lr.status_code == 200, lr.text
+        return c.post("/admin/auth/verify-otp", json={"challenge_id": lr.json()["challenge_id"], "otp": sent[-1]}, headers=h)
+    finally:
+        OTP._send_sms = original
+        sdb.dashboard_users.delete_many({"mobile": "9000000999"})
 
 
 def test_cookie_secure_only_over_https():
     r = _login(client(), {"x-forwarded-proto": "https"})
     ck = r.headers["set-cookie"]
     assert "admin_token=" in ck and "Secure" in ck and "HttpOnly" in ck
-    db.admins.delete_many({})
     r = _login(client())
     assert "Secure" not in r.headers["set-cookie"]               # local http dev keeps working
 
@@ -81,7 +98,9 @@ def test_download_requires_admin_session():
     c = client()
     assert c.get("/download/admin_dashboard").status_code == 401
     assert c.get("/download/admin_dashboard", cookies={"admin_token": "bogus"}).status_code == 401
-    db.admins.insert_one({"token": "good-token"})
+    db.dashboard_users.insert_one({"token": "good-token", "status": "active", "mobile": "9000000001"})
+    db.admins.insert_one({"token": "legacy-token"})
+    assert c.get("/download/admin_dashboard", cookies={"admin_token": "legacy-token"}).status_code == 401       # legacy sessions retired
     r = c.get("/download/admin_dashboard", cookies={"admin_token": "good-token"})
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
 

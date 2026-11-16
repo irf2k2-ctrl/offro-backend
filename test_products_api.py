@@ -25,7 +25,9 @@ def _api_fixtures():
     """Merchant account, admin session and an active store (rebuilt for every test)."""
     global SID
     fake.accounts.insert_one({"token": "mt", "merchant_id": MID, "name": "Mer", "phone": "999", "roles": ["merchant"]})
-    fake.admins.insert_one({"token": "at"})
+    role = fake.dashboard_roles.find_one({"role_name": "Super Admin"}) or {"_id": fake.dashboard_roles.insert_one({"role_name": "Super Admin", "permissions": {}}).inserted_id}
+    fake.dashboard_users.delete_many({"token": "at"})
+    fake.dashboard_users.insert_one({"token": "at", "status": "active", "full_name": "Test Admin", "mobile": "9000000001", "role_id": role["_id"]})   # OTP-created session shape
     SID = str(fake.stores.insert_one({"store_name": "S", "city": "Pune", "status": "active", "merchant_id": MID}).inserted_id)
     yield
 

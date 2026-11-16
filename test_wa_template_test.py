@@ -35,7 +35,7 @@ def _env(monkeypatch):
     monkeypatch.setattr(W, "db", db)
     for col in ("whatsapp_template_tests", "dashboard_users", "admins"):
         db[col].delete_many({})
-    db.admins.insert_one({"token": "tok"})
+    db.dashboard_users.insert_one({"token": "tok", "status": "active", "full_name": "Test Admin", "mobile": "9000000001"})
     calls["get"].clear(); calls["post"].clear()
     monkeypatch.setenv("WHATSAPP_TEMPLATE_TEST_ENABLED", "1")
     monkeypatch.setattr(wa, "WHATSAPP_ACCESS_TOKEN", SECRET)
