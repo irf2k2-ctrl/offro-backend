@@ -557,16 +557,18 @@ def test_the_client_ip_comes_from_the_trusted_right_most_forwarded_entry():
 
 # ── page and static contract ───────────────────────────────────────────────────────────────────────
 
-def test_the_public_login_page_has_no_msg91_widget_credentials_or_client_otp_logic():
+def test_the_public_login_page_has_no_server_secrets_hardcoded_ids_or_client_verified_flags():
     page = open(os.path.join(ROOT, "templates", "admin_login.html"), encoding="utf-8").read()
     r = client().get("/admin")
     assert r.status_code == 200
     for html in (page, r.text):
         low = html.lower()
-        for bad in ("tokenauth", "widgetid", "widget_id", "control.msg91.com", "msg91_token", "msg91_widget", "sendotpmobile", "verifyotp'", "retryotp",
-                    "msg91_verified", "trust_device", "trustdevice"):
+        # The widget is configured from the server's PUBLIC settings at run time: nothing is hard-coded in the page, no server key is
+        # referenced, and no browser-side "verified" flag exists.
+        for bad in ("authkey", "auth_key", "msg91_auth", "36656f6a786e313430373338", "msg91_verified", "verified: true", "verified:true",
+                    "trust_device", "trustdevice", "control.msg91.com"):
             assert bad not in low, bad
-        assert "/admin/auth/verify-otp" in html and "challenge_id" in html
+        assert "/admin/auth/verify-otp" in html and "challenge_id" in html and "access_token" in html
 
 
 def test_the_page_never_stores_the_challenge_or_otp_in_browser_storage():

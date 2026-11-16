@@ -170,9 +170,13 @@ body {
 </div>
 
 <script>
-// Sign-in is verified entirely by the server: PIN -> server sends a 4-digit SMS code -> the server checks the code and only then
-// creates the session. This page holds no SMS-provider settings and never decides whether a code is correct.
+// Sign-in is verified by the server: PIN -> (server creates a challenge) -> the MSG91 OTP widget sends and checks the SMS code in this
+// page -> the page hands the resulting MSG91 access token to the server -> the server asks MSG91 whether that token is genuine AND belongs
+// to this account's mobile number, and only then creates the session. This page never decides anything: a "verified" result in the browser
+// is ignored. The only widget settings here are the PUBLIC ones the server returns (widget id + public token); no server key is ever sent.
 let _challengeId = "";          // opaque, single-use token from the server; kept in memory only
+let _provider = "";             // "widget" (MSG91 widget) or "local" (Staging fixed-code test accounts)
+let _widgetReady = null;        // promise: the MSG91 SDK is loaded and its methods are exposed
 let _resendCountdown = 0;
 let _resendInterval = null;
 
@@ -183,6 +187,64 @@ async function readJson(res) {
 function transientFailure(res) { return !res || res.status >= 500; }     // network error or a server/gateway error: worth a retry
 function showRetry(id, on) { let b = document.getElementById(id); if (b) b.style.display = on ? "inline-block" : "none"; }
 function retryLogin() { showRetry("retryBtn", false); login(); }
+function loadWidget(cfg) {
+    if (_widgetReady) return _widgetReady;
+    _widgetReady = new Promise((resolve, reject) => {
+        window.__otpConfiguration = {
+            widgetId: cfg.widget_id, tokenAuth: cfg.token_auth, exposeMethods: true,
+            success: () => {}, failure: () => {}        // each call below has its own callbacks
+        };
+        const sc = document.createElement("script");
+        sc.src = "https://verify.msg91.com/otp-provider.js";
+        sc.onload = () => {
+            try { window.initSendOTP(window.__otpConfiguration); } catch (e) { reject(e); return; }
+            let tries = 0;
+            const wait = setInterval(() => {
+                if (typeof window.sendOtp === "function" && typeof window.verifyOtp === "function" && typeof window.retryOtp === "function") { clearInterval(wait); resolve(); }
+                else if (++tries > 50) { clearInterval(wait); reject(new Error("widget methods unavailable")); }
+            }, 100);
+        };
+        sc.onerror = () => reject(new Error("widget script failed"));
+        document.head.appendChild(sc);
+    }).catch(e => { _widgetReady = null; throw e; });
+    return _widgetReady;
+}
+
+// Ask the server for permission + the identifier for THIS challenge, then ask the widget to send (first time) or resend the SMS code.
+async function widgetSend() {
+    let res = null;
+    try {
+        res = await fetch("/admin/auth/otp-request", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ challenge_id: _challengeId }), credentials: "include"
+        });
+    } catch (err) { return { ok: false, message: "Could not reach the server. Please check your connection and try again.", retry: true, status: 0 }; }
+    let data = await readJson(res);
+    if (!res.ok || !data || !data.identifier || !data.widget) {
+        return { ok: false, message: friendly(res, data, "We could not send the verification code. Please try again."), status: res.status, retry: transientFailure(res) };
+    }
+    try { await loadWidget(data.widget); }
+    catch (e) { return { ok: false, message: "The verification service could not be loaded. Please check your connection and try again.", retry: true, status: 0 }; }
+    return await new Promise(resolve => {
+        const done = (ok) => resolve(ok ? { ok: true, wait: data.resend_available_in || 30 } :
+            { ok: false, message: "We could not send the verification code. Please try again in a moment.", retry: true, status: 0 });
+        try {
+            if (data.first) window.sendOtp(data.identifier, () => done(true), () => done(false));
+            else window.retryOtp(null, () => done(true), () => done(false));       // null = the widget's default channel (SMS)
+        } catch (e) { done(false); }
+    });
+}
+
+// The MSG91 widget returns the signed access token in the success data. Read it without assuming one exact field.
+function pickAccessToken(d) {
+    if (typeof d === "string") return d;
+    if (d && typeof d === "object") {
+        for (const k of ["message", "access-token", "accessToken", "access_token", "token", "jwt"]) { if (typeof d[k] === "string" && d[k].length > 20) return d[k]; }
+        if (d.data) return pickAccessToken(d.data);
+    }
+    return "";
+}
+
 function friendly(res, data, fallback) {
     if (data && typeof data.detail === "string") return data.detail;
     if (res && res.status >= 500) return "The service is temporarily unavailable (HTTP " + res.status + "). Please try again.";
@@ -244,10 +306,21 @@ async function login() {
         return;
     }
     _challengeId = data.challenge_id;
+    _provider = data.provider === "widget" ? "widget" : "local";
     document.getElementById("otpMobileDisplay").innerText = data.mobile_masked || "your registered mobile number";
     showOtpScreen();
     startResendCountdown(data.resend_available_in || 30);
     btn.disabled = false; btn.innerHTML = idle;
+    if (_provider === "widget") {                                      // PIN was correct: only now is the SMS requested
+        let omsg = document.getElementById("otpMsg");
+        omsg.style.color = "#3E5F55"; omsg.innerText = "Sending code...";
+        let r = await widgetSend();
+        if (r.ok) { omsg.innerText = "Code sent"; setTimeout(() => { if (omsg.innerText === "Code sent") omsg.innerText = ""; }, 3000); }
+        else {
+            omsg.style.color = "#c0392b"; omsg.innerText = r.message;
+            document.getElementById("resendBtn").disabled = false;     // the 30 s cooldown on the server still applies to the next permit
+        }
+    }
 }
 
 // ═══ Step 2: OTP Verification ═══
@@ -261,7 +334,7 @@ function showOtpScreen() {
 }
 
 function backToLogin() {
-    _challengeId = "";
+    _challengeId = ""; _provider = "";
     showRetry("retryBtn", false); showRetry("retryVerifyBtn", false);
     document.getElementById("otpCard").style.display = "none";
     document.getElementById("loginCard").style.display = "block";
@@ -329,12 +402,39 @@ async function verifyOtp() {
     msgEl.innerText = "";
     showRetry("retryVerifyBtn", false);
 
+    let payload = { challenge_id: _challengeId, otp: otp };
+    if (_provider === "widget") {
+        // The widget checks the typed code with MSG91 and gives back an access token. Only that token is sent on; the server verifies it.
+        const w = await new Promise(resolve => {
+            try {
+                window.verifyOtp(otp, (d) => resolve({ ok: true, token: pickAccessToken(d) }), () => resolve({ ok: false }));
+            } catch (e) { resolve({ ok: false, broken: true }); }
+        });
+        if (!w.ok || !w.token) {
+            btn.disabled = false; btn.innerHTML = idle;
+            msgEl.style.color = "#c0392b";
+            if (w.broken || (w.ok && !w.token)) { msgEl.innerText = "The verification service is not ready. Please try again."; showRetry("retryVerifyBtn", true); return; }
+            let left = null;
+            try {                                                      // advisory: counts this wrong code against the 5-attempt cap
+                let rr = await fetch("/admin/auth/otp-failed", { method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ challenge_id: _challengeId }), credentials: "include" });
+                if (rr.status === 401) { msgEl.innerText = "This sign-in has expired or is locked. Please sign in again."; setTimeout(backToLogin, 1500); return; }
+                let dd = await readJson(rr); if (dd && typeof dd.remaining === "number") left = dd.remaining;
+            } catch (e) { /* the code was still wrong */ }
+            msgEl.innerText = "That code is incorrect or has expired." + (left !== null ? " Attempts left: " + left + "." : "");
+            document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
+            let f0 = document.querySelector(".otp-box[data-index='0']"); if (f0) f0.focus();
+            return;
+        }
+        payload = { challenge_id: _challengeId, access_token: w.token };
+    }
+
     let res = null;
     try {
         res = await fetch("/admin/auth/verify-otp", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ challenge_id: _challengeId, otp: otp }),
+            body: JSON.stringify(payload),
             credentials: "include"
         });
     } catch (err) {
@@ -366,6 +466,21 @@ async function resendOtp() {
     let btn   = document.getElementById("resendBtn");
     if (!_challengeId) { backToLogin(); return; }
     btn.disabled = true;
+
+    if (_provider === "widget") {
+        let r = await widgetSend();
+        if (!r.ok) {
+            msgEl.innerText = r.message; msgEl.style.color = "#c0392b";
+            if (r.status === 429) startResendCountdown(30); else if (r.status === 401) setTimeout(backToLogin, 1500); else btn.disabled = false;
+            return;
+        }
+        document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
+        let f1 = document.querySelector(".otp-box[data-index='0']"); if (f1) f1.focus();
+        msgEl.innerText = "A new code has been sent"; msgEl.style.color = "#3E5F55";
+        setTimeout(() => { msgEl.innerText = ""; }, 3000);
+        startResendCountdown(r.wait || 30);
+        return;
+    }
 
     let res = null;
     try {
