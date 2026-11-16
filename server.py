@@ -585,7 +585,12 @@ def _ensure_indexes():
 # Admin pages
 @app.get("/admin", response_class=HTMLResponse)
 def serve_admin_login(request: Request):
-    return templates.TemplateResponse("admin_login.html", {"request": request})
+    resp = templates.TemplateResponse("admin_login.html", {"request": request})
+    # Only this page may load the MSG91 OTP widget (it needs a few extra hosts). The middleware leaves a CSP that is already present alone.
+    from services.security import CSP as _BASE_CSP
+    from services.msg91_widget import login_page_csp
+    resp.headers["Content-Security-Policy"] = login_page_csp(_BASE_CSP)
+    return resp
 
 
 @app.get("/admin/dashboard", response_class=HTMLResponse)

@@ -42,3 +42,11 @@ def _clean_db():
     for name in db.list_collection_names():
         db.drop_collection(name)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _legacy_sms_engine_for_existing_tests(monkeypatch):
+    """Real admin sign-ins use the MSG91 widget in the app. The long-standing challenge-engine tests exercise the shared machinery through the
+    old server-sent engine, so they select it here; the widget tests (test_security_admin_otp_widget.py) select the widget explicitly."""
+    from services import admin_login_otp as _otp
+    monkeypatch.setattr(_otp, "REAL_PROVIDER", "sms")
