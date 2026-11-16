@@ -162,6 +162,7 @@ function _secUrl(u) {
   return ok ? escHtml(u) : '';
 }
 </script>
+<link rel="stylesheet" href="/static/css/wa_campaigns.css?v=2g1">
 </head>
 <body>
 
@@ -203,6 +204,7 @@ function _secUrl(u) {
   <div class="sep"></div>
   <a href="#" onclick="showSection('social',this)"><i class="fab fa-whatsapp fa-fw"></i> Social Media</a>
   <a href="#" onclick="showSection('wa_chat',this)"><i class="fab fa-whatsapp fa-fw" style="color:#25D366"></i> Live Chat</a>
+  <a href="#" onclick="showSection('wa_campaigns',this)"><i class="fas fa-bullhorn fa-fw" style="color:#25D366"></i> WhatsApp Campaigns</a>
   <a href="#" onclick="showSection('about',this)"><i class="fas fa-info-circle fa-fw"></i> About Us</a>
   <div class="sep"></div>
 
@@ -2412,6 +2414,7 @@ const RBAC_SECTION_MAP = {
   "Policies":          ["policies"],
   "Social Media":      ["social"],
   "Live Chat":         ["wa_chat"],
+  "WhatsApp Campaigns":["wa_campaigns"],
   "Default Images":    ["default_images"],
   "User Management":   ["rbac_users","rbac_roles","rbac_logs"],
   "__super_admin_only": ["about","overview"]
@@ -2644,6 +2647,7 @@ function showSection(name, el){
   if(name==="promo_sliders") { loadSliders(); }
   if(name==="notifications") loadNotifications();
   if(name==="wa_chat") loadWaChats();
+  if(name==="wa_campaigns" && window.WaCampaigns) WaCampaigns.open();
   if(name==="popup_campaigns") loadPopupCampaigns();
   if(name==="rbac_users") rbacLoadUsers();
   if(name==="rbac_roles") rbacLoadRoles();
@@ -8660,6 +8664,8 @@ function gcOnStoreChange() {
 <!-- ═══════════════════════════════════════════════════════════
      WhatsApp Live Chat Section
 ═════════════════════════════════════════════════════════════ -->
+{% include "partials/wa_campaigns.html" %}
+
 <div id="section-wa_chat" class="section">
   <div class="section-header" style="margin-bottom:8px;flex-shrink:0;">
     <h5 style="color:var(--primary);font-weight:700;margin:0;">
@@ -9502,7 +9508,8 @@ const RBAC_MODULES = [
   "Accounts","Stores","Products","Banners","Admin Banners","Popup Campaigns",
   "Payments","Gift Vouchers","Notifications","Categories","Pricing & GST",
   "Reviews","Discounts","Terms & Conditions","Policies",
-  "Social Media","Live Chat","Default Images","User Management","Influencers"
+  "Social Media","Live Chat","Default Images","User Management","Influencers",
+  "WhatsApp Campaigns"
 ];
 const RBAC_ACTIONS = ["view","add","edit","delete","approve","export"];
 const RBAC_CITIES = ["Ballari","Bengaluru","Hyderabad","Hubli","Dharwad","Mysuru"];
@@ -9772,6 +9779,7 @@ function rbacLogsNext() { rbacLogSkip += rbacLogLimit; rbacLoadLogs(); }
 
 
 </script>
+<script src="/static/js/wa_campaigns.js?v=2g1"></script>
 
 </body>
 </html>

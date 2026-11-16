@@ -4,7 +4,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse, Response
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, wa_campaigns, dashboard_auth, maps, smart_link
 from routers import merchant_products, admin_products, public_products, collaborations
 from database import db
@@ -102,12 +102,14 @@ def download_admin_dashboard(request: Request):
             return JSONResponse(status_code=403, content={"detail": "Account is " + du.get("status", "disabled")})
     elif not db.admins.find_one({"token": token}):
         return JSONResponse(status_code=401, content={"detail": "Admin login required"})
-    return FileResponse(
-        path="templates/admin_dashboard.html",
-        media_type="text/html",
-        filename="admin_dashboard.html",
-        headers={"Content-Disposition": "attachment; filename=admin_dashboard.html"}
-    )
+    # The dashboard is a Jinja template that includes partials, so serve the RENDERED page; the raw file would contain unresolved
+    # {% include %} tags. Same attachment behaviour and filename as before.
+    try:
+        body = templates.env.get_template("admin_dashboard.html").render({"request": request})
+    except Exception:
+        return JSONResponse(status_code=500, content={"detail": "Could not render the dashboard"})
+    return Response(content=body, media_type="text/html",
+                    headers={"Content-Disposition": "attachment; filename=admin_dashboard.html"})
 
 # ── Public gift-voucher endpoint ──
 @app.get("/gift-vouchers")
