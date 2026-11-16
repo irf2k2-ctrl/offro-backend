@@ -604,6 +604,9 @@ def send_test_message(campaign, phone, admin, confirm, dry_run=False, sample=Non
     allowed, why = ST.sending_allowed()                                        # Phase 2A kill switch (never bypassed)
     if not allowed:
         raise blocked("sending_disabled", 409, "Sending is disabled (%s)." % why, reason=why)
+    env_ok, env_why = ST.environment_gate()                                    # Production / unknown environment: no test send either
+    if not env_ok:
+        raise blocked(env_why, 409, "Test sending is not allowed in this environment (%s)." % env_why, reason=env_why)
     if not ST.is_test_number(canonical):                                      # Phase 2A allow-list; empty = nobody
         raise blocked("not_a_test_number", 403, "This number is not on the test-number allow-list.")
     el = E.check(canonical)                                                    # Phase 2A eligibility: consent / STOP, fail closed

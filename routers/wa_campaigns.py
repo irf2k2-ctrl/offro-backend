@@ -18,7 +18,8 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 
-from routers import wa_campaign_audience, wa_campaign_lifecycle, wa_campaign_run, wa_campaign_templates
+from routers import (wa_campaign_audience, wa_campaign_lifecycle, wa_campaign_media, wa_campaign_recipient_details, wa_campaign_run,
+                     wa_campaign_templates, wa_consent_admin)
 from routers.dashboard_auth import require_permission
 from services import wa_campaign_audit as audit
 from services import wa_campaign_settings as settings
@@ -37,6 +38,9 @@ router.include_router(wa_campaign_templates.router)         # Phase 2C template 
 router.include_router(wa_campaign_lifecycle.router)         # Phase 2D campaign lifecycle + gated test send (no worker)
 router.include_router(wa_campaign_run.router)               # Phase 2E/2F run controls + reporting (sends nothing itself)
 router.include_router(wa_campaign_run.worker_router)
+router.include_router(wa_campaign_recipient_details.router)  # Phase 2G read-only recipient delivery details (masked)
+router.include_router(wa_consent_admin.router)               # Phase 2G read-only consent listing + STOP/START ledger (masked)
+router.include_router(wa_campaign_media.router)              # Phase 2G dedicated permission-gated header-media upload
 
 
 async def _json_object(request: Request) -> dict:

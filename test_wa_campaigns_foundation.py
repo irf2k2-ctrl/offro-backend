@@ -714,7 +714,9 @@ def test_server_registers_the_router_and_startup_index_creation():
     # Phase 2B adds audience management only (see test_wa_campaign_audience.py for the exact route set)
     # Phase 2C adds template management; the exact route sets are asserted in test_wa_campaign_audience.py / _templates.py
     assert all(p.startswith(("/admin/whatsapp-campaigns/audience/", "/admin/whatsapp-campaigns/templates",
-                             "/admin/whatsapp-campaigns/campaigns", "/admin/whatsapp-campaigns/worker"))     # 2E: worker status (read-only)
+                             "/admin/whatsapp-campaigns/campaigns", "/admin/whatsapp-campaigns/worker",
+                                 "/admin/whatsapp-campaigns/consents", "/admin/whatsapp-campaigns/consent-events",
+                                 "/admin/whatsapp-campaigns/media/"))     # 2E: worker status; 2G: consent listing + header media upload
                for p in mine - foundation)
     src = open("server.py", encoding="utf-8").read()
     assert "_wa_camp_audit.ensure_indexes_safe()" in src and "WhatsApp campaign audit indexes skipped ({type(e).__name__})" in src

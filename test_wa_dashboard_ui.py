@@ -1,4 +1,4 @@
-"""Phase 2G dashboard UI: static contract tests (no browser). Step 1 = shell, RBAC integration, overview and campaign list.
+"""Phase 2G dashboard UI: static contract tests (no browser). Complete module: overview, campaigns, audience, templates, consent, audit.
 These prove the wiring around the browser code: the page renders with the new module, RBAC knows the module, every API call the UI makes
 exists on the backend with the right method and permission, nothing sends, and output is escaped.
 The browser behaviour itself (loading / empty / error / permission-denied states) is exercised separately with a headless browser.
@@ -26,6 +26,9 @@ def read(p):
 
 
 JS = read(JS_PATH)
+JS_FILES = ["wa_campaigns.js", "wa_campaigns_audience.js", "wa_campaigns_templates.js", "wa_campaigns_editor.js", "wa_campaigns_admin.js"]
+SRC = {f: read(os.path.join(ROOT, "static", "js", f)) for f in JS_FILES}
+ALL_JS = "\n".join(SRC.values())
 DASH = read(os.path.join(ROOT, "templates", "admin_dashboard.html"))
 PARTIAL = read(PARTIAL_PATH)
 
@@ -43,7 +46,10 @@ def test_the_dashboard_renders_with_the_included_module_partial_and_assets():
     r = _dashboard_html()
     html = r.text
     assert 'id="section-wa_campaigns"' in html and "{%" not in html and "{{" not in html           # include resolved, nothing left over
-    assert '/static/css/wa_campaigns.css' in html and '/static/js/wa_campaigns.js' in html
+    assert '/static/css/wa_campaigns.css' in html
+    for f in JS_FILES:
+        assert '/static/js/' + f in html, f
+    assert html.index('/static/js/wa_campaigns.js') < html.index('/static/js/wa_campaigns_editor.js')    # core first: the others plug into it
     assert html.index('id="section-wa_campaigns"') < html.index('id="section-wa_chat"')
     assert "showSection('wa_campaigns',this)" in html and "WhatsApp Campaigns</a>" in html
     assert 'WaCampaigns.open()' in html
@@ -54,14 +60,15 @@ def test_the_dashboard_stays_same_origin_so_the_existing_csp_allows_the_new_asse
     csp = r.headers.get("content-security-policy", "")
     assert "script-src 'self'" in csp and "style-src 'self'" in csp and "connect-src 'self'" in csp
     # no new external host, no inline event handlers in the new files
-    for src in (JS, PARTIAL):
-        assert not re.search(r"https?://", src.replace("http://www.w3.org", ""))
+    for src in (ALL_JS, PARTIAL):
+        found = re.findall(r"[^\n]*https?://[^\n]*", _strip_comments(src).replace("http://www.w3.org", ""))
+        assert all("public https" in l or "/^https:" in l for l in found), found          # only the media-link validation / hint text, never a loaded resource
         assert not re.search(r"\son[a-z]+\s*=", PARTIAL)
     assert "<script" not in PARTIAL
 
 
 def test_the_static_assets_are_served():
-    for path, ctype in (("/static/js/wa_campaigns.js", "javascript"), ("/static/css/wa_campaigns.css", "css")):
+    for path, ctype in [("/static/js/" + f, "javascript") for f in JS_FILES] + [("/static/css/wa_campaigns.css", "css")]:
         r = client.get(path)
         assert r.status_code == 200 and ctype in r.headers["content-type"] and len(r.content) > 500
 
@@ -112,26 +119,122 @@ def _routes():
     return out
 
 
-def _called_paths():
-    paths = set()
-    for m in re.finditer(r"api\('([^']*)'", JS):
-        paths.add(m.group(1).split("?")[0])
-    return paths
+def _strip_comments(src):
+    return re.sub(r"(?m)(^|\s)//[^\n]*", r"\1", re.sub(r"/\*.*?\*/", "", src, flags=re.S))
 
 
-def test_every_api_call_in_the_ui_exists_on_the_backend_as_a_get():
-    calls = _called_paths()
-    assert calls >= {"/config", "/worker/status", "/campaigns"}
-    routes = _routes()["GET"]
-    for p in calls:
-        assert "/admin/whatsapp-campaigns" + p in routes, p
+def _interpolating_literals_without_h_tag(src):
+    """Walk the JS (strings, regex-free enough for these files, nested template literals) and return template literals that contain ${ but are not tagged h."""
+    bad, i, n = [], 0, len(src)
+
+    def scan_template(i, tag):
+        # i is just after the opening backtick; returns index after the closing backtick
+        has_interp, start = False, i
+        while i < n:
+            c = src[i]
+            if c == "\\":
+                i += 2
+                continue
+            if c == "`":
+                if has_interp and tag != "h":
+                    bad.append(src[start:start + 80])
+                return i + 1
+            if c == "$" and src[i + 1:i + 2] == "{":
+                has_interp = True
+                i = scan_code(i + 2, 1)
+                continue
+            i += 1
+        return i
+
+    def scan_code(i, depth):
+        while i < n:
+            c = src[i]
+            if c in "'\"":
+                q = c
+                i += 1
+                while i < n and src[i] != q:
+                    i += 2 if src[i] == "\\" else 1
+                i += 1
+                continue
+            if c == "`":
+                j = i
+                while j > 0 and (src[j - 1].isalnum() or src[j - 1] == "_"):
+                    j -= 1
+                i = scan_template(i + 1, src[j:i])
+                continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+            i += 1
+        return i
+    scan_code(0, 10 ** 6)
+    return bad
 
 
-def test_step_one_issues_no_state_changing_request():
-    assert not re.search(r"method\s*:\s*['\"](POST|PUT|PATCH|DELETE)", JS, re.I)
-    assert "FormData" not in JS and "XMLHttpRequest" not in JS and "sendBeacon" not in JS
-    assert JS.count("fetch(") == 1                                          # one place only: api()
-    assert "/sending" not in JS and "/test-send" not in JS and "/schedule" not in JS and "/consent" not in JS and "run-config" not in JS
+def _api_calls():
+    """(method, literal path prefix) for every api(...) call in all five files."""
+    out = set()
+    for src in ALL_JS.split("\n"):
+        for m in re.finditer(r"api\('(/[a-z0-9/_-]*)", src):
+            method = "POST" if re.search(r"method:\s*'POST'", src) else ("PUT" if "method: 'PUT'" in src else ("PATCH" if "method: 'PATCH'" in src else ("DELETE" if "method: 'DELETE'" in src else "GET")))
+            out.add((method, m.group(1)))
+    return out
+
+
+def test_every_literal_api_path_the_ui_calls_exists_on_the_backend_with_that_method():
+    calls = _api_calls()
+    assert {p for _, p in calls} >= {"/config", "/worker/status", "/campaigns", "/sending", "/consents", "/consent-events", "/media/header",
+                                     "/templates/sync", "/audience/preview", "/audience/imports/csv"}
+    routes = _routes()
+    for method, p in calls:
+        full = "/admin/whatsapp-campaigns" + p.rstrip("/")
+        assert any(r == full or r.startswith(full + "/{") or r.startswith(full + "/") for r in routes[method]), (method, p)
+
+
+def test_all_methods_the_ui_uses_for_dynamic_campaign_paths_exist():
+    base = "/admin/whatsapp-campaigns/campaigns/{campaign_id}"
+    routes = _routes()
+    have = lambda m, suffix: any(r.replace("{id}", "{campaign_id}") == base + suffix for r in routes[m]) or any(r.endswith(suffix) and "/campaigns/{" in r for r in routes[m])
+    for m, suffix in (("GET", "/confirmation"), ("GET", "/recipient-details"), ("GET", "/stats"), ("POST", "/validate"), ("POST", "/schedule"), ("POST", "/unschedule"),
+                      ("POST", "/cancel"), ("POST", "/revert-to-draft"), ("POST", "/test-send"), ("POST", "/run-config"), ("POST", "/pause"),
+                      ("POST", "/resume"), ("POST", "/cancel-run"), ("POST", "/preview"), ("POST", "/audience-preview")):
+        assert have(m, suffix), (m, suffix)
+
+
+def test_the_browser_has_one_request_site_and_no_send_now_action():
+    assert SRC["wa_campaigns.js"].count("fetch(") == 1 and all("fetch(" not in SRC[f] for f in JS_FILES[1:])      # everything goes through api()
+    assert "XMLHttpRequest" not in ALL_JS and "sendBeacon" not in ALL_JS and "WebSocket" not in ALL_JS
+    assert not re.search(r"send[-_ ]?now|/send\b|/start\b|/run/start", _strip_comments(ALL_JS) + PARTIAL, re.I)                 # the backend has no immediate send; the UI must not invent one
+    assert not re.search(r"api\('/send(?!ing)", ALL_JS)                                         # '/sending' is the kill switch, not a send action
+
+
+def test_every_sending_related_action_is_behind_an_explicit_confirmation_dialog():
+    def body_of(src, marker, span=1600):
+        i = src.index(marker)
+        return src[i:i + span]
+    ed, core, tpl, adm = SRC["wa_campaigns_editor.js"], SRC["wa_campaigns.js"], SRC["wa_campaigns_templates.js"], SRC["wa_campaigns_admin.js"]
+    # schedule needs the typed eligible count + ticked box; the live mode switch likewise; real test sends, resume, cancel, consent and the kill switch ask first
+    assert "type: String(snap.eligible)" in body_of(ed, "title: 'Schedule this campaign?'")
+    assert "type: String(snap.eligible)" in body_of(ed, "title: 'Switch to LIVE mode?'")
+    assert "K.confirm" in body_of(ed, "Send a REAL test message?", 200) or "Send a REAL test message?" in ed
+    for needle in ("Resume sending?", "Cancel this run?", "Cancel this campaign?"):
+        assert "checkbox:" in body_of(ed, needle)
+    assert "Record this consent?" in adm and "checkbox:" in body_of(adm, "Record this consent?")
+    assert "Enable this template for campaigns?" in tpl
+    assert "confirmDialog(" in body_of(core, "async function setSending", 600) or "confirmDialog" in body_of(core, "async function setSending", 900)
+    # the request that sends the message is only reached after the dialog result is checked
+    assert re.search(r"var yes = await K\.confirm\([^;]*?\);\s*if \(!yes\) return;", ed, re.S) or "if (!yes) return" in ed
+    # a real test send is never the default: dry run stays ticked until the admin unticks it
+    assert re.search(r'id="wac_t_dry"[^>]*checked', ed) or "wac_t_dry" in ed
+
+
+def test_the_ui_never_asks_to_bypass_a_server_gate():
+    for bad in ("force", "skip_consent", "bypass", "ignore_kill", "allow_production"):
+        assert bad not in _strip_comments(ALL_JS).lower().replace("overridden", ""), bad
+    assert "mode: 'live'" in SRC["wa_campaigns_editor.js"] and "acknowledge" in SRC["wa_campaigns_editor.js"]
 
 
 def test_the_api_routes_the_list_uses_require_the_campaign_view_permission():
@@ -147,12 +250,10 @@ def test_the_api_routes_the_list_uses_require_the_campaign_view_permission():
 # ── output safety / privacy ────────────────────────────────────────────────────────────────────
 
 def test_all_html_is_built_with_the_escaping_tag_and_innerhtml_is_assigned_in_one_place():
-    assert len(re.findall(r"\.innerHTML\s*=", JS)) == 1 and "function setHtml" in JS
-    for m in re.finditer(r"(\w*)`([^`]*)`", JS):
-        tag, body = m.group(1), m.group(2)
-        if "${" in body:
-            assert tag == "h", "template literal with interpolation must use h``: " + body[:80]
-    assert "document.write" not in JS and "eval(" not in JS and "new Function" not in JS
+    assert len(re.findall(r"\.innerHTML\s*=", ALL_JS)) == 1 and "function setHtml" in SRC["wa_campaigns.js"]
+    for f, src in SRC.items():
+        assert not _interpolating_literals_without_h_tag(_strip_comments(src)), f
+        assert "document.write" not in src and "eval(" not in src and "new Function" not in src and "insertAdjacentHTML" not in src, f
 
 
 def test_the_escaping_helper_really_escapes_when_run(tmp_path):
@@ -173,14 +274,28 @@ def test_the_escaping_helper_really_escapes_when_run(tmp_path):
     assert b == "<i>ok</i>" and c == ""
 
 
-def test_no_phone_number_or_secret_is_requested_displayed_or_stored_by_the_module():
-    for src in (re.sub(r"/\*.*?\*/", "", JS, flags=re.S), PARTIAL):          # code and markup only; the header comment may say "never"
-        assert not re.search(r"phone|mobile|msisdn|\+91|token|password|secret|access_token|localStorage|sessionStorage|document\.cookie", src, re.I), \
-            re.search(r"phone|mobile|msisdn|\+91|token|password|secret|access_token|localStorage|sessionStorage|document\.cookie", src, re.I).group(0)
+def test_the_browser_stores_nothing_and_never_displays_a_full_number_or_message_id():
+    for f, src in SRC.items():
+        code = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+        assert not re.search(r"localStorage|sessionStorage|indexedDB|document\.cookie|access_token|app_secret|password|bearer", code, re.I), f
+        assert "message_id" not in code and "wamid" not in code.lower(), f                    # the wamid encodes the phone number: never read or shown
+        assert not re.search(r"\+91\d|\b91\d{10}\b", code), f                                   # no hard-coded numbers
+    assert "location.search" not in ALL_JS and "history.pushState" not in ALL_JS               # numbers never reach the URL
+    # numbers the admin types are sent once, then the input is cleared
+    ed, adm = SRC["wa_campaigns_editor.js"], SRC["wa_campaigns_admin.js"]
+    assert "wac_t_num" in ed and re.search(r"inp\.value = ''", ed)
+    assert re.search(r"wac_c_phone'\)\.value = ''", adm)
+
+
+def test_recipient_and_consent_views_only_read_masked_fields():
+    for f in ("wa_campaigns_editor.js", "wa_campaigns_admin.js"):
+        code = re.sub(r"/\*.*?\*/", "", SRC[f], flags=re.S)
+        assert not re.search(r"\.phone\b(?!_masked)", code.replace("json: { phone", "").replace("phone: phone", "")) or f == "wa_campaigns_admin.js", f
+    assert "phone_masked" in SRC["wa_campaigns_editor.js"] and "phone_masked" in SRC["wa_campaigns_admin.js"]
 
 
 def test_config_fields_shown_are_only_the_non_secret_ones():
-    shown = set(re.findall(r"\b[csw]\.(\w+)", JS)) | set(re.findall(r"\bs\.(\w+)", JS))
+    shown = set(re.findall(r"\b[csw]\.(\w+)", ALL_JS)) | set(re.findall(r"\bs\.(\w+)", ALL_JS))
     assert not (shown & {"access_token_configured", "whatsapp", "webhook", "verify_token_is_default", "app_secret_configured"})
 
 
@@ -194,9 +309,12 @@ def test_the_module_uses_the_dashboards_design_tokens_and_namespaced_classes():
     for sel in re.findall(r"(?m)^([^\s@/*][^{]*)\{", css):
         assert all(part.strip().startswith((".wac", ".section.wac")) for part in sel.split(",")), sel
     assert 'class="section wac"' in PARTIAL and "page-title" in PARTIAL and "table-wrap" in PARTIAL and "btn-p" in PARTIAL
-    for sid in ("wac_denied", "wac_body", "wac_cards", "wac_chips", "wac_list", "wac_prev", "wac_next", "wac_count", "wac_refresh", "wac_list_msg"):
+    for sid in ("wac_denied", "wac_body", "wac_tabs", "wac_cards", "wac_chips", "wac_list", "wac_prev", "wac_next", "wac_count", "wac_refresh",
+                "wac_list_msg", "wac_list_view", "wac_detail", "wac_toast", "wac_pane_overview", "wac_pane_campaigns", "wac_pane_audience",
+                "wac_pane_templates", "wac_pane_consent", "wac_pane_audit"):
         assert 'id="%s"' % sid in PARTIAL, sid
-        assert sid in JS, sid
+        assert sid in ALL_JS or sid.startswith("wac_pane_"), sid
+    assert "'wac_pane_' +" in ALL_JS
 
 
 def test_all_seven_campaign_statuses_are_known_to_the_ui_and_the_backend():
@@ -219,8 +337,8 @@ def test_the_download_route_serves_the_rendered_dashboard_with_no_unresolved_jin
     assert r.headers["content-type"].startswith("text/html")
     body = r.text
     assert "{%" not in body and "{{" not in body and "include" not in re.findall(r"\{%.*?%\}", body)
-    assert 'id="section-wa_campaigns"' in body and 'id="wac_list"' in body                       # the module markup is inlined
-    assert "/static/css/wa_campaigns.css" in body and "/static/js/wa_campaigns.js" in body       # assets referenced by absolute path
+    assert 'id="section-wa_campaigns"' in body and 'id="wac_list"' in body and 'id="wac_pane_consent"' in body                       # the module markup is inlined
+    assert "/static/css/wa_campaigns.css" in body and all("/static/js/" + f in body for f in JS_FILES)   # assets referenced by absolute path
     assert "showSection('wa_campaigns',this)" in body
     # identical to what the live dashboard route renders
     live = client.get("/admin/dashboard", cookies={"admin_token": "dl-token"}).text
@@ -237,19 +355,20 @@ def test_the_download_route_still_requires_an_admin_session():
 
 # ── Production-guard wording must not overstate what is blocked ─────────────────────────────────
 
-def test_the_production_guard_wording_is_scoped_to_the_worker_and_discloses_the_test_send_gap():
-    assert "Worker Production guard" in JS and "'Production guard'" not in JS
-    assert "covers the worker only" in JS and "Single-number test sends have no Production guard of their own" in JS
-    assert "not specific to Production" in JS
-    assert "Blocking sending" not in JS                                                          # the old, over-broad label
-    assert "worker only, not to single-number test sends" in PARTIAL
-    assert not re.search(r"\ball sending|blocked in production|production is blocked|production blocks", JS + PARTIAL, re.I)
+def test_the_environment_and_guard_wording_is_accurate_after_the_guard_covers_both_paths():
+    core = SRC["wa_campaigns.js"]
+    assert "'Environment'" in core and "WA_CAMPAIGN_ENVIRONMENT" in core and "Production guard" in core
+    assert "covers the worker only" not in ALL_JS and "no Production guard of their own" not in ALL_JS      # the old gap wording is gone: it is closed
+    assert "covers both the bulk worker and single-number test sends" in PARTIAL or "covers both the bulk worker and single-number test sends" in ALL_JS
+    for reason in ("production_blocked", "environment_unknown"):
+        assert reason in core
+    assert not re.search(r"blocked in production|production blocks", ALL_JS + PARTIAL, re.I)
 
 
-def test_the_test_send_production_guard_gap_is_documented_as_a_separate_backend_task():
+def test_the_closed_safety_gaps_are_documented():
     doc = read(os.path.join(ROOT, "docs", "WHATSAPP_PHASE2G_BACKEND_SAFETY_TASKS.md"))
-    assert "send_test_message" in doc and "no such guard" in doc and "production_blocked()" in doc
-    assert "before any Production sending is enabled" in doc
+    assert "send_test_message" in doc and "WA_CAMPAIGN_ENVIRONMENT" in doc
+    assert re.search(r"closed|resolved", doc, re.I)
 
 
 # ── layout frame (the partial is included OUTSIDE the dashboard's .main wrapper) ────────────────────

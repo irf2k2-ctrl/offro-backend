@@ -60,7 +60,6 @@ RUNNING, PAUSED = "running", "paused"
 RATE = "wa_campaign_rate"
 EPOCH = datetime(1970, 1, 1)
 SYSTEM_ADMIN = {"id": "system", "name": "campaign worker", "role": "system"}
-_PRODUCTION_ENV_VARS = ("RAILWAY_ENVIRONMENT_NAME", "RAILWAY_ENVIRONMENT", "APP_ENV", "ENVIRONMENT", "ENV")
 RATE_LIMIT_CODES = frozenset({4, 80007, 130429, 131056})          # Meta throttling: slow the whole campaign down
 RATE_BACKOFF = timedelta(seconds=60)
 CONSENT_RETRY_DELAY = 30
@@ -110,11 +109,15 @@ def backoff_seconds(attempts: int, cfg: dict, rng=random.random) -> float:
 
 # ── gates ────────────────────────────────────────────────────────────────────────────────────────
 
+def environment_gate() -> tuple:
+    """(ok, reason): production_blocked | environment_unknown | ok. Only a CLASSIFIED Production may be allowed through the explicit
+    WA_CAMPAIGN_WORKER_ALLOW_PRODUCTION override; an unknown environment is always refused."""
+    return ST.environment_gate(allow_production=ST._env_flag("WA_CAMPAIGN_WORKER_ALLOW_PRODUCTION"))
+
+
 def production_blocked() -> bool:
-    for name in _PRODUCTION_ENV_VARS:
-        if (os.getenv(name, "") or "").strip().lower() in ("production", "prod"):
-            return not ST._env_flag("WA_CAMPAIGN_WORKER_ALLOW_PRODUCTION")
-    return False
+    """True when the worker must not send because of the environment (Production, a conflict, or an UNKNOWN environment)."""
+    return not environment_gate()[0]
 
 
 def live_allowed() -> bool:
@@ -126,8 +129,9 @@ def worker_gate() -> tuple:
     try:
         if not ST.worker_enabled():
             return False, "worker_disabled"
-        if production_blocked():
-            return False, "production_blocked"
+        env_ok, env_reason = environment_gate()
+        if not env_ok:
+            return False, env_reason
         return ST.sending_allowed()
     except Exception as e:
         logger.error("[WA-Worker] gate check failed (%s) - treating as OFF", exc_summary(e))
@@ -744,7 +748,7 @@ def status() -> dict:
         paused = _db()[M.CAMPAIGNS].count_documents({"status": PAUSED})
     except Exception:
         running = paused = None
-    return {"worker_env_enabled": ST.worker_enabled(), "production_blocked": production_blocked(),
+    return {"worker_env_enabled": ST.worker_enabled(), "production_blocked": production_blocked(), "environment": ST.environment_status(),
             "live_key_on": live_allowed(), "gate": {"ok": ok, "reason": why}, "thread_alive": bool(t and t.is_alive()),
             "last_tick": {"at": last["at"].isoformat() + "Z", "gate": last["gate"]} if last else None,
             "running_campaigns": running, "paused_campaigns": paused, "config": config()}

@@ -1,19 +1,14 @@
-# WhatsApp Campaigns: backend safety tasks to finish before any Production sending is enabled
+# WhatsApp Campaigns: backend safety tasks (status: CLOSED in Phase 2G complete)
 
-Status: **open, not part of Phase 2G Step 1** (Step 1 is strictly read-only and changes no backend behaviour).
+Both tasks recorded after Phase 2G Step 1 are resolved. Details: `docs/WHATSAPP_PHASE2G_DASHBOARD.md`.
 
-## 1. Single-number test send has no independent Production guard
-* The bulk worker refuses to run on a server that identifies as Production (`production_blocked()` in `services/wa_campaign_worker.py`,
-  unless `WA_CAMPAIGN_WORKER_ALLOW_PRODUCTION` is set).
-* `send_test_message` (`POST /admin/whatsapp-campaigns/campaigns/{id}/test-send`) has **no such guard**. In Production it would be
-  limited only by `WA_CAMPAIGN_SENDING_ENABLED`, the database kill switch, the `approve` permission and the test-number allow-list.
-* The dashboard therefore says that the Production guard covers the worker only, and never claims that all sending is blocked in Production.
-* Task: decide and implement a Production policy for test sends (for example the same `production_blocked()` check with an explicit,
-  separate override), with tests. Needs approval before it changes existing behaviour.
+## 1. Single-number test send had no independent Production guard: closed
+`send_test_message` (`POST /admin/whatsapp-campaigns/campaigns/{id}/test-send`) now calls `services.wa_campaign_settings.environment_gate()`
+before the allow-list check. Production and unidentified environments are refused (HTTP 409, reason `production_blocked` / `environment_unknown`).
+There is deliberately **no override** for test sends. The kill switch, environment key, consent, allow-list and `approve` permission are unchanged.
 
-## 2. Production detection depends on environment naming
-* `production_blocked()` looks for `production`/`prod` in `RAILWAY_ENVIRONMENT_NAME`, `RAILWAY_ENVIRONMENT`, `APP_ENV`, `ENVIRONMENT`, `ENV`.
-  A Production environment with another name would not be detected (the two sending keys would still hold).
-* Task: confirm the Production environment name, or invert the guard to an explicit allow-list of non-Production environments.
-
-Neither item may be left open when `WA_CAMPAIGN_SENDING_ENABLED` is set on Production.
+## 2. Production detection depended on environment naming: closed
+The guard no longer guesses from names. It requires an explicit `WA_CAMPAIGN_ENVIRONMENT` (production / staging / development / test).
+A missing or invalid value is "unknown" and sending is refused (fail closed). A platform signal that says production
+(`RAILWAY_ENVIRONMENT_NAME` / `RAILWAY_ENVIRONMENT`) always wins over an explicit non-production value (a conflict means Production).
+Tests: `test_wa_environment_guard.py`.

@@ -46,6 +46,65 @@ def worker_enabled() -> bool:
     return _env_flag("WA_CAMPAIGN_WORKER_ENABLED")
 
 
+# ── Environment identification (explicit, fail closed) ───────────────────────────────────────────
+# History: Production was detected only by matching "production"/"prod" in five variables, and anything unrecognised was treated as NOT
+# production. That (a) cannot tell Staging from Production when a copied variable says "production" and (b) fails OPEN on an unknown name.
+#
+# Rule now:
+#   * WA_CAMPAIGN_ENVIRONMENT names the environment explicitly: production | staging | development | test.
+#   * Any other / missing value => "unknown" => every sending path is refused.
+#   * Platform-set names (RAILWAY_ENVIRONMENT_NAME / RAILWAY_ENVIRONMENT) saying production can NOT be overridden by the explicit value:
+#     they cannot be copied between services by accident, so a disagreement is treated as Production (fail closed).
+#   * User-set generic names (APP_ENV / ENVIRONMENT / ENV) saying production lose to a non-production explicit value (they are the
+#     variables most often copied from Production to Staging by mistake); the override is reported in the status.
+ENVIRONMENT_VAR = "WA_CAMPAIGN_ENVIRONMENT"
+ENVIRONMENTS = ("production", "staging", "development", "test")
+_PLATFORM_ENV_VARS = ("RAILWAY_ENVIRONMENT_NAME", "RAILWAY_ENVIRONMENT")
+_GENERIC_ENV_VARS = ("APP_ENV", "ENVIRONMENT", "ENV")
+_PRODUCTION_WORDS = ("production", "prod")
+
+
+def _env_value(name: str) -> str:
+    return (os.getenv(name, "") or "").strip().lower()
+
+
+def environment_status() -> dict:
+    """What this process believes it is. Names and the environment words only - no secrets. classification is one of
+    production | staging | development | test | unknown. Never raises."""
+    explicit = _env_value(ENVIRONMENT_VAR)
+    platform_prod = [n for n in _PLATFORM_ENV_VARS if _env_value(n) in _PRODUCTION_WORDS]
+    generic_prod = [n for n in _GENERIC_ENV_VARS if _env_value(n) in _PRODUCTION_WORDS]
+    out = {"classification": "unknown", "source": "none", "explicit": explicit or None, "conflict": False,
+           "production_signals": platform_prod + generic_prod, "overridden_signals": []}
+    if explicit and explicit not in ENVIRONMENTS:
+        out["source"] = "explicit_invalid"
+    elif explicit == "production":
+        out.update(classification="production", source="explicit")
+    elif explicit:
+        if platform_prod:
+            out.update(classification="production", source="platform_conflict", conflict=True)
+        else:
+            out.update(classification=explicit, source="explicit", overridden_signals=generic_prod)
+    elif platform_prod or generic_prod:
+        out.update(classification="production", source="signal")
+    return out
+
+
+def environment_gate(allow_production: bool = False) -> tuple:
+    """(ok, reason) for ANY actual send. Production is refused (the bulk worker alone may be explicitly allowed through
+    WA_CAMPAIGN_WORKER_ALLOW_PRODUCTION); an unknown environment is ALWAYS refused. Fails closed on any error."""
+    try:
+        c = environment_status()["classification"]
+    except Exception as e:
+        logger.error("[WA-Campaign] environment check failed (%s) - treating as unknown", exc_summary(e))
+        return False, "environment_unknown"
+    if c == "production":
+        return (True, "ok") if allow_production else (False, "production_blocked")
+    if c == "unknown":
+        return False, "environment_unknown"
+    return True, "ok"
+
+
 def switch_on() -> bool:
     """The runtime kill-switch value. Raises on a database error; an absent document is OFF."""
     doc = db[SETTINGS].find_one({"_id": GLOBAL_ID}, {"sending_enabled": 1})
@@ -117,7 +176,9 @@ def config_snapshot() -> dict:
     return {
         "sending": {"allowed": allowed, "reason": reason, "env_key_on": env_sending_enabled(), "switch_on": sw},
         "worker_env_enabled": worker_enabled(),
+        "environment": environment_status(),
         "test_numbers_configured": len(test_numbers()),
+        "test_numbers_masked": sorted("***" + n[-4:] for n in test_numbers()),
         "whatsapp": {
             "access_token_configured": bool(wa.WHATSAPP_ACCESS_TOKEN),
             "phone_number_id_configured": bool(wa.WHATSAPP_PHONE_NUMBER_ID),
