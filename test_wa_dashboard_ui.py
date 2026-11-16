@@ -36,7 +36,7 @@ PARTIAL = read(PARTIAL_PATH)
 # ── the shell is served and wired ─────────────────────────────────────────────────────────────
 
 def _dashboard_html():
-    _DB.admins.insert_one({"username": "root", "token": "ui-token"})
+    _DB.dashboard_users.insert_one({"token": "ui-token", "status": "active", "full_name": "Test Admin", "mobile": "9000000001"})
     r = client.get("/admin/dashboard", cookies={"admin_token": "ui-token"})
     assert r.status_code == 200
     return r
@@ -330,7 +330,7 @@ def test_all_seven_campaign_statuses_are_known_to_the_ui_and_the_backend():
 # ── raw-download compatibility (the dashboard is a Jinja template with includes) ─────────────────
 
 def test_the_download_route_serves_the_rendered_dashboard_with_no_unresolved_jinja():
-    _DB.admins.insert_one({"username": "root", "token": "dl-token"})
+    _DB.dashboard_users.insert_one({"token": "dl-token", "status": "active", "full_name": "Test Admin", "mobile": "9000000001"})
     r = client.get("/download/admin_dashboard", cookies={"admin_token": "dl-token"})
     assert r.status_code == 200
     assert r.headers["content-disposition"] == "attachment; filename=admin_dashboard.html"      # same attachment behaviour as before

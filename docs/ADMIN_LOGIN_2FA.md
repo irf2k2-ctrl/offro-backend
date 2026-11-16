@@ -45,13 +45,21 @@ New collections (created with indexes at startup, TTL-purged): `admin_login_chal
   rotate/disable that widget in MSG91 when convenient (the customer app uses the same widget, so coordinate before rotating).
 * Rollback: revert the patch; nothing else depends on the new collections.
 
-## Not covered by this patch (decisions needed)
-* **Legacy password login without OTP.** `POST /admin/login` (`routers/admin.py`, username/password in `db.admins`, plaintext compare, default
-  `admin`/`admin123` seeded by `seed_admin()`) and `POST /admin-dashboard/admin/login` (`db.super_admins`) still issue an `admin_token`
-  that `get_current_admin` and `/admin/dashboard` accept as Super Admin, with no PIN and no OTP. This defeats "OTP mandatory for every admin
-  login". It is a separate patch (`phase-sec-2-disable-legacy-admin-login.patch`) because disabling it could lock out anyone still using it.
-* The page's CSP still allows `connect-src https://control.msg91.com`; it is no longer needed by the login page and can be removed later.
-* The customer app verifies OTPs on the device and the backend trusts that (`/user/account-login`). Same pattern, different feature; untouched.
+## Legacy admin authentication retired (Patch B)
+* `POST /admin/login` (username/password, no PIN, no OTP) now always answers **410** with a pointer to `/admin`; it reads no data, creates no
+  session and sets no cookie. The route still exists so old clients get a clear answer.
+* The `admins.token` fallback was removed from every active consumer: `get_current_admin` (`routers/admin.py`), `get_current_dashboard_user`
+  (`routers/dashboard_auth.py`), `routers/wa_chat.py`, `routers/popup_campaigns.py`, `/download/admin_dashboard` and `/admin/dashboard`
+  (`server.py`). Only `dashboard_users` sessions (created by the PIN + OTP sign-in) authenticate; roles, permissions and the inactivity timeout
+  are unchanged.
+* `seed_admin()` no longer creates `admin` / `admin123`; `seed_rbac()` no longer creates a default Super Admin (`9999999999` / `123456`,
+  `RBAC_SUPER_ADMIN_*`) and prints no credentials. Existing accounts and roles are never touched. On an EMPTY database create the first Super
+  Admin deliberately: `python tools/create_super_admin.py` (PIN prompted, not echoed, never printed or logged).
+* **No data was deleted or modified and no token was revoked.** Legacy `admins` rows and tokens stay in the database but no longer authenticate.
+  Anyone still signed in with a legacy session is signed out of the admin tools and must sign in again with PIN + OTP.
+* Not changed (separate decisions): the unmounted legacy files (`routers/admin_dashboard.py`, `routers/categories.py`, `auth.py`,
+  `routers/temp admin.py`, `seed.py`) still contain old password-login code, but none is mounted in `server.py`; the CSP still allows
+  `connect-src https://control.msg91.com`; the customer app verifies OTPs on the device and the backend trusts that (`/user/account-login`).
 
 ## Separate: the original "Server error. Please try again." (still UNRESOLVED)
 This patch does not fix it and must not be reported as fixing it. The old message came from the page's catch-all `catch`, reached by (a) a
@@ -86,9 +94,3 @@ The environment *name* is not used (the Staging environment was once named `prod
 Startup logs `[2FA] admin OTP test mode: ACTIVE|INACTIVE (<code>)`. Codes: flag_off, not_on_railway, project_mismatch, environment_mismatch,
 service_mismatch, domain_mismatch, database_unverified, database_mismatch, allow_list_empty, check_error.
 If the Staging service is ever recreated, update the constants (test mode stays off until then).
-
-## Patch B findings (legacy auth, NOT applied here)
-Password-only `POST /admin/login` and `/admin-dashboard/admin/login` (no PIN/OTP), legacy `admins.token` accepted by `get_current_admin` and the
-fallbacks in `dashboard_auth.py`, `wa_chat.py`, `popup_campaigns.py`, `server.py`; default `admin/admin123` seeding (`seed_admin`) and Super Admin
-default credentials with PIN printed by `seed_rbac()`. Recommended: `phase-sec-2-disable-legacy-admin-login.patch` after confirming nobody uses
-the legacy login (rejecting legacy tokens signs those sessions out). No data is modified by this patch set.

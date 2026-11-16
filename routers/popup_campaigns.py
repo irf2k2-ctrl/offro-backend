@@ -18,11 +18,7 @@ def _require_admin(request: Request):
         if du.get("status") in ("disabled", "suspended"):
             raise HTTPException(403, "Account is " + du.get("status", "disabled"))
         return du
-    # Fallback: legacy admin session (username+password login)
-    admin = db.admins.find_one({"token": token})
-    if not admin:
-        raise HTTPException(401, "Unauthorized")
-    return admin
+    raise HTTPException(401, "Unauthorized")           # legacy admins.token sessions were retired (Patch B)
 
 def _fmt(doc: dict) -> dict:
     doc["id"] = str(doc.pop("_id"))

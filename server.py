@@ -100,7 +100,7 @@ def download_admin_dashboard(request: Request):
         # Same rule as routers.admin.get_current_admin: disabled / suspended accounts are refused.
         if du.get("status") in ("disabled", "suspended"):
             return JSONResponse(status_code=403, content={"detail": "Account is " + du.get("status", "disabled")})
-    elif not db.admins.find_one({"token": token}):
+    else:                                   # legacy admins.token sessions were retired (Patch B)
         return JSONResponse(status_code=401, content={"detail": "Admin login required"})
     # The dashboard is a Jinja template that includes partials, so serve the RENDERED page; the raw file would contain unresolved
     # {% include %} tags. Same attachment behaviour and filename as before.
@@ -597,7 +597,7 @@ def serve_admin_dashboard(request: Request):
             request.headers.get("Authorization", "").replace("Bearer ", "")
     if not token:
         return RedirectResponse(url="/admin", status_code=307)
-    session_user = db.dashboard_users.find_one({"token": token}) or db.admins.find_one({"token": token})
+    session_user = db.dashboard_users.find_one({"token": token})      # legacy admins.token sessions were retired (Patch B)
     if not session_user:
         return RedirectResponse(url="/admin", status_code=307)
     try:

@@ -131,8 +131,7 @@ def log_activity(
 async def get_current_dashboard_user(request: Request) -> dict:
     """
     Resolve the current dashboard user from cookie or Bearer token.
-    Checks dashboard_users first (new RBAC login), then falls back to
-    db.admins (old legacy login) and treats that session as Super Admin.
+    Only dashboard_users sessions (created by the PIN + OTP sign-in) are accepted. The legacy db.admins token fallback was retired (Patch B).
     """
     token = request.cookies.get("admin_token") or \
             request.headers.get("Authorization", "").replace("Bearer ", "")
@@ -142,29 +141,7 @@ async def get_current_dashboard_user(request: Request) -> dict:
 
     user = db.dashboard_users.find_one({"token": token})
 
-    # ── Legacy fallback ──
     if not user:
-        legacy = db.admins.find_one({"token": token})
-        if legacy:
-            super_role = db.dashboard_roles.find_one({"role_name": "Super Admin"}) or {}
-            return {
-                "_id": legacy["_id"],
-                "full_name": legacy.get("username", "Admin"),
-                "mobile": "legacy",
-                "email": None,
-                "designation": "Super Administrator (Legacy)",
-                "profile_photo_url": None,
-                "role_id": super_role.get("_id"),
-                "assigned_cities": ["*"],
-                "status": "active",
-                "role": super_role or {"role_name": "Super Admin", "permissions": {
-                    mod: {act: True for act in ["view","add","edit","delete","approve","export"]}
-                    for mod in ["Accounts","Stores","Products","Banners","Admin Banners","Popup Campaigns",
-                                "Payments","Gift Vouchers","Notifications","Categories","Pricing & GST",
-                                "Reviews","Discounts","Terms & Conditions","Policies",
-                                "Social Media","Live Chat","Default Images","User Management"]
-                }}
-            }
         raise HTTPException(status_code=401, detail="Invalid session")
 
     if user.get("status") in ("disabled", "suspended"):
@@ -226,7 +203,7 @@ def get_assigned_cities_filter(user: dict = Depends(get_current_dashboard_user))
 # ═══════════════════════════════════════════════════════════════
 
 def seed_rbac():
-    """Seed default roles and a Super Admin user if they don't exist."""
+    """Seed default roles if they don't exist (no default user; see tools/create_super_admin.py)."""
     # ── 1. Seed default roles ──
     if db.dashboard_roles.count_documents({}) == 0:
         super_admin_perms = {}
@@ -290,32 +267,11 @@ def seed_rbac():
 
         print("[RBAC] Seeded " + str(len(roles_to_seed)) + " default roles")
 
-    # ── 2. Seed Super Admin user ──
+    # ── 2. Super Admin user ──
+    # (Patch B) No default Super Admin (mobile/PIN) is created any more and no credentials are printed. Existing accounts are untouched.
+    # On an EMPTY database create the first one deliberately with: python tools/create_super_admin.py
     if db.dashboard_users.count_documents({}) == 0:
-        super_role = db.dashboard_roles.find_one({"role_name": "Super Admin"})
-        if super_role:
-            default_mobile = os.getenv("RBAC_SUPER_ADMIN_MOBILE", "9999999999")
-            default_pin = os.getenv("RBAC_SUPER_ADMIN_PIN", "123456")
-
-            db.dashboard_users.insert_one({
-                "full_name": "Super Admin",
-                "mobile": default_mobile,
-                "pin": hash_pin(default_pin),
-                "email": None,
-                "designation": "Super Administrator",
-                "profile_photo_url": None,
-                "role_id": super_role["_id"],
-                "assigned_cities": ["*"],
-                "status": "active",
-                "login_attempts": 0,
-                "lockout_until": None,
-                "last_login_at": None,
-                "last_active_at": None,
-                "token": None,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            })
-            print("[RBAC] Seeded Super Admin user — Mobile: " + default_mobile + " PIN: " + default_pin)
+        print("[RBAC] No dashboard users exist. Create the first Super Admin with: python tools/create_super_admin.py")
 
     # ── 3. Create indexes ──
     try:

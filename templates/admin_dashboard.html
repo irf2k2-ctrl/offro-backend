@@ -2547,7 +2547,7 @@ async function loadGiftProductRequests() {
     tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'><i class='fas fa-spinner fa-spin'></i> Loading...</td></tr>";
     try {
         let res = await fetch("/admin/withdraw-requests", { credentials:"include" });
-        if (res.status===401||res.status===403) { window.location.href="/admin/login"; return; }
+        if (res.status===401||res.status===403) { window.location.href="/admin"; return; }
         let vouchers = await res.json();
         if (!vouchers.length) {
             tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No reward redemption requests yet.</td></tr>";

@@ -131,11 +131,11 @@ def test_disabled_or_suspended_admin_is_refused():
     assert client.get("/admin/whatsapp-campaigns/config", headers=H("sus")).status_code == 403
 
 
-def test_super_admin_and_legacy_admin_have_access():
+def test_super_admin_has_access_and_a_legacy_admins_token_no_longer_does():
     make_user("root", {}, role_name="Super Admin")
-    _DB.admins.insert_one({"token": "legacy", "username": "boss"})
+    _DB.admins.insert_one({"token": "legacy", "username": "boss"})          # legacy sessions were retired: no PIN/OTP behind them
     assert client.get("/admin/whatsapp-campaigns/config", headers=H("root")).status_code == 200
-    assert client.get("/admin/whatsapp-campaigns/config", headers=H("legacy")).status_code == 200
+    assert client.get("/admin/whatsapp-campaigns/config", headers=H("legacy")).status_code in (401, 403)
 
 
 # ═════════════════════ audit infrastructure ═════════════════════
@@ -638,7 +638,7 @@ def tt(monkeypatch):
     class R:
         def __init__(self, code, js): self.status_code, self._js = code, js
         def json(self): return self._js
-    _DB.admins.insert_one({"token": "tok"})
+    _DB.dashboard_users.insert_one({"token": "tok", "status": "active", "full_name": "Test Admin", "mobile": "9000000001"})
     monkeypatch.setenv("WHATSAPP_TEMPLATE_TEST_ENABLED", "1")
     monkeypatch.setattr(WA, "WHATSAPP_ACCESS_TOKEN", SECRET)
     monkeypatch.setattr(WA, "WHATSAPP_PHONE_NUMBER_ID", "111")
