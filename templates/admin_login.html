@@ -123,6 +123,7 @@ body {
         <i class="fas fa-sign-in-alt me-1"></i> Login to Dashboard
     </button>
     <p id="msg" class="mt-3 mb-0"></p>
+    <button class="back-btn" id="retryBtn" onclick="retryLogin()" style="display:none;margin:10px auto 0;"><i class="fas fa-redo me-1"></i> Try again</button>
 </div>
 
 <!-- ═══ Step 2: OTP Verification ═══ -->
@@ -147,16 +148,12 @@ body {
         <input type="text" class="otp-box" maxlength="1" inputmode="numeric" data-index="3" oninput="onOtpInput(this)" onkeydown="onOtpKeydown(event,this)">
     </div>
 
-    <div class="trust-check">
-        <input type="checkbox" id="trustDevice">
-        <label for="trustDevice" style="cursor:pointer;margin:0;">Trust this device for 30 days</label>
-    </div>
-
     <button class="btn-main" id="verifyBtn" onclick="verifyOtp()">
         <i class="fas fa-check-circle me-1"></i> Verify & Login
     </button>
 
     <p id="otpMsg" class="mt-3 mb-0"></p>
+    <button class="back-btn" id="retryVerifyBtn" onclick="verifyOtp()" style="display:none;margin:10px auto 0;"><i class="fas fa-redo me-1"></i> Try again</button>
 
     <div style="margin-top:12px;display:flex;flex-direction:column;align-items:center;gap:6px;">
         <button class="resend-btn" id="resendBtn" onclick="resendOtp()" disabled>
@@ -169,67 +166,23 @@ body {
 </div>
 
 <script>
-// ── MSG91 Widget credentials (same as Flutter app) ──────────────────────────
-const MSG91_WIDGET_ID   = '36656f6a786e313430373338';
-const MSG91_TOKEN_AUTH  = '516819TuGI7seX6a06f51cP1';
-const MSG91_WIDGET_BASE = 'https://control.msg91.com/api/v5/widget';
-
-let _loginMobile = "";
-let _loginPin = "";
+// Sign-in is verified entirely by the server: PIN -> server sends a 4-digit SMS code -> the server checks the code and only then
+// creates the session. This page holds no SMS-provider settings and never decides whether a code is correct.
+let _challengeId = "";          // opaque, single-use token from the server; kept in memory only
 let _resendCountdown = 0;
 let _resendInterval = null;
-let _msg91ReqId = "";   // ★ MSG91 widget returns this from sendOtpMobile — REQUIRED for verifyOtp/retryOtp
 
-// ─── MSG91 Widget API calls (identical to Flutter SDK) ───────────────────────
-async function msg91SendOTP(mobile) {
-    // mobile must be "91XXXXXXXXXX" format
-    const phone = mobile.startsWith("91") ? mobile : "91" + mobile;
-    const resp = await fetch(MSG91_WIDGET_BASE + '/sendOtpMobile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH, identifier: phone })
-    });
-    const data = await resp.json();
-    // MSG91 returns the reqId in the "message" field on success — store it for verify/retry
-    if (data && (data.type === "success" || data.message)) {
-        _msg91ReqId = data.message || data.reqId || "";
-    }
-    console.log('[MSG91 sendOtpMobile] reqId captured:', _msg91ReqId);
-    return data;
+// Parse a response safely: never let a non-JSON reply (gateway/proxy page) become a vague failure.
+async function readJson(res) {
+    try { return await res.json(); } catch (e) { return null; }
 }
-
-async function msg91RetryOTP(mobile) {
-    const phone = mobile.startsWith("91") ? mobile : "91" + mobile;
-    // Include widgetId + tokenAuth + identifier ALONGSIDE reqId — all are required together
-    const resp = await fetch(MSG91_WIDGET_BASE + '/retryOtp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH,
-            identifier: phone, reqId: _msg91ReqId, retryChannel: 'text'
-        })
-    });
-    const data = await resp.json();
-    // retryOtp may issue a fresh reqId — update it
-    if (data && data.message) {
-        _msg91ReqId = data.message || _msg91ReqId;
-    }
-    console.log('[MSG91 retryOtp] reqId now:', _msg91ReqId);
-    return data;
-}
-
-async function msg91VerifyOTP(mobile, otp) {
-    const phone = mobile.startsWith("91") ? mobile : "91" + mobile;
-    // Include widgetId + tokenAuth + identifier ALONGSIDE reqId — all are required together
-    const resp = await fetch(MSG91_WIDGET_BASE + '/verifyOtp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            widgetId: MSG91_WIDGET_ID, tokenAuth: MSG91_TOKEN_AUTH,
-            identifier: phone, reqId: _msg91ReqId, otp: otp
-        })
-    });
-    return await resp.json();
+function transientFailure(res) { return !res || res.status >= 500; }     // network error or a server/gateway error: worth a retry
+function showRetry(id, on) { let b = document.getElementById(id); if (b) b.style.display = on ? "inline-block" : "none"; }
+function retryLogin() { showRetry("retryBtn", false); login(); }
+function friendly(res, data, fallback) {
+    if (data && typeof data.detail === "string") return data.detail;
+    if (res && res.status >= 500) return "The service is temporarily unavailable (HTTP " + res.status + "). Please try again.";
+    return fallback;
 }
 
 // ═══ Step 1: Login ═══
@@ -238,6 +191,7 @@ async function login() {
     let pin    = document.getElementById("pin").value.trim();
     let msgEl  = document.getElementById("msg");
     let btn    = document.getElementById("loginBtn");
+    const idle = '<i class="fas fa-sign-in-alt me-1"></i> Login to Dashboard';
 
     if (!mobile || !pin) { msgEl.innerText = "Please enter mobile number and PIN"; return; }
     if (!/^\d{10}$/.test(mobile)) { msgEl.innerText = "Mobile number must be exactly 10 digits"; return; }
@@ -246,53 +200,35 @@ async function login() {
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Verifying...';
     msgEl.innerText = "";
+    showRetry("retryBtn", false);
 
+    let res = null;
     try {
-        // Step 1a: Validate credentials with backend
-        let res = await fetch("/admin/auth/login", {
+        res = await fetch("/admin/auth/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ mobile, pin }),
             credentials: "include"
         });
-        let data = await res.json();
-
-        if (!res.ok) {
-            msgEl.innerText = data.detail || "Login failed";
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-sign-in-alt me-1"></i> Login to Dashboard';
-            return;
-        }
-
-        // Trusted device — skip OTP
-        if (!data.otp_required) {
-            btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' + (data.user ? data.user.full_name : 'Admin') + '!';
-            setTimeout(() => { window.location.href = "/admin/dashboard"; }, 600);
-            return;
-        }
-
-        // Step 1b: Credentials valid — now send OTP via MSG91 Widget (same as Flutter)
-        _loginMobile = mobile;
-        _loginPin    = pin;
-
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Sending OTP...';
-
-        let otpRes = await msg91SendOTP(mobile);
-        console.log('[MSG91 sendOTP]', otpRes);
-
-        // Show OTP screen regardless of MSG91 response
-        // (MSG91 returns success on first call)
-        document.getElementById("otpMobileDisplay").innerText = "+91 " + mobile;
-        showOtpScreen();
-        startResendCountdown(30);
-
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-sign-in-alt me-1"></i> Login to Dashboard';
     } catch (err) {
-        msgEl.innerText = "Server error. Please try again.";
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-sign-in-alt me-1"></i> Login to Dashboard';
+        msgEl.innerText = "Could not reach the server. Please check your connection and try again.";
+        showRetry("retryBtn", true);                                   // the PIN is kept in the field so Try again works
+        btn.disabled = false; btn.innerHTML = idle;
+        return;
     }
+    let data = await readJson(res);
+    if (!transientFailure(res)) document.getElementById("pin").value = "";
+    if (!res.ok || !data || !data.otp_required || !data.challenge_id) {
+        msgEl.innerText = friendly(res, data, "Sign-in failed. Please try again.");
+        showRetry("retryBtn", transientFailure(res) || res.status === 503);
+        btn.disabled = false; btn.innerHTML = idle;
+        return;
+    }
+    _challengeId = data.challenge_id;
+    document.getElementById("otpMobileDisplay").innerText = data.mobile_masked || "your registered mobile number";
+    showOtpScreen();
+    startResendCountdown(data.resend_available_in || 30);
+    btn.disabled = false; btn.innerHTML = idle;
 }
 
 // ═══ Step 2: OTP Verification ═══
@@ -306,6 +242,8 @@ function showOtpScreen() {
 }
 
 function backToLogin() {
+    _challengeId = "";
+    showRetry("retryBtn", false); showRetry("retryVerifyBtn", false);
     document.getElementById("otpCard").style.display = "none";
     document.getElementById("loginCard").style.display = "block";
     document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
@@ -357,91 +295,87 @@ async function verifyOtp() {
     let otp   = getOtpValue();
     let msgEl = document.getElementById("otpMsg");
     let btn   = document.getElementById("verifyBtn");
+    const idle = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
 
     if (otp.length !== 4) {
         msgEl.innerText = "Please enter all 4 digits";
         msgEl.style.color = "#c0392b";
         return;
     }
-
-    let trustDevice = document.getElementById("trustDevice").checked;
+    if (!_challengeId) { backToLogin(); return; }
+    if (btn.disabled) return;                       // one verification at a time
 
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Verifying...';
     msgEl.innerText = "";
+    showRetry("retryVerifyBtn", false);
 
+    let res = null;
     try {
-        // Step 2a: Verify OTP directly with MSG91 Widget
-        let m91 = await msg91VerifyOTP(_loginMobile, otp);
-        console.log('[MSG91 verifyOtp]', m91);
-
-        const m91Type = (m91.type || m91.message_type || "").toLowerCase();
-        const m91Ok   = m91Type === "success" || m91.success === true || m91.status === "success";
-
-        if (!m91Ok) {
-            let errMsg = m91.message || m91.msg || m91.error || "Invalid OTP. Please try again.";
-            msgEl.innerText = errMsg;
-            msgEl.style.color = "#c0392b";
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
-            document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
-            let first = document.querySelector(".otp-box[data-index='0']");
-            if (first) first.focus();
-            return;
-        }
-
-        // Step 2b: MSG91 verified — now complete session with backend
-        let res = await fetch("/admin/auth/verify-otp", {
+        res = await fetch("/admin/auth/verify-otp", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mobile: _loginMobile, otp: otp, trust_device: trustDevice, msg91_verified: true }),
+            body: JSON.stringify({ challenge_id: _challengeId, otp: otp }),
             credentials: "include"
         });
-        let data = await res.json();
-
-        if (!res.ok) {
-            msgEl.innerText = data.detail || "Verification failed";
-            msgEl.style.color = "#c0392b";
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
-            return;
-        }
-
-        btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' + (data.user ? data.user.full_name : 'Admin') + '!';
-        setTimeout(() => { window.location.href = "/admin/dashboard"; }, 600);
     } catch (err) {
-        console.error('[verifyOtp error]', err);
-        msgEl.innerText = "Error verifying OTP. Please try again.";
+        msgEl.innerText = "Could not reach the server. Please check your connection and try again.";
         msgEl.style.color = "#c0392b";
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify & Login';
+        showRetry("retryVerifyBtn", true);                                // the code stays in the boxes
+        btn.disabled = false; btn.innerHTML = idle;
+        return;
     }
+    let data = await readJson(res);
+    if (!res.ok || !data) {
+        msgEl.innerText = friendly(res, data, "Verification failed. Please try again.");
+        msgEl.style.color = "#c0392b";
+        btn.disabled = false; btn.innerHTML = idle;
+        if (transientFailure(res)) { showRetry("retryVerifyBtn", true); return; }
+        document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
+        let first = document.querySelector(".otp-box[data-index='0']");
+        if (first) first.focus();
+        return;
+    }
+    _challengeId = "";
+    btn.innerHTML = '<i class="fas fa-check me-1"></i> Welcome, ' + (data.user && data.user.full_name ? data.user.full_name : 'Admin') + '!';
+    setTimeout(() => { window.location.href = "/admin/dashboard"; }, 600);
 }
 
 // ═══ Resend OTP ═══
 async function resendOtp() {
     let msgEl = document.getElementById("otpMsg");
     let btn   = document.getElementById("resendBtn");
+    if (!_challengeId) { backToLogin(); return; }
     btn.disabled = true;
 
+    let res = null;
     try {
-        let res = await msg91RetryOTP(_loginMobile);
-        console.log('[MSG91 retryOtp]', res);
-
-        document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
-        let first = document.querySelector(".otp-box[data-index='0']");
-        if (first) first.focus();
-
-        msgEl.innerText = "OTP resent successfully";
-        msgEl.style.color = "#3E5F55";
-        setTimeout(() => { msgEl.innerText = ""; }, 3000);
-
-        startResendCountdown(30);
+        res = await fetch("/admin/auth/resend-otp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ challenge_id: _challengeId }),
+            credentials: "include"
+        });
     } catch (err) {
-        msgEl.innerText = "Resend failed. Please try again.";
+        msgEl.innerText = "Could not reach the server. Please try again.";
         msgEl.style.color = "#c0392b";
         btn.disabled = false;
+        return;
     }
+    let data = await readJson(res);
+    if (!res.ok) {
+        msgEl.innerText = friendly(res, data, "Could not resend the code. Please try again.");
+        msgEl.style.color = "#c0392b";
+        if (res.status === 429) startResendCountdown(30); else if (res.status === 401) { setTimeout(backToLogin, 1500); } else btn.disabled = false;
+        return;
+    }
+    document.querySelectorAll(".otp-box").forEach(b => { b.value = ""; b.classList.remove("filled"); });
+    let first = document.querySelector(".otp-box[data-index='0']");
+    if (first) first.focus();
+    msgEl.innerText = "A new code has been sent";
+    msgEl.style.color = "#3E5F55";
+    setTimeout(() => { msgEl.innerText = ""; }, 3000);
+    startResendCountdown((data && data.resend_available_in) || 30);
 }
 
 function startResendCountdown(seconds) {

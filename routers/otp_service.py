@@ -279,3 +279,38 @@ def verify_otp(phone: str, otp_input: str) -> dict:
     )
     print(f"[OTP] ✅ OTP verified successfully for {phone}")
     return {"ok": True}
+
+
+# ── Send-only transport for server-managed OTPs (admin 2FA) ───────────────────────────────────────
+def send_sms_otp(phone: str, otp: str, expiry_minutes: int, template_id: str = "") -> dict:
+    """Send an OTP that the CALLER generated and stores (hashed). Uses the same MSG91 endpoint, auth key, template and sender
+    configuration as send_otp(). It stores nothing and never logs the OTP, the auth key or the full phone number.
+    Returns {"ok": True} or {"ok": False, "error": <short internal code>}; callers must not show the code to end users."""
+    e164 = _e164(phone)
+    tpl = (template_id or MSG91_TEMPLATE_ID or "").strip()
+    if not MSG91_AUTH_KEY or not tpl:
+        print("[MSG91] SMS not configured (auth key or template missing); OTP not sent")
+        return {"ok": False, "error": "not_configured"}
+    if len(e164) < 10 or not str(otp).isdigit():
+        return {"ok": False, "error": "invalid_input"}
+    payload = {"template_id": tpl, "mobile": e164, "authkey": MSG91_AUTH_KEY, "otp": str(otp),
+               "otp_expiry": int(expiry_minutes), "sender": MSG91_SENDER_ID}
+    masked = "***" + e164[-4:]
+    try:
+        resp = httpx.post(MSG91_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=15.0)
+        try:
+            data = resp.json()
+        except Exception:
+            print("[MSG91] SMS send failed for %s: HTTP %s, non-JSON reply" % (masked, resp.status_code))
+            return {"ok": False, "error": "non_json"}
+        if data.get("type") == "success" and "request_id" in data:
+            print("[MSG91] SMS accepted for %s" % masked)
+            return {"ok": True}
+        print("[MSG91] SMS rejected for %s: HTTP %s, type=%s" % (masked, resp.status_code, str(data.get("type", ""))[:20]))
+        return {"ok": False, "error": "rejected"}
+    except httpx.TimeoutException:
+        print("[MSG91] SMS send timed out for %s" % masked)
+        return {"ok": False, "error": "timeout"}
+    except Exception as e:
+        print("[MSG91] SMS send error for %s: %s" % (masked, type(e).__name__))
+        return {"ok": False, "error": "error"}
