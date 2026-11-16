@@ -187,12 +187,11 @@ def generate_qr_base64(store_id: str) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.read()).decode()
 
 def get_current_admin(request: Request):
-    """Resolve current admin — checks dashboard_users (RBAC) then admins (legacy fallback)."""
+    """Resolve the current admin from a dashboard_users session (created only by the PIN + OTP sign-in)."""
     token = request.cookies.get("admin_token") or \
             request.headers.get("Authorization", "").replace("Bearer ", "")
     if not token: raise HTTPException(401, "Not authenticated")
 
-    # ── Try new RBAC system first ──
     du = db.dashboard_users.find_one({"token": token})
     if du:
         if du.get("status") in ("disabled", "suspended"):
@@ -212,20 +211,8 @@ def get_current_admin(request: Request):
         du["assigned_cities"] = du.get("assigned_cities", [])
         return du
 
-    # ── Legacy fallback: old admins collection → Super Admin ──
-    a = db.admins.find_one({"token": token})
-    if not a: raise HTTPException(403, "Invalid session")
-    super_role = db.dashboard_roles.find_one({"role_name": "Super Admin"}) or {}
-    a["role"] = super_role or {"role_name": "Super Admin", "permissions": {
-        mod: {act: True for act in ["view","add","edit","delete","approve","export"]}
-        for mod in ["Merchants","Stores","Products","Banners","Deals","Users",
-                    "Payments","Invoices","Categories","Cities","Reports",
-                    "Notifications","Settings"]
-    }}
-    a["role_name"] = "Super Admin"
-    a["permissions"] = a["role"].get("permissions", {})
-    a["assigned_cities"] = ["*"]
-    return a
+    # No other credential is accepted. The old `admins.token` (username/password) sessions were retired (Patch B): they bypassed PIN + OTP.
+    raise HTTPException(403, "Invalid session")
 
 
 def _check_perm(a, module, action):
@@ -297,9 +284,7 @@ def _safe_city(v):
     return ""
 
 def seed_admin():
-    if not db.admins.find_one({"username": "admin"}):
-        db.admins.insert_one({"username": "admin", "password": "admin123", "token": None})
-        print("✅ Default admin: admin / admin123")
+    # (Patch B) The old default admin account is no longer created, and nothing is printed about credentials.
     if not db.categories.find_one({"_v": 2}):
         # Migrate flat-string categories → rich object model (v2)
         # Preserve any images already uploaded to existing rich-format docs
@@ -364,18 +349,12 @@ def admin_get_areas(city: str = ""):
     return {"areas": sorted([a for a in db_areas if a])}
 
 @router.post("/login")
-def admin_login(data: dict):
-    _u, _p = data.get("username"), data.get("password")
-    # Reject non-string values (blocks MongoDB operator injection such as {"$ne": null})
-    if not isinstance(_u, str) or not isinstance(_p, str):
-        raise HTTPException(401, "Invalid credentials")
-    a = db.admins.find_one({"username": _u, "password": _p})
-    if not a: raise HTTPException(401, "Invalid credentials")
-    token = create_token()
-    db.admins.update_one({"_id": a["_id"]}, {"$set": {"token": token}})
-    res = JSONResponse({"message": "ok"})
-    res.set_cookie("admin_token", token, httponly=True, samesite="Lax", max_age=3600*8)
-    return res
+def admin_login(data: dict = None):
+    """RETIRED (Patch B). This username/password route used to issue an admin session with no PIN and no OTP. It no longer reads the database,
+    creates a session or sets a cookie. Admins sign in at /admin (mobile + PIN + SMS code, POST /admin/auth/login)."""
+    return JSONResponse(
+        {"detail": "This sign-in method has been retired. Please sign in at /admin with your mobile number, PIN and SMS code."},
+        status_code=410)
 
 @router.post("/logout")
 def admin_logout(request: Request):

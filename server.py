@@ -4,8 +4,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
-from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, dashboard_auth, maps, smart_link
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse, Response
+from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, wa_campaigns, dashboard_auth, maps, smart_link
 from routers import merchant_products, admin_products, public_products, collaborations
 from database import db
 import base64, io, re, html as _html
@@ -40,6 +40,7 @@ app.include_router(popup_campaigns.router)
 app.include_router(webhook.router)          # WhatsApp Cloud API webhook — no prefix
 app.include_router(wa_chat.router, prefix="/admin")  # WhatsApp Live Chat admin API
 app.include_router(wa_template_test.router, prefix="/admin")  # single-recipient template TEST (off unless WHATSAPP_TEMPLATE_TEST_ENABLED=1)
+app.include_router(wa_campaigns.router, prefix="/admin")  # WhatsApp Campaign Manager 2A: permission-gated admin API; sends nothing
 app.include_router(dashboard_auth.router, prefix="/admin")  # RBAC dashboard auth — /admin/auth/*
 app.include_router(maps.router)
 app.include_router(smart_link.router)  # /open smart link + /.well-known app-link files
@@ -99,14 +100,16 @@ def download_admin_dashboard(request: Request):
         # Same rule as routers.admin.get_current_admin: disabled / suspended accounts are refused.
         if du.get("status") in ("disabled", "suspended"):
             return JSONResponse(status_code=403, content={"detail": "Account is " + du.get("status", "disabled")})
-    elif not db.admins.find_one({"token": token}):
+    else:                                   # legacy admins.token sessions were retired (Patch B)
         return JSONResponse(status_code=401, content={"detail": "Admin login required"})
-    return FileResponse(
-        path="templates/admin_dashboard.html",
-        media_type="text/html",
-        filename="admin_dashboard.html",
-        headers={"Content-Disposition": "attachment; filename=admin_dashboard.html"}
-    )
+    # The dashboard is a Jinja template that includes partials, so serve the RENDERED page; the raw file would contain unresolved
+    # {% include %} tags. Same attachment behaviour and filename as before.
+    try:
+        body = templates.env.get_template("admin_dashboard.html").render({"request": request})
+    except Exception:
+        return JSONResponse(status_code=500, content={"detail": "Could not render the dashboard"})
+    return Response(content=body, media_type="text/html",
+                    headers={"Content-Disposition": "attachment; filename=admin_dashboard.html"})
 
 # ── Public gift-voucher endpoint ──
 @app.get("/gift-vouchers")
@@ -322,6 +325,30 @@ def startup():
             print("⚠️  WhatsApp consent indexes skipped (see logs)")
     except Exception as e:
         print(f"⚠️  WhatsApp consent indexes skipped ({type(e).__name__})")
+    # WhatsApp campaign audit collection (Phase 2A): indexes only; sending stays disabled unless explicitly enabled.
+    try:
+        from services import wa_campaign_audit as _wa_camp_audit
+        if not _wa_camp_audit.ensure_indexes_safe():
+            print("⚠️  WhatsApp campaign audit indexes skipped (see logs)")
+    except Exception as e:
+        print(f"⚠️  WhatsApp campaign audit indexes skipped ({type(e).__name__})")
+    # WhatsApp campaign collections (Phase 2D): indexes only on NEW collections; nothing is processed or sent at startup.
+    try:
+        from services import wa_campaign_manager as _wa_camp_mgr
+        if not _wa_camp_mgr.ensure_indexes_safe():
+            print("⚠️  WhatsApp campaign indexes skipped (see logs)")
+    except Exception as e:
+        print(f"⚠️  WhatsApp campaign indexes skipped ({type(e).__name__})")
+    # WhatsApp campaign worker + delivery tracking (Phase 2E/2F). The delivery handler is passive; the worker thread starts ONLY when
+    # WA_CAMPAIGN_WORKER_ENABLED is on (default OFF, refused on Production) and still re-checks every gate before every message.
+    try:
+        from services import wa_campaign_worker as _wa_worker
+        from services import wa_delivery as _wa_delivery
+        _wa_worker.ensure_indexes_safe()
+        _wa_delivery.register()
+        _wa_worker.start_worker_if_enabled()
+    except Exception as e:
+        print(f"⚠️  WhatsApp worker setup skipped ({type(e).__name__})")
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
         from routers.otp_service import _ensure_otp_indexes
@@ -570,7 +597,7 @@ def serve_admin_dashboard(request: Request):
             request.headers.get("Authorization", "").replace("Bearer ", "")
     if not token:
         return RedirectResponse(url="/admin", status_code=307)
-    session_user = db.dashboard_users.find_one({"token": token}) or db.admins.find_one({"token": token})
+    session_user = db.dashboard_users.find_one({"token": token})      # legacy admins.token sessions were retired (Patch B)
     if not session_user:
         return RedirectResponse(url="/admin", status_code=307)
     try:

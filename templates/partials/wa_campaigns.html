@@ -1,0 +1,75 @@
+<!-- ═══════════════════════════════════════════════════════════════
+     WhatsApp Campaigns (Phase 2G). Included by admin_dashboard.html. Logic: /static/js/wa_campaigns.js, styles: /static/css/wa_campaigns.css.
+     Everything here talks to the existing /admin/whatsapp-campaigns API; the server decides permissions, consent and sending.
+     Screens: overview, campaigns (editor, review, test send, run, recipients), audience, templates, consent, audit.
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="section-wa_campaigns" class="section wac">
+  <div class="page-title"><i class="fab fa-whatsapp me-2" style="color:#25D366"></i>WhatsApp Campaigns</div>
+
+  <!-- permission denied / blocking error for the whole module -->
+  <div id="wac_denied" class="wac-state" hidden>
+    <div class="wac-state-icon"><i class="fas fa-lock"></i></div>
+    <div class="wac-state-title">Access denied</div>
+    <div class="wac-state-text" id="wac_denied_text">You do not have permission to view WhatsApp Campaigns. Ask a Super Admin to grant the module to your role.</div>
+  </div>
+
+  <div id="wac_body">
+    <div class="wac-notice"><i class="fas fa-shield-alt me-1"></i>
+      Opening this page, or saving a campaign, never sends a message. Sending is controlled by the server-side environment guard, keys, kill switch, consent
+      checks and explicit confirmations. The environment guard covers both the bulk worker and single-number test sends.</div>
+
+    <div class="wac-tabs" id="wac_tabs" role="tablist" aria-label="WhatsApp Campaigns sections"></div>
+
+    <!-- OVERVIEW: environment, sending switch, worker -->
+    <div class="wac-pane" id="wac_pane_overview">
+    <div class="section-header">
+      <div class="wac-h">Sending status</div>
+      <button type="button" class="btn-p" id="wac_refresh"><i class="fas fa-sync me-1"></i> Refresh</button>
+    </div>
+    <div class="row g-3 wac-cards" id="wac_cards" aria-live="polite">
+      <div class="col-12"><div class="wac-loading"><i class="fas fa-spinner fa-spin"></i> Loading status...</div></div>
+    </div>
+
+    </div>
+
+    <!-- CAMPAIGNS: list + editor/review/test/run/recipients -->
+    <div class="wac-pane" id="wac_pane_campaigns" hidden>
+    <div id="wac_list_view">
+    <div class="section-header">
+      <div class="wac-h">Campaigns</div>
+      <button type="button" class="btn-p" data-act="new-campaign"><i class="fas fa-plus me-1"></i> New campaign</button>
+    </div>
+    <div class="wac-chips" id="wac_chips" role="group" aria-label="Filter by status"></div>
+    <div id="wac_list_msg" class="wac-msg" role="status"></div>
+    <div class="table-wrap">
+      <table class="wac-table" style="min-width:860px">
+        <thead><tr>
+          <th style="min-width:200px">Name</th>
+          <th style="min-width:100px">Status</th>
+          <th style="min-width:170px">Template</th>
+          <th style="min-width:80px;text-align:right">Eligible</th>
+          <th style="min-width:150px">Scheduled for (IST)</th>
+          <th style="min-width:120px">Created by</th>
+          <th style="min-width:150px">Updated (IST)</th>
+        </tr></thead>
+        <tbody id="wac_list"><tr><td colspan="7" class="wac-cell-state"><i class="fas fa-spinner fa-spin"></i> Loading campaigns...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="wac-pager">
+      <span id="wac_count" class="wac-muted"></span>
+      <div>
+        <button type="button" class="btn-o" id="wac_prev" disabled>&larr; Prev</button>
+        <button type="button" class="btn-o" id="wac_next" disabled>Next &rarr;</button>
+      </div>
+    </div>
+    </div>
+    <div id="wac_detail" hidden></div>
+    </div>
+
+    <div class="wac-pane" id="wac_pane_audience" hidden></div>
+    <div class="wac-pane" id="wac_pane_templates" hidden></div>
+    <div class="wac-pane" id="wac_pane_consent" hidden></div>
+    <div class="wac-pane" id="wac_pane_audit" hidden></div>
+  </div>
+  <div id="wac_toast" class="wac-toast" role="status" aria-live="polite"></div>
+</div>

@@ -198,7 +198,7 @@ GET /merchant/dashboard
 ## Admin APIs
 
 ```
-POST /admin/login
+POST /admin/login            (retired: always 410. Sign in at /admin: POST /admin/auth/login, then /admin/auth/verify-otp)
 
 GET /admin/merchants
 POST /admin/merchant/disable
