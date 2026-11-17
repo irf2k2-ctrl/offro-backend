@@ -64,7 +64,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
     _tb.print_exc()  # full traceback still goes to Railway logs for debugging
     return JSONResponse(
         status_code=500,
-        content={"detail": "Something went wrong. Please try again."},
+        content={"detail": f"{type(exc).__name__}: {exc}"},
     )
 
 @app.exception_handler(StarletteHTTPException)

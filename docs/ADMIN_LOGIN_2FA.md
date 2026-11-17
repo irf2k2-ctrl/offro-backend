@@ -157,3 +157,9 @@ Known limits (honest list):
   claims, and refuses to sign in if neither names the number. The first Staging run logs the reply SHAPE (key names and types only) to settle this.
 - The login page's CSP (only that page) allows `*.msg91.com` and common captcha hosts. Confirm in the browser console on Staging.
 - OTP length/expiry are widget settings. The page has four boxes; if the widget issues 6 digits, set the widget to 4 or the page needs six boxes.
+
+Page rule (regression, "OTP not provided in verifyOtp() method"): the login page must never declare a function named `sendOtp`, `retryOtp`, `verifyOtp`,
+`getWidgetData` or `isCaptchaVerified`. The SDK installs those names on `window`; a page function with the same name made the Verify button call the SDK with no
+argument. The page's own handler is `submitOtp()`; it reads the code from the four on-page boxes (exposeMethods hides the SDK's own UI, so there is no Shadow DOM
+input to read) and passes it as a string to the SDK method captured after `initSendOTP`. `test_security_admin_login_browser.py` runs the real page in headless
+Chromium against a stand-in SDK (needs `pip install playwright` + Chromium; skipped when absent); static equivalents run everywhere.

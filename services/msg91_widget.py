@@ -216,7 +216,9 @@ def login_page_csp(base: str) -> str:
         elif name == "connect-src":
             part += " " + _MSG91_HOSTS + " " + _CAPTCHA_HOSTS
         elif name == "style-src":
-            part += " " + _CAPTCHA_HOSTS
+            part += " " + _MSG91_HOSTS + " " + _CAPTCHA_HOSTS
+        elif name == "font-src":
+            part += " " + _MSG91_HOSTS
         out.append(part)
     if not any(p.startswith("frame-src") for p in out):
         out.append("frame-src " + _CAPTCHA_HOSTS + " " + _MSG91_HOSTS)

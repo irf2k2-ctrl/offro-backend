@@ -152,12 +152,12 @@ body {
         <input type="text" class="otp-box" maxlength="1" inputmode="numeric" data-index="3" oninput="onOtpInput(this)" onkeydown="onOtpKeydown(event,this)">
     </div>
 
-    <button class="btn-main" id="verifyBtn" onclick="verifyOtp()">
+    <button class="btn-main" id="verifyBtn" onclick="submitOtp()">
         <i class="fas fa-check-circle me-1"></i> Verify & Login
     </button>
 
     <p id="otpMsg" class="mt-3 mb-0"></p>
-    <button class="back-btn" id="retryVerifyBtn" onclick="verifyOtp()" style="display:none;margin:10px auto 0;"><i class="fas fa-redo me-1"></i> Try again</button>
+    <button class="back-btn" id="retryVerifyBtn" onclick="submitOtp()" style="display:none;margin:10px auto 0;"><i class="fas fa-redo me-1"></i> Try again</button>
 
     <div style="margin-top:12px;display:flex;flex-direction:column;align-items:center;gap:6px;">
         <button class="resend-btn" id="resendBtn" onclick="resendOtp()" disabled>
@@ -176,6 +176,7 @@ body {
 // is ignored. The only widget settings here are the PUBLIC ones the server returns (widget id + public token); no server key is ever sent.
 let _challengeId = "";          // opaque, single-use token from the server; kept in memory only
 let _provider = "";             // "widget" (MSG91 widget) or "local" (Staging fixed-code test accounts)
+let _wm = null;                 // the MSG91 SDK methods {send, retry, verify}, captured after initSendOTP
 let _widgetReady = null;        // promise: the MSG91 SDK is loaded and its methods are exposed
 let _resendCountdown = 0;
 let _resendInterval = null;
@@ -200,7 +201,10 @@ function loadWidget(cfg) {
             try { window.initSendOTP(window.__otpConfiguration); } catch (e) { reject(e); return; }
             let tries = 0;
             const wait = setInterval(() => {
-                if (typeof window.sendOtp === "function" && typeof window.verifyOtp === "function" && typeof window.retryOtp === "function") { clearInterval(wait); resolve(); }
+                if (typeof window.sendOtp === "function" && typeof window.verifyOtp === "function" && typeof window.retryOtp === "function") {
+                    _wm = { send: window.sendOtp, retry: window.retryOtp, verify: window.verifyOtp };   // the SDK's own methods, captured once
+                    clearInterval(wait); resolve();
+                }
                 else if (++tries > 50) { clearInterval(wait); reject(new Error("widget methods unavailable")); }
             }, 100);
         };
@@ -237,8 +241,8 @@ async function widgetSend() {
             resolve({ ok: false, message: msg, retry: true, status: 0 });
         };
         try {
-            if (data.first) window.sendOtp(data.identifier, () => done(true), (e) => done(false, e));
-            else window.retryOtp(null, () => done(true), (e) => done(false, e));       // null = the widget's default channel (SMS)
+            if (data.first) _wm.send.call(window, data.identifier, () => done(true), (e) => done(false, e));
+            else _wm.retry.call(window, null, () => done(true), (e) => done(false, e));       // null = the widget's default channel (SMS)
         } catch (e) { done(false, e); }
     });
 }
@@ -368,7 +372,7 @@ function onOtpInput(el) {
         if (idx === 3) {
             let allFilled = true;
             document.querySelectorAll(".otp-box").forEach(b => { if (!b.value) allFilled = false; });
-            if (allFilled) verifyOtp();
+            if (allFilled) submitOtp();
         }
     } else {
         el.classList.remove("filled");
@@ -389,7 +393,7 @@ function onOtpKeydown(e, el) {
         let next = document.querySelector(".otp-box[data-index='" + (idx + 1) + "']");
         if (next) next.focus();
     }
-    if (e.key === "Enter") { e.preventDefault(); verifyOtp(); }
+    if (e.key === "Enter") { e.preventDefault(); submitOtp(); }
 }
 
 function getOtpValue() {
@@ -398,7 +402,10 @@ function getOtpValue() {
     return otp;
 }
 
-async function verifyOtp() {
+// NOTE: this page function must NOT be called verifyOtp / sendOtp / retryOtp / getWidgetData / isCaptchaVerified: the MSG91 SDK (exposeMethods)
+// installs those names on `window` and would replace (or be replaced by) a same-named page function. A page function called verifyOtp made the button
+// call the SDK's verifyOtp() with no argument -> "OTP not provided in verifyOtp() method".
+async function submitOtp() {
     let otp   = getOtpValue();
     let msgEl = document.getElementById("otpMsg");
     let btn   = document.getElementById("verifyBtn");
@@ -422,7 +429,8 @@ async function verifyOtp() {
         // The widget checks the typed code with MSG91 and gives back an access token. Only that token is sent on; the server verifies it.
         const w = await new Promise(resolve => {
             try {
-                window.verifyOtp(otp, (d) => resolve({ ok: true, token: pickAccessToken(d) }), () => resolve({ ok: false }));
+                if (!_wm) throw new Error("widget not loaded");
+                _wm.verify.call(window, String(otp), (d) => resolve({ ok: true, token: pickAccessToken(d) }), () => resolve({ ok: false }));
             } catch (e) { resolve({ ok: false, broken: true }); }
         });
         if (!w.ok || !w.token) {

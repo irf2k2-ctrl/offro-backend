@@ -420,8 +420,30 @@ def test_only_the_login_page_may_load_the_msg91_widget():
 
 def test_the_page_loads_the_official_sdk_with_exposed_methods_and_the_documented_calls():
     page = open("templates/admin_login.html", encoding="utf-8").read()
-    for needle in ("https://verify.msg91.com/otp-provider.js", "exposeMethods: true", "window.sendOtp(", "window.retryOtp(null", "window.verifyOtp("):
-        assert needle in page
+    for needle in ("https://verify.msg91.com/otp-provider.js", "exposeMethods: true", "window.sendOtp", "window.retryOtp", "window.verifyOtp",
+                   "_wm.retry.call(window, null,", "_wm.verify.call(window, String(otp),", "_wm.send.call(window, data.identifier,"):
+        assert needle in page, needle
+
+
+def test_the_page_never_defines_a_function_named_like_an_sdk_method():
+    """Regression: a page function called verifyOtp() shadowed/was shadowed by the SDK's window.verifyOtp, so the Verify button called the SDK with
+    no OTP ('OTP not provided in verifyOtp() method'). None of the SDK's exposed names may be declared, assigned or used as a handler by the page."""
+    import re
+    page = open("templates/admin_login.html", encoding="utf-8").read()
+    for name in ("sendOtp", "retryOtp", "verifyOtp", "getWidgetData", "isCaptchaVerified"):
+        assert not re.search(r"function\s+" + name + r"\b", page), name
+        assert not re.search(r"\b(?:var|let|const)\s+" + name + r"\b", page), name
+        assert not re.search(r"window\." + name + r"\s*=(?!=)", page), name
+        assert not re.search(r"on\w+=\"[^\"]*\b" + name + r"\s*\(", page), name          # no inline handler calls an SDK name
+    # every Verify entry point (button, retry button, 4th digit, Enter key) goes through the page's own submitOtp
+    assert page.count('onclick="submitOtp()"') == 2 and "if (allFilled) submitOtp();" in page and "submitOtp(); }" in page
+
+
+def test_the_login_page_csp_allows_the_widget_hosts_and_still_blocks_eval_and_framing():
+    csp = client().get("/admin").headers["content-security-policy"]
+    parts = {p.split(" ", 1)[0]: p for p in csp.split("; ")}
+    assert "https://*.msg91.com" in parts["script-src"] and "https://*.msg91.com" in parts["connect-src"] and "https://*.msg91.com" in parts["style-src"]
+    assert "'unsafe-eval'" not in csp and "frame-ancestors 'none'" in csp and "object-src 'none'" in csp and "default-src 'self'" in csp
 
 
 def test_nothing_secret_is_ever_printed(capsys, env):
