@@ -66,7 +66,7 @@ def handle_status(msg_id="", recipient="", status="", timestamp="", raw=None, **
         phone = C.normalize_phone(recipient, whatsapp_id=True) if recipient else ""
         if phone and coll.count_documents({"phone": phone, "state": "sending", "send_started": True}, limit=1):
             raise DeliveryPending()                           # id not saved yet: let Phase 1 retry the webhook
-        logger.info("[WA-Delivery] status for an unknown message id ignored (%s, to=%s)", status, mask_phone(recipient))
+        logger.info("[WA-Delivery] status for an unknown message id ignored (%s)", status)
         return "ignored_unknown"
     now = datetime.utcnow()
     if status == "failed":

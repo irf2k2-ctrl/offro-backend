@@ -208,3 +208,15 @@ async def send_template_test(request: Request, a=Depends(get_current_admin)):
     db[AUDIT].update_one({"_id": audit_id}, {"$set": {"status": "sent", "message_id": result.get("message_id", "")}})
     return {"ok": True, "sent": True, "message_id": result.get("message_id", ""), "template": TEMPLATE_NAME,
             "language": TEMPLATE_LANG, "template_status": tpl["status"], "to_last4": phone[-4:], "header_source": kind}
+
+
+@router.get("/whatsapp/template-test/status")
+async def template_test_delivery_status(ref: str = "", a=Depends(get_current_admin)):
+    """READ-ONLY. Delivery status Meta reported for one template-test message (sent / delivered / read / failed + Meta's numeric
+    error code). Found ONLY by the `ref` fingerprint (m_ + 12 hex) shown in the '[WA-Webhook][diag]' log lines; a full message id
+    is never accepted here, so it can never end up in a URL or an access log. Returns only safe fields; sends nothing."""
+    from services import wa_template_test_delivery as delivery
+    found = delivery.lookup(ref=ref)
+    if not found:
+        raise HTTPException(404, "No template test found for that message")
+    return found

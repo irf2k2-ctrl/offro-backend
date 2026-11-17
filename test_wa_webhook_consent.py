@@ -962,7 +962,7 @@ def test_no_raw_payload_or_full_phone_in_logs_or_stdout(client, sent, monkeypatc
         assert "my secret order" not in blob and "Asha Kumar" not in blob
         assert "WHATSAPP PAYLOAD RECEIVED" not in blob and "Replying to" not in blob
         assert SECRET not in blob
-    assert "***3210" in caplog.text
+    assert "3210" not in caplog.text            # stricter policy: not even a masked phone is logged
 
 
 def test_meta_error_details_are_redacted(client, caplog):
@@ -982,7 +982,7 @@ def test_redact_and_mask_helpers(monkeypatch):
     assert S.payload_summary(None) == "unparseable"
 
 
-def test_send_whatsapp_message_logs_masked_phone_and_keeps_return_values(monkeypatch, caplog):
+def test_send_whatsapp_message_logs_no_phone_and_keeps_return_values(monkeypatch, caplog):
     monkeypatch.setattr(WA, "WHATSAPP_ACCESS_TOKEN", "EAAtesttokentesttoken")
     monkeypatch.setattr(WA, "WHATSAPP_PHONE_NUMBER_ID", "PNID")
     caplog.set_level(logging.INFO)
@@ -1001,13 +1001,13 @@ def test_send_whatsapp_message_logs_masked_phone_and_keeps_return_values(monkeyp
     res = WA.send_whatsapp_message("919876543210", "hi")
     assert res["ok"] is False and "919876543210" in res["error"]       # returned value unchanged (callers/audit)
     assert "919876543210" not in caplog.text and "9876543210" not in caplog.text
-    assert "EAAtesttokentesttoken" not in caplog.text and "***3210" in caplog.text
+    assert "EAAtesttokentesttoken" not in caplog.text and "3210" not in caplog.text and "wamid.X" not in caplog.text
 
 
 def test_live_chat_store_log_is_masked(caplog):
     caplog.set_level(logging.INFO)
     WC.store_incoming_message(SENDER, "Asha Kumar", SENDER, "text", "hello", "wamid.Z", "1762843200", raw_msg={})
-    assert "Stored text from ***3210" in caplog.text
+    assert "Stored text cid=" in caplog.text and "3210" not in caplog.text
     assert SENDER not in caplog.text and "Asha Kumar" not in caplog.text
 
 

@@ -22,6 +22,7 @@ from services.whatsapp import WHATSAPP_VERIFY_TOKEN, send_whatsapp_message, send
 from services.wa_webhook_security import (check_signature, tokens_equal, mask_phone, safe_error, payload_summary,
                                           exc_summary, install_access_log_redaction, MAX_BODY_BYTES)
 from services import wa_consent as consent
+from services import wa_webhook_diag as diag   # visible, privacy-safe diagnostics (never raises)
 import routers.wa_chat as _wa_chat
 from routers.wa_chat import store_incoming_message
 
@@ -120,6 +121,7 @@ async def whatsapp_webhook(request: Request):
 
     # Counts only - the payload itself (phone numbers, names, message text) is never printed or logged.
     logger.info("[WA-Webhook] Received %s", payload_summary(body))
+    diag.event(body)   # visible: object type, change field(s), counts
 
     # Guard: only process whatsapp_business_account events
     if body.get("object") != "whatsapp_business_account":
@@ -214,9 +216,9 @@ def reply_to_sender(sender_phone: str, message: str) -> dict:
     """
     result = send_whatsapp_message(sender_phone, message)
     if result.get("ok"):
-        logger.info("[WA-Webhook] 📤 Reply sent to %s — id=%s", mask_phone(sender_phone), result.get("message_id"))
+        logger.info("[WA-Webhook] 📤 Reply sent — ref=%s", diag.msg_ref(result.get("message_id")))
     else:
-        logger.error("[WA-Webhook] ❌ Reply failed to %s — %s", mask_phone(sender_phone), safe_error(result.get("error")))
+        logger.error("[WA-Webhook] ❌ Reply failed — %s", safe_error(result.get("error")))
     return result
 
 
@@ -239,15 +241,15 @@ def _handle_messages(value: dict) -> bool:
         key = ("msg:" + msg_id) if msg_id else ""
         claim = consent.claim_event(key) if key else consent.Claim("claimed")
         if claim == "duplicate":
-            logger.info("[WA-Webhook] ♻️  Duplicate delivery of message id=%s ignored", msg_id)
+            logger.info("[WA-Webhook] ♻️  Duplicate delivery of message ref=%s ignored", diag.msg_ref(msg_id))
             continue
         if claim == "abandoned":
-            logger.warning("[WA-Webhook] Message id=%s abandoned after repeated stalled attempts — skipped", msg_id)
+            logger.warning("[WA-Webhook] Message ref=%s abandoned after repeated stalled attempts — skipped", diag.msg_ref(msg_id))
             continue
         if claim == "busy":
             # Another worker holds a live lease. Do not process (no duplicate work); Meta's retry will find the
             # event done, or reclaim it once the lease has expired.
-            logger.info("[WA-Webhook] Message id=%s is being processed by another worker — asking Meta to retry", msg_id)
+            logger.info("[WA-Webhook] Message ref=%s is being processed by another worker — asking Meta to retry", diag.msg_ref(msg_id))
             needs_retry = True
             continue
         # 'unavailable' = the claim store is down: still store the message and run handlers, but send no
@@ -258,8 +260,8 @@ def _handle_messages(value: dict) -> bool:
             outcome = _handle_one_message(msg, metadata, contact_map, replies_ok=claim in ("claimed", "retry"),
                                           key=key if tracked else "", retried=(claim == "retry"), token=token)
         except Exception as e:
-            logger.error("[WA-Webhook] ❌ Message %s processing failed (%s) — asking Meta to retry",
-                         msg_id, exc_summary(e))
+            logger.error("[WA-Webhook] ❌ Message ref=%s processing failed (%s) — asking Meta to retry",
+                         diag.msg_ref(msg_id), exc_summary(e))
             outcome = "retry"
         if outcome == "retry":
             needs_retry = True
@@ -306,22 +308,21 @@ def _auto_reply(key: str, token: str, sender: str, text: str) -> str:
     outcome = res.get("outcome")
     if outcome == "sent":
         consent.finish_reply_slot(key, token, "sent")
-        logger.info("[WA-Webhook] 📤 Reply sent to %s — id=%s", mask_phone(sender), res.get("message_id"))
+        logger.info("[WA-Webhook] 📤 Reply sent — ref=%s", diag.msg_ref(res.get("message_id")))
         return "sent"
     if outcome == "rejected_retryable":
         if consent.release_reply_slot(key, token):
-            logger.error("[WA-REPLY-REJECTED] retryable rejection (code=%s) to %s — slot released for retry",
-                         res.get("error_code"), mask_phone(sender))
+            logger.error("[WA-REPLY-REJECTED] retryable rejection (code=%s) — slot released for retry",
+                         res.get("error_code"))
             return "retryable"
         outcome = "uncertain"                     # could not release -> slot stays 'sending': never resent
     if outcome == "rejected_permanent":
         consent.finish_reply_slot(key, token, "rejected")
-        logger.error("[WA-REPLY-REJECTED] permanent rejection (code=%s) to %s — not retried",
-                     res.get("error_code"), mask_phone(sender))
+        logger.error("[WA-REPLY-REJECTED] permanent rejection (code=%s) — not retried",
+                     res.get("error_code"))
         return "rejected"
     consent.finish_reply_slot(key, token, "uncertain")
-    logger.error("[WA-REPLY-UNCERTAIN] delivery to %s could not be confirmed — NOT resent automatically",
-                 mask_phone(sender))
+    logger.error("[WA-REPLY-UNCERTAIN] delivery could not be confirmed — NOT resent automatically")
     return "uncertain"
 
 
@@ -344,14 +345,14 @@ def _handle_one_message(msg: dict, metadata: dict, contact_map: dict, replies_ok
 
     # No phone number, profile name or message text in logs.
     logger.info(
-        "[WA-Webhook] 📩 Message from %s — type=%s id=%s ts=%s len=%d",
-        mask_phone(sender), msg_type, msg_id, timestamp, len(text_body),
+        "[WA-Webhook] 📩 Message received — type=%s ref=%s ts=%s len=%d",
+        msg_type, diag.msg_ref(msg_id), timestamp, len(text_body),
     )
 
     # ── Persist incoming message to DB (Live Chat) — always, STOP/START included ─────
     store_failed = False
     if retried and msg_id and _in_live_chat(msg_id):
-        logger.info("[WA-Webhook] Message %s already in Live Chat from the earlier attempt", msg_id)
+        logger.info("[WA-Webhook] Message ref=%s already in Live Chat from the earlier attempt", diag.msg_ref(msg_id))
     elif store_incoming_message(
         phone=sender,
         name=sender_name,
@@ -363,7 +364,7 @@ def _handle_one_message(msg: dict, metadata: dict, contact_map: dict, replies_ok
         raw_msg=msg,          # pass full raw msg so wa_chat can extract media_id
     ) is False:
         store_failed = True   # Live Chat could not save it: ask Meta to retry (see below)
-        logger.error("[WA-Webhook] ❌ Live Chat store FAILED for message %s", msg_id)
+        logger.error("[WA-Webhook] ❌ Live Chat store FAILED for message ref=%s", diag.msg_ref(msg_id))
 
     outcome = "retry" if store_failed else "ok"
     # The reply slot (not a flag) enforces at-most-once; replies_ok is False only when the claim store is down.
@@ -428,8 +429,8 @@ def _handle_consent_keyword(keyword: str, sender: str, msg: dict, key: str, may_
         # START: no reply at all (never message someone on the strength of an unverifiable opt-in).
         # STOP : never silently dropped - the sender is told it was NOT processed ("please reply STOP again") and a
         #        monitored line is logged so a genuine STOP can be actioned by hand if it keeps recurring.
-        logger.error("[WA-CONSENT-INVALID-TIMESTAMP] event=%s phone=%s msg_id=%s ts=%s — future timestamp, "
-                     "consent NOT changed", event, mask_phone(sender), msg.get("id", ""),
+        logger.error("[WA-CONSENT-INVALID-TIMESTAMP] event=%s ref=%s ts=%s — future timestamp, "
+                     "consent NOT changed", event, diag.msg_ref(msg.get("id", "")),
                      str(msg.get("timestamp", ""))[:12])
         if not stop:
             return "ok"
@@ -438,27 +439,26 @@ def _handle_consent_keyword(keyword: str, sender: str, msg: dict, key: str, may_
         return "retry" if res == "retryable" else "ok"
     except Exception as e:
         # Monitored line: alert on "[WA-CONSENT-FAILURE]".
-        logger.error("[WA-CONSENT-FAILURE] event=%s phone=%s msg_id=%s error=%s — no confirmation sent",
-                     event, mask_phone(sender), msg.get("id", ""), exc_summary(e))
+        logger.error("[WA-CONSENT-FAILURE] event=%s ref=%s error=%s — no confirmation sent",
+                     event, diag.msg_ref(msg.get("id", "")), exc_summary(e))
         notice = consent.STOP_FAILURE_NOTICE if stop else consent.START_FAILURE_NOTICE
         res = _auto_reply(key, token, sender, notice) if may_reply else "blocked"
         sent = res in ("sent", "already")
         consent.note_consent_failure(key, keyword, sent, token)
         if sent:
             return "ok"
-        logger.error("[WA-CONSENT-FAILURE] event=%s phone=%s msg_id=%s failure notice NOT sent — requesting Meta retry",
-                     event, mask_phone(sender), msg.get("id", ""))
+        logger.error("[WA-CONSENT-FAILURE] event=%s ref=%s failure notice NOT sent — requesting Meta retry",
+                     event, diag.msg_ref(msg.get("id", "")))
         return "retry"
 
     if result == "applied":
-        logger.info("[WA-Webhook] 🔕 Consent recorded for %s — %s", mask_phone(sender), event)
+        logger.info("[WA-Webhook] 🔕 Consent recorded — %s", event)
         if may_reply:
             res = _auto_reply(key, token, sender, consent.STOP_CONFIRMATION if stop else consent.START_CONFIRMATION)
             if res == "retryable":
                 return "retry"
     else:
-        logger.info("[WA-Webhook] Consent %s for %s superseded by a newer event — no confirmation",
-                    event, mask_phone(sender))
+        logger.info("[WA-Webhook] Consent %s superseded by a newer event — no confirmation", event)
     return "ok"
 
 
@@ -485,22 +485,23 @@ def _handle_statuses(value: dict) -> bool:
 
         key = "status:%s:%s:%s" % (msg_id, status_val, timestamp) if msg_id else ""
         claim = consent.claim_event(key) if key else consent.Claim("claimed")
+        diag.status(status, str(claim))   # visible: status, ts, Meta error code, message fingerprint, claim outcome
         if claim == "duplicate":
-            logger.info("[WA-Webhook] ♻️  Duplicate status update ignored — msg_id=%s status=%s", msg_id, status_val)
+            logger.info("[WA-Webhook] ♻️  Duplicate status update ignored — ref=%s status=%s", diag.msg_ref(msg_id), diag.safe_word(status_val))
             continue
         if claim == "abandoned":
-            logger.warning("[WA-Webhook] Status update msg_id=%s abandoned after repeated stalled attempts", msg_id)
+            logger.warning("[WA-Webhook] Status update ref=%s abandoned after repeated stalled attempts", diag.msg_ref(msg_id))
             continue
         if claim == "busy":
-            logger.info("[WA-Webhook] Status update msg_id=%s is being processed by another worker — retry", msg_id)
+            logger.info("[WA-Webhook] Status update ref=%s is being processed by another worker — retry", diag.msg_ref(msg_id))
             needs_retry = True
             continue
         tracked = bool(key) and claim != "unavailable"
         token = getattr(claim, "token", "") if tracked else ""
 
         logger.info(
-            "[WA-Webhook] 📋 Status update — msg_id=%s recipient=%s status=%s ts=%s",
-            msg_id, mask_phone(recipient), status_val, timestamp,
+            "[WA-Webhook] 📋 Status update — ref=%s status=%s ts=%s",
+            diag.msg_ref(msg_id), diag.safe_word(status_val), diag.safe_digits(timestamp),
         )
 
         already = consent.handlers_done(key) if tracked and claim == "retry" else set()

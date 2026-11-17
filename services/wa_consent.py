@@ -491,8 +491,8 @@ def claim_event(event_key: str) -> "Claim":
                 {"_id": event_key, "state": "processing", "attempts": {"$gte": MAX_ATTEMPTS}},
                 {"$set": {"state": "abandoned", "updated_at": now}})
             if res.modified_count:
-                logger.error("[WA-EVENT-ABANDONED] event=%s attempts exhausted after a stalled worker - "
-                             "event NOT processed", event_key)
+                logger.error("[WA-EVENT-ABANDONED] event_ref=%s attempts exhausted after a stalled worker - "
+                             "event NOT processed", hashlib.sha256(str(event_key).encode("utf-8")).hexdigest()[:12])
             return Claim("abandoned")
         return Claim("duplicate")
     except Exception as e:

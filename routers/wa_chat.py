@@ -264,7 +264,7 @@ def store_incoming_message(phone: str, name: str, whatsapp_id: str,
             {"_id": ObjectId(cid)},
             {"$inc": {"unread_count": 1}}
         )
-        logger.info("[WA-Chat] 💾 Stored %s from %s cid=%s", msg_type, mask_phone(phone), cid)
+        logger.info("[WA-Chat] 💾 Stored %s cid=%s", msg_type, cid)
         return True
     except Exception as e:
         logger.error("[WA-Chat] ❌ Failed to store incoming message (%s)", exc_summary(e))

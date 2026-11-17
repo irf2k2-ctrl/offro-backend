@@ -14,6 +14,7 @@ import requests
 import io
 
 from services.wa_webhook_security import mask_phone, safe_error, exc_summary
+from services.wa_webhook_diag import msg_ref            # log-safe message fingerprint (full ids / phones are never logged)
 
 logger = logging.getLogger("offro.whatsapp")
 
@@ -67,16 +68,16 @@ def send_whatsapp_message(phone_number: str, message: str) -> dict:
         data = resp.json()
         if resp.status_code == 200 and "messages" in data:
             msg_id = data["messages"][0].get("id", "")
-            logger.info("[WA] ✅ Message sent to %s — id=%s", mask_phone(phone), msg_id)
+            logger.info("[WA] ✅ Message sent — ref=%s", msg_ref(msg_id))
             return {"ok": True, "message_id": msg_id}
         else:
             error_msg = data.get("error", {}).get("message", str(data))
-            logger.error("[WA] ❌ Failed to send to %s — %s", mask_phone(phone), safe_error(error_msg))
+            logger.error("[WA] ❌ Failed to send — %s", safe_error(error_msg))
             return {"ok": False, "error": error_msg}
     except requests.exceptions.Timeout:
         return {"ok": False, "error": "Request timed out"}
     except Exception as e:
-        logger.error("[WA] ❌ Unexpected error sending to %s (%s)", mask_phone(phone), exc_summary(e))
+        logger.error("[WA] ❌ Unexpected error sending (%s)", exc_summary(e))
         return {"ok": False, "error": str(e)}
 
 
@@ -128,7 +129,7 @@ def send_whatsapp_message_checked(phone_number: str, message: str) -> dict:
     try:
         resp = requests.post(_messages_url(), headers=_headers(), json=payload, timeout=10)
     except Exception as e:              # timeout / connection loss: the request may have reached Meta
-        logger.error("[WA] ❌ Send to %s outcome uncertain (%s)", mask_phone(phone), exc_summary(e))
+        logger.error("[WA] ❌ Send outcome uncertain (%s)", exc_summary(e))
         return {"ok": False, "outcome": "uncertain", "error_code": None}
     try:
         data = resp.json()
@@ -137,9 +138,9 @@ def send_whatsapp_message_checked(phone_number: str, message: str) -> dict:
     outcome, code = classify_send_response(resp.status_code, data)
     if outcome == "sent":
         mid = data["messages"][0].get("id", "")
-        logger.info("[WA] ✅ Message sent to %s — id=%s", mask_phone(phone), mid)
+        logger.info("[WA] ✅ Message sent — ref=%s", msg_ref(mid))
         return {"ok": True, "outcome": "sent", "message_id": mid}
-    logger.error("[WA] ❌ Send to %s %s — http=%s code=%s", mask_phone(phone), outcome, resp.status_code, code)
+    logger.error("[WA] ❌ Send %s — http=%s code=%s", outcome, resp.status_code, code)
     return {"ok": False, "outcome": outcome, "error_code": code}
 
 
@@ -178,7 +179,7 @@ def send_whatsapp_template_checked(phone_number, template_name, language_code, c
     try:
         resp = requests.post(_messages_url(), headers=_headers(), json=payload, timeout=10)
     except Exception as e:
-        logger.error("[WA] Template send to %s outcome uncertain (%s)", mask_phone(phone), exc_summary(e))
+        logger.error("[WA] Template send outcome uncertain (%s)", exc_summary(e))
         return {"ok": False, "outcome": "uncertain", "error_code": None}
     try:
         data = resp.json()
@@ -187,9 +188,9 @@ def send_whatsapp_template_checked(phone_number, template_name, language_code, c
     outcome, code = classify_send_response(resp.status_code, data)
     if outcome == "sent":
         mid = data["messages"][0].get("id", "")
-        logger.info("[WA] Template %s sent to %s - id=%s", template_name, mask_phone(phone), mid)
+        logger.info("[WA] Template %s sent - ref=%s", template_name, msg_ref(mid))
         return {"ok": True, "outcome": "sent", "message_id": mid}
-    logger.error("[WA] Template send to %s %s - http=%s code=%s", mask_phone(phone), outcome, resp.status_code, code)
+    logger.error("[WA] Template send %s - http=%s code=%s", outcome, resp.status_code, code)
     return {"ok": False, "outcome": outcome, "error_code": code}
 
 
@@ -377,10 +378,10 @@ def send_whatsapp_image(phone_number: str, media_id: str, caption: str = "") -> 
         data = resp.json()
         if resp.status_code == 200 and "messages" in data:
             msg_id = data["messages"][0].get("id", "")
-            logger.info("[WA] ✅ Image sent to %s — msg_id=%s media_id=%s", mask_phone(phone), msg_id, media_id)
+            logger.info("[WA] ✅ Image sent — ref=%s media_id=%s", msg_ref(msg_id), media_id)
             return {"ok": True, "message_id": msg_id}
         error_msg = data.get("error", {}).get("message", str(data))
-        logger.error("[WA] ❌ Image send failed to %s — %s", mask_phone(phone), safe_error(error_msg))
+        logger.error("[WA] ❌ Image send failed — %s", safe_error(error_msg))
         return {"ok": False, "error": error_msg}
     except Exception as e:
         logger.error("[WA] send_whatsapp_image error (%s)", exc_summary(e))
