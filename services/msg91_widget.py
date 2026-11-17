@@ -5,9 +5,11 @@ The browser runs the widget (send / retry / verify). It then hands the widget's 
 Integration" page) whether that token is genuine. Nothing the browser says is trusted by itself.
 
 Credentials (names only; values live in Railway, never in code, HTML, JavaScript or logs):
-    MSG91_AUTH_KEY            server secret, used ONLY here, ONLY for verifyAccessToken
-    MSG91_WIDGET_ID           public widget identifier (the existing OFFROOTP widget)
-    MSG91_WIDGET_TOKEN_AUTH   the widget's public client token (public by design; it is NOT the auth key)
+    MSG91_AUTH_KEY               server secret (account level), used ONLY here, ONLY for verifyAccessToken
+    MSG91_WEB_WIDGET_ID          public identifier of the WEB widget (OffroWeb) used by the admin website
+    MSG91_WEB_WIDGET_TOKEN_AUTH  that widget's public client token (public by design; it is NOT the auth key)
+  The MOBILE widget (OffroOTP: MSG91_WIDGET_ID / MSG91_WIDGET_TOKEN_AUTH) is used by the Flutter app and is NEVER used for the admin website: MSG91
+  answers "Web requests are not allowed for this widget" when a web page uses a mobile widget. There is deliberately NO fallback to the mobile widget.
 
 DOCUMENTED UNCERTAINTY (isolated in parse_verified_identifier): MSG91's public documentation shows the verifyAccessToken REQUEST but not the shape of
 its RESPONSE (the dashboard only says it returns "a success or failure"). The admin sign-in MUST know WHICH phone number was verified, otherwise an
@@ -38,14 +40,36 @@ def _env(name: str) -> str:
     return os.getenv(name, "").strip()
 
 
+WEB_ID_VAR, WEB_TOKEN_VAR = "MSG91_WEB_WIDGET_ID", "MSG91_WEB_WIDGET_TOKEN_AUTH"
+MOBILE_ID_VAR = "MSG91_WIDGET_ID"            # read ONLY to detect a copy/paste mistake; never used to configure the website
+
+
 def public_config() -> dict:
-    """The only widget settings the browser receives: both are public by design. The auth key is never included."""
-    return {"widget_id": _env("MSG91_WIDGET_ID"), "token_auth": _env("MSG91_WIDGET_TOKEN_AUTH")}
+    """The only widget settings the browser receives: the WEB widget's, both public by design. The auth key is never included."""
+    return {"widget_id": _env(WEB_ID_VAR), "token_auth": _env(WEB_TOKEN_VAR)}
+
+
+def config_problems() -> list:
+    """Names (never values) of what is wrong with the admin web-widget configuration; empty = usable."""
+    out = [n for n in (WEB_ID_VAR, WEB_TOKEN_VAR, "MSG91_AUTH_KEY") if not _env(n)]
+    wid, mid = _env(WEB_ID_VAR), _env(MOBILE_ID_VAR)
+    if wid and mid and wid == mid:
+        out.append(WEB_ID_VAR + " is the same as the mobile widget id (MSG91 refuses web requests for a mobile widget)")
+    return out
 
 
 def configured() -> bool:
-    c = public_config()
-    return bool(c["widget_id"] and c["token_auth"] and _env("MSG91_AUTH_KEY"))
+    return not config_problems()
+
+
+def selection_label() -> str:
+    """Safe description of which widget configuration is selected, for logs: the kind and a short fingerprint of the (public) widget id.
+    Never the token, never the auth key, never the full id."""
+    import hashlib
+    wid = _env(WEB_ID_VAR)
+    fp = hashlib.sha256(wid.encode()).hexdigest()[:8] if wid else "none"
+    return "widget=web(OffroWeb) id_fp=%s token=%s auth_key=%s" % (fp, "set" if _env(WEB_TOKEN_VAR) else "MISSING",
+                                                                  "set" if _env("MSG91_AUTH_KEY") else "MISSING")
 
 
 def identifier_for(mobile: str) -> str:
@@ -166,6 +190,8 @@ def verify_access_token(access_token: str) -> dict:
         return {"ok": False, "error": "unavailable", "detail": "auth"}
     print("[2FA][widget] verifyAccessToken HTTP %s response shape=%s" % (resp.status_code, json.dumps(_shape(body), sort_keys=True)))
     if not _is_success(body):
+        msg = body.get("message") if isinstance(body, dict) else None
+        print("[2FA][widget] verifyAccessToken: token not accepted by MSG91 (%s) reason=%s" % (selection_label(), str(msg)[:80] if isinstance(msg, str) else "n/a"))
         return {"ok": False, "error": "invalid"}
     claims = token_claims(access_token)
     print("[2FA][widget] access token claim names=%s" % sorted(str(k)[:24] for k in claims)[:12])

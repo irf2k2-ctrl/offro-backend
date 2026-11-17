@@ -19,7 +19,8 @@ from services import msg91_widget as W
 DB = sys.modules["database"].db
 _REAL_SEND_SMS, _REAL_VERIFY = OTP._send_sms, W.verify_access_token          # the originals, before any fixture replaces them
 MOBILE, PIN = "9000000200", "4321"
-WIDGET_ID, WIDGET_TOKEN, AUTH_KEY = "wid123", "public-token-xyz", "SERVER-SECRET-KEY"
+WIDGET_ID, WIDGET_TOKEN, AUTH_KEY = "webwid123", "public-web-token-xyz", "SERVER-SECRET-KEY"
+MOBILE_WIDGET_ID, MOBILE_WIDGET_TOKEN = "mobwid999", "public-mobile-token-abc"
 STAGING = {"RAILWAY_PROJECT_ID": TM.STAGING_PROJECT_ID, "RAILWAY_ENVIRONMENT_ID": TM.STAGING_ENVIRONMENT_ID,
            "RAILWAY_SERVICE_ID": TM.STAGING_SERVICE_ID, "RAILWAY_PUBLIC_DOMAIN": TM.STAGING_PUBLIC_DOMAIN,
            "MONGO_URL": "mongodb://u:p@" + TM.STAGING_MONGO_HOST + ":27017"}
@@ -49,8 +50,10 @@ def env(monkeypatch):
     for n in ("RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_ID", "RAILWAY_PUBLIC_DOMAIN", "MONGO_URL",
               "ADMIN_OTP_STAGING_TEST_MODE", "ADMIN_OTP_TEST_MOBILES", "ADMIN_TRUSTED_DEVICE_SUPER_ADMIN"):
         monkeypatch.delenv(n, raising=False)
-    monkeypatch.setenv("MSG91_WIDGET_ID", WIDGET_ID)
-    monkeypatch.setenv("MSG91_WIDGET_TOKEN_AUTH", WIDGET_TOKEN)
+    monkeypatch.setenv("MSG91_WEB_WIDGET_ID", WIDGET_ID)
+    monkeypatch.setenv("MSG91_WEB_WIDGET_TOKEN_AUTH", WIDGET_TOKEN)
+    monkeypatch.setenv("MSG91_WIDGET_ID", MOBILE_WIDGET_ID)                   # the mobile app's widget is present too and must never be used here
+    monkeypatch.setenv("MSG91_WIDGET_TOKEN_AUTH", MOBILE_WIDGET_TOKEN)
     monkeypatch.setenv("MSG91_AUTH_KEY", AUTH_KEY)
     monkeypatch.setattr(OTP, "REAL_PROVIDER", "widget")
     for c in OWN:
@@ -125,7 +128,7 @@ def test_unknown_account_gets_the_generic_answer_and_no_challenge():
     assert r.status_code == 401 and DB.admin_login_challenges.count_documents({}) == 0
 
 
-@pytest.mark.parametrize("missing", ["MSG91_WIDGET_ID", "MSG91_WIDGET_TOKEN_AUTH", "MSG91_AUTH_KEY"])
+@pytest.mark.parametrize("missing", ["MSG91_WEB_WIDGET_ID", "MSG91_WEB_WIDGET_TOKEN_AUTH", "MSG91_AUTH_KEY"])
 def test_missing_widget_configuration_refuses_sign_in_with_no_fallback(monkeypatch, missing):
     monkeypatch.delenv(missing)
     mk_user()
@@ -145,6 +148,7 @@ def test_first_permit_returns_the_server_derived_identifier_and_public_config_on
     assert d["identifier"] == "91" + MOBILE and d["first"] is True                 # browser-supplied number ignored
     assert d["widget"] == {"widget_id": WIDGET_ID, "token_auth": WIDGET_TOKEN}
     assert AUTH_KEY not in r.text and r.headers["cache-control"] == "no-store"
+    assert MOBILE_WIDGET_ID not in r.text and MOBILE_WIDGET_TOKEN not in r.text
 
 
 def test_resend_keeps_the_30s_cooldown_and_the_three_resend_cap():
@@ -359,7 +363,7 @@ def test_production_always_uses_the_widget_even_with_every_staging_switch_copied
 def test_production_without_widget_configuration_has_no_fallback_even_with_staging_switches(monkeypatch):
     for k, v in {**PROD, "ADMIN_OTP_STAGING_TEST_MODE": "1", "ADMIN_OTP_TEST_MOBILES": MOBILE}.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.delenv("MSG91_WIDGET_ID")
+    monkeypatch.delenv("MSG91_WEB_WIDGET_ID")
     mk_user()
     r = login(client())
     assert r.status_code == 503 and DB.admin_login_challenges.count_documents({}) == 0
@@ -498,3 +502,42 @@ def test_junk_tokens_never_reach_msg91(monkeypatch):
     for junk in ("", "short", "x" * 5000, "has space in it xxxxxxxxxxxxxxxxxx", None, 5):
         out, seen = call_real(monkeypatch, Resp(200, {"type": "success"}), token=junk)
         assert out["ok"] is False and not seen, junk
+
+
+# ── web widget vs mobile widget ────────────────────────────────────────────────────────────────────
+
+def test_admin_never_falls_back_to_the_mobile_widget_when_the_web_one_is_missing(monkeypatch):
+    monkeypatch.delenv("MSG91_WEB_WIDGET_ID")
+    monkeypatch.delenv("MSG91_WEB_WIDGET_TOKEN_AUTH")                          # mobile variables are still set
+    assert W.configured() is False and W.public_config() == {"widget_id": "", "token_auth": ""}
+    mk_user()
+    assert login(client()).status_code == 503
+
+
+def test_a_web_id_copied_from_the_mobile_widget_is_refused(monkeypatch):
+    monkeypatch.setenv("MSG91_WEB_WIDGET_ID", MOBILE_WIDGET_ID)
+    assert W.configured() is False and any("same as the mobile" in p for p in W.config_problems())
+    mk_user()
+    assert login(client()).status_code == 503
+
+
+def test_config_problem_names_never_contain_values(monkeypatch):
+    monkeypatch.delenv("MSG91_AUTH_KEY")
+    assert W.config_problems() == ["MSG91_AUTH_KEY"]
+
+
+def test_the_log_says_which_widget_is_selected_without_any_credential(capsys):
+    c = client()
+    cid, _ = start(c)
+    c.post("/admin/auth/otp-request", json={"challenge_id": cid})
+    out = capsys.readouterr().out
+    assert "widget=web(OffroWeb)" in out and "id_fp=" in out
+    for secret in (AUTH_KEY, WIDGET_TOKEN, WIDGET_ID, MOBILE_WIDGET_ID, MOBILE_WIDGET_TOKEN):
+        assert secret not in out
+
+
+def test_a_rejected_token_logs_msg91s_reason_but_not_the_token(monkeypatch, capsys):
+    tok = fake_token("rej")
+    out, _ = call_real(monkeypatch, Resp(200, {"type": "error", "message": "Invalid access token"}), token=tok)
+    logged = capsys.readouterr().out
+    assert out == {"ok": False, "error": "invalid"} and "Invalid access token" in logged and tok not in logged and AUTH_KEY not in logged

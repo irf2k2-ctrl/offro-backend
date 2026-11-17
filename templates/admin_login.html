@@ -226,13 +226,28 @@ async function widgetSend() {
     try { await loadWidget(data.widget); }
     catch (e) { return { ok: false, message: "The verification service could not be loaded. Please check your connection and try again.", retry: true, status: 0 }; }
     return await new Promise(resolve => {
-        const done = (ok) => resolve(ok ? { ok: true, wait: data.resend_available_in || 30 } :
-            { ok: false, message: "We could not send the verification code. Please try again in a moment.", retry: true, status: 0 });
+        const done = (ok, err) => {
+            if (ok) { resolve({ ok: true, wait: data.resend_available_in || 30 }); return; }
+            const why = widgetErrorText(err);
+            console.warn("MSG91 widget could not send the code:", why || "(no message)");          // MSG91's own message only; no token is involved
+            let msg = "We could not send the verification code. Please try again in a moment.";
+            if (/not allowed|web request|domain|origin|ip/i.test(why)) msg = "The verification service refused this website (" + why.slice(0, 80) + "). Please contact your administrator.";
+            else if (/captcha/i.test(why)) msg = "Please complete the security check and try again.";
+            else if (/limit|too many|exceed/i.test(why)) msg = "Too many code requests. Please wait a few minutes and try again.";
+            resolve({ ok: false, message: msg, retry: true, status: 0 });
+        };
         try {
-            if (data.first) window.sendOtp(data.identifier, () => done(true), () => done(false));
-            else window.retryOtp(null, () => done(true), () => done(false));       // null = the widget's default channel (SMS)
-        } catch (e) { done(false); }
+            if (data.first) window.sendOtp(data.identifier, () => done(true), (e) => done(false, e));
+            else window.retryOtp(null, () => done(true), (e) => done(false, e));       // null = the widget's default channel (SMS)
+        } catch (e) { done(false, e); }
     });
+}
+
+function widgetErrorText(e) {
+    if (!e) return "";
+    if (typeof e === "string") return e;
+    for (const k of ["message", "error", "reason", "description"]) { if (typeof e[k] === "string") return e[k]; }
+    try { return JSON.stringify(e).slice(0, 120); } catch (x) { return ""; }
 }
 
 // The MSG91 widget returns the signed access token in the success data. Read it without assuming one exact field.
