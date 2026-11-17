@@ -563,3 +563,145 @@ def test_a_rejected_token_logs_msg91s_reason_but_not_the_token(monkeypatch, caps
     out, _ = call_real(monkeypatch, Resp(200, {"type": "error", "message": "Invalid access token"}), token=tok)
     logged = capsys.readouterr().out
     assert out == {"ok": False, "error": "invalid"} and "Invalid access token" in logged and tok not in logged and AUTH_KEY not in logged
+
+
+# ── verified-number binding (production failure: token claims were only companyId + requestId) ────────────────────────────────────────
+
+def jwt_with(claims: dict) -> str:
+    seg = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return "eyJhbGciOiJIUzI1NiJ9." + seg + ".sig" + str(abs(hash(json.dumps(claims, sort_keys=True))) % 10**6)
+
+
+PROD_CLAIMS = {"companyId": "123456789012", "requestId": "336870744532313134323444"}      # the exact claim names seen in the Railway logs (values invented)
+
+
+@pytest.fixture
+def msg91(monkeypatch):
+    """The REAL verify_access_token talking to a fake MSG91 (httpx.post replaced), so the whole path router -> engine -> parser runs."""
+    state = {"reply": Resp(200, {"type": "success", "message": "91" + MOBILE}), "posts": []}
+    monkeypatch.setattr(W, "verify_access_token", _REAL_VERIFY)
+
+    def post(url, json=None, headers=None, timeout=None):
+        state["posts"].append((url, dict(json)))
+        return state["reply"]
+    monkeypatch.setattr(W.httpx, "post", post)
+    return state
+
+
+def test_the_exact_production_failure_message_is_the_documented_identifier_and_login_now_succeeds(msg91):
+    """Railway: HTTP 200 from verifyAccessToken, token claims companyId + requestId only, number not found -> 503. MSG91's reference puts the verified
+    identifier in the reply's `message`; it was never read. It is now, and it must equal the account's number."""
+    c = client()
+    cid, _ = start(c)
+    tok = jwt_with(PROD_CLAIMS)
+    r = verify(c, cid, tok)
+    assert r.status_code == 200 and "admin_token" in c.cookies
+    url, sent = msg91["posts"][0]
+    assert url.endswith("/api/v5/widget/verifyAccessToken") and sent == {"authkey": AUTH_KEY, "access-token": tok}
+
+
+@pytest.mark.parametrize("message", ["91" + MOBILE, "+91" + MOBILE, MOBILE, " 91" + MOBILE + " "])
+def test_the_documented_phone_spellings_all_match_the_account_number(msg91, message):
+    msg91["reply"] = Resp(200, {"type": "success", "message": message})
+    c = client()
+    cid, _ = start(c)
+    assert verify(c, cid, jwt_with(PROD_CLAIMS)).status_code == 200
+
+
+def test_the_attacker_scenario_a_real_token_for_the_attackers_own_phone_is_refused(msg91):
+    """PIN known to the attacker; the widget is genuinely completed, but for the attacker's phone. MSG91 says so; the account's number differs."""
+    msg91["reply"] = Resp(200, {"type": "success", "message": "919876500000"})
+    c = client()
+    cid, _ = start(c)
+    r = verify(c, cid, jwt_with(PROD_CLAIMS))
+    assert r.status_code == 401 and "admin_token" not in c.cookies
+    doc = DB.admin_login_challenges.find_one({})
+    assert doc["status"] == "pending" and doc["attempts"] == 1                       # an attempt is spent, nothing consumed
+
+
+def test_company_id_and_request_id_never_count_as_proof_of_identity(msg91):
+    """Even when they LOOK like phone numbers (digits, 12 / 15 chars) and even when they equal the account's number."""
+    msg91["reply"] = Resp(200, {"type": "success", "message": "Access Token verified"})
+    c = client()
+    cid, _ = start(c)
+    for claims in (PROD_CLAIMS, {"companyId": "91" + MOBILE, "requestId": "91" + MOBILE}, {"requestId": "9" * 15, "companyId": 919000000200}):
+        r = verify(c, cid, jwt_with(claims))
+        assert r.status_code == 503 and "admin_token" not in c.cookies               # fail closed: nothing names a verified number
+    assert DB.admin_login_challenges.find_one({})["attempts"] == 0 and DB.admin_login_challenges.find_one({})["status"] == "pending"
+
+
+@pytest.mark.parametrize("message", ["Access Token verified", "", None, "1234567", "9" * 16, "email@example.com", "my number is 9000000200", 9000000200])
+def test_a_message_that_is_not_exactly_a_phone_number_is_never_used(msg91, message):
+    msg91["reply"] = Resp(200, {"type": "success", "message": message})
+    out = _REAL_VERIFY(jwt_with(PROD_CLAIMS))
+    assert out["ok"] is True and out["identifier"] is None and out["identifiers"] == []
+
+
+def test_the_browser_cannot_supply_the_number_request_id_or_widget_id(msg91):
+    msg91["reply"] = Resp(200, {"type": "success", "message": "919876500000"})            # MSG91 verified someone else's phone
+    c = client()
+    cid, _ = start(c)
+    r = c.post("/admin/auth/verify-otp", json={"challenge_id": cid, "access_token": jwt_with(PROD_CLAIMS), "mobile": MOBILE, "identifier": "91" + MOBILE,
+                                              "requestId": PROD_CLAIMS["requestId"], "reqId": PROD_CLAIMS["requestId"], "widget_id": WIDGET_ID})
+    assert r.status_code == 401 and "admin_token" not in c.cookies
+
+
+def test_the_reply_and_the_token_must_agree_when_both_name_a_number(msg91):
+    msg91["reply"] = Resp(200, {"type": "success", "message": "91" + MOBILE})
+    c = client()
+    cid, _ = start(c)
+    r = verify(c, cid, jwt_with({**PROD_CLAIMS, "mobile": "919876500000"}))                # token claims a different number than MSG91's reply
+    assert r.status_code == 401 and "admin_token" not in c.cookies
+    ok = verify(c, cid, jwt_with({**PROD_CLAIMS, "mobile": "91" + MOBILE}))
+    assert ok.status_code == 200
+
+
+def test_a_number_in_the_token_claims_alone_is_still_checked_against_the_account(msg91):
+    msg91["reply"] = Resp(200, {"type": "success", "message": "Access Token verified"})
+    c = client()
+    cid, _ = start(c)
+    assert verify(c, cid, jwt_with({**PROD_CLAIMS, "identifier": "919876500000"})).status_code == 401
+    assert verify(c, cid, jwt_with({**PROD_CLAIMS, "identifier": "91" + MOBILE, "n": 1})).status_code == 200
+
+
+def test_a_verified_number_never_creates_a_session_unless_msg91_said_success(msg91):
+    for body in ({"type": "error", "message": "91" + MOBILE}, {"type": "error", "code": "201", "message": "AuthenticationFailure"}, {"message": "91" + MOBILE}):
+        msg91["reply"] = Resp(200, body)
+        c = client()
+        DB.admin_login_challenges.delete_many({})
+        cid, _ = start(c)
+        r = verify(c, cid, jwt_with(PROD_CLAIMS))
+        assert r.status_code in (401, 503) and "admin_token" not in c.cookies, body
+
+
+def test_a_successful_verification_is_single_use_and_the_token_cannot_be_replayed(msg91):
+    tok = jwt_with(PROD_CLAIMS)
+    c1, c2 = client(), client()
+    cid1, _ = start(c1)
+    assert verify(c1, cid1, tok).status_code == 200
+    cid2, _ = start(c2)
+    assert verify(c2, cid2, tok).status_code == 401 and "admin_token" not in c2.cookies         # same token, new challenge
+    assert verify(client(), cid1, jwt_with({**PROD_CLAIMS, "n": 2})).status_code == 401          # same challenge, new token
+
+
+def test_the_failure_log_shows_shape_and_claim_names_but_no_values(msg91, capsys):
+    msg91["reply"] = Resp(200, {"type": "success", "message": "Access Token verified"})
+    tok = jwt_with({"companyId": "COMPANY-SECRET-VALUE", "requestId": "REQUEST-SECRET-VALUE"})
+    c = client()
+    cid, _ = start(c)
+    assert verify(c, cid, tok).status_code == 503
+    out = capsys.readouterr().out
+    assert "claim names=['companyId', 'requestId']" in out and "message=text len=21" in out and "verified_number_found=False" in out
+    assert "fail closed" in out
+    for secret in ("COMPANY-SECRET-VALUE", "REQUEST-SECRET-VALUE", "Access Token verified", tok, AUTH_KEY):
+        assert secret not in out
+
+
+def test_a_successful_login_logs_no_number_token_or_key(msg91, capsys):
+    tok = jwt_with(PROD_CLAIMS)
+    c = client()
+    cid, _ = start(c)
+    assert verify(c, cid, tok).status_code == 200
+    out = capsys.readouterr().out
+    for secret in (tok, AUTH_KEY, MOBILE, PROD_CLAIMS["requestId"], PROD_CLAIMS["companyId"]):
+        assert secret not in out

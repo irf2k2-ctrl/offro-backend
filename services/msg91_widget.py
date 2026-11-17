@@ -11,12 +11,23 @@ Credentials (names only; values live in Railway, never in code, HTML, JavaScript
   The MOBILE widget (OffroOTP: MSG91_WIDGET_ID / MSG91_WIDGET_TOKEN_AUTH) is used by the Flutter app and is NEVER used for the admin website: MSG91
   answers "Web requests are not allowed for this widget" when a web page uses a mobile widget. There is deliberately NO fallback to the mobile widget.
 
-DOCUMENTED UNCERTAINTY (isolated in parse_verified_identifier): MSG91's public documentation shows the verifyAccessToken REQUEST but not the shape of
-its RESPONSE (the dashboard only says it returns "a success or failure"). The admin sign-in MUST know WHICH phone number was verified, otherwise an
-attacker who knows a PIN could verify their OWN phone and be let in. So the parser looks for the verified number in (a) the response body and (b) the
-claims of the access token itself (a signed JWT that MSG91 has just confirmed is genuine), and if neither contains one it returns None and the login
-FAILS CLOSED. It never guesses and never trusts an unverified value. The response SHAPE (key names and types only, never values) is logged so the
-parser can be tightened after the first real Staging run.
+HOW THE VERIFIED PHONE NUMBER IS ESTABLISHED (isolated in parse_verified_identifier). The admin sign-in MUST know WHICH phone number MSG91 verified,
+otherwise an attacker who knows a PIN could verify their OWN phone through the widget and be let in.
+  * MSG91's API reference for verifyAccessToken (as published in its OpenAPI-derived documentation) lists exactly two response fields:
+        type    "success" on success ("error" / code "201" = failure, even with HTTP 200)
+        message "an identifier tied to the verified token, such as a mobile number or email address"   e.g. {"type":"success","message":"919999999999"}
+    So `message` is the PROVIDER-ATTESTED identifier. It is accepted only when the whole string is a phone number (optional '+', 10-15 digits); free text such as
+    "Access Token verified" is NOT a number and is ignored.
+  * The access token's own claims are a second source, but only keys that name a phone (see IDENTIFIER_KEYS). The claims actually observed in production are
+    `companyId` and `requestId`: these are NOT identity, are never read as a phone number, and never prove anything.
+  * If both sources name a number they must agree; any disagreement refuses the sign-in.
+  * Whatever number is found must then equal the ACCOUNT's number (admin_login_otp.verify_widget). A token for any other number is refused.
+  * If no source names a number the login FAILS CLOSED (HTTP 503, no attempt used, no session). The code never guesses and never trusts a number, request id or
+    company id supplied by the browser. What is logged on that path is only the response SHAPE (key names and value types), the kind of `message`
+    (phone-like / text, with its length, never its value) and the claim NAMES, so the provider behaviour can be confirmed without exposing anything.
+If MSG91's reply for this account does not carry the number at all, the secure fix is provider-side: ask MSG91 support to return the verified identifier in
+`message` for this widget/account, or switch to the documented server-side flow (server calls widget/sendOtp, keeps the returned reqId, and requires the access
+token's `requestId` claim to equal that server-held reqId). See docs/ADMIN_LOGIN_2FA.md.
 """
 import base64
 import json
@@ -126,6 +137,31 @@ def _walk(obj, depth=0):
                 yield pair
 
 
+_PHONE_TEXT = re.compile(r"^\+?\d{10,15}$")
+
+
+def _message_identifier(body):
+    """MSG91's documented location of the verified identifier: the top-level `message` string of the verifyAccessToken reply. Accepted ONLY if the whole
+    string is a phone number; any other text (e.g. a status sentence) is ignored."""
+    if not isinstance(body, dict):
+        return None
+    m = body.get("message")
+    if isinstance(m, str) and _PHONE_TEXT.match(m.strip()):
+        d = normalize_identifier(m.strip())
+        return d if 10 <= len(d) <= 15 else None
+    return None
+
+
+def message_kind(body) -> str:
+    """Safe description of the reply's `message` for logs: its kind and length, never its value."""
+    m = body.get("message") if isinstance(body, dict) else None
+    if m is None:
+        return "absent"
+    if isinstance(m, str):
+        return ("phone-like len=%d" if _PHONE_TEXT.match(m.strip()) else "text len=%d") % len(m)
+    return type(m).__name__
+
+
 def _find_number(obj):
     for key, value in _walk(obj):
         if key in IDENTIFIER_KEYS and isinstance(value, (str, int)) and not isinstance(value, bool):
@@ -135,9 +171,20 @@ def _find_number(obj):
     return None
 
 
+def verified_identifiers(response_body, access_token: str) -> list:
+    """Every DISTINCT phone number the provider side names for this verified token: from the reply (documented `message`, else a phone-named field) and from the
+    token's claims. [] = nothing names a number (the caller must REJECT); more than one = the sources disagree (the caller must REJECT)."""
+    out = []
+    for n in (_message_identifier(response_body) or _find_number(response_body), _find_number(token_claims(access_token))):
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
 def parse_verified_identifier(response_body, access_token: str):
-    """The phone number MSG91 says was verified, or None if it cannot be determined (the caller must then REJECT the sign-in)."""
-    return _find_number(response_body) or _find_number(token_claims(access_token))
+    """The single phone number MSG91 says was verified, or None if it cannot be determined (the caller must then REJECT the sign-in)."""
+    ids = verified_identifiers(response_body, access_token)
+    return ids[0] if ids else None
 
 
 def _shape(obj, depth=0):
@@ -160,7 +207,8 @@ def _is_success(body) -> bool:
 
 def verify_access_token(access_token: str) -> dict:
     """Ask MSG91 whether `access_token` is genuine. Returns:
-        {"ok": True,  "identifier": "91XXXXXXXXXX" | None, "claims": {...}}      MSG91 confirmed the token (identifier None = could not be determined)
+        {"ok": True,  "identifier": "91XXXXXXXXXX" | None, "identifiers": [...], "claims": {...}}   MSG91 confirmed the token (none = could not be determined;
+                                                                                         more than one = the sources disagree)
         {"ok": False, "error": "invalid"}                                       MSG91 rejected the token (wrong / expired / used)
         {"ok": False, "error": "unavailable", "detail": <short code>}           MSG91 could not be asked or answered unusably (NOT the user's fault)
     Never logs or returns the token or the auth key."""
@@ -194,8 +242,9 @@ def verify_access_token(access_token: str) -> dict:
         print("[2FA][widget] verifyAccessToken: token not accepted by MSG91 (%s) reason=%s" % (selection_label(), str(msg)[:80] if isinstance(msg, str) else "n/a"))
         return {"ok": False, "error": "invalid"}
     claims = token_claims(access_token)
-    print("[2FA][widget] access token claim names=%s" % sorted(str(k)[:24] for k in claims)[:12])
-    return {"ok": True, "identifier": parse_verified_identifier(body, access_token), "claims": claims}
+    ids = verified_identifiers(body, access_token)
+    print("[2FA][widget] access token claim names=%s message=%s verified_number_found=%s" % (sorted(str(k)[:24] for k in claims)[:12], message_kind(body), bool(ids)))
+    return {"ok": True, "identifier": ids[0] if ids else None, "identifiers": ids, "claims": claims}
 
 
 # ── Content-Security-Policy for the admin LOGIN PAGE only ──────────────────────────────────────────────────────────────────────────

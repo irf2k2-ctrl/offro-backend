@@ -153,8 +153,15 @@ Staging and Production:
 Known limits (honest list):
 - The browser talks to MSG91 directly, so the server cannot count wrong codes itself. The 5-attempt cap is enforced for honest clients (the page reports each failure);
   a hostile client's real brake is MSG91's own attempt limit on the widget. Check that limit in the MSG91 dashboard.
-- `verifyAccessToken`'s reply format is not documented in the material available. `services/msg91_widget.parse_verified_identifier` looks in the reply, then in the token's
-  claims, and refuses to sign in if neither names the number. The first Staging run logs the reply SHAPE (key names and types only) to settle this.
+- Verified-number binding. MSG91's reference for `verifyAccessToken` lists two reply fields: `type` ("success") and `message`, documented as the identifier tied to the verified
+  token (e.g. `{"type":"success","message":"919999999999"}`). `services/msg91_widget.py` accepts `message` only when the WHOLE string is a phone number, may also read
+  phone-named claims from the token, requires the sources to agree, and the engine then requires the number to equal the ACCOUNT's number. The token claims seen in
+  production (`companyId`, `requestId`) are not identity and are never read as a number. Nothing the browser sends (mobile, identifier, request id, widget id) is trusted.
+  If no source names a number the login fails closed (HTTP 503, no attempt used) and the log shows only the reply shape, the kind/length of `message`, and claim names.
+  If MSG91's reply for your account does NOT carry the number, the secure options are provider-side: (1) ask MSG91 support to return the verified identifier in `message`
+  for this widget, or (2) move to the documented server-side flow (server calls `widget/sendOtp` itself, keeps the returned `reqId`, and requires the token's `requestId`
+  claim to equal that server-held reqId; note MSG91 states captcha is not supported in the server-side flow). A browser-reported request id must NEVER be used for this:
+  an attacker could complete the widget for their own phone and report that request id.
 - The login page's CSP (only that page) allows `*.msg91.com` and common captcha hosts. Confirm in the browser console on Staging.
 - OTP length/expiry are widget settings. The page has four boxes; if the widget issues 6 digits, set the widget to 4 or the page needs six boxes.
 

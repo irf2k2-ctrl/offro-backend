@@ -426,14 +426,15 @@ def verify_widget(token: str, access_token: str, mobile_lookup) -> dict:
         return {"ok": False, "reason": "unavailable"}
     if not result.get("ok"):
         return _count_failed_code(reserved)
-    verified = result.get("identifier")
-    if not verified:
+    # Every number the provider side names for this token (the reply's documented `message`, and phone claims in the token). The browser supplies none of them.
+    named = [str(x) for x in (result.get("identifiers") or ([result["identifier"]] if result.get("identifier") else []))]
+    if not named:
         print("[2FA][widget] REFUSED: MSG91 confirmed the token but neither its reply nor the token names the verified phone number. "
-              "Sign-in is refused (fail closed). See the logged response shape and services/msg91_widget.parse_verified_identifier.")
+              "Sign-in is refused (fail closed). See services/msg91_widget.py (HOW THE VERIFIED PHONE NUMBER IS ESTABLISHED).")
         release()
         return {"ok": False, "reason": "unavailable"}
-    if not hmac.compare_digest(str(verified), expected):
-        print("[2FA][widget] refused: the verified number is not this account's number")
+    if len(set(named)) > 1 or any(not hmac.compare_digest(n, expected) for n in named):
+        print("[2FA][widget] refused: the verified number is not this account's number (or the provider-side sources disagree)")
         return _count_failed_code(reserved)
     claims = result.get("claims") or {}
     iat, exp = _claim_number(claims, "iat"), _claim_number(claims, "exp")
