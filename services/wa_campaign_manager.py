@@ -445,6 +445,19 @@ def list_snapshot(campaign, page=1, page_size=50) -> dict:
 
 # ── confirmation / schedule ─────────────────────────────────────────────────────────────────────
 
+def scheduler_status() -> tuple:
+    """(active, reason): would the campaign worker act on a scheduled campaign in THIS process right now? Reads only the worker key and
+    the environment gate (the same two checks `services.wa_campaign_worker.worker_gate` makes first); the kill switch and the live
+    key are reported separately. Never raises; any doubt = inactive."""
+    try:
+        if not ST.worker_enabled():
+            return False, "worker_disabled"
+        ok, why = ST.environment_gate(allow_production=ST._env_flag("WA_CAMPAIGN_WORKER_ALLOW_PRODUCTION"))
+        return (True, "ok") if ok else (False, why)
+    except Exception:
+        return False, "gate_unavailable"
+
+
 def confirmation_report(campaign) -> dict:
     """What the admin must read before confirming. Pure read; no Meta call."""
     snap = campaign.get("snapshot") or {}
@@ -453,8 +466,13 @@ def confirmation_report(campaign) -> dict:
     if not ok_sending:
         warnings.append({"code": "sending_disabled", "message": "Sending is currently DISABLED (%s). A scheduled campaign will "
                          "not run until the global switch is enabled." % why})
-    warnings.append({"code": "no_worker_yet", "message": "In this release scheduling only records the time; no process sends "
-                     "anything yet."})
+    active, why = scheduler_status()
+    if active:
+        warnings.append({"code": "worker_active", "message": "The campaign worker is enabled on this server: at the scheduled time it "
+                         "will send to the eligible recipients, only while every sending switch is on."})
+    else:
+        warnings.append({"code": "no_worker_yet", "message": "The campaign worker is NOT active on this server (%s), so a scheduled "
+                         "campaign will not be sent until it is enabled." % why})
     warnings.append({"code": "consent_rechecked", "message": "Consent and STOP status are re-checked for every recipient at "
                      "send time; people who opted out after the snapshot will be skipped."})
     if snap:

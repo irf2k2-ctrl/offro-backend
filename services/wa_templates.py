@@ -167,9 +167,11 @@ def fetch_live_template(name: str, language: str) -> dict:
     raise TemplateSyncError("template_not_found")
 
 
-def verify_live(doc: dict) -> list:
+def verify_live(doc: dict, details: dict = None) -> list:
     """Re-check a cached template against Meta RIGHT NOW. Returns the list of problems ([] = still usable).
-    Meta errors propagate as TemplateSyncError (callers must treat them as 'not verified' = do not send)."""
+    Meta errors propagate as TemplateSyncError (callers must treat them as 'not verified' = do not send).
+    `details` (optional dict) is filled with WHY a hash mismatch was reported: `cause` and `changed_fields` (component PATHS only,
+    never values), so an operator can tell a genuine edit at Meta from a stale cache without reading any template text."""
     raw = fetch_live_template(doc["name"], doc["language"])
     problems = []
     if str(raw.get("status") or "").upper() != "APPROVED":
@@ -181,6 +183,10 @@ def verify_live(doc: dict) -> list:
     cu = doc.get("campaign_use") or {}
     if live_hash != doc.get("content_hash") or live_hash != cu.get("mapped_hash"):
         problems.append("template_changed_since_sync")
+        cause, changed = _mismatch_cause(doc, comps, live_hash)
+        if details is not None:
+            details.update(cause=cause, changed_fields=changed)
+        logger.warning("[WA-Templates] live template differs from the cache: cause=%s fields=%s", cause, changed[:10])
     if not parse_template(raw)["campaign_supported"]:
         problems.append("live_unsupported_components")
     return problems
@@ -285,9 +291,70 @@ def parse_template(raw: dict) -> dict:
             "unsupported": sorted(set(unsupported)), "campaign_supported": not unsupported}
 
 
+# Hash algorithm version stored on every cached template. Version 1 hashed Meta's RAW components, which for a template with an
+# IMAGE / VIDEO / DOCUMENT header include `example.header_handle`: a temporary, signed media URL that Meta re-issues on every request.
+# The cache and the live re-check therefore never agreed (a false `template_changed_since_sync` after every successful sync).
+HASH_VERSION = 2
+VOLATILE_EXAMPLE_KEYS = ("header_handle",)      # sample-media handles: re-signed by Meta per request, never part of what is sent
+
+
+def normalize_components(raw_components) -> list:
+    """Meta's components minus the per-request volatile parts. EVERYTHING that defines the template (types, header format, texts,
+    footer, buttons and their types / urls, variable example values) is kept, so a genuine edit still changes the hash."""
+    out = []
+    for comp in raw_components if isinstance(raw_components, list) else []:
+        if isinstance(comp, dict) and isinstance(comp.get("example"), dict):
+            comp = dict(comp)
+            ex = {k: v for k, v in comp["example"].items() if k not in VOLATILE_EXAMPLE_KEYS}
+            if ex:
+                comp["example"] = ex
+            else:
+                comp.pop("example")
+        out.append(comp)
+    return out
+
+
 def content_hash(raw_components) -> str:
-    blob = json.dumps(raw_components or [], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    blob = json.dumps(normalize_components(raw_components), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:32]
+
+
+def diff_paths(a, b, path="components", limit=20) -> list:
+    """Paths (never values) at which two normalized structures differ, e.g. ['components[0].text', 'components[2].buttons[1]']."""
+    out = []
+
+    def walk(x, y, p):
+        if len(out) >= limit:
+            return
+        if isinstance(x, dict) and isinstance(y, dict):
+            for k in sorted(set(x) | set(y), key=str):
+                if k not in x or k not in y:
+                    out.append("%s.%s" % (p, str(k)[:30]))
+                else:
+                    walk(x[k], y[k], "%s.%s" % (p, str(k)[:30]))
+        elif isinstance(x, list) and isinstance(y, list):
+            for i in range(max(len(x), len(y))):
+                if i >= len(x) or i >= len(y):
+                    out.append("%s[%d]" % (p, i))
+                else:
+                    walk(x[i], y[i], "%s[%d]" % (p, i))
+        elif x != y:
+            out.append(p)
+
+    walk(a, b, path)
+    return out[:limit]
+
+
+def _mismatch_cause(doc: dict, live_components, live_hash: str):
+    """(cause, changed_fields) for a hash mismatch. Paths only."""
+    cu = doc.get("campaign_use") or {}
+    if doc.get("hash_version") != HASH_VERSION:
+        return "cache_hash_outdated", []                    # cached before this fix: one Sync under the new algorithm repairs it
+    cached = normalize_components(doc.get("components"))
+    changed = diff_paths(cached, normalize_components(live_components))
+    if live_hash != doc.get("content_hash"):
+        return "template_edited_at_meta", changed
+    return "mapping_not_saved_for_current_content", []     # content unchanged; the admin's saved mapping belongs to an older version
 
 
 def template_id(name, language) -> str:
@@ -347,9 +414,10 @@ def sync() -> dict:
             fields = {"name": name, "language": lang, "meta_id": str(raw.get("id") or ""),
                       "status": str(raw.get("status") or "").upper(), "category": str(raw.get("category") or "").upper(),
                       "rejected_reason": str(raw.get("rejected_reason") or "")[:100] if str(raw.get("rejected_reason") or "") != "NONE" else "",
-                      "components": comps, "content_hash": content_hash(comps), "parsed": parse_template(raw),
+                      "components": comps, "content_hash": content_hash(comps), "hash_version": HASH_VERSION, "parsed": parse_template(raw),
                       "missing_from_meta": False, "synced_at": now}
-            old = coll.find_one({"_id": tid}, {"status": 1, "category": 1, "content_hash": 1, "missing_from_meta": 1})
+            old = coll.find_one({"_id": tid}, {"status": 1, "category": 1, "content_hash": 1, "missing_from_meta": 1,
+                                               "hash_version": 1, "components": 1})
             if old is None:
                 coll.update_one({"_id": tid}, {"$set": fields, "$setOnInsert": {"first_seen_at": now, "campaign_use": None}},
                                 upsert=True)
@@ -362,9 +430,19 @@ def sync() -> dict:
                 changes.append({"name": name, "language": lang, "from": old.get("status"), "to": fields["status"]})
             if old.get("missing_from_meta"):
                 counts["restored"] += 1
-            if old.get("content_hash") == fields["content_hash"] and old.get("status") == fields["status"] \
+            legacy = old.get("hash_version") != HASH_VERSION
+            # A template cached under the old (raw) hash is UNCHANGED if its stored components, re-hashed with the current
+            # algorithm, equal Meta's: only the volatile media handle differed. Genuine edits still differ and fall through.
+            same_content = (content_hash(old.get("components")) == fields["content_hash"]) if legacy \
+                else old.get("content_hash") == fields["content_hash"]
+            if legacy and same_content:
+                # a mapping that was current under the old hash stays current (same content); an ALREADY stale mapping stays stale;
+                # nothing else of the admin's configuration is touched
+                coll.update_one({"_id": tid, "campaign_use.mapped_hash": old.get("content_hash")},
+                                {"$set": {"campaign_use.mapped_hash": fields["content_hash"]}})
+            if same_content and old.get("status") == fields["status"] \
                     and old.get("category") == fields["category"] and not old.get("missing_from_meta"):
-                coll.update_one({"_id": tid}, {"$set": {"synced_at": now}})
+                coll.update_one({"_id": tid}, {"$set": {"synced_at": now, "content_hash": fields["content_hash"], "hash_version": HASH_VERSION}})
                 counts["unchanged"] += 1
             else:
                 coll.update_one({"_id": tid}, {"$set": {**fields, **extra}})

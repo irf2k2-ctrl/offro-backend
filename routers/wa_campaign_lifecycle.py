@@ -90,7 +90,7 @@ def _detail(c):
                                                 "confirmed_by": _who(plan.get("confirmed_by")), "confirmed_at": _iso(plan.get("confirmed_at"))},
             "template_problems": M.template_problems(c), "created_by": _who(c.get("created_by")),
             "created_at": _iso(c.get("created_at")), "updated_by": _who(c.get("updated_by")), "updated_at": _iso(c.get("updated_at")),
-            "executes_automatically": False}
+            "executes_automatically": M.scheduler_status()[0]}
 
 
 def _media_view(m):
@@ -303,12 +303,14 @@ async def schedule_campaign(campaign_id: str, request: Request, user: dict = Dep
     try:
         M.check_schedulable(c, body.get("confirm"))
         send_at = M.parse_send_at(body.get("send_at"))
+        why = {}
         try:
-            live = T.verify_live(M.load_template(c["template"]))           # fail closed if Meta cannot be asked
+            live = T.verify_live(M.load_template(c["template"]), why)       # fail closed if Meta cannot be asked
         except T.TemplateSyncError as e:
             raise M.CampaignError("template_unverified", 502, e.message, meta_code=e.meta_code, template_error=e.code)
         if live:
-            raise M.CampaignError("template_not_ready", 409, "The template is no longer usable at Meta.", reasons=live)
+            # `cause` / `changed_fields` (paths only, no template text) say whether Meta really changed the template or the cache is stale
+            raise M.CampaignError("template_not_ready", 409, "The template is no longer usable at Meta.", reasons=live, **why)
         audit.record("campaign.schedule", admin, outcome="attempt", campaign_id=c["_id"], strict=True,
                      details={"send_at": send_at.isoformat() + "Z", "eligible": c["snapshot"]["eligible"]})
         out = M.schedule(c, send_at, admin)

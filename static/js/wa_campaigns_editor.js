@@ -159,7 +159,9 @@
     } catch (e) { msg($('wac_ed_smsg'), conflictText(e), 'error'); return false; }
   }
 
-  function conflictText(e) { return e.status === 409 && /version|changed|conflict/i.test(e.message) ? 'Someone else changed this campaign. Reload it and try again.' : e.message; }
+  // Only a genuine version/status conflict (backend code 'conflict') is a "someone else" problem. Other 409s (template_changed, template_not_ready,
+  // snapshot_stale, ...) must show THEIR OWN message: matching on words such as "changed" mislabelled a template change as a version clash.
+  function conflictText(e) { return e.status === 409 && e.detail && typeof e.detail === 'object' && e.detail.code === 'conflict' ? 'Someone else changed this campaign. Reload it and try again.' : e.message; }
 
   async function patchMedia(el, hm, okText) {
     var m = $('wac_ed_mmsg');
