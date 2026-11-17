@@ -139,7 +139,8 @@ Flow:
 6. MSG91 unreachable, or a confirmed token that does not say which number it was for: HTTP 503 with a reference id, NO attempt is used, NO session.
 
 Configuration (Railway variable NAMES; set per environment, values stay in Railway):
-- `MSG91_WIDGET_ID` (the OFFROOTP widget id), `MSG91_WIDGET_TOKEN_AUTH` (the widget's PUBLIC tokenAuth, which is sent to the browser by design)
+- `MSG91_WEB_WIDGET_ID` (the OffroWeb widget id), `MSG91_WEB_WIDGET_TOKEN_AUTH` (the web widget's PUBLIC tokenAuth, sent to the browser by design). The mobile widget
+  (`MSG91_WIDGET_ID`/`MSG91_WIDGET_TOKEN_AUTH`, OffroOTP) belongs to the Flutter app and is never used for the website: MSG91 answers "Web requests are not allowed for this widget" otherwise. No fallback.
 - `MSG91_AUTH_KEY` (server key, already present; used ONLY for verifyAccessToken, never sent to a browser, never logged). If MSG91 IP security is on for this key,
   Railway's outbound IP must be allowed or verification answers "auth" (logged as a clear 503).
 Any of the three missing: login answers 503 with a reference; there is NO fallback code.

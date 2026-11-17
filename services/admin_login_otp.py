@@ -89,7 +89,7 @@ def burn_pin_time():
 
 
 def log_test_mode_status():
-    print("[2FA] admin OTP provider: " + REAL_PROVIDER + (" (widget configured)" if REAL_PROVIDER != "widget" or W.configured() else " (NOT CONFIGURED: sign-in is refused until MSG91_WIDGET_ID, MSG91_WIDGET_TOKEN_AUTH and MSG91_AUTH_KEY are set)"))
+    print("[2FA] admin OTP provider: " + REAL_PROVIDER + (" (" + W.selection_label() + ")" if REAL_PROVIDER != "widget" or W.configured() else " (NOT CONFIGURED: sign-in is refused. Problems: " + "; ".join(W.config_problems()) + ")"))
     active, reason = TM.status()
     print("[2FA] admin OTP test mode: " + ("ACTIVE (Staging identity verified; allow-listed admins get the fixed code, no SMS)" if active else "INACTIVE (" + reason + ")"))
 
@@ -172,6 +172,7 @@ def start_challenge(user, mobile: str, ip: str, user_agent: str, template_id: st
     provider = "local" if test else REAL_PROVIDER
     widget = provider == "widget"
     if widget and user and not W.configured():       # fail closed BEFORE anything is created or counted; there is no fallback code
+        print("[2FA][widget] login refused, not configured. Problems: " + "; ".join(W.config_problems()))
         return {"ok": False, "reason": "not_configured"}
     # The SMS budget exists to stop SMS spam and cost, so it only counts real sends (test mode sends none). In widget mode the first send is
     # counted here (the challenge exists to send one); resends are counted when their permit is issued.
@@ -351,6 +352,7 @@ def request_send(token: str, mobile_lookup, ip: str) -> dict:
             return_document=True)
         if not claimed:
             return {"ok": False, "reason": "cooldown", "retry_in": OTP_RESEND_SECONDS}
+    print("[2FA][widget] permit issued (%s) %s" % ("send" if sent == 0 else "resend", W.selection_label()))
     return {"ok": True, "identifier": identifier, "widget": W.public_config(), "first": sent == 0,
             "expires_in": OTP_EXPIRY_MINUTES * 60, "resend_in": OTP_RESEND_SECONDS}
 
