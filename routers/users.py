@@ -99,6 +99,18 @@ def register_user(data: dict):
     if not raw_phone or not name:
         raise HTTPException(status_code=400, detail="Name and phone are required")
 
+    # Consent (Terms & Conditions + Privacy Policy + data processing).
+    # Optional for older app builds that do not send it; when present it must be
+    # a real boolean true.  Explicit false / any other value is rejected.
+    consent_given = False
+    if "consent" in data:
+        if data.get("consent") is not True:
+            raise HTTPException(
+                status_code=400,
+                detail="Please accept the Terms & Conditions and Privacy Policy to continue",
+            )
+        consent_given = True
+
     phone    = _normalise_phone(raw_phone)
     variants = _phone_variants(raw_phone)
 
@@ -127,6 +139,9 @@ def register_user(data: dict):
             "terms_version":       "1.0",
             "terms_accepted_at":   now,
         }
+        if consent_given:
+            fresh["consent_accepted"]    = True
+            fresh["consent_accepted_at"] = now
         db.accounts.update_one({"_id": existing["_id"]}, {"$set": fresh})
         db.users.update_one({"phone": {"$in": variants}}, {"$set": fresh}, upsert=True)
         acct_id = str(existing["_id"])
@@ -155,6 +170,9 @@ def register_user(data: dict):
         "terms_version":  "1.0",
         "terms_accepted_at": now,
     }
+    if consent_given:
+        account["consent_accepted"]    = True
+        account["consent_accepted_at"] = now
     result = db.accounts.insert_one(account)
     acct_id = str(result.inserted_id)
 
@@ -192,6 +210,8 @@ def get_profile(user=Depends(get_current_user)):
         "profile_image":      user.get("profile_image", ""),
         "terms_version":      user.get("terms_version", ""),
         "terms_accepted_at":  user.get("terms_accepted_at", ""),
+        "consent_accepted":    bool(user.get("consent_accepted", False)),
+        "consent_accepted_at": user.get("consent_accepted_at", ""),
         "merchant_terms_accepted": user.get("merchant_terms_accepted", False),
         # BUG FIX (Round 4 — Bug 3): the account's live, server-authoritative
         # role list — same field create_influencer_profile() does

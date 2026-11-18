@@ -43,6 +43,7 @@ ALL_MODULES = [
     "Reviews", "Discounts", "Terms & Conditions", "Policies",
     "Social Media", "Live Chat", "Default Images", "User Management",
     "WhatsApp Campaigns",   # dedicated module (Phase 2A): never granted to an existing/seeded role except Super Admin
+    "Deals",                # admin view/manage of merchant deals; existing DB roles lack it, so only Super Admin sees it until a role is granted
 ]
 
 ALL_ACTIONS = ["view", "add", "edit", "delete", "approve", "export"]

@@ -3,7 +3,7 @@ from fastapi import UploadFile, File, Form, APIRouter, HTTPException, Depends, R
 from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pymongo.errors import DuplicateKeyError
 import uuid, qrcode, io, base64
 import time as _time
@@ -658,6 +658,38 @@ def _accounts_query(a, search: str = "", role: str = "", city: str = "") -> dict
     return clauses[0] if len(clauses) == 1 else {"$and": clauses}
 
 
+def _created_dt(v):
+    """Account creation timestamp -> naive UTC datetime, or None.
+
+    `created_at` is stored in two shapes: ISO strings (POST /user/register) and
+    datetime objects (merchant app).  Both are naive UTC.  Missing / unparseable
+    values (older records) return None instead of raising."""
+    if isinstance(v, datetime):
+        dt = v
+    elif isinstance(v, str) and v.strip():
+        txt = v.strip()
+        if txt.endswith("Z"):
+            txt = txt[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(txt)
+        except ValueError:
+            try:
+                dt = datetime.strptime(txt[:10], "%Y-%m-%d")
+            except ValueError:
+                return None
+    else:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _created_iso(v) -> str:
+    """UTC ISO-8601 with a trailing Z (the dashboard renders it in IST), or ''."""
+    dt = _created_dt(v)
+    return dt.replace(microsecond=0).isoformat() + "Z" if dt else ""
+
+
 @router.get("/accounts")
 def list_accounts(
     a=Depends(get_current_admin),
@@ -666,6 +698,7 @@ def list_accounts(
     search: str = "",
     role: str = "",
     city: str = "",
+    sort: str = "",
 ):
     """Unified accounts view — single accounts collection. Bulletproof version.
 
@@ -686,9 +719,23 @@ def list_accounts(
             total = db.accounts.count_documents(query)
             pages = max(1, -(-total // page_size))
             page = min(max(1, int(page)), pages)
-            all_accounts = list(
-                db.accounts.find(query).sort("created_at", -1)
-                .skip((page - 1) * page_size).limit(page_size))
+            if sort in ("created_asc", "created_desc"):
+                # created_at is stored as both ISO strings and datetimes, which a
+                # database sort cannot order together.  Sort the matched ids in
+                # Python on the normalised timestamp (missing dates always last),
+                # then load only the requested page.
+                _rows = list(db.accounts.find(query, {"created_at": 1}))
+                _dated = [(r["_id"], _created_dt(r.get("created_at"))) for r in _rows]
+                _have = sorted((x for x in _dated if x[1] is not None),
+                               key=lambda x: (x[1], str(x[0])), reverse=(sort == "created_desc"))
+                _none = sorted((x for x in _dated if x[1] is None), key=lambda x: str(x[0]))
+                _ids = [x[0] for x in _have + _none][(page - 1) * page_size: page * page_size]
+                _by_id = {d["_id"]: d for d in db.accounts.find({"_id": {"$in": _ids}})}
+                all_accounts = [_by_id[i] for i in _ids if i in _by_id]
+            else:
+                all_accounts = list(
+                    db.accounts.find(query).sort("created_at", -1)
+                    .skip((page - 1) * page_size).limit(page_size))
             cities = sorted(
                 c for c in db.accounts.distinct("city", _accounts_query(a)) if c)
             meta = {"total": total, "page": page, "page_size": page_size,
@@ -771,6 +818,7 @@ def list_accounts(
                 "product_count": product_count,
                 "banner_count":  banner_count,
                 "created_at":    str(acct.get("created_at", ""))[:10],
+                "created_at_iso": _created_iso(acct.get("created_at")),
             })
         except Exception as e:
             _errors.append({"id": str(acct.get("_id", "?")), "error": str(e)})

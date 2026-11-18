@@ -185,6 +185,7 @@ function _secUrl(u) {
   <div class="sep"></div>
   <a href="#" onclick="showSection('accounts',this)"><i class="fas fa-id-badge fa-fw"></i> Accounts</a>
   <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
+  <a href="#" onclick="showSection('deals',this)"><i class="fas fa-tags fa-fw"></i> Deals</a>
   <a href="#" onclick="showSection('product_cards',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
   <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
   <a href="#" onclick="showSection('admin_banners',this)"><i class="fas fa-ad fa-fw"></i> Admin Banners</a>
@@ -459,7 +460,10 @@ function _secUrl(u) {
     <thead><tr>
       <th>Name</th><th>Phone</th><th>Ref ID</th><th>City</th>
       <th>Roles</th><th>Stores</th><th>Products</th><th>Banners</th>
-      <th>Points</th><th>Status</th><th>Actions</th>
+      <th>Points</th>
+      <th id="acct_created_th" onclick="toggleAcctSort()" style="cursor:pointer;white-space:nowrap;"
+        title="Sort by creation date">Created <span id="acct_sort_ind">⇅</span></th>
+      <th>Status</th><th>Actions</th>
     </tr></thead>
     <tbody id="accounts_table"></tbody>
   </table></div>
@@ -478,6 +482,53 @@ function _secUrl(u) {
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-0" id="acctDetailBody" style="background:#FDFBF6;padding:20px!important;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ DEALS (admin view of merchant deals) ═══ -->
+<div id="section-deals" class="section">
+  <div class="section-header">
+    <div class="page-title" style="margin:0">🏷️ Deals</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input id="deal_search" class="form-control" style="max-width:220px;"
+        placeholder="🔍 Title / store / merchant..." oninput="filterDeals()">
+      <select id="deal_merchant_filter" class="form-select" style="max-width:170px;" onchange="filterDeals()">
+        <option value="">All Merchants</option>
+      </select>
+      <select id="deal_status_filter" class="form-select" style="max-width:140px;" onchange="filterDeals()">
+        <option value="">All Status</option>
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+        <option value="expired">Expired</option>
+      </select>
+      <label style="font-size:11px;color:var(--muted);margin:0;">Created</label>
+      <input id="deal_from" type="date" class="form-control" style="max-width:140px;" onchange="filterDeals()" title="Created from">
+      <input id="deal_to" type="date" class="form-control" style="max-width:140px;" onchange="filterDeals()" title="Created to">
+    </div>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr>
+      <th>Image</th><th>Deal</th><th>Merchant</th><th>Store</th><th>Offer</th>
+      <th>Start</th><th>Expiry</th><th>Status</th><th>Created</th><th>Actions</th>
+    </tr></thead>
+    <tbody id="deals_table"></tbody>
+  </table></div>
+  <div id="deals_pagination"
+    style="display:flex;align-items:center;justify-content:space-between;
+    padding:10px 16px;border-top:1px solid var(--border);
+    background:#fff;border-radius:0 0 12px 12px;"></div>
+</div>
+
+<!-- Deal Detail / Edit Modal -->
+<div class="modal fade" id="dealModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content" style="border-radius:16px;overflow:hidden;">
+      <div class="modal-header" style="background:var(--sidebar);color:#fff;border:none;padding:18px 24px;">
+        <h5 class="modal-title fw-bold" id="dealModalTitle">Deal</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="dealModalBody" style="background:#FDFBF6;"></div>
     </div>
   </div>
 </div>
@@ -2398,6 +2449,7 @@ window._rbacMe = null;
 const RBAC_SECTION_MAP = {
   "Accounts":          ["accounts"],
   "Stores":            ["stores"],
+  "Deals":             ["deals"],
   "Products":          ["product_cards"],
   "Banners":           ["promo_sliders"],
   "Admin Banners":     ["admin_banners"],
@@ -2630,6 +2682,7 @@ function showSection(name, el){
     sec.querySelectorAll(".table-wrap").forEach(tw => tw.scrollLeft = 0);
   }
   if(name==="accounts") loadAccounts();
+  if(name==="deals") loadDeals();
   if(name==="overview") { loadStats(); loadSliders(); }
   if(name==="stores") loadStores();
   if(name==="gift_product_requests") loadGiftProductRequests();
@@ -7391,6 +7444,24 @@ async function grantMerchantRole(accountId, name) {
 }
 
 let _acctTotal = 0, _acctReqId = 0, _acctSearchTimer = null;
+let _acctSort = '';   // '' (server default: newest first) | 'created_desc' | 'created_asc'
+
+// "Created" column: the stored creation timestamp (UTC) shown in IST, one format everywhere.
+function fmtAccountCreated(iso) {
+  if (!iso) return '—';                                  // older records without a timestamp
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString('en-IN', {timeZone:'Asia/Kolkata', day:'2-digit', month:'short',
+    year:'numeric', hour:'2-digit', minute:'2-digit', hour12:true});
+}
+
+function toggleAcctSort() {
+  _acctSort = (_acctSort === 'created_desc') ? 'created_asc' : 'created_desc';
+  const ind = document.getElementById('acct_sort_ind');
+  if (ind) ind.textContent = _acctSort === 'created_asc' ? '▲' : '▼';
+  _acctPage = 1;
+  loadAccounts();
+}
 
 // Server-side pagination: only the current page (PAGE_SIZE rows) is fetched.
 // Search / role / city are sent with the request so paging and filtering
@@ -7405,8 +7476,9 @@ async function loadAccounts(page) {
   if (search) qs.set('search', search);
   if (role)   qs.set('role', role);
   if (city)   qs.set('city', city);
+  if (_acctSort) qs.set('sort', _acctSort);
   const tb = document.getElementById('accounts_table');
-  const fail = (msg) => { if (tb) tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:32px;color:#c0392b;">
+  const fail = (msg) => { if (tb) tb.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:32px;color:#c0392b;">
         ⚠️ ${msg}<br>
         <button onclick="loadAccounts()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button>
       </td></tr>`; };
@@ -7454,7 +7526,7 @@ function renderAccountsPage() {
   if (!tbody) return;
 
   if (!page.length) {
-    tbody.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-4">No accounts found</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12" class="text-center text-muted py-4">No accounts found</td></tr>`;
     renderPagination('accounts_pagination', total, _acctPage, 'goAcctPage');
     return;
   }
@@ -7479,6 +7551,7 @@ function renderAccountsPage() {
       <td><span class="badge" style="background:#e8f5e9;color:var(--text);">${a.product_count||0}</span></td>
       <td><span class="badge" style="background:var(--beige);color:var(--text);">${a.banner_count||0}</span></td>
       <td style="font-size:12px;">${pts > 0 ? '⭐ '+pts : '—'}</td>
+      <td style="font-size:12px;white-space:nowrap;">${escHtml(fmtAccountCreated(a.created_at_iso))}</td>
       <td><span class="${stCls}" style="background:${stBg};color:${a.status==='delete_requested'?'#856404':a.status==='deleted'?'#666':'#fff'};">${stLbl}</span></td>
       <td>
         <button class="btn-sm-p" onclick="openAccountDetail('${_secJs(a.account_id)}','${escHtml(a.full_name||'')}')">👁 View</button>
@@ -7500,6 +7573,230 @@ function renderAccountsPage() {
 }
 
 function goAcctPage(p) { _acctPage = p; loadAccounts(); }
+
+// ═══════════════════════════════════════════════════════════════
+// DEALS (admin) — manages the same deals the merchant & customer apps use
+// ═══════════════════════════════════════════════════════════════
+let _dealPage = 1, _dealTotal = 0, _dealReqId = 0, _dealTimer = null, _dealRows = [], _dealModalInst = null;
+
+function _dealSafeImg(u) {
+  u = String(u || '');
+  return (/^https?:\/\//i.test(u) || /^data:image\//i.test(u)) ? u : '';
+}
+function _dealFmtDate(ymd) {
+  if (!ymd) return '—';
+  const d = new Date(ymd + 'T00:00:00');
+  return isNaN(d.getTime()) ? escHtml(ymd) : d.toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'});
+}
+function _dealOffer(r) {
+  return (r.discount === '' || r.discount === null || r.discount === undefined) ? '—' : escHtml(String(r.discount)) + '% off';
+}
+function _dealStatusBadge(st) {
+  const m = {active:['#1a6640','Active'], inactive:['#7a7f85','Inactive'], expired:['#c0392b','Expired']}[st] || ['#7a7f85', st];
+  return `<span style="background:${m[0]};color:#fff;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;">${escHtml(m[1])}</span>`;
+}
+function filterDeals() {
+  clearTimeout(_dealTimer);
+  _dealTimer = setTimeout(() => { _dealPage = 1; loadDeals(); }, 300);
+}
+function goDealPage(p) { _dealPage = p; loadDeals(); }
+
+async function loadDeals(page) {
+  if (page) _dealPage = page;
+  const reqId = ++_dealReqId;
+  const tb = document.getElementById('deals_table');
+  const val = id => (document.getElementById(id)?.value || '').trim();
+  const qs = new URLSearchParams({page: _dealPage, page_size: PAGE_SIZE});
+  [['search','deal_search'],['merchant_id','deal_merchant_filter'],['status','deal_status_filter'],
+   ['date_from','deal_from'],['date_to','deal_to']].forEach(([k,id]) => { if (val(id)) qs.set(k, val(id)); });
+  const fail = msg => { if (tb) tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:32px;color:#c0392b;">⚠️ ${escHtml(msg)}<br>
+      <button onclick="loadDeals()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button></td></tr>`; };
+  try {
+    const r = await fetch('/admin/deals?' + qs.toString(), {credentials:'include'});
+    if (reqId !== _dealReqId) return;
+    if (r.status === 401) { window.location.href = '/admin'; return; }
+    if (r.status === 403) { if (tb) tb.innerHTML = '<tr><td colspan="10">' + _accessDeniedHtml('Deals') + '</td></tr>'; return; }
+    if (!r.ok) { let m = 'Server error ' + r.status; try { m = (await r.json()).detail || m; } catch(_) {} fail('Failed to load deals: ' + m); return; }
+    const d = await r.json();
+    _dealRows = Array.isArray(d.items) ? d.items : [];
+    _dealTotal = d.total || 0; _dealPage = d.page || 1;
+    const sel = document.getElementById('deal_merchant_filter');
+    if (sel) {
+      const cur = sel.value;
+      const opts = d.merchants || [];
+      sel.innerHTML = '<option value="">All Merchants</option>' + opts.map(m => `<option value="${escHtml(m.id)}">${escHtml(m.name)}</option>`).join('');
+      sel.value = cur;
+    }
+    renderDeals();
+  } catch(e) { if (reqId === _dealReqId) fail('Network error loading deals.'); }
+}
+
+function renderDeals() {
+  const tb = document.getElementById('deals_table');
+  if (!tb) return;
+  if (!_dealRows.length) {
+    tb.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">No deals found</td></tr>';
+    renderPagination('deals_pagination', _dealTotal, _dealPage, 'goDealPage');
+    return;
+  }
+  const canEdit = _rbacCanDo('deals', 'edit'), canDel = _rbacCanDo('deals', 'delete');
+  tb.innerHTML = _dealRows.map(r => {
+    const img = _dealSafeImg(r.image_url);
+    const id = _secJs(r.id);
+    const toggle = canEdit && r.status !== 'expired'
+      ? `<button class="btn-sm-p" style="background:${r.status==='active'?'#7a7f85':'var(--primary)'};" onclick="dealToggle('${id}',${r.status==='active'?'false':'true'})">${r.status==='active'?'⏸ Deactivate':'▶ Activate'}</button>` : '';
+    return `<tr>
+      <td>${img ? `<img src="${escHtml(img)}" alt="" style="width:46px;height:46px;object-fit:cover;border-radius:8px;border:1px solid var(--border);">` : '<span style="color:var(--muted)">—</span>'}</td>
+      <td style="max-width:220px;"><strong>${escHtml(r.title || '—')}</strong>
+        <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px;" title="${escHtml(r.description)}">${escHtml(r.description || '')}</div></td>
+      <td>${escHtml(r.merchant_name || '—')}</td>
+      <td>${escHtml(r.store_name || '—')}${r.city ? `<div style="font-size:11px;color:var(--muted)">${escHtml(r.city)}</div>` : ''}</td>
+      <td style="white-space:nowrap;">${_dealOffer(r)}</td>
+      <td style="font-size:12px;white-space:nowrap;">${_dealFmtDate(r.start_date)}</td>
+      <td style="font-size:12px;white-space:nowrap;">${_dealFmtDate(r.end_date)}</td>
+      <td>${_dealStatusBadge(r.status)}</td>
+      <td style="font-size:12px;white-space:nowrap;">${escHtml(fmtAccountCreated(r.created_at_iso))}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn-sm-p" onclick="openDeal('${id}',false)">👁 View</button>
+        ${canEdit ? `<button class="btn-sm-p" onclick="openDeal('${id}',true)">✏️ Edit</button>` : ''}
+        ${toggle}
+        ${canDel ? `<button class="btn-sm-p" style="background:#c0392b;" onclick="dealDelete('${id}')">🗑 Delete</button>` : ''}
+      </td></tr>`;
+  }).join('');
+  renderPagination('deals_pagination', _dealTotal, _dealPage, 'goDealPage');
+}
+
+function _dealModal() {
+  if (!_dealModalInst) _dealModalInst = new bootstrap.Modal(document.getElementById('dealModal'));
+  return _dealModalInst;
+}
+
+async function openDeal(id, edit) {
+  const body = document.getElementById('dealModalBody');
+  document.getElementById('dealModalTitle').textContent = edit ? 'Edit Deal' : 'Deal Details';
+  body.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted)">Loading…</div>';
+  _dealModal().show();
+  try {
+    const r = await fetch('/admin/deals/' + encodeURIComponent(id), {credentials:'include'});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { body.innerHTML = `<div style="color:#c0392b;padding:20px;">${escHtml(d.detail || 'Failed to load deal')}</div>`; return; }
+    body.innerHTML = edit ? _dealEditHtml(d) : _dealViewHtml(d);
+  } catch(e) { body.innerHTML = '<div style="color:#c0392b;padding:20px;">Network error.</div>'; }
+}
+
+function _dealViewHtml(d) {
+  const img = _dealSafeImg(d.image_url);
+  const row = (k, v) => `<tr><td style="width:150px;color:var(--muted);font-size:12px;">${k}</td><td>${v}</td></tr>`;
+  return `${img ? `<img src="${escHtml(img)}" alt="" style="max-width:100%;max-height:240px;object-fit:contain;border-radius:12px;border:1px solid var(--border);margin-bottom:14px;">` : ''}
+    <table style="width:100%;font-size:13px;"><tbody>
+      ${row('Title', `<strong>${escHtml(d.title || '—')}</strong>`)}
+      ${row('Description', escHtml(d.description || '—').replace(/\n/g, '<br>'))}
+      ${row('Offer', _dealOffer(d))}
+      ${row('Category', escHtml(d.category || '—'))}
+      ${row('Merchant', escHtml(d.merchant_name || '—') + (d.merchant_phone ? ' · ' + escHtml(d.merchant_phone) : ''))}
+      ${row('Store', escHtml(d.store_name || '—') + (d.city ? ' · ' + escHtml(d.city) : ''))}
+      ${row('Start date', _dealFmtDate(d.start_date))}
+      ${row('Expiry date', _dealFmtDate(d.end_date))}
+      ${row('Status', _dealStatusBadge(d.status))}
+      ${row('Created', escHtml(fmtAccountCreated(d.created_at_iso)))}
+      ${row('Deal ID', `<span style="font-family:monospace;font-size:11px;">${escHtml(d.id)}</span>`)}
+    </tbody></table>`;
+}
+
+function _dealEditHtml(d) {
+  const img = _dealSafeImg(d.image_url);
+  const f = (label, input) => `<div class="mb-2"><label class="form-label">${label}</label>${input}</div>`;
+  return `<div id="dealEditForm" data-id="${escHtml(d.id)}" data-image="${escHtml(img)}">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${escHtml(d.merchant_name || '—')} · ${escHtml(d.store_name || '—')} (merchant and store cannot be changed)</div>
+    ${f('Title *', `<input id="de_title" class="form-control" maxlength="120" value="${escHtml(d.title)}">`)}
+    ${f('Description', `<textarea id="de_desc" class="form-control" rows="3" maxlength="2000">${escHtml(d.description)}</textarea>`)}
+    <div class="row g-2">
+      <div class="col-md-4">${f('Discount (%)', `<input id="de_disc" type="number" min="0" max="100" step="any" class="form-control" value="${escHtml(String(d.discount ?? ''))}">`)}</div>
+      <div class="col-md-4">${f('Start date', `<input id="de_start" type="date" class="form-control" value="${escHtml(d.start_date)}">`)}</div>
+      <div class="col-md-4">${f('Expiry date', `<input id="de_end" type="date" class="form-control" value="${escHtml(d.end_date)}">`)}</div>
+    </div>
+    ${f('Image', `${img ? `<div><img id="de_preview" src="${escHtml(img)}" alt="" style="max-height:110px;border-radius:8px;border:1px solid var(--border);margin-bottom:6px;"></div>` : '<div><img id="de_preview" alt="" style="display:none;max-height:110px;border-radius:8px;border:1px solid var(--border);margin-bottom:6px;"></div>'}
+      <input id="de_file" type="file" accept="image/*" class="form-control" onchange="dealPickImage(this)">
+      <label style="font-size:12px;margin-top:4px;"><input type="checkbox" id="de_rmimg"> Remove image</label>`)}
+    <div id="de_err" style="color:#c0392b;font-size:12px;min-height:18px;margin:6px 0;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn-sm-p" style="background:#7a7f85;" data-bs-dismiss="modal">Cancel</button>
+      <button class="btn-sm-p" id="de_save" onclick="dealSave()">💾 Save changes</button>
+    </div></div>`;
+}
+
+let _dealNewImage = null;
+function dealPickImage(inp) {
+  const file = inp.files && inp.files[0];
+  _dealNewImage = null;
+  if (!file) return;
+  if (file.size > 6 * 1024 * 1024) { document.getElementById('de_err').textContent = 'Image must be under 6 MB.'; inp.value = ''; return; }
+  const rd = new FileReader();
+  rd.onload = () => {
+    _dealNewImage = rd.result;
+    const p = document.getElementById('de_preview');
+    if (p) { p.src = rd.result; p.style.display = ''; }
+    const rm = document.getElementById('de_rmimg'); if (rm) rm.checked = false;
+  };
+  rd.readAsDataURL(file);
+}
+
+async function dealSave() {
+  const form = document.getElementById('dealEditForm');
+  const err = document.getElementById('de_err');
+  const btn = document.getElementById('de_save');
+  const g = id => document.getElementById(id).value;
+  const payload = {title: g('de_title').trim(), description: g('de_desc'), start_date: g('de_start'), end_date: g('de_end')};
+  if (!payload.title) { err.textContent = 'Title is required.'; return; }
+  if (g('de_disc').trim() !== '') {
+    const n = Number(g('de_disc'));
+    if (!isFinite(n) || n < 0 || n > 100) { err.textContent = 'Discount must be between 0 and 100.'; return; }
+    payload.discount = n;
+  }
+  if (payload.start_date && payload.end_date && payload.end_date < payload.start_date) { err.textContent = 'Expiry date cannot be before the start date.'; return; }
+  if (_dealNewImage) payload.image_url = _dealNewImage;
+  else if (document.getElementById('de_rmimg').checked) payload.image_url = '';
+  err.textContent = ''; btn.disabled = true;
+  try {
+    const r = await fetch('/admin/deals/' + encodeURIComponent(form.dataset.id), {
+      method: 'PUT', credentials: 'include', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 401) { window.location.href = '/admin'; return; }
+    if (!r.ok) { err.textContent = d.detail || ('Failed (status ' + r.status + ')'); btn.disabled = false; return; }
+    _dealNewImage = null;
+    _dealModal().hide();
+    showToast('Deal updated', 'success');
+    loadDeals();
+  } catch(e) { err.textContent = 'Network error: ' + (e.message || e); btn.disabled = false; }
+}
+
+async function dealToggle(id, active) {
+  if (!confirm(active ? 'Activate this deal? It becomes visible to customers again.' : 'Deactivate this deal? Customers will stop seeing it.')) return;
+  try {
+    const r = await fetch('/admin/deals/' + encodeURIComponent(id) + '/status', {
+      method: 'POST', credentials: 'include', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({active})});
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 401) { window.location.href = '/admin'; return; }
+    if (!r.ok) { showToast(d.detail || 'Failed', 'danger'); return; }
+    showToast(d.message || 'Done', 'success');
+    loadDeals();
+  } catch(e) { showToast('Network error: ' + (e.message || e), 'danger'); }
+}
+
+async function dealDelete(id) {
+  const row = _dealRows.find(x => x.id === id);
+  const label = row ? `"${row.title}" (${row.store_name})` : 'this deal';
+  if (!confirm(`Permanently delete ${label}?\n\nIt will disappear from the merchant and customer apps. This cannot be undone.`)) return;
+  try {
+    const r = await fetch('/admin/deals/' + encodeURIComponent(id), {method: 'DELETE', credentials: 'include'});
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 401) { window.location.href = '/admin'; return; }
+    if (!r.ok) { showToast(d.detail || 'Failed', 'danger'); return; }
+    showToast('Deal deleted', 'success');
+    if (_dealRows.length === 1 && _dealPage > 1) _dealPage--;
+    loadDeals();
+  } catch(e) { showToast('Network error: ' + (e.message || e), 'danger'); }
+}
 
 async function processDeletion(accountId, action) {
   const verb = action === 'approve' ? 'permanently DELETE' : 'restore (reject deletion for)';
@@ -9509,7 +9806,7 @@ const RBAC_MODULES = [
   "Payments","Gift Vouchers","Notifications","Categories","Pricing & GST",
   "Reviews","Discounts","Terms & Conditions","Policies",
   "Social Media","Live Chat","Default Images","User Management","Influencers",
-  "WhatsApp Campaigns"
+  "WhatsApp Campaigns","Deals"
 ];
 const RBAC_ACTIONS = ["view","add","edit","delete","approve","export"];
 const RBAC_CITIES = ["Ballari","Bengaluru","Hyderabad","Hubli","Dharwad","Mysuru"];

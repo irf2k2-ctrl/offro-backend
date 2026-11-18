@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse, Response
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, wa_campaigns, dashboard_auth, maps, smart_link
-from routers import merchant_products, admin_products, public_products, collaborations
+from routers import merchant_products, admin_products, admin_deals, public_products, collaborations
 from database import db
 import base64, io, re, html as _html
 from services.security import cors_origins, SecurityMiddleware
@@ -34,6 +34,7 @@ app.include_router(public.router)
 app.include_router(public_products.router)   # /products-public, /products/{id}/reviews ... (merchant_products)
 app.include_router(merchant_products.router) # /merchant/products/...
 app.include_router(admin_products.router)    # /admin/products/...
+app.include_router(admin_deals.router)       # /admin/deals/...  (same `deals` collection the merchant + customer apps use)
 app.include_router(collaborations.merchant_router)    # /merchant/collab/...
 app.include_router(collaborations.influencer_router)  # /influencer/opportunities/...
 app.include_router(popup_campaigns.router)
