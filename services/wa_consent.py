@@ -384,6 +384,70 @@ def record_admin_consent(phone, source, evidence_ref, consented_at, admin, attes
             "phone_last4": p[-4:], "event_id": event_id}
 
 
+# ── Registration (checkbox) WhatsApp consent ────────────────────────────────────
+#
+# The customer registration checkbox carries EXPLICIT WhatsApp marketing consent. The exact wording shown to the customer is
+# versioned here; the server stores ITS OWN copy of the wording for the version the app reports (never client-supplied text), and
+# refuses a version it does not know. Rules (same safety model as admin-evidenced consent):
+#   * it can NEVER override an opt-out (STOP): only the customer's own START restores consent;
+#   * an existing opted_in contact is left untouched (only an evidence row is appended);
+#   * consent_seq of a contact created here is 0, so any later STOP / START applies normally;
+#   * idempotent: the same (number, wording version, account) is ONE ledger row;
+#   * ledger row first, then contact (a failure can only leave extra evidence, never consent without evidence).
+REGISTRATION_CONSENT_VERSION = "reg-wa-2026-11-18"
+REGISTRATION_CONSENT_TEXT = ("I agree to the Terms & Conditions and Privacy Policy and consent to receive updates "
+                             "and promotional messages from OffrO via WhatsApp.")
+REGISTRATION_CONSENT_VERSIONS = {REGISTRATION_CONSENT_VERSION: REGISTRATION_CONSENT_TEXT}
+REGISTRATION_EVENT = "registration_opt_in"
+
+
+def record_registration_consent(phone, account_id, version, consented_at) -> dict:
+    """Returns {"result": "recorded" | "already_opted_in" | "opted_out_kept", "phone_last4", "event_id"}.
+    ValueError: invalid phone / unknown wording version / missing account id. Database errors propagate - nothing is
+    reported as saved unless it was."""
+    p = normalize_phone(phone)
+    if not p:
+        raise ValueError("invalid phone for consent record")
+    text = REGISTRATION_CONSENT_VERSIONS.get(str(version or ""))
+    if not text:
+        raise ValueError("unknown consent wording version")
+    acct = str(account_id or "").strip()
+    if not acct:
+        raise ValueError("account id required")
+    if consent_status(p) == "opted_out":          # raises on a database error: fail closed
+        return {"result": "opted_out_kept", "phone_last4": p[-4:], "event_id": ""}
+
+    now = datetime.utcnow()
+    when = consented_at if isinstance(consented_at, datetime) else (_parse_consent_time(consented_at) or now)
+    ev = {"source": "registration_checkbox", "consent_source": "customer_registration", "consent_text": text,
+          "consent_version": str(version), "consented_at": when.isoformat(), "recorded_at": now.isoformat(),
+          "account_id": acct[:60], "message_id": ""}
+    event_id = REGISTRATION_EVENT + ":" + hashlib.sha256("|".join([p, str(version), acct]).encode()).hexdigest()[:32]
+
+    try:
+        res = db[EVENTS].insert_one({"_id": event_id, "phone": p, "phone_last4": p[-4:], "event": REGISTRATION_EVENT,
+                                     "at": now, "consent_seq": 0, **ev})
+        if not res.acknowledged:
+            raise ConsentWriteError("ledger write not acknowledged")
+    except DuplicateKeyError:
+        pass
+    try:
+        res = db[CONTACTS].update_one(
+            {"_id": p, "status": {"$ne": "opted_out"}},
+            {"$setOnInsert": {"phone": p, "phone_last4": p[-4:], "status": "opted_in", "opted_in_at": now,
+                              "updated_at": now, "consent_seq": 0, "last_consent": ev, "created_at": now}},
+            upsert=True)
+    except DuplicateKeyError:
+        stored = db[CONTACTS].find_one({"_id": p}, {"status": 1})
+        if stored and stored.get("status") == "opted_out":
+            return {"result": "opted_out_kept", "phone_last4": p[-4:], "event_id": event_id}   # a STOP won the race
+        raise ConsentWriteError("contact write conflict (duplicate key)")
+    if not res.acknowledged:
+        raise ConsentWriteError("contact write not acknowledged")
+    return {"result": "recorded" if res.upserted_id is not None else "already_opted_in",
+            "phone_last4": p[-4:], "event_id": event_id}
+
+
 def consent_status(phone) -> str:
     """'opted_in' | 'opted_out' | 'unknown' | 'invalid'. Checks every storage variant of the number, and an
     opted_out record under ANY variant wins. RAISES if the database cannot be read - callers must fail closed."""

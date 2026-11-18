@@ -111,6 +111,26 @@ def register_user(data: dict):
             )
         consent_given = True
 
+    # WhatsApp promotional-messages consent, carried by the SAME registration checkbox (new wording). It is a separate, explicit
+    # purpose: only a request that sends `whatsapp_consent: true` together with the wording version the app displayed counts.
+    # The `consent` flag alone (older builds) is Terms/Privacy only and NEVER implies WhatsApp consent. The server keeps its own copy
+    # of the wording for the version and rejects a version it does not know. The consent is held on the account as PENDING here and is
+    # written to the WhatsApp consent store (wa_contacts) at the first successful login, i.e. after the customer has completed OTP
+    # for this number - so a mistyped number never receives a marketing opt-in.
+    wa_pending = None
+    if "whatsapp_consent" in data:
+        from services import wa_consent as _wac
+        if data.get("whatsapp_consent") is not True or data.get("consent") is not True:
+            raise HTTPException(
+                status_code=400,
+                detail="Please accept the Terms & Conditions, Privacy Policy and WhatsApp consent to continue",
+            )
+        _ver = str(data.get("consent_version", "")).strip()
+        if _ver not in _wac.REGISTRATION_CONSENT_VERSIONS:
+            raise HTTPException(status_code=400, detail="Please update the OffrO app to register.")
+        wa_pending = {"version": _ver, "text": _wac.REGISTRATION_CONSENT_VERSIONS[_ver],
+                      "accepted_at": datetime.utcnow().isoformat()}
+
     phone    = _normalise_phone(raw_phone)
     variants = _phone_variants(raw_phone)
 
@@ -142,8 +162,13 @@ def register_user(data: dict):
         if consent_given:
             fresh["consent_accepted"]    = True
             fresh["consent_accepted_at"] = now
-        db.accounts.update_one({"_id": existing["_id"]}, {"$set": fresh})
-        db.users.update_one({"phone": {"$in": variants}}, {"$set": fresh}, upsert=True)
+        db.users.update_one({"phone": {"$in": variants}}, {"$set": dict(fresh)}, upsert=True)   # legacy mirror: no pending WhatsApp consent
+        acct_upd = {"$set": fresh}
+        if wa_pending:
+            fresh["wa_consent_pending"] = wa_pending
+        else:
+            acct_upd["$unset"] = {"wa_consent_pending": ""}      # never carry an old, unactivated consent into the new account
+        db.accounts.update_one({"_id": existing["_id"]}, acct_upd)
         acct_id = str(existing["_id"])
         print(f"[REGISTER] ✅ Re-registered as new account (was {existing.get('status')}): {phone} name={name} id={acct_id}")
         return {"message": "Registered successfully", "account_id": acct_id}
@@ -173,13 +198,16 @@ def register_user(data: dict):
     if consent_given:
         account["consent_accepted"]    = True
         account["consent_accepted_at"] = now
+    users_copy = dict(account)                                   # legacy mirror below: no pending WhatsApp consent
+    if wa_pending:
+        account["wa_consent_pending"] = wa_pending
     result = db.accounts.insert_one(account)
     acct_id = str(result.inserted_id)
 
     # Sync to legacy users collection for rollback safety
     db.users.update_one(
         {"phone": phone},
-        {"$setOnInsert": {**account, "account_id": acct_id}},
+        {"$setOnInsert": {**users_copy, "account_id": acct_id}},
         upsert=True,
     )
 
@@ -350,6 +378,22 @@ def account_login(data: dict):
     influencer_id = acct.get("influencer_id", "") if "influencer" in roles else ""
 
     print(f"[ACCOUNT-LOGIN] ✅ {raw_phone} roles={roles} id={acct_id}")
+
+    # First successful login after a registration that ticked the WhatsApp-consent checkbox: write the consent into the WhatsApp
+    # consent store now. Never blocks or changes the login: any problem is logged (no number) and retried at the next login.
+    _pending = acct.get("wa_consent_pending")
+    if isinstance(_pending, dict) and _pending.get("version"):
+        try:
+            from services import wa_consent as _wac
+            _res = _wac.record_registration_consent(acct.get("phone"), acct_id, _pending.get("version"), _pending.get("accepted_at"))
+            db.accounts.update_one(
+                {"_id": acct["_id"]},
+                {"$unset": {"wa_consent_pending": ""},
+                 "$set": {"whatsapp_consent_version": _pending.get("version"),
+                          "whatsapp_consent_at": _pending.get("accepted_at"),
+                          "whatsapp_consent_result": _res.get("result")}})
+        except Exception as _e:
+            print(f"[ACCOUNT-LOGIN] WhatsApp consent not recorded yet type={type(_e).__name__}")
 
     resp_data = {
         "account_id":     acct_id,

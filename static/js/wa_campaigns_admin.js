@@ -9,8 +9,8 @@
   var K = W.kit, h = K.h, raw = K.raw, setHtml = K.setHtml, $ = K.$, api = K.api;
 
   var SRC = { signup_form: 'Sign-up form', written_form: 'Written form', email: 'Email', in_person: 'In person', phone_call: 'Phone call', whatsapp_optin_message: 'WhatsApp opt-in message', other: 'Other' };
-  var CH = { whatsapp_keyword: 'Customer replied on WhatsApp', admin_recorded: 'Recorded by an administrator' };
-  var EV = { opt_in: 'START (opted in)', opt_out: 'STOP (opted out)', admin_opt_in: 'Admin-recorded consent' };
+  var CH = { whatsapp_keyword: 'Customer replied on WhatsApp', admin_recorded: 'Recorded by an administrator', registration_checkbox: 'Customer registration checkbox' };
+  var EV = { opt_in: 'START (opted in)', opt_out: 'STOP (opted out)', admin_opt_in: 'Admin-recorded consent', registration_opt_in: 'Registration consent (WhatsApp)' };
   var cs = { page: 1, pages: 1, status: '', last4: '', seq: 0, sources: null, ev: { page: 1, pages: 1, event: '', last4: '', seq: 0 } };
   var as = { entries: [], action: '', campaign: '', seq: 0, more: false };
 
@@ -19,6 +19,7 @@
   function evidenceText(e) {
     if (!e) return '—';
     var parts = [CH[e.channel] || e.channel || ''];
+    if (e.channel === 'registration_checkbox') { if (e.consent_version) parts.push('wording ' + e.consent_version); }
     if (e.channel === 'admin_recorded') { parts.push(SRC[e.consent_source] || e.consent_source || ''); if (e.evidence_ref) parts.push('ref: ' + e.evidence_ref); if (e.recorded_by) parts.push('by ' + e.recorded_by + (e.recorded_by_role ? ' (' + e.recorded_by_role + ')' : '')); }
     else if (e.keyword) parts.push('"' + e.keyword + '"');
     return parts.filter(Boolean).join(' · ');
@@ -43,7 +44,7 @@
       '<input class="form-control" inputmode="numeric" maxlength="4" placeholder="Last 4 digits" data-input="con-filter" data-key="last4" autocomplete="off" style="width:140px"><button type="button" class="btn-o" data-act="con-reload">Refresh</button></div>' +
       '<div class="table-wrap"><table class="wac-table" style="min-width:760px"><thead><tr><th>Number</th><th>Status</th><th>Opted in</th><th>Opted out</th><th>Source / evidence</th><th>Updated</th></tr></thead><tbody id="wac_c_rows"></tbody></table></div>' +
       '<div class="wac-pager"><span id="wac_c_count" class="wac-muted"></span><div><button type="button" class="btn-o" data-act="con-prev">&larr; Prev</button> <button type="button" class="btn-o" data-act="con-next">Next &rarr;</button></div></div></div>' +
-      '<div class="wac-panel"><div class="wac-panel-title">STOP / START history</div><div class="wac-toolbar"><select class="form-select" data-change="ev-filter" data-key="event"><option value="">All events</option><option value="opt_out">STOP</option><option value="opt_in">START</option><option value="admin_opt_in">Admin-recorded</option></select>' +
+      '<div class="wac-panel"><div class="wac-panel-title">STOP / START history</div><div class="wac-toolbar"><select class="form-select" data-change="ev-filter" data-key="event"><option value="">All events</option><option value="opt_out">STOP</option><option value="opt_in">START</option><option value="admin_opt_in">Admin-recorded</option><option value="registration_opt_in">Registration</option></select>' +
       '<input class="form-control" inputmode="numeric" maxlength="4" placeholder="Last 4 digits" data-input="ev-filter" data-key="last4" autocomplete="off" style="width:140px"></div>' +
       '<div class="table-wrap"><table class="wac-table" style="min-width:700px"><thead><tr><th>When</th><th>Number</th><th>Event</th><th>Source / evidence</th></tr></thead><tbody id="wac_e_rows"></tbody></table></div>' +
       '<div class="wac-pager"><span id="wac_e_count" class="wac-muted"></span><div><button type="button" class="btn-o" data-act="ev-prev">&larr; Prev</button> <button type="button" class="btn-o" data-act="ev-next">Next &rarr;</button></div></div></div>');

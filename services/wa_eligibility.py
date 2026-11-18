@@ -36,6 +36,7 @@ LOOKUP_FAILED = "consent_lookup_failed"
 
 BASIS_CUSTOMER_START = "customer_start"
 BASIS_ADMIN_RECORDED = "admin_recorded"
+BASIS_CUSTOMER_REGISTRATION = "customer_registration"
 
 _BATCH = 500
 
@@ -45,7 +46,7 @@ class Eligibility:
     eligible: bool
     reason: str
     canonical: str = ""          # canonical number ('' if invalid) - for server-side use; never log it
-    basis: str = ""              # customer_start | admin_recorded when eligible
+    basis: str = ""              # customer_start | admin_recorded | customer_registration when eligible
 
     @property
     def phone_last4(self) -> str:
@@ -63,6 +64,13 @@ def _evidence_basis(contact: dict) -> str:
         needed = ("consent_source", "evidence_ref", "consented_at", "admin_id")
         if lc.get("attested") is True and all(str(lc.get(k, "")).strip() for k in needed):
             return BASIS_ADMIN_RECORDED
+    if lc.get("source") == "registration_checkbox":
+        # Customer ticked the registration checkbox that explicitly names WhatsApp promotional messages. The stored wording must be
+        # the exact wording of a version the server knows, so an edited / unknown / partial record is never eligible.
+        needed = ("consent_text", "consent_version", "consented_at", "account_id")
+        if (lc.get("consent_source") == "customer_registration" and all(str(lc.get(k, "")).strip() for k in needed)
+                and C.REGISTRATION_CONSENT_VERSIONS.get(str(lc.get("consent_version"))) == lc.get("consent_text")):
+            return BASIS_CUSTOMER_REGISTRATION
     return ""
 
 

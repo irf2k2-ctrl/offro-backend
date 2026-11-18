@@ -26,7 +26,7 @@ MODULE = "WhatsApp Campaigns"
 router = APIRouter(tags=["WhatsApp Campaigns - Consent"])
 
 CONTACT_STATUSES = ("opted_in", "opted_out")
-EVENT_TYPES = ("opt_in", "opt_out", "admin_opt_in")
+EVENT_TYPES = ("opt_in", "opt_out", "admin_opt_in", "registration_opt_in")
 _LAST4 = re.compile(r"^[0-9]{4}$")
 
 
@@ -46,6 +46,10 @@ def _evidence(ev):
         out.update(consent_source=ev.get("consent_source"), evidence_ref=ev.get("evidence_ref"), consented_at=ev.get("consented_at"),
                    recorded_at=ev.get("recorded_at"), recorded_by=ev.get("admin_name") or None, recorded_by_role=ev.get("admin_role") or None,
                    attested=bool(ev.get("attested")))
+    elif ev.get("source") == "registration_checkbox":
+        # wording + version are shown so the evidence is reviewable; no account id, no full number.
+        out.update(consent_source=ev.get("consent_source"), consent_version=ev.get("consent_version"),
+                   consent_text=ev.get("consent_text"), consented_at=ev.get("consented_at"), recorded_at=ev.get("recorded_at"))
     else:
         out.update(keyword=ev.get("text"))
     return out
@@ -86,7 +90,7 @@ async def list_consents(status: str = "", last4: str = "", page: int = Query(1, 
 async def list_consent_events(event: str = "", last4: str = "", page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100),
                               user: dict = Depends(require_permission(MODULE, "view"))):
     if event and event not in EVENT_TYPES:
-        raise HTTPException(400, {"code": "invalid_event", "message": "event must be opt_in, opt_out or admin_opt_in."})
+        raise HTTPException(400, {"code": "invalid_event", "message": "event must be opt_in, opt_out, admin_opt_in or registration_opt_in."})
     q = {**_filters(last4), **({"event": event} if event else {})}
     try:
         rows, total, page, pages = _page(C.db[C.EVENTS], q, page, page_size, [("at", -1), ("_id", 1)])
