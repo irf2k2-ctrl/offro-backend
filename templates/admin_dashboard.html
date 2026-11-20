@@ -172,7 +172,7 @@ function _secUrl(u) {
 }
 </script>
 <link rel="stylesheet" href="/static/css/wa_campaigns.css?v=2g3">
-<link rel="stylesheet" href="/static/css/translations.css?v=h1">
+<link rel="stylesheet" href="/static/css/translations.css?v=h3">
 </head>
 <body>
 
@@ -1677,6 +1677,8 @@ function _secUrl(u) {
   </div>
 
 
+<!-- Translations lives INSIDE .main so it gets the sidebar offset and padding like every other section. -->
+{% include "partials/translations.html" %}
 </div>
 
 <!-- RENEW SUBSCRIPTION MODAL -->
@@ -8976,7 +8978,6 @@ function gcOnStoreChange() {
      WhatsApp Live Chat Section
 ═════════════════════════════════════════════════════════════ -->
 {% include "partials/wa_campaigns.html" %}
-{% include "partials/translations.html" %}
 
 <div id="section-wa_chat" class="section">
   <div class="section-header" style="margin-bottom:8px;flex-shrink:0;">

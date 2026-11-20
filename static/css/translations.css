@@ -1,4 +1,7 @@
 /* Translations (Phase H) - admin dashboard module. Prefix trn- keeps it isolated from the rest of the dashboard. */
+.trn{min-width:0;max-width:100%}
+.trn #trn_body,.trn .trn-pane{min-width:0;max-width:100%}
+.trn .trn-banner:empty{display:none}
 .trn .trn-banner{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 .trn .trn-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;background:var(--card,#fff);border:1px solid var(--border,#ddd);color:var(--text,#222)}
 .trn .trn-pill.prod{background:#fdecea;color:#b3261e;border-color:#f5c2be}
@@ -16,7 +19,7 @@
 .trn .trn-toolbar select,.trn .trn-toolbar input{padding:6px 10px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--card,#fff);color:var(--text,#222)}
 .trn table.trn-table{width:100%;border-collapse:collapse;font-size:13px}
 .trn .trn-table th,.trn .trn-table td{padding:8px 10px;border-bottom:1px solid var(--border,#e5e5e5);vertical-align:top;text-align:left}
-.trn .trn-table th{font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted,#666)}
+.trn .trn-table th{font-size:12px;text-transform:uppercase;letter-spacing:.03em;background:#3E5F55;color:#fff}
 .trn .trn-key{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all}
 .trn .trn-en{max-width:320px;white-space:pre-wrap}
 .trn textarea.trn-val{width:100%;min-width:220px;min-height:54px;padding:6px 8px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--card,#fff);color:var(--text,#222)}
@@ -26,7 +29,8 @@
 .trn .trn-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
 .trn .trn-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;align-items:end;margin:10px 0}
 .trn .trn-form label{font-size:12px;font-weight:600;display:block;margin-bottom:3px}
-.trn .trn-form input,.trn .trn-form select{width:100%;padding:6px 10px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--card,#fff);color:var(--text,#222)}
+.trn .table-wrap{margin-bottom:14px}
+.trn .trn-form input,.trn .trn-form select{width:100%;height:38px;box-sizing:border-box;padding:6px 10px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--card,#fff);color:var(--text,#222)}
 .trn .trn-box{border:1px solid var(--border,#ddd);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--card,#fff)}
 .trn .trn-box h4{font-size:15px;margin:0 0 8px}
 .trn .trn-state{text-align:center;padding:50px 0}.trn .trn-state-icon{font-size:42px;margin-bottom:12px}.trn .trn-state-title{font-size:18px;font-weight:700;margin-bottom:6px}
