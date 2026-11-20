@@ -43,3 +43,10 @@ Admin Dashboard -> Translations (`templates/partials/translations.html`, `static
 - Audit: recent translation audit entries.
 - Production: no edit, add-language, approve, rollback or export controls are shown; "Publish imported package" appears only while an imported package is pending. The server enforces all of this regardless of the UI.
 - Not in this phase: Excel import/export, Flutter localization and loader.
+
+## Environment identification and first-time setup (fix after Phase H)
+- Set `OFFRO_ENVIRONMENT=staging` on the Staging service and `OFFRO_ENVIRONMENT=production` on Production. This is the primary, explicit setting.
+- Safety net: if the variable is missing AND `RAILWAY_PROJECT_ID`, `RAILWAY_ENVIRONMENT_ID` and `RAILWAY_SERVICE_ID` all equal the known Staging ids, the service is treated as **staging**. Production is never inferred; a missing/invalid value anywhere else stays "unknown" and every change is refused. The dashboard shows the reason (never ids or secrets).
+- While the environment is "unknown" the dashboard disables every change; the server refuses them too (503 `environment_unknown`).
+- English is the app's built-in source language: it is shown as a read-only base row and is never stored. Other languages are explicit Super Admin actions (Overview -> Add a language; "Fill in Arabic" pre-fills the form). Nothing is seeded automatically; adding an existing code returns 409 and never duplicates or overwrites.
+- Keys come from the app: with the Flutter `lib/l10n/app_en.arb` run, in a Staging shell (needs the staging database), `python tools/sync_translation_keys.py <app_en.arb>` (dry run), then `--apply`. It only writes `translation_keys`; re-running is idempotent and never touches languages or translations. The Phase I ARB (72 keys) and its draft Arabic are covered by tests.

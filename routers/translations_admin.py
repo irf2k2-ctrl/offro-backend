@@ -132,7 +132,10 @@ async def list_languages(user: dict = Depends(require_perm("view"))):
         l["status_indicators"] = T.language_status(l["code"])
         l["last_updated"] = _last_updated(l["code"])
         rows.append(l)
-    return {"languages": rows}
+    # English is the app's built-in source language, not a stored record (nothing to seed, nothing to duplicate).
+    base = {"code": "en", "name_en": "English", "name_native": "English", "direction": "ltr", "bundled": True,
+            "note": "Built-in source language. Its text comes from the app and is not edited here."}
+    return {"languages": rows, "base_language": base}
 
 
 @router.get("/strings")

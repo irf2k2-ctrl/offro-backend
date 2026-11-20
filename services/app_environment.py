@@ -10,7 +10,9 @@ This module leaves that code untouched and adds a separate, explicit, fail-close
 
   OFFRO_ENVIRONMENT   production | staging | development | test      (set explicitly on every service; missing/invalid = unknown)
 
-  1. Missing or invalid value                                   -> unknown   (every translation write is refused)
+  0. Value missing, but ALL THREE Railway project / environment / service IDs equal the known STAGING ones
+                                                                -> staging   (inferred from exact IDs; never inferred for any other case)
+  1. Missing (no staging-ID proof) or invalid value             -> unknown   (every translation write is refused)
   2. Value says production but the Railway project / environment / service IDs are the known STAGING ones
                                                                 -> unknown   (misconfiguration; refuse)
   3. Value says production                                      -> production
@@ -64,6 +66,10 @@ def status() -> dict:
         staging_ids = _known_staging_ids()
         out["staging_ids_match"] = staging_ids
         if not explicit:
+            if staging_ids:
+                # Safety net for a Staging service whose OFFRO_ENVIRONMENT was not set yet. Exact-ID proof only, and only ever
+                # toward the NON-production side. Production is never inferred: it must be declared explicitly.
+                out.update(classification="staging", source="staging_ids", reason="inferred_from_staging_ids")
             return out
         if explicit not in ENVIRONMENTS:
             out.update(source="explicit_invalid", reason="environment_value_invalid")

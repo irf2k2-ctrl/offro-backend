@@ -42,11 +42,22 @@
 
   function envName() { return st.env && st.env.environment ? st.env.environment.classification : 'unknown'; }
   function isProd() { return envName() === 'production'; }
+  // Every action that changes data needs a SAFELY IDENTIFIED environment. 'unknown' (not set / invalid / conflicting) disables them all;
+  // the server refuses them too (503 environment_unknown).
+  function envKnown() { var e = envName(); return e === 'staging' || e === 'development' || e === 'test' || e === 'production'; }
+  function canWriteNonProd() { return envKnown() && !isProd(); }
+  var ENV_REASON = {
+    environment_not_set: 'OFFRO_ENVIRONMENT is not set on this server.',
+    environment_value_invalid: 'OFFRO_ENVIRONMENT has a value that is not recognised (use staging or production).',
+    production_declared_on_staging_service: 'This is the Staging service but OFFRO_ENVIRONMENT says production.',
+    platform_says_production: 'The hosting environment is named production but OFFRO_ENVIRONMENT says otherwise.',
+    check_error: 'The environment check failed.'
+  };
   function isSA() { return !!(st.env && st.env.caller_is_system_super_admin); }      // decided by the server, not by the role name in the browser
   function canPerm(action) {                                                         // UX only; the server re-checks every call
     return isSA() || (typeof window._rbacCanDo === 'function' && !!window._rbacCanDo('translations', action));
   }
-  function canEdit() { return !isProd() && canPerm('edit'); }
+  function canEdit() { return canWriteNonProd() && canPerm('edit'); }
   function pendingFor(lang, track) { var p = st.env && st.env.pending_packages; return p ? p[track + ':' + lang] : null; }
   function langObj(code) { for (var i = 0; i < st.langs.length; i++) if (st.langs[i].code === code) return st.langs[i]; return null; }
 
@@ -65,7 +76,8 @@
     package_secrets_identical: 'The production secrets are misconfigured (identical). Ask the developer to fix them.',
     package_import_production_only: 'Packages are imported in production only.',
     package_export_staging_only: 'Packages are exported from staging only.',
-    environment_unknown: 'This server does not know whether it is staging or production, so changes are refused.'
+    environment_unknown: 'This server does not know whether it is staging or production, so changes are refused. Ask the developer to set OFFRO_ENVIRONMENT.',
+    language_exists: 'That language already exists. Nothing was changed.'
   };
   function messageFor(data, status) {
     var d = data && data.detail, code = d && typeof d === 'object' ? d.code : '';
@@ -134,7 +146,10 @@
     p += ks && ks.enabled ? '<span class="trn-pill warn"><i class="fas fa-power-off"></i> Kill switch ON: apps use bundled text</span>'
                           : '<span class="trn-pill ok"><i class="fas fa-check"></i> Remote translations enabled</span>';
     if (e === 'production') p += '<span class="trn-pill off">Production: text arrives only from an approved staging package</span>';
-    if (e === 'unknown') p += '<span class="trn-pill warn">Environment not identified: changes are refused</span>';
+    if (e === 'unknown') {
+      var why = ENV_REASON[(st.env && st.env.environment && st.env.environment.reason) || ''] || '';
+      p += h`<span class="trn-pill warn">Environment not identified: changes are refused. ${why}</span>`;
+    }
     setHtml($('trn_banner'), p);
   }
   function tabs() {
@@ -177,18 +192,25 @@
           h`<td><button type="button" class="btn-s" data-act="open" data-lang="${l.code}" data-track="${tr}">Open</button></td></tr>`;
       });
     });
+    var base = st.base || { code: 'en', name_en: 'English', name_native: 'English', direction: 'ltr' };
+    var baseRow = h`<tr><td>${base.name_en} <span class="trn-key">${base.code}</span><div class="trn-hint">${base.name_native} · ${(base.direction || 'ltr').toUpperCase()} · built-in</div></td>` +
+      h`<td colspan="8" class="trn-hint">Source language. Its text comes from the app and is not edited here.</td></tr>`;
     var add = '';
-    if (isSA() && !isProd()) {
-      add = h`<div class="trn-box"><h4>Add a language</h4><div class="trn-form">` +
+    if (isSA() && canWriteNonProd()) {
+      var arHint = langObj('ar') ? '' : '<p class="trn-note">Arabic is not added yet. <button type="button" class="btn-s" data-act="fillar">Fill in Arabic</button> then press Add language.</p>';
+      add = '<div class="trn-box"><h4>Add a language</h4>' + arHint + '<div class="trn-form">' +
         '<div><label>Code (e.g. ar)</label><input id="trn_nl_code" maxlength="10"></div><div><label>English name</label><input id="trn_nl_en" maxlength="60"></div>' +
         '<div><label>Native name</label><input id="trn_nl_native" maxlength="60"></div>' +
         '<div><label>Direction</label><select id="trn_nl_dir"><option value="ltr">Left to right</option><option value="rtl">Right to left</option></select></div>' +
         '<div><button type="button" class="btn-p" data-act="addlang">Add language</button></div></div></div>';
     }
+    var none = st.langs.length ? '' : '<div class="trn-empty">No translation languages added yet.' +
+      (isProd() ? ' They appear here after a signed staging package is imported.' : !envKnown() ? ' Adding languages is disabled until the environment is identified.' : ' Add one below (for example Arabic).') + '</div>';
     setHtml($('trn_pane_overview'),
       '<div class="section-header"><div></div><button type="button" class="btn-p" data-act="refresh"><i class="fas fa-sync me-1"></i> Refresh</button></div>' +
-      (st.langs.length ? '<div class="table-wrap"><table class="trn-table"><thead><tr><th>Language</th><th>Track</th><th>Published</th><th>Draft</th><th>Completion</th><th>Status</th><th>Review / approval</th><th>Last updated</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
-        : '<div class="trn-empty">No languages yet.' + (isProd() ? ' They appear here after a signed staging package is imported.' : '') + '</div>') + add);
+      (envKnown() ? '' : '<div class="trn-alert">The environment is not identified, so every change is disabled until it is.</div>') +
+      '<div class="table-wrap"><table class="trn-table"><thead><tr><th>Language</th><th>Track</th><th>Published</th><th>Draft</th><th>Completion</th><th>Status</th><th>Review / approval</th><th>Last updated</th><th></th></tr></thead><tbody>' + baseRow + rows + '</tbody></table></div>' +
+      none + add);
   }
 
   // ── translations (strings) ───────────────────────────────────────────────────────────────
@@ -211,7 +233,7 @@
       var extra = r.locked ? h`<div class="trn-hint">${r.lock_reason}</div>` : '';
       var btns = '';
       if (edit && !r.locked) btns += h`<button type="button" class="btn-p" data-act="save" data-key="${r.key}" hidden>Save draft</button>`;
-      if (st.track === 'legal' && isSA() && !isProd() && r.value) btns += h` <button type="button" class="btn-s" data-act="legalreview" data-key="${r.key}">Record legal review</button>`;
+      if (st.track === 'legal' && isSA() && canWriteNonProd() && r.value) btns += h` <button type="button" class="btn-s" data-act="legalreview" data-key="${r.key}">Record legal review</button>`;
       return h`<tr data-row="${r.key}"><td><div class="trn-key">${r.key}</div><div class="trn-hint">${r.screen_group}</div></td><td class="trn-en">${r.english}</td>` +
         h`<td><textarea class="trn-val" dir="${dir}" data-orig="${r.value || ''}" data-input="val" ${raw(dis)} aria-label="Translation of ${r.key}">${r.value || ''}</textarea>` +
         h`<div class="trn-hint">${hint}</div>${raw(extra)}<div class="trn-rowerr" hidden></div></td><td><span class="trn-pill ${r.status === 'published' ? 'ok' : r.status === 'modified' ? 'warn' : 'off'}" data-status>${r.status}</span></td><td>${raw(btns)}</td></tr>`;
@@ -219,10 +241,11 @@
     var pages = Math.max(1, Math.ceil(d.total / d.page_size));
     var pend = pendingFor(st.lang, st.track), actions = '';
     if (edit) actions += '<button type="button" class="btn-s" data-act="submit">Mark drafts ready for review</button>';
-    if (isSA() && (!isProd() || pend)) actions += h`<button type="button" class="btn-p" data-act="publish">${isProd() ? 'Publish imported package' : 'Publish draft'}</button>`;
+    if (isSA() && (canWriteNonProd() || (isProd() && pend))) actions += h`<button type="button" class="btn-p" data-act="publish">${isProd() ? 'Publish imported package' : 'Publish draft'}</button>`;
     setHtml($('trn_pane_strings'),
       h`<div class="trn-toolbar">${raw(selectors())}<select data-change="filter" aria-label="Filter">${raw(filt)}</select>` +
       h`<input type="search" placeholder="Search key or English text" value="${st.q}" data-input="q" aria-label="Search"></div>` +
+      (!envKnown() ? '<p class="trn-note">Changes are disabled until the environment is identified.</p>' : '') +
       (isProd() ? '<p class="trn-note">Production is read-only here. To change text: edit and publish in staging, approve it, export the package and import it on this server.</p>' : '') +
       (d.rows.length ? '<div class="table-wrap"><table class="trn-table"><thead><tr><th>Key</th><th>English (source)</th><th>Translation</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
         : '<div class="trn-empty">No translation keys match.' + (d.total === 0 && st.filter === 'all' && !st.q ? ' The key list is created from the app text during the localization phase.' : '') + '</div>') +
@@ -254,7 +277,7 @@
     var rows = vs.map(function (v) {
       var src = v.promoted_from ? 'Promoted from staging v' + v.promoted_from.version : v.restored_from ? 'Rollback to v' + v.restored_from : 'Published';
       var b = '';
-      if (isSA() && !isProd()) {
+      if (isSA() && canWriteNonProd()) {
         if (!v.approved) b += h`<button type="button" class="btn-s" data-act="approve" data-v="${v.version}">Approve for production</button> `;
         if (v.version !== latest) b += h`<button type="button" class="btn-s" data-act="rollback" data-v="${v.version}">Roll back to this</button> `;
         if (v.approved && envName() === 'staging') b += h`<button type="button" class="btn-p" data-act="export" data-v="${v.version}">Export package</button>`;
@@ -285,7 +308,7 @@
       h`<div class="trn-box"><h4>Package secrets</h4>${raw(secrets)}<p class="trn-hint">Only fingerprints are shown, never the secrets.</p></div>` + imp +
       (pend ? h`<div class="trn-box"><h4>Waiting to be published</h4><ul>${raw(pend)}</ul></div>` : '') +
       h`<div class="trn-box"><h4>Kill switch (${envName()} only)</h4><p class="trn-note">${ks.enabled ? 'ON: apps ignore remote translations and use their bundled text.' : 'OFF: apps may use remote translations.'} This switch is independent of the other environment.</p>` +
-      h`<button type="button" class="btn-${ks.enabled ? 'p' : 's'}" data-act="killswitch" data-on="${ks.enabled ? '0' : '1'}">${ks.enabled ? 'Turn kill switch OFF' : 'Turn kill switch ON'}</button></div>`);
+      h`<button type="button" class="btn-${ks.enabled ? 'p' : 's'}" ${raw(envKnown() ? '' : 'disabled')} data-act="killswitch" data-on="${ks.enabled ? '0' : '1'}">${ks.enabled ? 'Turn kill switch OFF' : 'Turn kill switch ON'}</button></div>`);
   }
 
   // ── audit ────────────────────────────────────────────────────────────────────────────────
@@ -350,6 +373,10 @@
       return dialog({ title: 'Record legal review', okLabel: 'Record', fields: [NOTE], text: 'Confirms the current text of ' + key + ' was reviewed. Editing it again invalidates the review.',
         run: async function (f) { await api('/legal/review', { method: 'POST', json: { lang: lang, key: key, note: f.note } }); } }).then(function (r) { if (r) alertMsg('Review recorded.', true); });
     }
+    if (name === 'fillar') {
+      $('trn_nl_code').value = 'ar'; $('trn_nl_en').value = 'Arabic'; $('trn_nl_native').value = 'العربية'; $('trn_nl_dir').value = 'rtl';
+      return;
+    }
     if (name === 'addlang') {
       var body = { code: $('trn_nl_code').value.trim(), name_en: $('trn_nl_en').value.trim(), name_native: $('trn_nl_native').value.trim(), direction: $('trn_nl_dir').value };
       if (!body.code || !body.name_en || !body.name_native) { alertMsg('Fill in the code and both names.'); return; }
@@ -393,7 +420,7 @@
     $('trn_denied').hidden = true; $('trn_body').hidden = false;
     try {
       var r = await Promise.all([api('/environment'), api('/languages')]);
-      st.env = r[0]; st.langs = r[1].languages;
+      st.env = r[0]; st.langs = r[1].languages; st.base = r[1].base_language || null;
     } catch (e) {
       if (e.status === 403) { $('trn_body').hidden = true; $('trn_denied').hidden = false; $('trn_denied_text').textContent = DENIED; return; }
       $('trn_body').hidden = false; alertMsg(e.message); return;

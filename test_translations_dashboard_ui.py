@@ -90,12 +90,12 @@ def test_every_api_call_in_the_ui_exists_on_the_backend():
 
 def test_ui_never_offers_a_production_edit_or_direct_rollback():
     assert "isProd()" in JS
-    for fn in ("canEdit() { return !isProd()", ):
+    for fn in ("canEdit() { return canWriteNonProd()", ):
         assert fn in JS
     # rollback / approve / add-language controls only render outside production
-    assert "isSA() && !isProd()" in JS
+    assert "isSA() && canWriteNonProd()" in JS
     # publish in production only when an imported package is pending
-    assert "(!isProd() || pend)" in JS
+    assert "(canWriteNonProd() || (isProd() && pend))" in JS
 
 
 def test_output_is_escaped_and_no_dynamic_code():
@@ -144,12 +144,12 @@ def make_none():
 pw = pytest.importorskip("playwright.sync_api")
 
 
-def _fixture(env="staging", sa=True, pending=None):
+def _fixture(env="staging", sa=True, pending=None, empty=False, reason=None):
     ind = lambda pub, missing, draft, review: {"missing": missing, "draft_changes": draft, "waiting_review": review, "complete": missing == 0 and draft == 0, "published_version": pub}
     return {
-        "environment": {"environment": {"classification": env}, "caller_is_system_super_admin": sa,
+        "environment": {"environment": {"classification": env, **({"reason": reason} if reason else {})}, "caller_is_system_super_admin": sa,
                         "kill_switch": {"enabled": False}, **({"package_config": {"own_secret": "ok", "own_fingerprint": "abcd1234", "ready_to_export": True}, "pending_packages": pending or {}} if sa else {})},
-        "languages": {"languages": [{"code": "ar", "name_en": "Arabic", "name_native": "العربية", "direction": "rtl", "status": "draft",
+        "languages": {"base_language": {"code": "en", "name_en": "English", "name_native": "English", "direction": "ltr", "bundled": True}, "languages": [] if empty else [{"code": "ar", "name_en": "Arabic", "name_native": "العربية", "direction": "rtl", "status": "draft",
                                      "status_indicators": {"app": ind(2, 1, 3, 2), "legal": ind(None, 2, 0, 0)}, "last_updated": {"app": "2026-11-01T10:00:00Z", "legal": None}}]},
         "strings": {"lang": "ar", "track": "app", "total": 2, "page": 1, "page_size": 50, "rows": [
             {"key": "loginTitle", "screen_group": "login", "english": "Welcome <b>back</b>", "placeholders": [], "max_length": 60, "value": "مرحبا", "status": "published", "locked": False, "lock_reason": ""},
@@ -287,4 +287,63 @@ def test_browser_publish_requires_a_note_and_sends_it():
         assert "required" in pg.inner_text("#trn_modal_err") and sent == []                  # blocked client side, and the server also requires it
         pg.fill("#trn_f_note", "tested on device"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
         assert sent == [{"lang": "ar", "track": "app", "note": "tested on device"}]
+        b.close()
+
+
+# ── unsafe / unidentified environment and an empty registry ──────────────────────────────────────────────────
+def test_browser_unknown_environment_disables_every_change_and_explains_why():
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture("unknown", True, None, empty=True, reason="environment_not_set"))
+        banner = pg.inner_text("#trn_banner")
+        assert "Environment not identified" in banner and "OFFRO_ENVIRONMENT is not set" in banner
+        assert "every change is disabled" in pg.inner_text("#trn_pane_overview")
+        assert pg.locator("#trn_nl_code").count() == 0 and pg.locator("[data-act=fillar]").count() == 0
+        assert "English" in pg.inner_text("#trn_pane_overview")                              # base language row is still shown
+        pg.click("[data-act=tab][data-tab=promotion]"); assert pg.locator("[data-act=killswitch]").is_disabled()
+        b.close()
+
+
+def test_browser_unknown_environment_hides_edit_and_publish_for_existing_languages():
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture("unknown", True, None, reason="environment_value_invalid"))
+        pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
+        assert pg.locator("tr[data-row=loginTitle] textarea").is_disabled()
+        assert pg.locator("[data-act=publish]").count() == 0 and pg.locator("[data-act=submit]").count() == 0
+        assert "Changes are disabled" in pg.inner_text("#trn_pane_strings")
+        pg.click("[data-act=tab][data-tab=versions]"); pg.wait_for_selector("#trn_pane_versions table")
+        assert pg.locator("[data-act=approve],[data-act=rollback],[data-act=export]").count() == 0
+        b.close()
+
+
+def test_browser_empty_staging_shows_english_base_and_lets_super_admin_add_arabic_once():
+    sent = []
+    def extra(route, path):
+        if route.request.method == "POST" and path == "/languages":
+            sent.append(route.request.post_data_json); route.fulfill(body='{"code":"ar","status":"draft","direction":"rtl"}', content_type="application/json"); return True
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture("staging", True, None, empty=True), extra)
+        txt = pg.inner_text("#trn_pane_overview")
+        assert "English" in txt and "built-in" in txt and "No translation languages added yet" in txt
+        pg.click("[data-act=fillar]")
+        assert pg.input_value("#trn_nl_code") == "ar" and pg.input_value("#trn_nl_dir") == "rtl" and pg.input_value("#trn_nl_en") == "Arabic"
+        pg.click("[data-act=addlang]"); pg.wait_for_selector("#trn_alert:not([hidden])")
+        assert sent == [{"code": "ar", "name_en": "Arabic", "name_native": "العربية", "direction": "rtl"}]
+        b.close()
+
+
+def test_browser_no_arabic_shortcut_when_arabic_already_exists():
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture("staging", True))
+        assert pg.locator("[data-act=fillar]").count() == 0 and "Arabic" in pg.inner_text("#trn_pane_overview")
+        b.close()
+
+
+def test_browser_duplicate_language_error_is_shown_plainly():
+    def extra(route, path):
+        if route.request.method == "POST" and path == "/languages":
+            route.fulfill(status=409, body='{"detail":{"code":"language_exists"}}', content_type="application/json"); return True
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture("staging", True, None, empty=True), extra)
+        pg.click("[data-act=fillar]"); pg.click("[data-act=addlang]"); pg.wait_for_selector("#trn_alert:not([hidden])")
+        assert "already exists" in pg.inner_text("#trn_alert")
         b.close()

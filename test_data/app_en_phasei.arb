@@ -1,0 +1,391 @@
+{
+  "@@locale": "en",
+  "otpEyebrow": "VERIFICATION",
+  "@otpEyebrow": {
+    "description": "Small label above the OTP heading",
+    "x-screen": "otp"
+  },
+  "otpTitleLead": "Verify your",
+  "@otpTitleLead": {
+    "description": "OTP heading, first part (plain)",
+    "x-screen": "otp"
+  },
+  "otpTitleAccent": "number",
+  "@otpTitleAccent": {
+    "description": "OTP heading, accent part",
+    "x-screen": "otp"
+  },
+  "otpSentTo": "We sent a 4-digit OTP to\n{phone}",
+  "@otpSentTo": {
+    "description": "OTP explanation; {phone} is the number the code was sent to",
+    "x-screen": "otp",
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
+  "otpVerifyButton": "Verify OTP",
+  "@otpVerifyButton": {
+    "description": "Primary button on the OTP screen",
+    "x-screen": "otp"
+  },
+  "otpDidntReceive": "Didn't receive OTP?",
+  "@otpDidntReceive": {
+    "description": "Text before the resend link",
+    "x-screen": "otp"
+  },
+  "otpResendIn": "Resend in {seconds}s",
+  "@otpResendIn": {
+    "description": "Countdown before resend is available; {seconds} is a number of seconds",
+    "x-screen": "otp",
+    "placeholders": {
+      "seconds": {
+        "type": "String"
+      }
+    }
+  },
+  "otpResendAction": "Resend OTP",
+  "@otpResendAction": {
+    "description": "Resend link",
+    "x-screen": "otp"
+  },
+  "otpSmsFallback": "Send code by SMS instead",
+  "@otpSmsFallback": {
+    "description": "Link that requests the code by SMS (non-India countries)",
+    "x-screen": "otp"
+  },
+  "roleEyebrow": "MAKE OFFRO YOURS",
+  "@roleEyebrow": {
+    "description": "Small label above the role chooser heading",
+    "x-screen": "role"
+  },
+  "roleTitleLead": "How will you use",
+  "@roleTitleLead": {
+    "description": "Role chooser heading, first part",
+    "x-screen": "role"
+  },
+  "roleTitleBrand": "OffrO?",
+  "@roleTitleBrand": {
+    "description": "Role chooser heading, brand part (accent)",
+    "x-screen": "role"
+  },
+  "roleSubtitle": "Choose your starting space. You can add another role later from your profile.",
+  "@roleSubtitle": {
+    "description": "Role chooser explanation",
+    "x-screen": "role",
+    "x-max-length": 160
+  },
+  "roleCustomer": "Customer",
+  "@roleCustomer": {
+    "description": "Role name: customer",
+    "x-screen": "role"
+  },
+  "roleCustomerDesc": "Discover places, products and local offers",
+  "@roleCustomerDesc": {
+    "description": "Customer role description",
+    "x-screen": "role",
+    "x-max-length": 100
+  },
+  "roleMerchant": "Merchant",
+  "@roleMerchant": {
+    "description": "Role name: merchant",
+    "x-screen": "role"
+  },
+  "roleMerchantDesc": "Grow your business and manage your storefront",
+  "@roleMerchantDesc": {
+    "description": "Merchant role description",
+    "x-screen": "role",
+    "x-max-length": 100
+  },
+  "roleInfluencer": "Influencer",
+  "@roleInfluencer": {
+    "description": "Role name: influencer",
+    "x-screen": "role"
+  },
+  "roleInfluencerDesc": "Create local stories and collaborate with brands",
+  "@roleInfluencerDesc": {
+    "description": "Influencer role description",
+    "x-screen": "role",
+    "x-max-length": 100
+  },
+  "roleRemember": "Remember my choice",
+  "@roleRemember": {
+    "description": "Checkbox label",
+    "x-screen": "role"
+  },
+  "roleRememberHint": "You can change this anytime from Profile",
+  "@roleRememberHint": {
+    "description": "Checkbox hint",
+    "x-screen": "role",
+    "x-max-length": 100
+  },
+  "roleEnterCustomer": "Enter as Customer",
+  "@roleEnterCustomer": {
+    "description": "Button label",
+    "x-screen": "role"
+  },
+  "roleEnterMerchant": "Enter as Merchant",
+  "@roleEnterMerchant": {
+    "description": "Button label",
+    "x-screen": "role"
+  },
+  "roleEnterInfluencer": "Enter as Influencer",
+  "@roleEnterInfluencer": {
+    "description": "Button label",
+    "x-screen": "role"
+  },
+  "roleSelectPrompt": "Select a role to continue",
+  "@roleSelectPrompt": {
+    "description": "Button label when no role is selected",
+    "x-screen": "role"
+  },
+  "switchTitleLead": "Switch",
+  "@switchTitleLead": {
+    "description": "Switch-mode heading, first part",
+    "x-screen": "switch_mode"
+  },
+  "switchTitleAccent": "mode",
+  "@switchTitleAccent": {
+    "description": "Switch-mode heading, accent part",
+    "x-screen": "switch_mode"
+  },
+  "switchCurrently": "You are currently in {mode} mode",
+  "@switchCurrently": {
+    "description": "Shows the active mode; {mode} is the role name (Customer / Merchant / Influencer)",
+    "x-screen": "switch_mode",
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "switchCustomerSubtitle": "Browse stores, products and offers",
+  "@switchCustomerSubtitle": {
+    "description": "Customer mode description",
+    "x-screen": "switch_mode",
+    "x-max-length": 100
+  },
+  "switchMerchantSubtitle": "Manage store, products and banners",
+  "@switchMerchantSubtitle": {
+    "description": "Merchant mode description",
+    "x-screen": "switch_mode",
+    "x-max-length": 100
+  },
+  "switchInfluencerSubtitle": "Manage your influencer profile",
+  "@switchInfluencerSubtitle": {
+    "description": "Influencer mode description",
+    "x-screen": "switch_mode",
+    "x-max-length": 100
+  },
+  "loginBadge": "LOCAL, MADE EASY",
+  "@loginBadge": {
+    "description": "Badge on the login hero",
+    "x-screen": "login"
+  },
+  "loginWelcomeEyebrow": "WELCOME TO YOUR NEIGHBOURHOOD",
+  "@loginWelcomeEyebrow": {
+    "description": "Small label above the login heading",
+    "x-screen": "login"
+  },
+  "loginHeroLead": "Find more to",
+  "@loginHeroLead": {
+    "description": "Login heading, first part",
+    "x-screen": "login"
+  },
+  "loginHeroAccent": "love",
+  "@loginHeroAccent": {
+    "description": "Login heading, accent word",
+    "x-screen": "login"
+  },
+  "loginHeroTail": ", nearby.",
+  "@loginHeroTail": {
+    "description": "Login heading, last part",
+    "x-screen": "login"
+  },
+  "loginHeroBody": "Local stores, thoughtful offers and people worth discovering—all in one place.",
+  "@loginHeroBody": {
+    "description": "Login hero description",
+    "x-screen": "login",
+    "x-max-length": 160
+  },
+  "loginTabLogin": "Login",
+  "@loginTabLogin": {
+    "description": "Tab label",
+    "x-screen": "login"
+  },
+  "loginTabRegister": "Register",
+  "@loginTabRegister": {
+    "description": "Tab label",
+    "x-screen": "login"
+  },
+  "loginYourName": "Your name",
+  "@loginYourName": {
+    "description": "Field label",
+    "x-screen": "login"
+  },
+  "loginNameHint": "Enter your full name",
+  "@loginNameHint": {
+    "description": "Field placeholder",
+    "x-screen": "login"
+  },
+  "loginMobile": "Mobile number",
+  "@loginMobile": {
+    "description": "Field label",
+    "x-screen": "login"
+  },
+  "loginGetCode": "Get verification code",
+  "@loginGetCode": {
+    "description": "Primary button (login)",
+    "x-screen": "login"
+  },
+  "loginRegisterGetCode": "Register & get verification code",
+  "@loginRegisterGetCode": {
+    "description": "Primary button (register)",
+    "x-screen": "login"
+  },
+  "loginOr": "OR",
+  "@loginOr": {
+    "description": "Divider between the primary button and guest button",
+    "x-screen": "login"
+  },
+  "loginGuest": "Continue as guest",
+  "@loginGuest": {
+    "description": "Guest button",
+    "x-screen": "login"
+  },
+  "loginFollow": "FOLLOW THE LOCAL STORY",
+  "@loginFollow": {
+    "description": "Label above the social links",
+    "x-screen": "login"
+  },
+  "onboardingSkip": "Skip",
+  "@onboardingSkip": {
+    "description": "Skip button",
+    "x-screen": "onboarding"
+  },
+  "onboardingSlide1Title": "Discover Local Deals",
+  "@onboardingSlide1Title": {
+    "description": "Slide 1 title (fallback slide)",
+    "x-screen": "onboarding"
+  },
+  "onboardingSlide1Subtitle": "Find the best offers from stores near you",
+  "@onboardingSlide1Subtitle": {
+    "description": "Slide 1 subtitle (fallback slide)",
+    "x-screen": "onboarding",
+    "x-max-length": 120
+  },
+  "onboardingSlide2Title": "Earn Reward Points",
+  "@onboardingSlide2Title": {
+    "description": "Slide 2 title (fallback slide)",
+    "x-screen": "onboarding"
+  },
+  "onboardingSlide2Subtitle": "Every visit earns you points you can redeem",
+  "@onboardingSlide2Subtitle": {
+    "description": "Slide 2 subtitle (fallback slide)",
+    "x-screen": "onboarding",
+    "x-max-length": 120
+  },
+  "onboardingSlide3Title": "Get Gift Vouchers",
+  "@onboardingSlide3Title": {
+    "description": "Slide 3 title (fallback slide)",
+    "x-screen": "onboarding"
+  },
+  "onboardingSlide3Subtitle": "Redeem your points for Amazon & Flipkart vouchers",
+  "@onboardingSlide3Subtitle": {
+    "description": "Slide 3 subtitle (fallback slide)",
+    "x-screen": "onboarding",
+    "x-max-length": 120
+  },
+  "countryPickerTitle": "Select country",
+  "@countryPickerTitle": {
+    "description": "Title of the country picker sheet",
+    "x-screen": "phone"
+  },
+  "profileGroupActivity": "My activity",
+  "@profileGroupActivity": {
+    "description": "Profile section title",
+    "x-screen": "profile"
+  },
+  "profileGroupAccount": "Account",
+  "@profileGroupAccount": {
+    "description": "Profile section title",
+    "x-screen": "profile"
+  },
+  "profileGroupLanguage": "Language",
+  "@profileGroupLanguage": {
+    "description": "Profile section title",
+    "x-screen": "profile"
+  },
+  "profileGroupLegal": "About & legal",
+  "@profileGroupLegal": {
+    "description": "Profile section title",
+    "x-screen": "profile"
+  },
+  "profileGroupSession": "Session",
+  "@profileGroupSession": {
+    "description": "Profile section title",
+    "x-screen": "profile"
+  },
+  "profileGuestBadge": "Browsing as guest",
+  "@profileGuestBadge": {
+    "description": "Badge under the name for guests",
+    "x-screen": "profile"
+  },
+  "profileMemberBadge": "OffrO member",
+  "@profileMemberBadge": {
+    "description": "Badge under the name for members",
+    "x-screen": "profile"
+  },
+  "languageRowLabel": "App language",
+  "@languageRowLabel": {
+    "description": "Row label that opens the language chooser",
+    "x-screen": "language"
+  },
+  "languageSheetTitle": "Choose language",
+  "@languageSheetTitle": {
+    "description": "Title of the language chooser",
+    "x-screen": "language"
+  },
+  "languageSheetNote": "The app stays in English until you choose another language.",
+  "@languageSheetNote": {
+    "description": "Note in the language chooser",
+    "x-screen": "language",
+    "x-max-length": 120
+  },
+  "languageNameEn": "English",
+  "@languageNameEn": {
+    "description": "Native name of English (same in every language)",
+    "x-screen": "language"
+  },
+  "languageNameAr": "العربية",
+  "@languageNameAr": {
+    "description": "Native name of Arabic (same in every language)",
+    "x-screen": "language"
+  },
+  "languageButtonSemantics": "Change language",
+  "@languageButtonSemantics": {
+    "description": "Accessibility label of the language button",
+    "x-screen": "language"
+  },
+  "profileEyebrow": "Your OffrO",
+  "@profileEyebrow": {
+    "description": "Eyebrow above the Profile title",
+    "x-screen": "profile"
+  },
+  "profileTitle": "Profile",
+  "@profileTitle": {
+    "description": "Profile screen title",
+    "x-screen": "profile"
+  },
+  "profileStatSaved": "Saved",
+  "@profileStatSaved": {
+    "description": "Profile statistic label",
+    "x-screen": "profile"
+  },
+  "profileStatPoints": "Points",
+  "@profileStatPoints": {
+    "description": "Profile statistic label",
+    "x-screen": "profile"
+  }
+}
