@@ -1,4 +1,4 @@
-"""routers/translations_admin.py - admin API for the translation module (Phase G; backend only, no dashboard UI yet).
+"""routers/translations_admin.py - admin API for the translation module (Phase G; dashboard UI added in Phase H).
 
 Prefix /admin/translations (mounted in server.py). Uses the existing dashboard session (get_current_dashboard_user).
 
@@ -108,6 +108,21 @@ async def environment(user: dict = Depends(require_perm("view"))):
     return out
 
 
+def _last_updated(lang: str) -> dict:
+    """Per track: the newest of the last published version and the last draft edit (UTC ISO), or None. Read only."""
+    out = {}
+    for track in T.TRACKS:
+        stamps = []
+        v = T.latest_version(track, lang)
+        if v and isinstance(v.get("published_at"), datetime):
+            stamps.append(v["published_at"])
+        e = T.db[T.VALUES].find_one({"lang": lang, "track": track, "updated_at": {"$type": "date"}}, sort=[("updated_at", -1)])
+        if e:
+            stamps.append(e["updated_at"])
+        out[track] = max(stamps).isoformat() + "Z" if stamps else None
+    return out
+
+
 @router.get("/languages")
 async def list_languages(user: dict = Depends(require_perm("view"))):
     rows = []
@@ -115,6 +130,7 @@ async def list_languages(user: dict = Depends(require_perm("view"))):
         l.pop("_id", None)
         l["created_at"] = l["created_at"].isoformat() + "Z" if isinstance(l.get("created_at"), datetime) else l.get("created_at")
         l["status_indicators"] = T.language_status(l["code"])
+        l["last_updated"] = _last_updated(l["code"])
         rows.append(l)
     return {"languages": rows}
 
