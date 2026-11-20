@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse, Response
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, wa_campaigns, dashboard_auth, maps, smart_link
 from routers import merchant_products, admin_products, admin_deals, public_products, collaborations
+from routers import translations_admin, translations_public
 from database import db
 import base64, io, re, html as _html
 from services.security import cors_origins, SecurityMiddleware
@@ -43,6 +44,8 @@ app.include_router(wa_chat.router, prefix="/admin")  # WhatsApp Live Chat admin 
 app.include_router(wa_template_test.router, prefix="/admin")  # single-recipient template TEST (off unless WHATSAPP_TEMPLATE_TEST_ENABLED=1)
 app.include_router(wa_campaigns.router, prefix="/admin")  # WhatsApp Campaign Manager 2A: permission-gated admin API; sends nothing
 app.include_router(dashboard_auth.router, prefix="/admin")  # RBAC dashboard auth — /admin/auth/*
+app.include_router(translations_admin.router, prefix="/admin")   # Translation module admin API (Phase G): /admin/translations/*
+app.include_router(translations_public.router)                 # Public read-only translation API (Phase G): /translations/*
 app.include_router(maps.router)
 app.include_router(smart_link.router)  # /open smart link + /.well-known app-link files
 
@@ -333,6 +336,13 @@ def startup():
             print("⚠️  WhatsApp campaign audit indexes skipped (see logs)")
     except Exception as e:
         print(f"⚠️  WhatsApp campaign audit indexes skipped ({type(e).__name__})")
+    # Translation module (Phase G): indexes on NEW, empty collections only; nothing is published or changed at startup.
+    try:
+        from services import translations as _tr, translation_audit as _tr_audit
+        if not _tr.ensure_indexes_safe() or not _tr_audit.ensure_indexes_safe():
+            print("⚠️  Translation indexes skipped (see logs)")
+    except Exception as e:
+        print(f"⚠️  Translation indexes skipped ({type(e).__name__})")
     # WhatsApp campaign collections (Phase 2D): indexes only on NEW collections; nothing is processed or sent at startup.
     try:
         from services import wa_campaign_manager as _wa_camp_mgr

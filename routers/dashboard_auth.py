@@ -44,6 +44,7 @@ ALL_MODULES = [
     "Social Media", "Live Chat", "Default Images", "User Management",
     "WhatsApp Campaigns",   # dedicated module (Phase 2A): never granted to an existing/seeded role except Super Admin
     "Deals",                # admin view/manage of merchant deals; existing DB roles lack it, so only Super Admin sees it until a role is granted
+    "Translations",         # Phase G: view / edit drafts only. Publishing, rollback, languages, packages and the kill switch are Super Admin only (checked in routers/translations_admin.py), never by this matrix
 ]
 
 ALL_ACTIONS = ["view", "add", "edit", "delete", "approve", "export"]
@@ -218,11 +219,13 @@ def seed_rbac():
             admin_perms[mod] = {act: True for act in ALL_ACTIONS}
         admin_perms["User Management"] = {act: (act == "view") for act in ALL_ACTIONS}
         admin_perms["WhatsApp Campaigns"] = {act: False for act in ALL_ACTIONS}     # explicit grant only
+        admin_perms["Translations"] = {act: False for act in ALL_ACTIONS}           # explicit grant only (Phase G)
 
         readonly_perms = {}
         for mod in ALL_MODULES:
             readonly_perms[mod] = {act: (act == "view") for act in ALL_ACTIONS}
         readonly_perms["WhatsApp Campaigns"] = {act: False for act in ALL_ACTIONS}  # explicit grant only
+        readonly_perms["Translations"] = {act: False for act in ALL_ACTIONS}        # explicit grant only (Phase G)
 
         sales_perms = {}
         for mod in ALL_MODULES:

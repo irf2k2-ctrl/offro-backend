@@ -1,0 +1,20 @@
+{
+  "@@locale": "en",
+  "loginTitle": "Welcome to OffrO",
+  "@loginTitle": { "description": "Login screen heading", "x-screen": "login", "x-max-length": 40 },
+  "otpSent": "We sent a 4-digit code to {phone}",
+  "@otpSent": { "description": "OTP screen subtitle", "x-screen": "otp",
+                "placeholders": { "phone": { "type": "String" } } },
+  "resendOtp": "Resend OTP",
+  "@resendOtp": { "x-screen": "otp" },
+  "smsInstead": "Send code by SMS instead",
+  "@smsInstead": { "x-screen": "otp" },
+  "supportLine": "Need help? Email support@theoffro.com",
+  "@supportLine": { "x-screen": "settings" },
+  "visitsCount": "{count, plural, =0{No visits} =1{1 visit} other{{count} visits}}",
+  "@visitsCount": { "x-screen": "wallet", "placeholders": { "count": { "type": "int" } } },
+  "privacyIntro": "By continuing you accept our Privacy Policy.",
+  "@privacyIntro": { "x-group": "legal", "x-screen": "legal" },
+  "whatsappConsent": "I agree to receive WhatsApp updates from OffrO.",
+  "@whatsappConsent": { "x-group": "legal", "x-screen": "register", "x-max-length": 200 }
+}
