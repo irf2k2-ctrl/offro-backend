@@ -5,26 +5,34 @@ from bson import ObjectId
 import uuid
 from datetime import datetime
 
-# ── Phone normalisation helper ─────────────────────────────────
-def _phone_variants(raw: str) -> list:
-    p = str(raw).strip().replace(" ", "").replace("-", "")
-    d = p[1:] if p.startswith("+") else p
-    if len(d) == 12 and d.startswith("91"):
-        d = d[2:]
-    elif len(d) == 11 and d.startswith("0"):
-        d = d[1:]
-    last10 = d[-10:] if len(d) >= 10 else d
-    return list({p, f"+91{last10}", f"91{last10}", last10, f"0{last10}"})
+# ── Phone normalisation helpers ────────────────────────────────
+# Thin wrappers over utils.phone (Phase D). The names and signatures are unchanged because merchant_app, admin and server import
+# them. With no `country` they behave as before for Indian numbers (all four legacy formats are still found) but a number that
+# carries another supported country code (+966, +962, +977, +63) is matched by its exact E.164 and is never cut to 10 digits.
+# PHONE_INTL_MODE=legacy restores the old last-10-digit code exactly.
+from utils import phone as _ph
 
-def _normalise_phone(raw: str) -> str:
-    p = str(raw).strip().replace(" ", "").replace("-", "")
-    d = p[1:] if p.startswith("+") else p
-    if len(d) == 12 and d.startswith("91"):
-        d = d[2:]
-    elif len(d) == 11 and d.startswith("0"):
-        d = d[1:]
-    last10 = d[-10:] if len(d) >= 10 else d
-    return f"+91{last10}" if len(last10) == 10 else p
+def _phone_variants(raw: str, country: str = None) -> list:
+    return _ph.account_lookup_keys(raw, country)
+
+def _normalise_phone(raw: str, country: str = None) -> str:
+    r = _ph.register_phone(raw, country)
+    if r.phone:
+        return r.phone
+    return str(raw).strip().replace(" ", "").replace("-", "")     # unresolvable: same fallback as the old code (cleaned input)
+
+def _influencer_phone(value: str) -> str:
+    """Influencer contact phone: the old 10-digit Indian number is stored unchanged; a valid international +E.164 mobile is stored
+    in canonical E.164. Anything else is rejected with the same message as before."""
+    import re as _re
+    v = (value or "").strip()
+    if _re.fullmatch(r"\d{10}", v):
+        return v
+    if _ph.intl_enabled() and v.startswith("+"):
+        r = _ph.parse(v)
+        if r.ok:
+            return r.e164
+    raise HTTPException(400, "Please enter a valid 10-digit mobile number.")
 
 
 router = APIRouter(tags=["Users"])
@@ -53,7 +61,7 @@ def check_phone(data: dict):
     raw_phone = str(data.get("phone", "")).strip()
     if not raw_phone:
         raise HTTPException(status_code=400, detail="Phone is required")
-    variants = _phone_variants(raw_phone)
+    variants = _phone_variants(raw_phone, _ph.request_country(data))
 
     # Primary: unified accounts collection
     acct = db.accounts.find_one({"phone": {"$in": variants}})
@@ -131,8 +139,13 @@ def register_user(data: dict):
         wa_pending = {"version": _ver, "text": _wac.REGISTRATION_CONSENT_VERSIONS[_ver],
                       "accepted_at": datetime.utcnow().isoformat()}
 
-    phone    = _normalise_phone(raw_phone)
-    variants = _phone_variants(raw_phone)
+    country  = _ph.request_country(data)
+    _reg     = _ph.register_phone(raw_phone, country)
+    if _ph.intl_enabled() and _reg.error:
+        raise HTTPException(status_code=400, detail="Please enter a valid mobile number for the selected country.")
+    phone    = _reg.phone
+    variants = _phone_variants(raw_phone, country)
+    _pf      = _ph.phone_fields(phone)           # phone_country / phone_e164 - new accounts only
 
     # If an existing account on this phone requested/completed deletion, treat this
     # as a brand-new account: wipe the old record's identity fields and reactivate it
@@ -145,6 +158,7 @@ def register_user(data: dict):
             "name":                name,
             "phone":               phone,
             "phone_variants":      variants,
+            **_pf,
             "city":                city,
             "roles":               ["user"],
             "status":              "active",
@@ -184,6 +198,7 @@ def register_user(data: dict):
         "name":           name,
         "phone":          phone,
         "phone_variants": variants,
+        **_pf,
         "city":           city,
         "roles":          ["user"],
         "status":         "active",
@@ -328,7 +343,7 @@ def account_login(data: dict):
     if not raw_phone:
         raise HTTPException(status_code=400, detail="Phone is required")
 
-    variants = _phone_variants(raw_phone)
+    variants = _phone_variants(raw_phone, _ph.request_country(data))      # lookup keys only; token/verification logic below is unchanged
 
     # ── Primary: unified accounts collection ──
     acct = db.accounts.find_one({"phone": {"$in": variants}})
@@ -479,10 +494,7 @@ def create_influencer_profile(data: dict, user=Depends(get_current_user)):
     # Scoped to this influencer-profile endpoint only, per the request.
     raw_phone_input = (data.get("phone", "") or "").strip()
     if raw_phone_input:
-        import re as _re
-        if not _re.fullmatch(r"\d{10}", raw_phone_input):
-            raise HTTPException(400, "Please enter a valid 10-digit mobile number.")
-        phone = raw_phone_input
+        phone = _influencer_phone(raw_phone_input)
     else:
         phone = acct.get("phone", "")
     social_in = data.get("social") or {}
@@ -658,9 +670,7 @@ def update_my_influencer_profile(data: dict, user=Depends(get_current_user)):
     if "phone" in data:
         new_phone = (data["phone"] or "").strip()
         if new_phone:
-            import re as _re
-            if not _re.fullmatch(r"\d{10}", new_phone):
-                raise HTTPException(400, "Please enter a valid 10-digit mobile number.")
+            new_phone = _influencer_phone(new_phone)
         update["phone"] = new_phone
     if "social" in data:
         social_in = data.get("social") or {}
@@ -813,9 +823,7 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
     if "phone" in data:
         new_phone = (data["phone"] or "").strip()
         if new_phone:
-            import re as _re
-            if not _re.fullmatch(r"\d{10}", new_phone):
-                raise HTTPException(400, "Please enter a valid 10-digit mobile number.")
+            new_phone = _influencer_phone(new_phone)
         update["phone"] = new_phone
     if "social" in data:
         social_in = data.get("social") or {}

@@ -882,6 +882,11 @@ def fix_account_roles(a=Depends(get_current_admin)):
             p = phone.strip().replace(" ", "").replace("-", "")
             last10 = p[-10:] if len(p) >= 10 else p
             phone_variants = list({p, last10, "+91" + last10, "91" + last10})
+            # Phase D: a valid NON-Indian number must not be cut to its last 10 digits (it could match an Indian store).
+            from utils import phone as _ph
+            _r = _ph.parse(p) if _ph.intl_enabled() else None
+            if _r is not None and _r.ok and _r.country != "IN":
+                phone_variants = list(set(_ph.account_lookup_keys(p) + [_ph.owner_key(p)]))
 
         parts = [{"merchant_id": mid}, {"merchant_id": acct_id}]
         if phone_variants:
@@ -2792,7 +2797,8 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
     # Normalize merchant_phone to last 10 digits for consistent matching
     import re as _re
     raw_phone = str(data.get("merchant_phone", "") or "").strip()
-    merchant_phone_norm = _re.sub(r'\D', '', raw_phone)[-10:] if raw_phone else ""
+    from utils.phone import slider_phone_key as _spk      # Indian -> last 10 digits (unchanged); international -> digits-only E.164
+    merchant_phone_norm = _spk(raw_phone) if raw_phone else ""
 
     doc = {
         "title":          data.get("title", ""),
@@ -2821,7 +2827,8 @@ def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
         if f in data: upd[f] = data[f]
     if "merchant_phone" in data:
         raw_p = str(data["merchant_phone"] or "").strip()
-        upd["merchant_phone"] = _re.sub(r'\D', '', raw_p)[-10:] if raw_p else ""
+        from utils.phone import slider_phone_key as _spk
+        upd["merchant_phone"] = _spk(raw_p) if raw_p else ""
     if "sort_order"    in data: upd["sort_order"]    = int(data["sort_order"])
     if "is_active"     in data: upd["is_active"]     = bool(data["is_active"])
     if "days"          in data: upd["duration_days"]  = int(data["days"])
@@ -3378,7 +3385,8 @@ def banner_forensics(title: str = "", phone: str = "", a=Depends(get_current_adm
                 out[k] = v
         return out
 
-    phone_digits = "".join(c for c in phone if c.isdigit())[-10:] if phone else ""
+    from utils.phone import owner_key as _okey
+    phone_digits = _okey(phone) if phone else ""
 
     mb_query_parts = []
     if title:
@@ -3418,7 +3426,7 @@ def banner_forensics(title: str = "", phone: str = "", a=Depends(get_current_adm
     # return, without anyone having to scroll a huge Network tab response.
     def _matches(row):
         t = (row.get("title") or "").lower()
-        p = "".join(c for c in (row.get("merchant_phone") or "") if c.isdigit())[-10:]
+        p = _okey(row.get("merchant_phone") or "")
         return (title and title.lower() in t) or (phone_digits and phone_digits == p)
 
     try:

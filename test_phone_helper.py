@@ -134,11 +134,12 @@ def test_old_indian_accounts_with_odd_numbers_can_still_be_found():
 
 
 def test_old_logic_collision_is_gone():
-    # The old helper cut any longer number to its last 10 digits and called it Indian:
+    # The old helper cut any longer number to its last 10 digits and called it Indian (kept verbatim as P.legacy_variants):
     from routers.users import _phone_variants
     nepal = _e164("NP")
-    assert "+91" + _national("NP") in _phone_variants(nepal)            # documents the OLD hazard
+    assert "+91" + _national("NP") in P.legacy_variants(nepal)          # documents the OLD hazard
     assert "+91" + _national("NP") not in P.lookup_keys(nepal)          # the new helper does not do it
+    assert "+91" + _national("NP") not in _phone_variants(nepal)        # Phase D: the route wrapper no longer does it either
 
 
 def test_wa_digits_and_consistency_with_whatsapp_consent_key():

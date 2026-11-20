@@ -16,10 +16,14 @@ Design rules
     (``9876543210``, ``919876543210``, ``+919876543210``, ``09876543210``) for India ONLY. Other countries match their exact
     E.164 value (with and without "+") and nothing else.
 
-Nothing here reads or writes the database. The helper is not wired into any route in Phase C.
+Nothing here reads or writes the database.
+
+Phase D wires the account-facing helpers at the bottom of this file (``account_lookup_keys``, ``register_phone``, ``owner_key`` ...)
+into the routes. ``PHONE_INTL_MODE=legacy`` in the environment makes every one of them behave exactly like the old last-10-digit code.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -210,3 +214,142 @@ def lookup_keys_for(raw, country: Optional[str] = None, legacy_india: bool = Fal
     if indian and r.error in (INVALID_NUMBER, NOT_MOBILE, INVALID_FORMAT):
         return legacy_india_keys(raw)
     return []
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase D - account-facing helpers used by the routes
+# ══════════════════════════════════════════════════════════════════════════════
+
+def intl_enabled() -> bool:
+    """False when the environment variable PHONE_INTL_MODE=legacy: every helper below then reproduces the old code exactly."""
+    return os.environ.get("PHONE_INTL_MODE", "").strip().lower() != "legacy"
+
+
+def legacy_variants(raw) -> list:
+    """The ORIGINAL routers.users._phone_variants, verbatim (used only in legacy mode)."""
+    p = str(raw).strip().replace(" ", "").replace("-", "")
+    d = p[1:] if p.startswith("+") else p
+    if len(d) == 12 and d.startswith("91"):
+        d = d[2:]
+    elif len(d) == 11 and d.startswith("0"):
+        d = d[1:]
+    last10 = d[-10:] if len(d) >= 10 else d
+    return list({p, f"+91{last10}", f"91{last10}", last10, f"0{last10}"})
+
+
+def legacy_normalise(raw) -> str:
+    """The ORIGINAL routers.users._normalise_phone, verbatim (used only in legacy mode)."""
+    p = str(raw).strip().replace(" ", "").replace("-", "")
+    d = p[1:] if p.startswith("+") else p
+    if len(d) == 12 and d.startswith("91"):
+        d = d[2:]
+    elif len(d) == 11 and d.startswith("0"):
+        d = d[1:]
+    last10 = d[-10:] if len(d) >= 10 else d
+    return f"+91{last10}" if len(last10) == 10 else p
+
+
+def request_country(data) -> Optional[str]:
+    """The optional `country` field of a request body (ISO code or calling code), or None when absent/blank."""
+    try:
+        c = str((data or {}).get("country") or "").strip()
+    except Exception:
+        return None
+    return c or None
+
+
+def _is_india(country: Optional[str]) -> bool:
+    if country is None:
+        return True                       # old app versions send no country and only ever supported India
+    c = supported_country(country)
+    return c is not None and c.iso == "IN"
+
+
+def account_lookup_keys(raw, country: Optional[str] = None) -> list:
+    """Stored-string candidates for finding an EXISTING account from a request. Always a non-empty list for non-empty input.
+
+    Indian or country-less Indian-shaped input -> the four legacy Indian formats (existing accounts keep working).
+    A valid international number -> its exact E.164 (with and without '+') and nothing else, so it can never match an Indian record.
+    Anything else -> only the cleaned input itself (exact match). It is never cut down to its last 10 digits.
+    """
+    if not intl_enabled():
+        return legacy_variants(raw)
+    country = str(country).strip() if country else None
+    country = country or None
+    keys = lookup_keys_for(raw, country, legacy_india=(country is None))
+    if keys:
+        return keys
+    p = str(raw).strip().replace(" ", "").replace("-", "")
+    return [p] if p else []
+
+
+@dataclass(frozen=True)
+class RegPhone:
+    phone: str = ""      # the value to store in accounts.phone ('' when error)
+    country: str = ""    # ISO code, '' in legacy mode
+    error: str = ""      # one of the error codes; '' when ok
+
+
+def register_phone(raw, country: Optional[str] = None) -> RegPhone:
+    """Validate and canonicalise a phone for REGISTRATION.
+
+    Indian numbers stay lenient exactly as before (any 10 digits, also 91+10 / +91+10 / 0+10) and are stored as '+91'+10 digits.
+    International numbers must be a valid mobile for their country and are stored as E.164.
+    """
+    if not intl_enabled():
+        return RegPhone(legacy_normalise(raw), "", "")
+    country = str(country).strip() if country else None
+    country = country or None
+    r = parse(raw, country, legacy_india=(country is None))
+    if r.ok:
+        return RegPhone(r.e164, r.country, "")
+    if _is_india(country):
+        k = legacy_india_keys(raw)
+        if k:
+            return RegPhone(k[0], "IN", "")
+    return RegPhone("", "", r.error or INVALID_NUMBER)
+
+
+def phone_fields(stored: str) -> dict:
+    """Extra fields to write on a NEW account document: {'phone_country': 'SA', 'phone_e164': '+966...'}. {} when not resolvable
+    or in legacy mode. Never applied to existing records."""
+    if not intl_enabled():
+        return {}
+    r = parse(stored)
+    if r.ok:
+        return {"phone_country": r.country, "phone_e164": r.e164}
+    k = legacy_india_keys(stored)
+    if k:
+        return {"phone_country": "IN", "phone_e164": k[0]}
+    return {}
+
+
+def owner_key(raw) -> str:
+    """Comparison key for 'is this the same merchant phone' checks (banner / store ownership).
+
+    Indian numbers -> their 10 digits (identical to the old last-10 rule, so existing banners and stores keep matching).
+    Valid international numbers -> digits-only E.164 (e.g. '977981...'), so a Nepal 10-digit number never equals an Indian one.
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    digits = "".join(c for c in s if c.isdigit())
+    if not intl_enabled():
+        return digits[-10:]
+    r = parse(s, legacy_india=True)
+    if r.ok:
+        return r.national if r.country == "IN" else wa_digits(r.e164)
+    if legacy_india_keys(s):
+        return digits[-10:]
+    return digits
+
+
+def same_number(a, b) -> bool:
+    """True when two phone strings are the same number (both non-empty)."""
+    ka, kb = owner_key(a), owner_key(b)
+    return bool(ka) and ka == kb
+
+
+def slider_phone_key(raw) -> str:
+    """Value stored in promo_sliders.merchant_phone: Indian -> last 10 digits (unchanged), international -> digits-only E.164."""
+    return owner_key(raw)

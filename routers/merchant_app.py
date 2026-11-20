@@ -358,7 +358,20 @@ def merchant_register(data: dict):
     area  = data.get("area", "").strip()
     if not name or not phone:
         raise HTTPException(400, "Name and phone are required")
-    if db.accounts.find_one({"phone": {"$in": [phone, phone[-10:] if len(phone)>=10 else phone]}}):
+    from utils import phone as _ph
+    country = _ph.request_country(data)
+    _reg = _ph.register_phone(phone, country)
+    if _ph.intl_enabled() and _reg.error:
+        raise HTTPException(400, "Please enter a valid mobile number for the selected country.")
+    # International number (valid, non-Indian): stored as E.164 everywhere, matched by exact E.164 only.
+    # Indian / country-less number: EXACTLY the previous behaviour (raw phone, last-10 duplicate check, last-10 final value).
+    intl_phone = _reg.phone if (_reg.country and _reg.country != "IN") else ""
+    if intl_phone:
+        phone = intl_phone
+        dup_keys = _ph.account_lookup_keys(phone, country)
+    else:
+        dup_keys = [phone, phone[-10:] if len(phone)>=10 else phone]
+    if db.accounts.find_one({"phone": {"$in": dup_keys}}):
         raise HTTPException(400, "Phone already registered. Please login.")
     merchant = {
         "name": name, "phone": phone,
@@ -376,9 +389,9 @@ def merchant_register(data: dict):
     # Sync to unified accounts collection
     from routers.users import _phone_variants as _pv
     db.accounts.update_one(
-        {"phone": {"$in": _pv(phone)}},
+        {"phone": {"$in": _pv(phone, country)}},
         {"$set": {
-            "phone":         re.sub(r"\D", "", phone)[-10:],
+            "phone":         intl_phone or re.sub(r"\D", "", phone)[-10:],
             "name":          name,
             "city":          data.get("city", ""),
             "status":        "active",
@@ -399,7 +412,7 @@ def merchant_login(data: dict):
     phone = str(data.get("phone", "")).strip()
     if not phone:
         raise HTTPException(400, "Phone required")
-    variants = _pv(phone)
+    variants = _pv(phone, __import__("utils.phone", fromlist=["x"]).request_country(data))      # lookup keys only; token logic below is unchanged
 
     # Check unified accounts collection first
     acct = db.accounts.find_one({"phone": {"$in": variants}})
@@ -460,7 +473,7 @@ def check_merchant_phone(data: dict):
     phone = (data.get("phone") or "").strip()
     if not phone:
         raise HTTPException(400, "Phone required")
-    variants = _pv(phone)
+    variants = _pv(phone, __import__("utils.phone", fromlist=["x"]).request_country(data))
     acct = db.accounts.find_one({"phone": {"$in": variants}})
     if acct:
         return {"registered": True, "role": "merchant" if "merchant" in acct.get("roles",[]) else "user"}
@@ -1482,12 +1495,13 @@ def get_my_banners(m=Depends(get_merchant)):
 
     # 2. Admin-created banners (promo_sliders) assigned to this merchant
     try:
-        phone_10 = re.sub(r'\D', '', merchant_phone)[-10:] if merchant_phone else ""
+        from utils.phone import owner_key as _ok
+        phone_10 = _ok(merchant_phone) if merchant_phone else ""
         if phone_10:
             for s in db.promo_sliders.find(
                 {"merchant_phone": {"$exists": True, "$ne": ""}}
             ):
-                s_phone_10 = re.sub(r'\D', '', str(s.get("merchant_phone", "")))[-10:]
+                s_phone_10 = _ok(s.get("merchant_phone", ""))
                 if s_phone_10 != phone_10:
                     continue
                 # Skip this promo_sliders entry if it's the live/promoted
@@ -1554,8 +1568,9 @@ def merchant_toggle_banner(bid: str, m=Depends(get_merchant)):
         raise HTTPException(404, "Banner not found")
 
     # Verify ownership
-    b_phone = re.sub(r'\D', '', str(b.get("merchant_phone", "")))[-10:]
-    m_phone = re.sub(r'\D', '', merchant_phone)[-10:] if merchant_phone else ""
+    from utils.phone import owner_key as _ok
+    b_phone = _ok(b.get("merchant_phone", ""))
+    m_phone = _ok(merchant_phone) if merchant_phone else ""
     if str(b.get("merchant_id","")) != merchant_id and (not m_phone or b_phone != m_phone):
         raise HTTPException(403, "Not your banner")
 
@@ -1608,8 +1623,9 @@ def merchant_update_banner_title(bid: str, data: dict, m=Depends(get_merchant)):
         raise HTTPException(404, "Banner not found")
 
     # Verify ownership (same pattern as merchant_toggle_banner)
-    b_phone = re.sub(r'\D', '', str(b.get("merchant_phone", "")))[-10:]
-    m_phone = re.sub(r'\D', '', merchant_phone)[-10:] if merchant_phone else ""
+    from utils.phone import owner_key as _ok
+    b_phone = _ok(b.get("merchant_phone", ""))
+    m_phone = _ok(merchant_phone) if merchant_phone else ""
     if str(b.get("merchant_id","")) != merchant_id and (not m_phone or b_phone != m_phone):
         raise HTTPException(403, "Not your banner")
 

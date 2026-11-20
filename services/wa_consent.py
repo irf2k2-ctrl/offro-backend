@@ -96,7 +96,7 @@ def _split(raw):
     return (s if _ASCII_DIGITS_RE.match(s) else None), plus
 
 
-def normalize_phone(raw, whatsapp_id: bool = False) -> str:
+def normalize_phone(raw, whatsapp_id: bool = False, country=None) -> str:
     """The ONE canonical key for a phone number, or '' if invalid. Never stores two keys for one person.
 
     Indian numbers - '+91XXXXXXXXXX', '91XXXXXXXXXX', '0091XXXXXXXXXX', '0XXXXXXXXXX' and a bare 10-digit
@@ -106,7 +106,15 @@ def normalize_phone(raw, whatsapp_id: bool = False) -> str:
 
     whatsapp_id=True is for Meta's `from` / wa_id, which is ALWAYS already international: a bare 10-digit
     value is then NOT assumed to be Indian. An explicit '+' also means "already international".
+
+    `country` (optional, Phase D): the ISO code of the country the person selected. When given, the number is validated and
+    canonicalised by utils.phone for THAT country (a Nepal or Philippines 10-digit mobile is never taken as Indian) and returned as
+    E.164 digits without '+'; '' if it is not a valid mobile there. When omitted, behaviour is exactly as before.
     """
+    if country and not whatsapp_id:
+        from utils import phone as _ph
+        r = _ph.parse(raw, country)
+        return _ph.wa_digits(r.e164) if r.ok else ""
     d, plus = _split(raw)
     if d is None:
         return ""
@@ -122,10 +130,13 @@ def normalize_phone(raw, whatsapp_id: bool = False) -> str:
     return d if _E164_RE.match(d) else ""
 
 
-def phone_lookup_keys(raw) -> list:
+def phone_lookup_keys(raw, country=None) -> list:
     """Every key under which this number could be stored. Used for CHECKS so an opt-out can't be bypassed by
     writing the same number differently. A bare 10-digit number is normally Indian ('91'+d) but could also be a
-    full international number stored as-is, so both are checked."""
+    full international number stored as-is, so both are checked. With `country` only the one canonical key is returned."""
+    if country:
+        c = normalize_phone(raw, country=country)
+        return [c] if c else []
     keys = []
     c = normalize_phone(raw)
     if c:
