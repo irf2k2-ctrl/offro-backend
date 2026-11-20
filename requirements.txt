@@ -21,3 +21,5 @@ requests==2.31.0
 firebase-admin>=6.2.0
 
 cryptography==42.0.8
+phonenumbers==9.0.43
+phonenumbers==9.0.43
