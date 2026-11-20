@@ -172,6 +172,7 @@ function _secUrl(u) {
 }
 </script>
 <link rel="stylesheet" href="/static/css/wa_campaigns.css?v=2g3">
+<link rel="stylesheet" href="/static/css/translations.css?v=h1">
 </head>
 <body>
 
@@ -216,6 +217,7 @@ function _secUrl(u) {
   <a href="#" onclick="showSection('wa_chat',this)"><i class="fab fa-whatsapp fa-fw" style="color:#25D366"></i> Live Chat</a>
   <a href="#" onclick="showSection('wa_campaigns',this)"><i class="fas fa-bullhorn fa-fw" style="color:#25D366"></i> WhatsApp Campaigns</a>
   <a href="#" onclick="showSection('about',this)"><i class="fas fa-info-circle fa-fw"></i> About Us</a>
+  <a href="#" onclick="showSection('translations',this)"><i class="fas fa-language fa-fw"></i> Translations</a>
   <div class="sep"></div>
 
   <a href="#" onclick="showSection('default_images',this)"><i class="fas fa-image fa-fw"></i> Default Images</a>
@@ -2477,6 +2479,7 @@ const RBAC_SECTION_MAP = {
   "Social Media":      ["social"],
   "Live Chat":         ["wa_chat"],
   "WhatsApp Campaigns":["wa_campaigns"],
+  "Translations":      ["translations"],
   "Default Images":    ["default_images"],
   "User Management":   ["rbac_users","rbac_roles","rbac_logs"],
   "__super_admin_only": ["about","overview"]
@@ -2711,6 +2714,7 @@ function showSection(name, el){
   if(name==="notifications") loadNotifications();
   if(name==="wa_chat") loadWaChats();
   if(name==="wa_campaigns" && window.WaCampaigns) WaCampaigns.open();
+  if(name==="translations" && window.Translations) Translations.open();
   if(name==="popup_campaigns") loadPopupCampaigns();
   if(name==="rbac_users") rbacLoadUsers();
   if(name==="rbac_roles") rbacLoadRoles();
@@ -8972,6 +8976,7 @@ function gcOnStoreChange() {
      WhatsApp Live Chat Section
 ═════════════════════════════════════════════════════════════ -->
 {% include "partials/wa_campaigns.html" %}
+{% include "partials/translations.html" %}
 
 <div id="section-wa_chat" class="section">
   <div class="section-header" style="margin-bottom:8px;flex-shrink:0;">
@@ -9816,7 +9821,7 @@ const RBAC_MODULES = [
   "Payments","Gift Vouchers","Notifications","Categories","Pricing & GST",
   "Reviews","Discounts","Terms & Conditions","Policies",
   "Social Media","Live Chat","Default Images","User Management","Influencers",
-  "WhatsApp Campaigns","Deals"
+  "WhatsApp Campaigns","Deals","Translations"
 ];
 const RBAC_ACTIONS = ["view","add","edit","delete","approve","export"];
 const RBAC_CITIES = ["Ballari","Bengaluru","Hyderabad","Hubli","Dharwad","Mysuru"];
@@ -10091,6 +10096,7 @@ function rbacLogsNext() { rbacLogSkip += rbacLogLimit; rbacLoadLogs(); }
 <script src="/static/js/wa_campaigns_templates.js?v=2g3"></script>
 <script src="/static/js/wa_campaigns_editor.js?v=2g3"></script>
 <script src="/static/js/wa_campaigns_admin.js?v=2g3"></script>
+<script src="/static/js/translations.js?v=h1"></script>
 
 </body>
 </html>

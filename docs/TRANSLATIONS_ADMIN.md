@@ -32,3 +32,14 @@ Design note: HMAC is symmetric, so production must hold staging's secret to veri
 6. New empty collections/indexes are created at first startup after deploy.
 7. Grant "Translations" permissions to non-Super-Admin roles via the roles API (dashboard role editor UI arrives in Phase H).
 8. Legal review is not re-required on production import (staging version was already reviewed and approved).
+
+## Dashboard tab (Phase H)
+Admin Dashboard -> Translations (`templates/partials/translations.html`, `static/js/translations.js`, `static/css/translations.css`). It only calls the APIs above.
+- Sidebar entry and tab are visible to roles with the **Translations -> view** permission (Super Admin always). The role editor now lists the Translations module, so grants no longer need the API.
+- Overview: per language and track, published version, draft (next version, number of changes), missing keys, awaiting-review / pending imported package, last updated (from `GET /languages`).
+- Translations: search/filter keys, English source, edit and save drafts (edit permission, staging only), plural keys locked, mark drafts ready for review, publish (Super Admin).
+- Versions: history, approve for production, roll back (new version), export signed package (staging only).
+- Promotion & safety (Super Admin): secret readiness/fingerprints, import package as draft (production only), pending packages, kill switch.
+- Audit: recent translation audit entries.
+- Production: no edit, add-language, approve, rollback or export controls are shown; "Publish imported package" appears only while an imported package is pending. The server enforces all of this regardless of the UI.
+- Not in this phase: Excel import/export, Flutter localization and loader.

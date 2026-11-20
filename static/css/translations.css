@@ -1,0 +1,40 @@
+/* Translations (Phase H) - admin dashboard module. Prefix trn- keeps it isolated from the rest of the dashboard. */
+.trn .trn-banner{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.trn .trn-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;background:var(--card,#fff);border:1px solid var(--border,#ddd);color:var(--text,#222)}
+.trn .trn-pill.prod{background:#fdecea;color:#b3261e;border-color:#f5c2be}
+.trn .trn-pill.stg{background:#e8f4fd;color:#0b5394;border-color:#b6dcf5}
+.trn .trn-pill.ok{background:#e6f6ec;color:#1b7a3a;border-color:#b9e3c7}
+.trn .trn-pill.warn{background:#fff4e0;color:#9a5b00;border-color:#f3d9a4}
+.trn .trn-pill.off{background:#f0f0f0;color:#666}
+.trn .trn-note{font-size:13px;color:var(--muted,#666);margin:0 0 12px}
+.trn .trn-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--border,#ddd)}
+.trn .trn-tab{background:none;border:0;border-bottom:3px solid transparent;padding:8px 14px;font-weight:600;color:var(--muted,#666);cursor:pointer}
+.trn .trn-tab.active{color:var(--text,#222);border-bottom-color:var(--accent,#e8590c)}
+.trn .trn-alert{padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:14px;background:#fdecea;color:#b3261e}
+.trn .trn-alert.good{background:#e6f6ec;color:#1b7a3a}
+.trn .trn-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.trn .trn-toolbar select,.trn .trn-toolbar input{padding:6px 10px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--card,#fff);color:var(--text,#222)}
+.trn table.trn-table{width:100%;border-collapse:collapse;font-size:13px}
+.trn .trn-table th,.trn .trn-table td{padding:8px 10px;border-bottom:1px solid var(--border,#e5e5e5);vertical-align:top;text-align:left}
+.trn .trn-table th{font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted,#666)}
+.trn .trn-key{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all}
+.trn .trn-en{max-width:320px;white-space:pre-wrap}
+.trn textarea.trn-val{width:100%;min-width:220px;min-height:54px;padding:6px 8px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--card,#fff);color:var(--text,#222)}
+.trn textarea.trn-val[dir=rtl]{text-align:right}
+.trn .trn-hint{font-size:11px;color:var(--muted,#777);margin-top:3px}
+.trn .trn-rowerr{font-size:12px;color:#b3261e;margin-top:3px}
+.trn .trn-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.trn .trn-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;align-items:end;margin:10px 0}
+.trn .trn-form label{font-size:12px;font-weight:600;display:block;margin-bottom:3px}
+.trn .trn-form input,.trn .trn-form select{width:100%;padding:6px 10px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--card,#fff);color:var(--text,#222)}
+.trn .trn-box{border:1px solid var(--border,#ddd);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--card,#fff)}
+.trn .trn-box h4{font-size:15px;margin:0 0 8px}
+.trn .trn-state{text-align:center;padding:50px 0}.trn .trn-state-icon{font-size:42px;margin-bottom:12px}.trn .trn-state-title{font-size:18px;font-weight:700;margin-bottom:6px}
+.trn .trn-empty{padding:26px;text-align:center;color:var(--muted,#777)}
+.trn .trn-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:3000}
+.trn .trn-modal[hidden]{display:none}
+.trn .trn-modal-box{background:var(--card,#fff);color:var(--text,#222);border-radius:12px;padding:20px;max-width:480px;width:92%;max-height:90vh;overflow:auto}
+.trn .trn-modal-title{font-size:17px;font-weight:700;margin-bottom:8px}.trn .trn-modal-text{font-size:14px;margin-bottom:10px}
+.trn .trn-modal-err{color:#b3261e;font-size:13px;margin:8px 0}
+.trn .trn-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.trn .trn-modal textarea,.trn .trn-modal input[type=text]{width:100%;padding:6px 8px;border:1px solid var(--border,#ccc);border-radius:6px}

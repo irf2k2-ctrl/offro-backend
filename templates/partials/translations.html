@@ -1,0 +1,41 @@
+<!-- ═══════════════════════════════════════════════════════════════
+     Translations (Phase H). Included by admin_dashboard.html. Logic: /static/js/translations.js, styles: /static/css/translations.css.
+     Talks only to the Phase G API (/admin/translations). The server decides every permission and the production rules; the browser
+     only hides controls the caller cannot use. There is no production edit or direct-publish path here: production receives text only
+     through an imported, signed staging package, which is then published explicitly.
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="section-translations" class="section trn">
+  <div class="page-title"><i class="fas fa-language me-2"></i>Translations</div>
+
+  <div id="trn_denied" class="trn-state" hidden>
+    <div class="trn-state-icon"><i class="fas fa-lock"></i></div>
+    <div class="trn-state-title">Access denied</div>
+    <div class="trn-state-text" id="trn_denied_text">You do not have permission to view Translations. Ask a Super Admin to grant the module to your role.</div>
+  </div>
+
+  <div id="trn_body">
+    <div id="trn_banner" class="trn-banner" aria-live="polite"></div>
+    <div class="trn-tabs" id="trn_tabs" role="tablist" aria-label="Translations sections"></div>
+    <div id="trn_alert" class="trn-alert" hidden role="alert"></div>
+
+    <div class="trn-pane" id="trn_pane_overview"></div>
+    <div class="trn-pane" id="trn_pane_strings" hidden></div>
+    <div class="trn-pane" id="trn_pane_versions" hidden></div>
+    <div class="trn-pane" id="trn_pane_promotion" hidden></div>
+    <div class="trn-pane" id="trn_pane_audit" hidden></div>
+  </div>
+
+  <!-- one reusable confirmation dialog (note required for sensitive actions) -->
+  <div id="trn_modal" class="trn-modal" hidden>
+    <div class="trn-modal-box" role="dialog" aria-modal="true" aria-labelledby="trn_modal_title">
+      <div class="trn-modal-title" id="trn_modal_title"></div>
+      <div class="trn-modal-text" id="trn_modal_text"></div>
+      <div id="trn_modal_fields"></div>
+      <div class="trn-modal-err" id="trn_modal_err" hidden></div>
+      <div class="trn-modal-actions">
+        <button type="button" class="btn-s" id="trn_modal_cancel">Cancel</button>
+        <button type="button" class="btn-p" id="trn_modal_ok">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
