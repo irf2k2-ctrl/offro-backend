@@ -10,6 +10,19 @@ Scope: data model + admin API (T1), public API + kill switches (T3), HMAC-signed
 - Staging and production behave identically (Stage 1 simplification): edit, add a language, change a language's names and publish all work in either, and each writes ONLY to its own database (its own `MONGO_URL`). Nothing is shared or synced between environments. An unknown `OFFRO_ENVIRONMENT` refuses every write. The retired rollback and approve workflows stay refused in production until the cleanup stage removes them. Emergency lever: the kill switch (per environment).
 - Audit: append-only `translation_audit`, no TTL. Strict "started" entry before each sensitive op (failure -> 503 `audit_unavailable`, nothing changes). Denials logged.
 
+## Staging / production separation (configuration, not code)
+Separation is guaranteed by configuration, NOT by anything in this code or its mock-database tests. Each environment MUST run with its **own, independent**
+`MONGO_URL` (a different database or cluster) and its own `OFFRO_ENVIRONMENT` (`staging` or `production`). If both pointed at the same database they would share
+translations, and no test here would notice. Verify both values in each Railway service during production setup (before any production publish):
+the production service must NOT use the staging `MONGO_URL`, and `OFFRO_ENVIRONMENT` must match the service. The dashboard banner shows the environment name;
+an unset or invalid `OFFRO_ENVIRONMENT` refuses every change. Translation data is copied between environments only by the separate, one-time, manually run transfer
+(Stage 4), never automatically.
+
+## Dashboard (Stage 2)
+Two sections only: **Overview** (languages, live version, number of Modified strings, completion, emergency kill switch, add language) and **Translations**
+(edit Arabic; English is a read-only reference; status Modified / Published; **Publish Changes**). The Versions, Promotion & safety and Audit tabs, rollback,
+approval, package and legal-review controls are gone from the UI. Audit entries are still written, and `GET /admin/translations/audit` still exists (no UI).
+
 ## Simplified publishing (Stage 1)
 Edit (status becomes `modified`) -> **Publish Changes** (`POST /admin/translations/publish`, Super Admin, `note` optional) -> a new immutable version
 (number + SHA-256 hash, which the app uses to detect changes) is written to THIS environment's database and every published value is marked `published`.

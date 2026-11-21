@@ -1,8 +1,8 @@
 <!-- ═══════════════════════════════════════════════════════════════
      Translations (Phase H). Included by admin_dashboard.html. Logic: /static/js/translations.js, styles: /static/css/translations.css.
-     Talks only to the Phase G API (/admin/translations). The server decides every permission and the production rules; the browser
-     only hides controls the caller cannot use. There is no production edit or direct-publish path here: production receives text only
-     through an imported, signed staging package, which is then published explicitly.
+     Talks only to the translation API (/admin/translations) of THIS server. Two sections: Overview and Translations. Edit -> status
+     Modified -> Publish Changes. Staging and production use this same page, each with its own database. The server decides every
+     permission; the browser only hides controls the caller cannot use.
      ═══════════════════════════════════════════════════════════════ -->
 <div id="section-translations" class="section trn">
   <div class="page-title"><i class="fas fa-language me-2"></i>Translations</div>
@@ -20,9 +20,6 @@
 
     <div class="trn-pane" id="trn_pane_overview"></div>
     <div class="trn-pane" id="trn_pane_strings" hidden></div>
-    <div class="trn-pane" id="trn_pane_versions" hidden></div>
-    <div class="trn-pane" id="trn_pane_promotion" hidden></div>
-    <div class="trn-pane" id="trn_pane_audit" hidden></div>
   </div>
 
   <!-- one reusable confirmation dialog (note required for sensitive actions) -->

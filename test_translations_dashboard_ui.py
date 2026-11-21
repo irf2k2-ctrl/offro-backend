@@ -81,21 +81,31 @@ def test_every_api_call_in_the_ui_exists_on_the_backend():
         line = JS[m.start():JS.index("\n", m.start())]
         mm = re.search(r"method:\s*'([A-Z]+)'", line)
         calls.append((m.group(1), mm.group(1) if mm else None))
-    assert len(calls) >= 12
+    assert len(calls) >= 6
     for path, method in calls:
         method = method or "GET"
         ok = any(m == method and (p == "/admin/translations" + path or p.startswith("/admin/translations" + path.rstrip("/") + "/{")) for (m, p) in routes)
         assert ok, (method, path)
 
 
-def test_ui_never_offers_a_production_edit_or_direct_rollback():
-    assert "isProd()" in JS
-    for fn in ("canEdit() { return canWriteNonProd()", ):
-        assert fn in JS
-    # rollback / approve / add-language controls only render outside production
-    assert "isSA() && canWriteNonProd()" in JS
-    # publish in production only when an imported package is pending
-    assert "(canWriteNonProd() || (isProd() && pend))" in JS
+def test_ui_has_only_overview_and_translations_and_no_retired_workflow_controls():
+    assert "return [['overview', 'Overview'], ['strings', 'Translations']];" in JS
+    for retired in ("/versions", "/audit", "/package", "/approve-for-production", "/submit", "/legal/review", "/rollback",
+                    "data-act=\"approve\"", "data-act=\"export\"", "data-act=\"import\"", "data-act=\"rollback\"", "data-act=\"submit\"",
+                    "data-act=\"legalreview\"", "loadVersions", "renderPromotion", "loadAudit", "Roll back", "Approve for production",
+                    "Promotion", "isProd()", "canWriteNonProd"):
+        assert retired not in JS, retired
+    for pane in ("versions", "promotion", "audit"):
+        assert "trn_pane_" + pane not in PARTIAL and "trn_pane_" + pane not in JS
+    # every known environment is treated the same: editing needs only a known environment
+    assert "function canEdit() { return envKnown() && canPerm('edit'); }" in JS
+    assert "Publish Changes" in JS and "Publish draft" not in JS and "Mark drafts ready" not in JS
+    # the kill switch lives on Overview
+    assert JS.index('data-act="killswitch"') < JS.index("// ── translations (strings)")
+
+
+def test_legal_limitation_is_stated_and_not_hidden():
+    assert "does not read legal text yet" in JS and "does not change what customers see" in JS
 
 
 def test_output_is_escaped_and_no_dynamic_code():
@@ -193,9 +203,12 @@ def test_browser_overview_shows_real_data_and_super_admin_controls():
     with pw.sync_playwright() as p:
         b, pg, calls = _page(p, _fixture())
         txt = pg.inner_text("#trn_pane_overview")
-        assert "Arabic" in txt and "v2" in txt and "v3 (3 changes)" in txt and "1 missing" in txt and "2 awaiting review" in txt and "01 Nov 2026" in txt
-        assert pg.locator("#trn_tabs").inner_text().count("Promotion") == 1 and pg.locator("#trn_nl_code").count() == 1
-        assert "STAGING" in pg.inner_text("#trn_banner")
+        assert "Arabic" in txt and "v2" in txt and "3 modified" in txt and "1 missing" in txt and "01 Nov 2026" in txt
+        assert "awaiting review" not in txt and "approval" not in txt.lower() and "Review" not in txt
+        tabs = pg.locator("#trn_tabs button").all_inner_texts()
+        assert [t.strip() for t in tabs] == ["Overview", "Translations"]
+        assert pg.locator("#trn_nl_code").count() == 1 and "STAGING" in pg.inner_text("#trn_banner")
+        assert pg.locator("[data-act=killswitch]").count() == 1 and "Emergency kill switch" in txt     # moved to Overview
         b.close()
 
 
@@ -217,38 +230,30 @@ def test_browser_edit_save_draft_and_escaping():
         b.close()
 
 
-def test_browser_production_has_no_edit_rollback_approve_or_add_language():
-    pend = {"app:ar": {"lang": "ar", "track": "app", "source_version": 3, "imported_at": "2026-11-02T00:00:00"}}
+def test_browser_production_dashboard_is_the_same_as_staging():
+    saved = []
+    def extra(route, path):
+        if route.request.method == "PUT":
+            saved.append(path); route.fulfill(body='{"track":"app"}', content_type="application/json"); return True
     with pw.sync_playwright() as p:
-        b, pg, calls = _page(p, _fixture("production", True, pend))
-        assert pg.locator("#trn_nl_code").count() == 0 and "PRODUCTION" in pg.inner_text("#trn_banner")
+        b, pg, calls = _page(p, _fixture("production", True), extra)
+        assert "PRODUCTION" in pg.inner_text("#trn_banner") and "approved staging package" not in pg.inner_text("#trn_banner")
+        assert pg.locator("#trn_nl_code").count() == 1 and pg.locator("[data-act=killswitch]").count() == 1
+        assert [t.strip() for t in pg.locator("#trn_tabs button").all_inner_texts()] == ["Overview", "Translations"]
         pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
-        assert pg.locator("tr[data-row=loginTitle] textarea").is_disabled() and pg.locator("[data-act=save]").count() == 0
-        assert pg.locator("[data-act=submit]").count() == 0
-        assert "Publish imported package" in pg.inner_text("#trn_pane_strings")              # only because a package is pending
-        pg.click("[data-act=tab][data-tab=versions]"); pg.wait_for_selector("#trn_pane_versions table")
-        for act in ("rollback", "approve", "export"):
-            assert pg.locator("[data-act=%s]" % act).count() == 0, act
-        pg.click("[data-act=tab][data-tab=promotion]"); assert pg.locator("[data-act=import]").count() == 1
-        b.close()
-
-
-def test_browser_production_without_pending_package_has_no_publish_button():
-    with pw.sync_playwright() as p:
-        b, pg, calls = _page(p, _fixture("production", True, {}))
-        pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
-        assert pg.locator("[data-act=publish]").count() == 0
+        assert not pg.locator("tr[data-row=loginTitle] textarea").is_disabled() and pg.locator("[data-act=publish]").inner_text() == "Publish Changes"
+        assert "Production is read-only" not in pg.inner_text("#trn_pane_strings")
+        pg.fill("tr[data-row=loginTitle] textarea", "نص جديد"); pg.click("tr[data-row=loginTitle] [data-act=save]"); pg.wait_for_selector("#trn_alert:not([hidden])")
+        assert saved == ["/strings/ar/loginTitle"]
         b.close()
 
 
 def test_browser_non_super_admin_sees_no_privileged_controls():
     with pw.sync_playwright() as p:
         b, pg, calls = _page(p, _fixture("staging", False))
-        assert pg.locator("#trn_tabs").inner_text().count("Promotion") == 0 and pg.locator("#trn_nl_code").count() == 0
+        assert pg.locator("#trn_nl_code").count() == 0 and pg.locator("[data-act=killswitch]").count() == 0
         pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
-        assert pg.locator("[data-act=publish]").count() == 0 and pg.locator("[data-act=submit]").count() == 1
-        pg.click("[data-act=tab][data-tab=versions]"); pg.wait_for_selector("#trn_pane_versions table")
-        assert pg.locator("[data-act=approve],[data-act=rollback],[data-act=export]").count() == 0
+        assert pg.locator("[data-act=publish]").count() == 0 and not pg.locator("tr[data-row=loginTitle] textarea").is_disabled()
         b.close()
 
 
@@ -256,7 +261,7 @@ def test_browser_view_only_user_cannot_edit():
     with pw.sync_playwright() as p:
         b, pg, calls = _page(p, _fixture("staging", False), can_edit=False)
         pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
-        assert pg.locator("tr[data-row=loginTitle] textarea").is_disabled() and pg.locator("[data-act=submit]").count() == 0
+        assert pg.locator("tr[data-row=loginTitle] textarea").is_disabled() and pg.locator("[data-act=publish]").count() == 0
         b.close()
 
 
@@ -275,7 +280,7 @@ def test_browser_permission_denied_state_and_server_errors_shown():
         b.close()
 
 
-def test_browser_publish_requires_a_note_and_sends_it():
+def test_browser_publish_changes_sends_an_optional_note_to_this_server_only():
     sent = []
     def extra(route, path):
         if route.request.method == "POST" and path == "/publish":
@@ -283,10 +288,49 @@ def test_browser_publish_requires_a_note_and_sends_it():
     with pw.sync_playwright() as p:
         b, pg, calls = _page(p, _fixture(), extra)
         pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
-        pg.click("[data-act=publish]"); pg.click("#trn_modal_ok")
-        assert "required" in pg.inner_text("#trn_modal_err") and sent == []                  # blocked client side, and the server also requires it
-        pg.fill("#trn_f_note", "tested on device"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
-        assert sent == [{"lang": "ar", "track": "app", "note": "tested on device"}]
+        pg.click("[data-act=publish]")
+        assert "staging only" in pg.inner_text("#trn_modal_text") and "Note (optional)" in pg.inner_text("#trn_modal_fields")
+        pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")              # no note needed
+        assert sent == [{"lang": "ar", "track": "app", "note": ""}]
+        pg.click("[data-act=publish]"); pg.fill("#trn_f_note", "wording fix"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
+        assert sent[1] == {"lang": "ar", "track": "app", "note": "wording fix"}
+        b.close()
+
+
+def test_browser_legal_track_says_publishing_does_not_change_the_customer_app():
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture())
+        pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
+        assert "does not read legal text" not in pg.inner_text("#trn_pane_strings")
+        pg.select_option("select[data-change=track]", "legal"); pg.wait_for_selector("tr[data-row=loginTitle]")
+        assert "does not read legal text yet" in pg.inner_text("#trn_pane_strings")
+        pg.click("[data-act=publish]")
+        assert "does not change what customers see" in pg.inner_text("#trn_modal_text")
+        b.close()
+
+
+def test_browser_kill_switch_on_overview_needs_a_reason_and_posts_to_this_server():
+    sent = []
+    def extra(route, path):
+        if route.request.method == "POST" and path == "/kill-switch":
+            sent.append(route.request.post_data_json); route.fulfill(body="{}", content_type="application/json"); return True
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture(), extra)
+        pg.click("[data-act=killswitch]"); pg.click("#trn_modal_ok")
+        assert "required" in pg.inner_text("#trn_modal_err") and sent == []
+        pg.fill("#trn_f_note", "bad text live"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
+        assert sent == [{"enabled": True, "reason": "bad text live"}]
+        b.close()
+
+
+def test_browser_never_calls_retired_endpoints():
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture())
+        pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
+        pg.click("[data-act=tab][data-tab=overview]"); pg.click("[data-act=refresh]"); pg.wait_for_selector("#trn_pane_overview table")
+        pg.wait_for_timeout(300)
+        for _, path in calls:
+            assert not path.startswith(("/versions", "/audit", "/rollback", "/package", "/approve", "/submit", "/legal")), path
         b.close()
 
 
@@ -299,7 +343,7 @@ def test_browser_unknown_environment_disables_every_change_and_explains_why():
         assert "every change is disabled" in pg.inner_text("#trn_pane_overview")
         assert pg.locator("#trn_nl_code").count() == 0 and pg.locator("[data-act=fillar]").count() == 0
         assert "English" in pg.inner_text("#trn_pane_overview")                              # base language row is still shown
-        pg.click("[data-act=tab][data-tab=promotion]"); assert pg.locator("[data-act=killswitch]").is_disabled()
+        assert pg.locator("[data-act=killswitch]").is_disabled()                              # on Overview now
         b.close()
 
 
@@ -308,10 +352,8 @@ def test_browser_unknown_environment_hides_edit_and_publish_for_existing_languag
         b, pg, calls = _page(p, _fixture("unknown", True, None, reason="environment_value_invalid"))
         pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
         assert pg.locator("tr[data-row=loginTitle] textarea").is_disabled()
-        assert pg.locator("[data-act=publish]").count() == 0 and pg.locator("[data-act=submit]").count() == 0
+        assert pg.locator("[data-act=publish]").count() == 0 and pg.locator("[data-act=save]").count() == 0
         assert "Changes are disabled" in pg.inner_text("#trn_pane_strings")
-        pg.click("[data-act=tab][data-tab=versions]"); pg.wait_for_selector("#trn_pane_versions table")
-        assert pg.locator("[data-act=approve],[data-act=rollback],[data-act=export]").count() == 0
         b.close()
 
 
@@ -347,143 +389,3 @@ def test_browser_duplicate_language_error_is_shown_plainly():
         pg.click("[data-act=fillar]"); pg.click("[data-act=addlang]"); pg.wait_for_selector("#trn_alert:not([hidden])")
         assert "already exists" in pg.inner_text("#trn_alert")
         b.close()
-
-
-# ── Phase L1: rollback preview, confirmation and recovery banner ───────────────────────────────────────────
-def _preview(**over):
-    base = {"lang": "ar", "track": "app", "from_version": 2, "to_version": 1, "already_current": False, "would_create_version": True,
-            "requires_confirmation": True, "impact_hash": "h" * 64,
-            "counts": {"overwritten": 120, "deleted": 1, "working_removed": 2, "status_only": 3, "live_changed": 4, "live_restored": 3, "live_removed": 1,
-                       "ready_for_review": 5, "blockers": 0},
-            "totals": {"overwritten": 120, "deleted": 1, "working_removed": 2, "status_only": 3, "live_changed": 4}, "blockers": {"global": [], "keys": {}},
-            "keys": {"overwritten": [{"key": "k%d" % i, "draft": "d", "live": "l", "restored": "r"} for i in range(50)], "deleted": [{"key": "gone", "draft": "d"}]}}
-    base.update(over)
-    return base
-
-
-def _status(**over):
-    base = {"lang": "ar", "track": "app", "active": True, "target_version": 1, "new_version": 3, "phase": "writing", "version_written": False,
-            "owner": {"name": "Sam"}, "started_by": {"name": "Sam"}, "started_at": "2026-11-02T10:00:00", "lease_until": "2026-11-02T10:10:00",
-            "lease_expired": False, "is_owner": True, "can_resume": True, "can_abort": True}
-    base.update(over)
-    return base
-
-
-def _rb_route(preview=None, status=None, sent=None):
-    def extra(route, path):
-        if path.startswith("/rollback-preview") and route.request.method == "GET":
-            body = json.dumps(preview or _preview())
-        elif path.startswith("/rollback-status"):
-            body = json.dumps(status or {"lang": "ar", "track": "app", "active": False})
-        elif path == "/rollback" and route.request.method == "POST":
-            sent.append(route.request.post_data_json); body = '{"version":3}'
-        elif path == "/rollback/resume":
-            sent.append(route.request.post_data_json); body = "{}"
-        else:
-            return False
-        route.fulfill(body=body, content_type="application/json"); return True
-    return extra
-
-
-def _versions(pg):
-    pg.click("[data-act=tab][data-tab=versions]"); pg.wait_for_selector("#trn_pane_versions table")
-
-
-def test_browser_rollback_dialog_shows_full_counts_and_requires_confirmation():
-    sent = []
-    with pw.sync_playwright() as p:
-        b, pg, calls = _page(p, _fixture(), _rb_route(sent=sent))
-        _versions(pg)
-        pg.click("[data-act=rollback][data-v='1']"); pg.wait_for_selector("#trn_modal")
-        txt = pg.inner_text("#trn_modal")
-        assert "120 overwritten" in txt and "1 deleted" in txt and "first 50 of 120" in txt and "cannot be recovered" in txt
-        assert "Overwritten (120)" in txt or "overwritten" in txt.lower()
-        assert pg.locator("[data-act=rollcsv]").count() == 1
-        pg.fill("#trn_f_note", "restore"); pg.click("#trn_modal_ok")
-        assert sent == [] and pg.locator("#trn_modal").count() == 1                           # blocked until the checkbox is ticked
-        pg.check("#trn_f_ack"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
-        assert sent == [{"lang": "ar", "track": "app", "version": 1, "note": "restore", "confirm_impact_hash": "h" * 64}]
-        b.close()
-
-
-def test_browser_clean_rollback_needs_no_confirmation_checkbox():
-    sent = []
-    clean = _preview(requires_confirmation=False, counts={"overwritten": 0, "deleted": 0, "working_removed": 0, "status_only": 0, "live_changed": 1,
-                                                          "live_restored": 1, "live_removed": 0, "ready_for_review": 0, "blockers": 0},
-                     totals={}, keys={})
-    with pw.sync_playwright() as p:
-        b, pg, calls = _page(p, _fixture(), _rb_route(clean, sent=sent))
-        _versions(pg)
-        pg.click("[data-act=rollback][data-v='1']"); pg.wait_for_selector("#trn_modal")
-        assert pg.locator("#trn_f_ack").count() == 0
-        pg.fill("#trn_f_note", "restore"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
-        assert sent == [{"lang": "ar", "track": "app", "version": 1, "note": "restore"}]
-        b.close()
-
-
-def test_browser_same_hash_target_and_blockers_are_explained_without_a_dialog():
-    with pw.sync_playwright() as p:
-        b, pg, _ = _page(p, _fixture(), _rb_route(_preview(already_current=True, would_create_version=False, requires_confirmation=False)))
-        _versions(pg); pg.click("[data-act=rollback][data-v='1']"); pg.wait_for_selector("#trn_alert:not([hidden])")
-        assert "nothing to roll back" in pg.inner_text("#trn_alert") and "untouched" in pg.inner_text("#trn_alert") and not pg.locator("#trn_modal").is_visible()
-        b.close()
-    with pw.sync_playwright() as p:
-        b, pg, _ = _page(p, _fixture(), _rb_route(_preview(blockers={"global": [], "keys": {"loginTitle": "too_long"}})))
-        _versions(pg); pg.click("[data-act=rollback][data-v='1']"); pg.wait_for_selector("#trn_alert:not([hidden])")
-        assert "cannot be restored" in pg.inner_text("#trn_alert") and "loginTitle (too_long)" in pg.inner_text("#trn_alert") and not pg.locator("#trn_modal").is_visible()
-        b.close()
-
-
-def test_browser_banner_offers_resume_and_abort_before_the_version_is_written():
-    sent = []
-    with pw.sync_playwright() as p:
-        b, pg, _ = _page(p, _fixture(), _rb_route(status=_status(), sent=sent))
-        _versions(pg)
-        banner = pg.inner_text("[data-rollback-banner]")
-        assert "Incomplete rollback" in banner and "Sam" in banner and "Lease ends" in banner
-        assert pg.locator("[data-act=rbresume]").inner_text() == "Resume" and pg.locator("[data-act=rbabort]").count() == 1
-        assert pg.locator("[data-act=rollback]").count() == 0                                   # no second rollback while one is unfinished
-        pg.click("[data-act=rbabort]"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
-        assert sent == [{"lang": "ar", "track": "app", "action": "abort"}]
-        b.close()
-
-
-def test_browser_banner_has_no_abort_once_the_version_is_written():
-    with pw.sync_playwright() as p:
-        b, pg, _ = _page(p, _fixture(), _rb_route(status=_status(version_written=True, phase="version_written", can_abort=False)))
-        _versions(pg)
-        assert pg.locator("[data-act=rbabort]").count() == 0 and pg.locator("[data-rollback-resume-only]").count() == 1
-        assert "already live" in pg.inner_text("[data-rollback-resume-only]") and pg.locator("[data-act=rbresume]").count() == 1
-        b.close()
-
-
-def test_browser_other_super_admin_sees_owner_and_lease_and_can_only_take_over_after_expiry():
-    with pw.sync_playwright() as p:
-        b, pg, _ = _page(p, _fixture(), _rb_route(status=_status(is_owner=False, can_resume=False, can_abort=False)))
-        _versions(pg)
-        assert pg.locator("[data-act=rbresume]").count() == 0 and pg.locator("[data-act=rbabort]").count() == 0
-        assert "Owned by Sam" in pg.inner_text("[data-rollback-owned]")
-        b.close()
-    sent = []
-    with pw.sync_playwright() as p:
-        b, pg, _ = _page(p, _fixture(), _rb_route(status=_status(is_owner=False, lease_expired=True, version_written=True, can_abort=False), sent=sent))
-        _versions(pg)
-        assert pg.locator("[data-act=rbresume]").inner_text() == "Take over and resume" and "(expired)" in pg.inner_text("[data-rollback-banner]")
-        pg.click("[data-act=rbresume]"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
-        assert sent == [{"lang": "ar", "track": "app", "action": "resume"}]
-        b.close()
-
-
-def test_browser_nothing_rollback_related_appears_in_production():
-    with pw.sync_playwright() as p:
-        b, pg, calls = _page(p, _fixture("production", True), _rb_route(status=_status()))
-        _versions(pg)
-        assert pg.locator("[data-rollback-banner]").count() == 0 and pg.locator("[data-act=rollback]").count() == 0
-        assert not any(path.startswith("/rollback") for _, path in calls)
-        b.close()
-
-
-def test_rollback_ui_code_stays_escaped_and_contract_checked():
-    assert "rollback-preview" in JS and "rollback-status" in JS and "'/rollback/resume'" in JS and "innerHTML =" in JS
-    assert JS.count(".innerHTML =") == 1
-    assert "data-act=\"rbabort\"" in JS and "rb.can_abort && !rb.version_written" in JS
