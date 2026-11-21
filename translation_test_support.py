@@ -76,7 +76,7 @@ def sync_fixture_keys():
 
 def wipe_translation_data():
     """Simulate a different environment's (empty) database for the translation collections."""
-    for c in (T.LANGS, T.KEYS, T.VALUES, T.VERSIONS, T.STATE, T.REVIEWS, "translation_audit"):
+    for c in (T.LANGS, T.KEYS, T.VALUES, T.VERSIONS, T.STATE, T.REVIEWS, T.ROLLBACKS, "translation_audit"):
         DB.drop_collection(c)
     T.ensure_indexes()
 

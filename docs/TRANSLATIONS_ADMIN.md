@@ -50,3 +50,30 @@ Admin Dashboard -> Translations (`templates/partials/translations.html`, `static
 - While the environment is "unknown" the dashboard disables every change; the server refuses them too (503 `environment_unknown`).
 - English is the app's built-in source language: it is shown as a read-only base row and is never stored. Other languages are explicit Super Admin actions (Overview -> Add a language; "Fill in Arabic" pre-fills the form). Nothing is seeded automatically; adding an existing code returns 409 and never duplicates or overwrites.
 - Keys come from the app: with the Flutter `lib/l10n/app_en.arb` run, in a Staging shell (needs the staging database), `python tools/sync_translation_keys.py <app_en.arb>` (dry run), then `--apply`. It only writes `translation_keys`; re-running is idempotent and never touches languages or translations. The Phase I ARB (72 keys) and its draft Arabic are covered by tests.
+
+## Rollback safety (Phase L1)
+
+Staging only; production still returns 403 for every rollback route. Super Admin only.
+
+**Preview (read-only, nothing written, no audit entry):** `GET /admin/translations/rollback-preview?lang&track&version[&section&page&page_size][&format=csv]`
+reports what a rollback would do: `overwritten` / `deleted` (unpublished drafts that would be lost), `working_removed`, `status_only`
+(a status flag changes but no text is lost), and `live_changed` (what the app sees). Counts are always full; rows are paged
+(`page_size` ≤ 200); `format=csv` returns every row (formula-escaped, UTF-8 BOM, `no-store`). A *draft* is a working value whose text
+differs from the latest published text **or** whose status is not `published`. `impact_hash` covers the complete impact (value hashes, no text).
+
+**Rules enforced before anything is written:** language not disabled; target hash integrity; every restored string re-validated against the
+*current* registry (422 `invalid_values`, no skipping); legal review (409 `legal_review_required`); target equal to the live content →
+409 `already_current` (drafts untouched); lost drafts need `confirm_impact_hash` equal to the preview's (409 `draft_loss_confirmation_required` / `impact_changed`).
+
+**Journaled, resumable rollback (no database transaction is relied on):** a claim document in `translation_rollbacks` (`_id="<track>:<lang>"`)
+records intent, target, new version number, phase and a 10-minute lease (renewed every phase). Order: claim → re-verify impact →
+**write the new version (commit point; exact number + `intent_id`, so retries cannot duplicate)** → restore the working copy (idempotent) →
+clear the pending package → delete the claim. While a claim exists, publish/rollback/submit/draft edits for that language+track return 409 `rollback_in_progress`;
+the public API already serves the new version once it is written and never exposes drafts.
+
+**Recovery:** `GET /rollback-status`, `POST /rollback/resume` with `action` = `resume` | `abort`. Abort is allowed only while the version has *not* been written
+(checked against the version itself, not just the phase flag; otherwise 409 `abort_not_allowed_version_written`). The owner may act immediately; another Super Admin
+only after the lease expired, via an atomic conditional takeover (one winner). Status shows owner, who started it, lease expiry, `lease_expired`, `is_owner`, `can_resume`, `can_abort`.
+
+**Audit:** a strict `started` entry precedes any change; every refusal/failure is recorded `failed` with a code and safe details (counts, impact hash, phase, version, blocker key→code);
+never translation text. Resume/abort are audited as `rollback_resume` / `rollback_abort` (with `takeover` and `previous_owner_id`).

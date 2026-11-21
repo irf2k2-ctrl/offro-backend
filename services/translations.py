@@ -13,6 +13,8 @@ Collections (all new; each environment has its own database, so staging and prod
                           promoted_from, approval                                               [immutable snapshots]
   translation_state       one document: kill_switch (+ who/when/why) and pending production packages
   translation_legal_reviews  lang, key, value_hash, reviewer, reviewed_at, note
+  translation_rollbacks   _id "<track>:<lang>", intent_id, target/new version, phase, owner, lease_until   [Phase L1, only while a
+                          rollback is unfinished; holds no translation text]
   (translation_audit lives in services/translation_audit.py)
 
 Tracks: "app" (ordinary text) and "legal" (keys with group "legal"). They are versioned and published separately, so an ordinary
@@ -25,13 +27,27 @@ Rules enforced here (not only in the routes)
     the English set, no URL / e-mail / phone number that the English text does not already contain;
   * production never accepts direct edits - its working copy only ever comes from an imported, signed staging package;
   * publishing and rollback create NEW versions; nothing is ever overwritten or deleted.
+
+Rollback (Phase L1) - journaled and resumable, no database transactions needed (a standalone MongoDB has none)
+  1. every check is read-only first: impact (which unpublished drafts would be lost), validation of the historical text against the
+     CURRENT registry, language state, integrity, legal review, and - when drafts would be lost - the admin's confirmation of the
+     exact impact (impact_hash);
+  2. a claim document is inserted (unique per track+lang; it blocks publish / edits / submit / another rollback);
+  3. the new version is inserted with the claim's intent_id: THIS is the commit point (the only write the app ever sees);
+  4. the working copy is rewritten by an idempotent upsert-then-delete pass, the pending package is cleared, the claim is deleted.
+  A failure after step 3 leaves a claim that a Super Admin can RESUME (roll forward; the owner at once, another Super Admin once the
+  lease has expired). ABORT exists only until the version has been written. Retrying can never create a second version: the
+  (track, lang, version) index and the intent_id make every repeated step a no-op.
 """
+import csv
 import hashlib
+import io
 import json
 import logging
 import re
 import unicodedata
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 
 from pymongo.errors import DuplicateKeyError
 
@@ -44,7 +60,10 @@ SCHEMA = 1
 LANGS, KEYS, VALUES, VERSIONS, STATE, REVIEWS = (
     "translation_languages", "translation_keys", "translation_values", "translation_versions", "translation_state",
     "translation_legal_reviews")
+ROLLBACKS = "translation_rollbacks"     # Phase L1: one claim document per (track, lang) while a rollback is unfinished
 STATE_ID = "state"
+LEASE_SECONDS = 600                       # a rollback claim's lease; every phase renews it
+PREVIEW_PAGE_DEFAULT, PREVIEW_PAGE_MAX = 50, 200
 TRACKS = ("app", "legal")
 DIRECTIONS = ("ltr", "rtl")
 LANG_STATUSES = ("draft", "active", "disabled")
@@ -272,6 +291,18 @@ def update_language(code: str, changes: dict) -> dict:
     return db[LANGS].find_one({"code": code})
 
 
+def _now() -> datetime:
+    return datetime.utcnow()
+
+
+def _assert_no_rollback(lang: str, track: str) -> None:
+    """Edits, submit, publish and a new rollback are refused while a rollback of this language+track is unfinished."""
+    c = db[ROLLBACKS].find_one({"_id": f"{track}:{lang}"})
+    if c:
+        raise TranslationError("rollback_in_progress", 409, {"phase": c.get("phase"), "new_version": c.get("new_version"),
+                                                              "to_version": c.get("target_version")})
+
+
 # ── drafts (working copy) ─────────────────────────────────────────────────────────────────────────────────────────────
 def latest_version(track: str, lang: str):
     d = db[VERSIONS].find({"track": track, "lang": lang}).sort("version", -1).limit(1)
@@ -308,6 +339,7 @@ def set_value(lang: str, key: str, value, actor_id: str = "") -> dict:
         raise TranslationError("plural_read_only", 422, "Plural strings are bundled-only and read-only in this release")
     clean = validate_value(kd, value)
     track = track_of(kd)
+    _assert_no_rollback(lang, track)
     old = db[VALUES].find_one({"lang": lang, "key": key})
     status = "published" if published_strings(track, lang).get(key) == clean else "modified"
     db[VALUES].update_one(
@@ -323,6 +355,7 @@ def submit(lang: str, track: str) -> int:
     require_env("edit")
     get_language(lang)
     _check_track(track)
+    _assert_no_rollback(lang, track)
     pub = published_strings(track, lang)
     n = 0
     for v in db[VALUES].find({"lang": lang, "track": track, "submitted": {"$ne": True}}):
@@ -365,7 +398,8 @@ def language_status(lang: str) -> dict:
         out[track] = {"missing": miss, "draft_changes": draft,
                       "waiting_review": db[VALUES].count_documents({"lang": lang, "track": track, "submitted": True, "status": "modified"}),
                       "complete": miss == 0 and draft == 0,
-                      "published_version": lv["version"] if lv else None}
+                      "published_version": lv["version"] if lv else None,
+                      "rollback_pending": db[ROLLBACKS].find_one({"_id": f"{track}:{lang}"}) is not None}
     return out
 
 
@@ -392,7 +426,8 @@ def _legal_unreviewed(lang: str, changed_keys: list, strings: dict) -> list:
 
 
 # ── publish / rollback / approve ──────────────────────────────────────────────────────────────────────────────────────
-def _validate_all(strings: dict) -> None:
+def _validation_problems(strings: dict) -> dict:
+    """key -> error code for every text that could not be published against the CURRENT registry (read-only)."""
     bad = {}
     for k, v in strings.items():
         try:
@@ -402,6 +437,11 @@ def _validate_all(strings: dict) -> None:
             validate_value(kd, v)
         except TranslationError as e:
             bad[k] = e.code
+    return bad
+
+
+def _validate_all(strings: dict) -> None:
+    bad = _validation_problems(strings)
     if bad:
         raise TranslationError("invalid_values", 422, bad)
 
@@ -439,6 +479,7 @@ def publish(lang: str, track: str, note, actor: dict) -> dict:
     if language["status"] == "disabled":
         raise TranslationError("language_disabled", 409)
     _check_track(track)
+    _assert_no_rollback(lang, track)
     work = working_strings(track, lang)
     _validate_all(work)
     pub = published_strings(track, lang)
@@ -474,34 +515,385 @@ def publish(lang: str, track: str, note, actor: dict) -> dict:
     return {"lang": lang, "track": track, "version": doc["version"], "hash": doc["hash"], "count": len(work), "diff": d}
 
 
-def rollback(lang: str, track: str, to_version, note, actor: dict) -> dict:
-    """Super Admin only (route), staging/dev/test only. Publishes the strings of an earlier version as a NEW version (restored_from).
-    Nothing is deleted. Production cannot roll back directly: roll back in staging, approve, export, import, then publish."""
-    require_env("rollback")      # production never creates versions directly; it only publishes an imported, signed package
-    note = _check_note(note)
-    get_language(lang)
-    _check_track(track)
-    try:
-        to_version = int(to_version)
-    except (TypeError, ValueError):
+# ── rollback (Phase L1): impact preview, journaled and resumable ───────────────────────────────────────────────────────
+PREVIEW_SECTIONS = ("overwritten", "deleted", "working_removed", "live_changed", "status_only", "blockers")
+
+
+def _version_number(v) -> int:
+    if isinstance(v, bool) or not isinstance(v, (int, str)):
         raise TranslationError("invalid_version", 422)
-    target = db[VERSIONS].find_one({"track": track, "lang": lang, "version": to_version})
+    try:
+        return int(v)
+    except ValueError:
+        raise TranslationError("invalid_version", 422)
+
+
+def _iso(d) -> str:
+    return d.isoformat() + "Z" if isinstance(d, datetime) else str(d or "")
+
+
+def rollback_impact(lang: str, track: str, to_version) -> dict:
+    """Read-only. What restoring `to_version` would do, including the UNPUBLISHED drafts it would overwrite or delete.
+    A working value is an unpublished draft when its text differs from the latest published text OR its status is not 'published'
+    (a status-only difference, same text, loses nothing and is reported separately). Raw working values are used (not only registered
+    keys) because the restore deletes every working value of this language+track that is not in the target version."""
+    require_env("rollback")
+    language = get_language(lang)
+    _check_track(track)
+    ver = _version_number(to_version)
+    target = db[VERSIONS].find_one({"track": track, "lang": lang, "version": ver})
     if not target:
         raise TranslationError("unknown_version", 404)
     latest = latest_version(track, lang)
-    if latest and latest["hash"] == target["hash"]:
-        raise TranslationError("already_current", 409)
-    strings = dict(target["strings"])
-    doc = _insert_version(track, lang, strings, note, actor, restored_from=to_version)
-    # the working copy follows the restored text so there is no stale draft left behind
-    db[VALUES].delete_many({"lang": lang, "track": track, "key": {"$nin": list(strings)}})
+    live = dict(latest["strings"]) if latest else {}
+    tgt = dict(target["strings"])
+    work = {d["key"]: d for d in db[VALUES].find({"lang": lang, "track": track})}
+
+    overwritten, deleted, working_removed, status_only, live_changed = [], [], [], [], []
+    for k in sorted(work):
+        d = work[k]
+        val = d.get("value", "")
+        sub = bool(d.get("submitted"))
+        if val != live.get(k):                                   # unpublished text
+            if k in tgt:
+                if tgt[k] == val:
+                    status_only.append({"key": k, "reason": "draft_equals_restored_text"})
+                else:
+                    overwritten.append({"key": k, "draft": val, "live": live.get(k), "restored": tgt[k], "ready_for_review": sub})
+            else:
+                deleted.append({"key": k, "draft": val, "live": live.get(k), "ready_for_review": sub})
+        elif k not in tgt:                                       # published text that is not in the target version
+            working_removed.append({"key": k, "live": val})
+        elif d.get("status") != "published":                     # same text as live, only the status flag differs
+            status_only.append({"key": k, "reason": "status_flag_only"})
+    for k in sorted(set(live) | set(tgt)):
+        if k in live and k in tgt:
+            if live[k] != tgt[k]:
+                live_changed.append({"key": k, "change": "changed", "live": live[k], "restored": tgt[k]})
+        elif k in tgt:
+            live_changed.append({"key": k, "change": "added", "live": None, "restored": tgt[k]})
+        else:
+            live_changed.append({"key": k, "change": "removed", "live": live[k], "restored": None})
+
+    already = bool(latest and latest["hash"] == target["hash"])
+    glob = []
+    if language["status"] == "disabled":
+        glob.append("language_disabled")
+    if hash_strings(tgt) != target["hash"]:
+        glob.append("version_integrity_failed")
+    keys_bad = {}
+    if not already:
+        keys_bad = _validation_problems(tgt)
+        if track == "legal":
+            changed = [r["key"] for r in live_changed if r["change"] in ("changed", "added")]
+            for k in _legal_unreviewed(lang, changed, tgt):
+                keys_bad.setdefault(k, "legal_review_required")
+
+    core = {"lang": lang, "track": track, "from": latest["version"] if latest else 0, "to": ver, "target_hash": target["hash"],
+            "overwritten": [[r["key"], value_hash(r["draft"]), value_hash(r["restored"]), r["ready_for_review"]] for r in overwritten],
+            "deleted": [[r["key"], value_hash(r["draft"]), r["ready_for_review"]] for r in deleted],
+            "working_removed": [r["key"] for r in working_removed], "status_only": [r["key"] for r in status_only],
+            "live": [[r["key"], r["change"]] for r in live_changed]}
+    counts = {"overwritten": len(overwritten), "deleted": len(deleted), "working_removed": len(working_removed),
+              "status_only": len(status_only), "live_changed": len(live_changed),
+              "live_restored": sum(1 for r in live_changed if r["change"] in ("changed", "added")),
+              "live_removed": sum(1 for r in live_changed if r["change"] == "removed"),
+              "ready_for_review": sum(1 for r in overwritten + deleted if r["ready_for_review"]),
+              "blockers": len(keys_bad) + len(glob)}
+    return {"lang": lang, "track": track, "from_version": latest["version"] if latest else 0, "to_version": ver,
+            "already_current": already, "would_create_version": not already,
+            "requires_confirmation": (not already) and bool(overwritten or deleted),
+            "impact_hash": hash_strings(core), "counts": counts, "blockers": {"global": glob, "keys": keys_bad},
+            "rows": {"overwritten": overwritten, "deleted": deleted, "working_removed": working_removed,
+                     "live_changed": live_changed, "status_only": status_only,
+                     "blockers": [{"key": k, "code": c} for k, c in sorted(keys_bad.items())]}}
+
+
+def rollback_preview(lang: str, track: str, to_version, section=None, page=1, page_size=PREVIEW_PAGE_DEFAULT) -> dict:
+    """The impact with TOTALS for everything and rows paged (the full set is always reachable: pass section + page, or use the CSV)."""
+    imp = rollback_impact(lang, track, to_version)
+    rows = imp.pop("rows")
+    try:
+        ps = max(1, min(PREVIEW_PAGE_MAX, int(page_size)))
+        pg = max(1, int(page))
+    except (TypeError, ValueError):
+        raise TranslationError("invalid_paging", 422)
+    imp["page_size"] = ps
+    if section:
+        if section not in PREVIEW_SECTIONS:
+            raise TranslationError("invalid_section", 422)
+        lst = rows[section]
+        imp.update({"section": section, "page": pg, "total": len(lst), "rows": lst[(pg - 1) * ps: pg * ps]})
+    else:
+        imp["keys"] = {sec: rows[sec][:ps] for sec in PREVIEW_SECTIONS}
+        imp["totals"] = {sec: len(rows[sec]) for sec in PREVIEW_SECTIONS}
+    return imp
+
+
+def _csv_safe(v) -> str:
+    s = "" if v is None else str(v)
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
+
+def rollback_impact_csv(lang: str, track: str, to_version, section=None) -> str:
+    """Every affected row (all sections, or one) as UTF-8 CSV with a BOM so spreadsheets read Arabic. Cells that could be read as
+    formulas are neutralised."""
+    if section and section not in PREVIEW_SECTIONS:
+        raise TranslationError("invalid_section", 422)
+    rows = rollback_impact(lang, track, to_version)["rows"]
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\r\n")
+    w.writerow(["section", "key", "change", "current_draft", "live_text", "restored_text"])
+    for sec in ([section] if section else PREVIEW_SECTIONS):
+        for r in rows[sec]:
+            change = {"overwritten": "draft_overwritten", "deleted": "draft_deleted", "working_removed": "working_value_removed"}.get(sec)
+            if sec == "live_changed":
+                change = r["change"]
+            elif sec == "status_only":
+                change = r["reason"]
+            elif sec == "blockers":
+                change = r["code"]
+            w.writerow([_csv_safe(x) for x in (sec, r["key"], change, r.get("draft"), r.get("live"), r.get("restored"))])
+    return "﻿" + buf.getvalue()
+
+
+def _impact_summary(imp: dict) -> dict:
+    return {"impact_hash": imp["impact_hash"], "counts": imp["counts"], "from_version": imp["from_version"], "to_version": imp["to_version"]}
+
+
+# -- the claim (journal) ------------------------------------------------------------------------------------------------
+def _claim_id(track: str, lang: str) -> str:
+    return f"{track}:{lang}"
+
+
+def _claim_insert(claim: dict) -> None:
+    db[ROLLBACKS].insert_one(claim)
+
+
+def _claim_update(claim: dict, fields: dict, phases=None) -> None:
+    """Renews the lease together with `fields`. Matches only this claim (intent_id) and, when given, only these phases, so an
+    aborted or finished claim can never be revived by a late write."""
+    q = {"_id": claim["_id"], "intent_id": claim["intent_id"]}
+    if phases:
+        q["phase"] = {"$in": list(phases)}
+    res = db[ROLLBACKS].update_one(q, {"$set": {**fields, "lease_until": _now() + timedelta(seconds=LEASE_SECONDS)}})
+    if res.matched_count != 1:
+        raise TranslationError("rollback_not_found", 409, "This rollback was aborted or has already finished")
+
+
+def _claim_delete(claim: dict) -> None:
+    db[ROLLBACKS].delete_one({"_id": claim["_id"], "intent_id": claim["intent_id"]})
+
+
+def _version_written(claim: dict) -> bool:
+    return db[VERSIONS].find_one({"track": claim["track"], "lang": claim["lang"], "version": claim["new_version"],
+                                  "intent_id": claim["intent_id"]}) is not None
+
+
+def _insert_rollback_version(claim: dict, target: dict, actor: dict) -> None:
+    doc = {"track": claim["track"], "lang": claim["lang"], "version": claim["new_version"], "strings": dict(target["strings"]),
+           "hash": hash_strings(target["strings"]), "note": str(claim.get("note") or "")[:NOTE_MAX], "published_by": actor,
+           "published_at": _now(), "restored_from": claim["target_version"], "promoted_from": None, "approval": None,
+           "environment": environment(), "schema": SCHEMA, "intent_id": claim["intent_id"]}
+    db[VERSIONS].insert_one(doc)
+
+
+def _restore_working_copy(claim: dict, target: dict, actor: dict) -> None:
+    """Rewrites the working copy from the target version: upsert every key, then delete the rest. Idempotent: running it again (after
+    a failure) ends in exactly the same state, whatever part of the first run had been applied."""
+    strings, lang, track, now = target["strings"], claim["lang"], claim["track"], _now()
     for k, v in strings.items():
-        db[VALUES].update_one({"lang": lang, "key": k}, {"$set": {"lang": lang, "key": k, "track": track, "value": v,
-                              "value_hash": value_hash(v), "status": "published", "submitted": False,
-                              "updated_by": actor.get("id", ""), "updated_at": datetime.utcnow(), "source": "rollback",
-                              "schema": SCHEMA}}, upsert=True)
-    db[STATE].update_one({"_id": STATE_ID}, {"$unset": {f"pending.{track}:{lang}": ""}})
-    return {"lang": lang, "track": track, "version": doc["version"], "restored_from": to_version, "hash": doc["hash"]}
+        db[VALUES].update_one({"lang": lang, "key": k},
+                              {"$set": {"lang": lang, "key": k, "track": track, "value": v, "value_hash": value_hash(v), "status": "published",
+                                        "submitted": False, "updated_by": actor.get("id", ""), "updated_at": now, "source": "rollback",
+                                        "schema": SCHEMA}}, upsert=True)
+    db[VALUES].delete_many({"lang": lang, "track": track, "key": {"$nin": list(strings)}})
+
+
+def _clear_pending(claim: dict) -> None:
+    db[STATE].update_one({"_id": STATE_ID}, {"$unset": {f"pending.{claim['track']}:{claim['lang']}": ""}})
+
+
+def _incomplete_error(claim: dict) -> TranslationError:
+    try:
+        written = _version_written(claim)
+    except Exception:
+        written = None
+    code = "rollback_incomplete" if written else "rollback_interrupted"
+    phase = "version_written" if written else ("started" if written is False else "unknown")
+    return TranslationError(code, 503, {"phase": phase, "new_version": claim.get("new_version"), "intent_id": str(claim.get("intent_id", ""))[:12]})
+
+
+def _rollback_execute(claim: dict, actor: dict, *, initial: bool, resumed: bool = False, prev_owner: str = "", takeover: bool = False) -> dict:
+    """Steps 3-4 of the journal. Safe to repeat: each step is a no-op when it was already done."""
+    lang, track = claim["lang"], claim["track"]
+    try:
+        target = db[VERSIONS].find_one({"track": track, "lang": lang, "version": claim["target_version"]})
+        if not target:
+            raise TranslationError("unknown_version", 404)
+        if not _version_written(claim):
+            # nothing of ours is live yet: re-check what could have changed, then write the commit point
+            problems = []
+            if get_language(lang)["status"] == "disabled":
+                problems.append(TranslationError("language_disabled", 409))
+            elif hash_strings(target["strings"]) != target["hash"]:
+                problems.append(TranslationError("version_integrity_failed", 409))
+            else:
+                bad = _validation_problems(target["strings"])
+                if bad:
+                    problems.append(TranslationError("invalid_values", 422, bad))
+            if problems:
+                if initial:
+                    _claim_delete(claim)                       # nothing was written: leave no claim behind
+                raise problems[0]
+            _claim_update(claim, {"phase": "writing"}, phases=("started", "writing"))
+            try:
+                _insert_rollback_version(claim, target, actor)
+            except DuplicateKeyError:
+                pass                                           # the version number exists: ours (a repeat) or someone else's, checked next
+            if not _version_written(claim):
+                _claim_delete(claim)
+                raise TranslationError("version_conflict", 409, "Another publish happened at the same time; try again")
+        _claim_update(claim, {"phase": "version_written"})
+        _restore_working_copy(claim, target, actor)
+        _clear_pending(claim)
+        _claim_delete(claim)
+    except TranslationError:
+        raise
+    except Exception as _e:
+        logger.error("translation rollback interrupted for %s:%s (new version %s): %s", track, lang, claim.get("new_version"), type(_e).__name__, exc_info=True)
+        raise _incomplete_error(claim)
+    out = {"lang": lang, "track": track, "version": claim["new_version"], "restored_from": claim["target_version"], "hash": target["hash"],
+           "impact": claim.get("counts"), "audit_details": {"counts": claim.get("counts"), "resumed": resumed, "takeover": takeover,
+                                                            "previous_owner_id": prev_owner}}
+    if resumed:
+        out["resumed"] = True
+    return out
+
+
+def rollback(lang: str, track: str, to_version, note, actor: dict, confirm_impact_hash=None) -> dict:
+    """Super Admin only (route), staging/dev/test only. Publishes the strings of an earlier version as a NEW version (restored_from).
+    Nothing is deleted from the version history. The working copy follows the restored text; unpublished drafts that this would
+    overwrite or delete need the admin's confirmation of the exact impact (confirm_impact_hash from rollback_preview).
+    Production cannot roll back directly: roll back in staging, approve, export, import, then publish."""
+    require_env("rollback")
+    note = _check_note(note)
+    get_language(lang)
+    _check_track(track)
+    _assert_no_rollback(lang, track)
+    imp = rollback_impact(lang, track, to_version)
+    summary = _impact_summary(imp)
+    if imp["already_current"]:
+        raise TranslationError("already_current", 409, summary)          # nothing is written: drafts stay exactly as they are
+    glob = imp["blockers"]["global"]
+    for code in ("language_disabled", "version_integrity_failed"):
+        if code in glob:
+            raise TranslationError(code, 409, summary)
+    keys_bad = imp["blockers"]["keys"]
+    legal = sorted(k for k, c in keys_bad.items() if c == "legal_review_required")
+    other = {k: c for k, c in keys_bad.items() if c != "legal_review_required"}
+    if other:
+        raise TranslationError("invalid_values", 422, other)
+    if legal:
+        raise TranslationError("legal_review_required", 409, legal)
+    if imp["requires_confirmation"]:
+        if not confirm_impact_hash:
+            raise TranslationError("draft_loss_confirmation_required", 409, summary)
+        if not isinstance(confirm_impact_hash, str) or confirm_impact_hash != imp["impact_hash"]:
+            raise TranslationError("impact_changed", 409, summary)
+
+    now = _now()
+    claim = {"_id": _claim_id(track, lang), "intent_id": uuid.uuid4().hex, "lang": lang, "track": track,
+             "from_version": imp["from_version"], "target_version": imp["to_version"], "new_version": imp["from_version"] + 1,
+             "target_hash": db[VERSIONS].find_one({"track": track, "lang": lang, "version": imp["to_version"]})["hash"],
+             "phase": "started", "note": note, "started_by": actor, "owner": actor, "started_at": now,
+             "lease_until": now + timedelta(seconds=LEASE_SECONDS), "takeover_count": 0, "counts": imp["counts"], "schema": SCHEMA}
+    try:
+        _claim_insert(claim)
+    except DuplicateKeyError:
+        raise TranslationError("rollback_in_progress", 409)
+    except Exception:
+        raise TranslationError("rollback_not_started", 503, {"phase": "not_started"})
+    try:
+        again = rollback_impact(lang, track, imp["to_version"])           # re-verify now that edits are blocked
+        if again["impact_hash"] != imp["impact_hash"]:
+            _claim_delete(claim)
+            raise TranslationError("impact_changed", 409, _impact_summary(again))
+    except TranslationError:
+        raise
+    except Exception:
+        raise _incomplete_error(claim)
+    return _rollback_execute(claim, actor, initial=True)
+
+
+def rollback_status(lang: str, track: str, actor: dict = None) -> dict:
+    """The unfinished rollback of this language+track, who owns it, when the lease ends and what the caller may do."""
+    require_env("rollback")
+    get_language(lang)
+    _check_track(track)
+    c = db[ROLLBACKS].find_one({"_id": _claim_id(track, lang)})
+    if not c:
+        return {"lang": lang, "track": track, "active": False}
+    try:
+        written = _version_written(c)
+    except Exception:
+        written = c.get("phase") == "version_written"
+    expired = c["lease_until"] < _now()
+    owner = c.get("owner") or {}
+    is_owner = bool(actor and owner.get("id") and owner.get("id") == actor.get("id"))
+    can_resume = is_owner or expired
+    return {"lang": lang, "track": track, "active": True, "phase": "version_written" if written else c.get("phase"),
+            "version_written": written, "from_version": c.get("from_version"), "target_version": c.get("target_version"),
+            "new_version": c.get("new_version"), "started_by": c.get("started_by"), "owner": owner,
+            "started_at": _iso(c.get("started_at")), "lease_until": _iso(c.get("lease_until")), "lease_expired": expired,
+            "takeover_count": c.get("takeover_count", 0), "counts": c.get("counts"),
+            "is_owner": is_owner, "can_resume": can_resume, "can_abort": can_resume and not written,
+            "reason": None if can_resume else "owned_by_other"}
+
+
+def rollback_resume(lang: str, track: str, actor: dict, action: str) -> dict:
+    """Super Admin only. `resume` finishes an unfinished rollback (roll forward). `abort` cancels it, but only until the new version
+    has been written. The owner may act at once; any other Super Admin only after the lease has expired (an atomic takeover)."""
+    require_env("rollback")
+    get_language(lang)
+    _check_track(track)
+    if action not in ("resume", "abort"):
+        raise TranslationError("invalid_action", 422)
+    c = db[ROLLBACKS].find_one({"_id": _claim_id(track, lang)})
+    if not c:
+        raise TranslationError("no_rollback_in_progress", 404)
+    now, prev, takeover = _now(), (c.get("owner") or {}).get("id", ""), False
+    if prev != actor.get("id"):
+        if c["lease_until"] >= now:
+            raise TranslationError("rollback_owned_by_other", 409, {"owner": (c.get("owner") or {}).get("name", ""),
+                                                                      "lease_until": _iso(c["lease_until"])})
+        res = db[ROLLBACKS].update_one({"_id": c["_id"], "intent_id": c["intent_id"], "lease_until": {"$lt": now}},
+                                       {"$set": {"owner": actor, "lease_until": now + timedelta(seconds=LEASE_SECONDS)},
+                                        "$inc": {"takeover_count": 1}})
+        if res.modified_count != 1:                                      # another Super Admin took over first
+            raise TranslationError("rollback_owned_by_other", 409, {"owner": "", "lease_until": ""})
+        takeover = True
+    else:
+        _claim_update(c, {})
+    c = db[ROLLBACKS].find_one({"_id": c["_id"]})
+    if not c:
+        raise TranslationError("rollback_not_found", 409, "This rollback was aborted or has already finished")
+    if action == "abort":
+        if c.get("phase") == "version_written" or _version_written(c):
+            raise TranslationError("abort_not_allowed_version_written", 409, {"phase": "version_written", "new_version": c.get("new_version")})
+        deleted = db[ROLLBACKS].delete_one({"_id": c["_id"], "intent_id": c["intent_id"], "phase": {"$in": ["started", "writing"]}})
+        if deleted.deleted_count != 1:
+            raise TranslationError("rollback_not_found", 409, "This rollback was aborted or has already finished")
+        if _version_written(c):                                          # a Resume wrote the version in the same instant: keep it recoverable
+            try:
+                db[ROLLBACKS].insert_one({**c, "phase": "version_written"})
+            except DuplicateKeyError:
+                pass
+            raise TranslationError("abort_not_allowed_version_written", 409, {"phase": "version_written", "new_version": c.get("new_version")})
+        return {"lang": lang, "track": track, "aborted": True,
+                "audit_details": {"takeover": takeover, "previous_owner_id": prev, "phase": c.get("phase")}}
+    return _rollback_execute(c, actor, initial=False, resumed=True, prev_owner=prev, takeover=takeover)
+
 
 
 def approve_for_production(lang: str, track: str, version, note, actor: dict) -> dict:

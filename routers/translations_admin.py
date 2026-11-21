@@ -14,6 +14,7 @@ Audit
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 
 from routers.dashboard_auth import get_current_dashboard_user
 from services import app_environment as _env
@@ -76,6 +77,22 @@ def _actor(user: dict) -> dict:
     return {"id": a["id"], "name": a["name"]}
 
 
+# Failure details that are safe to write to the audit log: codes, counts, versions, hashes, key NAMES. Never translation text.
+_AUDIT_DETAIL_KEYS = ("phase", "new_version", "intent_id", "counts", "impact_hash", "from_version", "to_version", "previous_owner_id", "takeover")
+
+
+def _safe_failure_details(e: T.TranslationError) -> dict:
+    d, out = e.detail, {}
+    if isinstance(d, dict):
+        if e.code == "invalid_values":
+            out["blockers"] = {str(k)[:100]: str(v)[:40] for k, v in list(d.items())[:30]}
+        else:
+            out.update({k: d[k] for k in _AUDIT_DETAIL_KEYS if k in d})
+    elif isinstance(d, list) and e.code == "legal_review_required":
+        out["blockers"] = {str(k)[:100]: "legal_review_required" for k in d[:30]}
+    return out
+
+
 def _run_sensitive(request: Request, user: dict, action: str, fn, *, lang="", track="", version=None, details=None):
     """Strict 'started' audit entry first, then the operation, then the outcome entry."""
     admin, ip, env = audit.admin_ref(user), _ip(request), T.environment()
@@ -87,11 +104,16 @@ def _run_sensitive(request: Request, user: dict, action: str, fn, *, lang="", tr
         result = fn()
     except T.TranslationError as e:
         audit.record(action, admin, "failed", environment=env, lang=lang, track=track, version=version,
-                     details={"code": e.code}, ip=ip)
+                     details={"code": e.code, **_safe_failure_details(e)}, ip=ip)
         raise _http(e)
+    except Exception:
+        audit.record(action, admin, "failed", environment=env, lang=lang, track=track, version=version,
+                     details={"code": "internal_error"}, ip=ip)
+        raise
+    ok_details = result.pop("audit_details", None) if isinstance(result, dict) else None
     ok = audit.record(action, admin, "ok", environment=env, lang=lang, track=track,
                       version=result.get("version") if isinstance(result, dict) else None,
-                      new_hash=(result.get("hash") if isinstance(result, dict) else "") or "", ip=ip)
+                      new_hash=(result.get("hash") if isinstance(result, dict) else "") or "", details=ok_details, ip=ip)
     if not ok and isinstance(result, dict):
         result["audit_warning"] = "The operation succeeded but its completion entry could not be written to the audit log"
     return result
@@ -259,12 +281,61 @@ async def publish(data: dict, request: Request, user: dict = Depends(require_sup
                           lang=lang, track=track)
 
 
+@router.get("/rollback-preview")
+async def rollback_preview(lang: str, version: int, track: str = "app", section: str = "", page: int = 1, page_size: int = 50,
+                           format: str = "json", user: dict = Depends(require_super_admin("rollback_preview"))):
+    """Read-only (no audit entry, nothing written). What restoring `version` would do, including the unpublished drafts it would lose.
+    Totals are always complete; rows are paged (section + page + page_size) and `format=csv` returns every row."""
+    try:
+        if format == "csv":
+            text = T.rollback_impact_csv(lang, track, version, section or None)
+            return Response(content=text.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                            headers={"Cache-Control": "no-store",
+                                     "Content-Disposition": f'attachment; filename="rollback-impact-{lang}-{track}-v{int(version)}.csv"'})
+        if format != "json":
+            raise T.TranslationError("invalid_format", 422)
+        return T.rollback_preview(lang, track, version, section or None, page, page_size)
+    except T.TranslationError as e:
+        raise _http(e)
+
+
+@router.get("/rollback-status")
+async def rollback_status(lang: str, track: str = "app", user: dict = Depends(require_super_admin("rollback_status"))):
+    try:
+        return T.rollback_status(lang, track, _actor(user))
+    except T.TranslationError as e:
+        raise _http(e)
+
+
 @router.post("/rollback")
-async def rollback(data: dict, request: Request, user: dict = Depends(require_super_admin("rollback"))):
+async def rollback(request: Request, user: dict = Depends(require_super_admin("rollback"))):
+    try:
+        data = await request.json()
+    except Exception:
+        data = None
+    if not isinstance(data, dict):
+        audit.record("rollback", audit.admin_ref(user), "failed", environment=T.environment(), details={"code": "bad_request"}, ip=_ip(request))
+        raise HTTPException(422, {"code": "bad_request", "detail": "The request body must be a JSON object"})
     lang, track = str(data.get("lang", "")), str(data.get("track", "app"))
-    return _run_sensitive(request, user, "rollback",
-                          lambda: T.rollback(lang, track, data.get("version"), data.get("note"), _actor(user)),
-                          lang=lang, track=track, details={"to_version": data.get("version")})
+    confirm = data.get("confirm_impact_hash")
+    return _run_sensitive(request, user, "rollback", lambda: T.rollback(lang, track, data.get("version"), data.get("note"), _actor(user), confirm),
+                          lang=lang, track=track, details={"to_version": data.get("version"), "confirm_provided": bool(confirm)})
+
+
+@router.post("/rollback/resume")
+async def rollback_resume(request: Request, user: dict = Depends(require_super_admin("rollback_resume"))):
+    """Finish (resume) or cancel (abort) an unfinished rollback. Abort exists only until the new version has been written."""
+    try:
+        data = await request.json()
+    except Exception:
+        data = None
+    if not isinstance(data, dict):
+        audit.record("rollback_resume", audit.admin_ref(user), "failed", environment=T.environment(), details={"code": "bad_request"}, ip=_ip(request))
+        raise HTTPException(422, {"code": "bad_request", "detail": "The request body must be a JSON object"})
+    lang, track, action = str(data.get("lang", "")), str(data.get("track", "app")), str(data.get("action", "resume"))
+    audit_action = "rollback_abort" if action == "abort" else "rollback_resume"
+    return _run_sensitive(request, user, audit_action, lambda: T.rollback_resume(lang, track, _actor(user), action),
+                          lang=lang, track=track, details={"action": action[:10]})
 
 
 @router.post("/approve-for-production")

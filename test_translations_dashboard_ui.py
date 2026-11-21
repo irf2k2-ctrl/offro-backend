@@ -347,3 +347,143 @@ def test_browser_duplicate_language_error_is_shown_plainly():
         pg.click("[data-act=fillar]"); pg.click("[data-act=addlang]"); pg.wait_for_selector("#trn_alert:not([hidden])")
         assert "already exists" in pg.inner_text("#trn_alert")
         b.close()
+
+
+# ── Phase L1: rollback preview, confirmation and recovery banner ───────────────────────────────────────────
+def _preview(**over):
+    base = {"lang": "ar", "track": "app", "from_version": 2, "to_version": 1, "already_current": False, "would_create_version": True,
+            "requires_confirmation": True, "impact_hash": "h" * 64,
+            "counts": {"overwritten": 120, "deleted": 1, "working_removed": 2, "status_only": 3, "live_changed": 4, "live_restored": 3, "live_removed": 1,
+                       "ready_for_review": 5, "blockers": 0},
+            "totals": {"overwritten": 120, "deleted": 1, "working_removed": 2, "status_only": 3, "live_changed": 4}, "blockers": {"global": [], "keys": {}},
+            "keys": {"overwritten": [{"key": "k%d" % i, "draft": "d", "live": "l", "restored": "r"} for i in range(50)], "deleted": [{"key": "gone", "draft": "d"}]}}
+    base.update(over)
+    return base
+
+
+def _status(**over):
+    base = {"lang": "ar", "track": "app", "active": True, "target_version": 1, "new_version": 3, "phase": "writing", "version_written": False,
+            "owner": {"name": "Sam"}, "started_by": {"name": "Sam"}, "started_at": "2026-11-02T10:00:00", "lease_until": "2026-11-02T10:10:00",
+            "lease_expired": False, "is_owner": True, "can_resume": True, "can_abort": True}
+    base.update(over)
+    return base
+
+
+def _rb_route(preview=None, status=None, sent=None):
+    def extra(route, path):
+        if path.startswith("/rollback-preview") and route.request.method == "GET":
+            body = json.dumps(preview or _preview())
+        elif path.startswith("/rollback-status"):
+            body = json.dumps(status or {"lang": "ar", "track": "app", "active": False})
+        elif path == "/rollback" and route.request.method == "POST":
+            sent.append(route.request.post_data_json); body = '{"version":3}'
+        elif path == "/rollback/resume":
+            sent.append(route.request.post_data_json); body = "{}"
+        else:
+            return False
+        route.fulfill(body=body, content_type="application/json"); return True
+    return extra
+
+
+def _versions(pg):
+    pg.click("[data-act=tab][data-tab=versions]"); pg.wait_for_selector("#trn_pane_versions table")
+
+
+def test_browser_rollback_dialog_shows_full_counts_and_requires_confirmation():
+    sent = []
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture(), _rb_route(sent=sent))
+        _versions(pg)
+        pg.click("[data-act=rollback][data-v='1']"); pg.wait_for_selector("#trn_modal")
+        txt = pg.inner_text("#trn_modal")
+        assert "120 overwritten" in txt and "1 deleted" in txt and "first 50 of 120" in txt and "cannot be recovered" in txt
+        assert "Overwritten (120)" in txt or "overwritten" in txt.lower()
+        assert pg.locator("[data-act=rollcsv]").count() == 1
+        pg.fill("#trn_f_note", "restore"); pg.click("#trn_modal_ok")
+        assert sent == [] and pg.locator("#trn_modal").count() == 1                           # blocked until the checkbox is ticked
+        pg.check("#trn_f_ack"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
+        assert sent == [{"lang": "ar", "track": "app", "version": 1, "note": "restore", "confirm_impact_hash": "h" * 64}]
+        b.close()
+
+
+def test_browser_clean_rollback_needs_no_confirmation_checkbox():
+    sent = []
+    clean = _preview(requires_confirmation=False, counts={"overwritten": 0, "deleted": 0, "working_removed": 0, "status_only": 0, "live_changed": 1,
+                                                          "live_restored": 1, "live_removed": 0, "ready_for_review": 0, "blockers": 0},
+                     totals={}, keys={})
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture(), _rb_route(clean, sent=sent))
+        _versions(pg)
+        pg.click("[data-act=rollback][data-v='1']"); pg.wait_for_selector("#trn_modal")
+        assert pg.locator("#trn_f_ack").count() == 0
+        pg.fill("#trn_f_note", "restore"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
+        assert sent == [{"lang": "ar", "track": "app", "version": 1, "note": "restore"}]
+        b.close()
+
+
+def test_browser_same_hash_target_and_blockers_are_explained_without_a_dialog():
+    with pw.sync_playwright() as p:
+        b, pg, _ = _page(p, _fixture(), _rb_route(_preview(already_current=True, would_create_version=False, requires_confirmation=False)))
+        _versions(pg); pg.click("[data-act=rollback][data-v='1']"); pg.wait_for_selector("#trn_alert:not([hidden])")
+        assert "nothing to roll back" in pg.inner_text("#trn_alert") and "untouched" in pg.inner_text("#trn_alert") and not pg.locator("#trn_modal").is_visible()
+        b.close()
+    with pw.sync_playwright() as p:
+        b, pg, _ = _page(p, _fixture(), _rb_route(_preview(blockers={"global": [], "keys": {"loginTitle": "too_long"}})))
+        _versions(pg); pg.click("[data-act=rollback][data-v='1']"); pg.wait_for_selector("#trn_alert:not([hidden])")
+        assert "cannot be restored" in pg.inner_text("#trn_alert") and "loginTitle (too_long)" in pg.inner_text("#trn_alert") and not pg.locator("#trn_modal").is_visible()
+        b.close()
+
+
+def test_browser_banner_offers_resume_and_abort_before_the_version_is_written():
+    sent = []
+    with pw.sync_playwright() as p:
+        b, pg, _ = _page(p, _fixture(), _rb_route(status=_status(), sent=sent))
+        _versions(pg)
+        banner = pg.inner_text("[data-rollback-banner]")
+        assert "Incomplete rollback" in banner and "Sam" in banner and "Lease ends" in banner
+        assert pg.locator("[data-act=rbresume]").inner_text() == "Resume" and pg.locator("[data-act=rbabort]").count() == 1
+        assert pg.locator("[data-act=rollback]").count() == 0                                   # no second rollback while one is unfinished
+        pg.click("[data-act=rbabort]"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
+        assert sent == [{"lang": "ar", "track": "app", "action": "abort"}]
+        b.close()
+
+
+def test_browser_banner_has_no_abort_once_the_version_is_written():
+    with pw.sync_playwright() as p:
+        b, pg, _ = _page(p, _fixture(), _rb_route(status=_status(version_written=True, phase="version_written", can_abort=False)))
+        _versions(pg)
+        assert pg.locator("[data-act=rbabort]").count() == 0 and pg.locator("[data-rollback-resume-only]").count() == 1
+        assert "already live" in pg.inner_text("[data-rollback-resume-only]") and pg.locator("[data-act=rbresume]").count() == 1
+        b.close()
+
+
+def test_browser_other_super_admin_sees_owner_and_lease_and_can_only_take_over_after_expiry():
+    with pw.sync_playwright() as p:
+        b, pg, _ = _page(p, _fixture(), _rb_route(status=_status(is_owner=False, can_resume=False, can_abort=False)))
+        _versions(pg)
+        assert pg.locator("[data-act=rbresume]").count() == 0 and pg.locator("[data-act=rbabort]").count() == 0
+        assert "Owned by Sam" in pg.inner_text("[data-rollback-owned]")
+        b.close()
+    sent = []
+    with pw.sync_playwright() as p:
+        b, pg, _ = _page(p, _fixture(), _rb_route(status=_status(is_owner=False, lease_expired=True, version_written=True, can_abort=False), sent=sent))
+        _versions(pg)
+        assert pg.locator("[data-act=rbresume]").inner_text() == "Take over and resume" and "(expired)" in pg.inner_text("[data-rollback-banner]")
+        pg.click("[data-act=rbresume]"); pg.click("#trn_modal_ok"); pg.wait_for_selector("#trn_modal", state="hidden")
+        assert sent == [{"lang": "ar", "track": "app", "action": "resume"}]
+        b.close()
+
+
+def test_browser_nothing_rollback_related_appears_in_production():
+    with pw.sync_playwright() as p:
+        b, pg, calls = _page(p, _fixture("production", True), _rb_route(status=_status()))
+        _versions(pg)
+        assert pg.locator("[data-rollback-banner]").count() == 0 and pg.locator("[data-act=rollback]").count() == 0
+        assert not any(path.startswith("/rollback") for _, path in calls)
+        b.close()
+
+
+def test_rollback_ui_code_stays_escaped_and_contract_checked():
+    assert "rollback-preview" in JS and "rollback-status" in JS and "'/rollback/resume'" in JS and "innerHTML =" in JS
+    assert JS.count(".innerHTML =") == 1
+    assert "data-act=\"rbabort\"" in JS and "rb.can_abort && !rb.version_written" in JS
