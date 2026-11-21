@@ -144,19 +144,23 @@ class TestProductionImport:
         assert client.get("/translations/ar").status_code == 404
         assert "package_import" in audit_actions("ok")
 
-    def test_explicit_production_publish_then_goes_live(self, monkeypatch):
+    def test_production_publish_after_import_is_an_ordinary_publish_of_the_working_copy(self, monkeypatch):
         psa, env, _ = self.imported(monkeypatch)
-        r = publish(psa, note="promote v1")
+        r = publish(psa, note="")
         assert r.status_code == 200 and r.json()["version"] == 1
         v = DB.translation_versions.find_one({"lang": "ar"})
-        assert v["promoted_from"]["environment"] == "staging" and v["promoted_from"]["version"] == 1
-        assert v["promoted_from"]["hash"] == env["payload"]["hash"] and v["approval"]["note"] == "tested on device"
-        assert v["environment"] == "production"
+        assert v["environment"] == "production" and v["promoted_from"] is None and v["approval"] is None
         assert client.get("/translations/ar").json()["strings"]["loginTitle"] == "مرحبا بك"
-        assert DB.translation_state.find_one({"_id": "state"}).get("pending", {}) == {}
-        assert publish(psa).status_code == 409                                             # nothing pending any more
+        assert DB.translation_state.find_one({"_id": "state"}).get("pending", {}) == {}      # the imported-package marker is cleared
+        assert publish(psa).status_code == 409                                                # nothing left to publish
 
-    def test_publish_needs_a_pending_package(self, monkeypatch):
+    def test_a_draft_edited_after_import_is_simply_published_as_edited(self, monkeypatch):
+        psa, env, _ = self.imported(monkeypatch)
+        DB.translation_values.update_one({"lang": "ar", "key": "loginTitle"}, {"$set": {"value": "تعديل مباشر"}})
+        assert publish(psa).status_code == 200
+        assert client.get("/translations/ar").json()["strings"]["loginTitle"] == "تعديل مباشر"
+
+    def test_publish_without_a_language_is_refused(self, monkeypatch):
         to_production(monkeypatch)
         psa = super_admin("prod-sa")
         r = publish(psa)
@@ -238,24 +242,6 @@ class TestProductionImport:
             r = client.post(A + "/package/import", headers=super_admin("p"), json=env)
             assert r.status_code == 503 and r.json()["detail"]["code"] == "package_secret_not_configured"
             DB.dashboard_users.delete_many({}); DB.dashboard_roles.delete_many({})
-
-    def test_publish_refused_if_the_draft_is_changed_after_import(self, monkeypatch):
-        psa, env, _ = self.imported(monkeypatch)
-        DB.translation_values.update_one({"lang": "ar", "key": "loginTitle"}, {"$set": {"value": "تعديل مباشر"}})
-        r = publish(psa)
-        assert r.status_code == 409 and r.json()["detail"]["code"] == "pending_package_mismatch"
-        assert DB.translation_versions.count_documents({}) == 0
-
-    def test_publish_refused_if_the_pending_record_is_tampered(self, monkeypatch):
-        psa, env, _ = self.imported(monkeypatch)
-        DB.translation_state.update_one({"_id": "state"}, {"$set": {"pending.app:ar.source_version": 99}})
-        r = publish(psa)
-        assert r.status_code == 409 and r.json()["detail"]["code"] == "pending_package_tampered"
-
-    def test_publish_refused_if_the_seal_secret_changed(self, monkeypatch):
-        psa, env, _ = self.imported(monkeypatch)
-        monkeypatch.setenv("TRANSLATION_PACKAGE_SECRET", "Nq5hT8wLc2ZpD7tYb4RjK9mXe3UaS6oFgV1i")
-        assert publish(psa).json()["detail"]["code"] == "pending_package_tampered"
 
     def test_import_replaces_the_whole_draft_for_that_language_and_track(self, monkeypatch):
         sa = super_admin(); env = approved_package(sa).json()

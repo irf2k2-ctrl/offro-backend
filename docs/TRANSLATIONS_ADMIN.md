@@ -4,13 +4,21 @@ Scope: data model + admin API (T1), public API + kill switches (T3), HMAC-signed
 
 ## Rules
 - Only values are editable; keys come from the app (`tools/sync_translation_keys.py`, dry-run by default). Real registry stays empty until localization creates `app_en.arb`.
-- Plural keys: bundled-only, read-only. Legal text: separate track, separate versions, review of the exact value hash required before publish.
+- Plural keys: bundled-only, read-only. Legal text: separate track with its own version counter, edited and published like any other text (no review step; validation still applies).
 - Super Admin (all privileged ops) = `role_name == "Super Admin"` AND `is_system_role == true`. A renamed role never qualifies.
 - Other admins need explicit "Translations" module grants (none by default); they edit drafts and submit; they cannot publish/approve/rollback/export/import/toggle kill switch.
-- Production: no direct edits, no new languages, no direct rollback (403). To roll back production: roll back in staging, approve the new version, export, import, then explicit publish. Emergency lever: production kill switch. Content arrives only as a signed package from staging.
+- Staging and production behave identically (Stage 1 simplification): edit, add a language, change a language's names and publish all work in either, and each writes ONLY to its own database (its own `MONGO_URL`). Nothing is shared or synced between environments. An unknown `OFFRO_ENVIRONMENT` refuses every write. The retired rollback and approve workflows stay refused in production until the cleanup stage removes them. Emergency lever: the kill switch (per environment).
 - Audit: append-only `translation_audit`, no TTL. Strict "started" entry before each sensitive op (failure -> 503 `audit_unavailable`, nothing changes). Denials logged.
 
-## Promotion flow
+## Simplified publishing (Stage 1)
+Edit (status becomes `modified`) -> **Publish Changes** (`POST /admin/translations/publish`, Super Admin, `note` optional) -> a new immutable version
+(number + SHA-256 hash, which the app uses to detect changes) is written to THIS environment's database and every published value is marked `published`.
+`GET /translations/manifest` and `GET /translations/{lang}` then serve it.
+
+**Legal track limitation:** the Flutter app currently reads ONLY the `app` track (`track=app`). Legal-track text can be edited and published here, but doing so
+does **not** change what customers see in the app until the app is changed to read the legal track.
+
+## Promotion flow (retired; kept only until the cleanup stage)
 1. Staging: edit -> publish -> `POST /admin/translations/approve-for-production` -> `GET /admin/translations/package?lang=&version=` (signed with staging `TRANSLATION_PACKAGE_SECRET`).
 2. Production: `POST /admin/translations/package/import` -> verifies kind/schema, source=staging, hash, approval, signature (with `TRANSLATION_PACKAGE_VERIFY_SECRET`), key/value rules. Creates a **DRAFT only**; nothing goes live.
 3. Production: separate explicit `POST /admin/translations/publish`.

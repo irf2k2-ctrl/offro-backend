@@ -226,7 +226,7 @@ async def get_kill_switch(user: dict = Depends(require_perm("view"))):
     return T.kill_switch_state()
 
 
-# ── draft editing (edit permission; never available in production) ────────────────────────────────────────────────────
+# ── draft editing (edit permission; same in every known environment) ────────────────────────────────────────────────────
 @router.put("/strings/{lang}/{key}")
 async def put_value(lang: str, key: str, data: dict, request: Request, user: dict = Depends(require_perm("edit"))):
     admin, ip, env = audit.admin_ref(user), _ip(request), T.environment()

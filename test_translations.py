@@ -264,11 +264,15 @@ class TestVersions:
         assert DB.translation_versions.find_one({"version": 2})["strings"]["loginTitle"] == "أهلا بك"
         assert DB.translation_languages.find_one({"code": "ar"})["status"] == "active"
 
-    def test_note_required_and_nothing_to_publish(self):
+    def test_note_is_optional_and_nothing_to_publish(self):
         sa = self.seed()
-        assert publish(sa, note="").json()["detail"]["code"] == "note_required"
-        assert publish(sa).status_code == 200
+        assert publish(sa, note="").status_code == 200                                    # Stage 1: no note needed
+        assert DB.translation_versions.find_one({"version": 1})["note"] == ""
         assert publish(sa).json()["detail"]["code"] == "nothing_to_publish"
+        put(sa, "loginTitle", "أهلا بك")
+        assert client.post("/admin/translations/publish", headers=sa, json={"lang": "ar"}).status_code == 200     # no note key at all
+        put(sa, "loginTitle", "أهلا وسهلا")
+        assert publish(sa, note="wording").status_code == 200 and DB.translation_versions.find_one({"version": 3})["note"] == "wording"
 
     def test_rollback_publishes_a_new_version_with_restored_from(self):
         sa = self.seed(); publish(sa)
@@ -288,17 +292,17 @@ class TestVersions:
         assert "privacyIntro" not in DB.translation_versions.find_one({"track": "app"})["strings"]
         assert DB.translation_versions.count_documents({"track": "legal"}) == 0
 
-    def test_legal_needs_review_of_the_exact_text(self):
+    def test_legal_track_is_published_like_any_other_text(self):
         sa = self.seed()
         put(sa, "privacyIntro", "باستمرارك فإنك تقبل سياسة الخصوصية.")
         r = publish(sa, track="legal")
-        assert r.status_code == 409 and r.json()["detail"]["code"] == "legal_review_required"
-        assert client.post("/admin/translations/legal/review", headers=sa, json={"lang": "ar", "key": "loginTitle"}).json()["detail"]["code"] == "not_a_legal_key"
-        assert client.post("/admin/translations/legal/review", headers=sa, json={"lang": "ar", "key": "privacyIntro", "note": "checked by counsel"}).status_code == 200
-        assert publish(sa, track="legal").status_code == 200
-        put(sa, "privacyIntro", "نص معدل بعد المراجعة.")                                   # editing invalidates the review
-        assert publish(sa, track="legal").json()["detail"]["code"] == "legal_review_required"
-        assert DB.translation_versions.count_documents({"track": "legal"}) == 1           # own version counter
+        assert r.status_code == 200 and r.json()["version"] == 1                          # no legal review step any more
+        put(sa, "privacyIntro", "نص معدل.")
+        assert publish(sa, track="legal").json()["version"] == 2
+        assert DB.translation_versions.count_documents({"track": "legal"}) == 2           # own version counter
+        assert DB.translation_versions.count_documents({"track": "app"}) == 0             # the app track is untouched
+        # validation still applies to legal text
+        assert put(sa, "privacyIntro", "<b>x</b>").status_code == 422
 
     def test_direction_locked_after_publish(self):
         sa = self.seed(); publish(sa)
@@ -314,12 +318,26 @@ class TestVersions:
         assert r.status_code == 422 and r.json()["detail"]["code"] == "invalid_values"
         assert DB.translation_versions.count_documents({}) == 0
 
-    def test_production_has_no_direct_edits_and_cannot_add_languages(self, monkeypatch):
-        sa = super_admin(); add_ar(sa)
+    def test_production_edits_and_publishes_exactly_like_staging_in_its_own_database(self, monkeypatch):
         setup_env(monkeypatch, "production", verify="X" * 5)
-        assert put(sa, "loginTitle", "مرحبا").json()["detail"]["code"] == "production_edit_blocked"
-        assert add_ar(sa, "hi").json()["detail"]["code"] == "production_edit_blocked"
-        assert client.post("/admin/translations/submit", headers=sa, json={"lang": "ar"}).status_code == 403
+        sa = super_admin()
+        assert add_ar(sa).status_code == 200
+        assert put(sa, "loginTitle", "مرحبا").status_code == 200 and put(sa, "resendOtp", "إعادة الإرسال").status_code == 200
+        assert client.post("/admin/translations/submit", headers=sa, json={"lang": "ar"}).status_code == 200
+        r = publish(sa, note="")
+        assert r.status_code == 200 and r.json()["version"] == 1
+        v = DB.translation_versions.find_one({"lang": "ar"})
+        assert v["environment"] == "production" and v["promoted_from"] is None and v["approval"] is None
+        assert client.get("/translations/ar").json()["strings"] == {"loginTitle": "مرحبا", "resendOtp": "إعادة الإرسال"}
+        assert client.get("/translations/manifest").json()["languages"][0]["tracks"]["app"]["version"] == 1
+        put(sa, "loginTitle", "أهلا")
+        assert publish(sa).json()["version"] == 2 and client.get("/translations/ar").json()["strings"]["loginTitle"] == "أهلا"
+
+    def test_production_still_refuses_the_retired_rollback_and_approval_workflows(self, monkeypatch):
+        sa = self.seed(); publish(sa)
+        setup_env(monkeypatch, "production", verify="X" * 5)
+        assert client.post("/admin/translations/rollback", headers=sa, json={"lang": "ar", "version": 1, "note": "x"}).status_code == 403
+        assert client.post("/admin/translations/approve-for-production", headers=sa, json={"lang": "ar", "version": 1, "note": "x"}).status_code == 403
 
     def test_status_indicators(self):
         sa = self.seed()

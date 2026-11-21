@@ -18,15 +18,16 @@ Collections (all new; each environment has its own database, so staging and prod
   (translation_audit lives in services/translation_audit.py)
 
 Tracks: "app" (ordinary text) and "legal" (keys with group "legal"). They are versioned and published separately, so an ordinary
-publish can never carry or overwrite legal wording, and a legal value needs a recorded review of that exact text before it can be
-published.
+publish can never carry or overwrite legal wording. The legal track is edited and published like any other text (no separate review
+step). NOTE: the Flutter app currently reads ONLY the "app" track, so publishing legal text does not change what customers see.
 
 Rules enforced here (not only in the routes)
   * plural keys are bundled-only and read-only; deprecated keys cannot be edited;
   * value rules: plain text only (no HTML), no hidden / bidirectional-override characters, length limit, placeholders must equal
     the English set, no URL / e-mail / phone number that the English text does not already contain;
-  * production never accepts direct edits - its working copy only ever comes from an imported, signed staging package;
-  * publishing and rollback create NEW versions; nothing is ever overwritten or deleted.
+  * every known environment (staging and production) works the same way and writes only to its OWN database; an unknown
+    environment refuses every write;
+  * publishing (and the older rollback) creates a NEW version; nothing is ever overwritten or deleted.
 
 Rollback (Phase L1) - journaled and resumable, no database transactions needed (a standalone MongoDB has none)
   1. every check is read-only first: impact (which unpublished drafts would be lost), validation of the historical text against the
@@ -119,9 +120,10 @@ def require_env(kind: str) -> str:
     env = environment()
     if env == "unknown":
         raise TranslationError("environment_unknown", 503, "OFFRO_ENVIRONMENT is not set to a valid value; translation writes are refused")
-    if kind in ("edit", "publish_draft", "add_language", "approve", "rollback") and env == "production":
-        raise TranslationError("production_edit_blocked", 403, "Production receives translations only through an approved staging package"
-                               + (" (roll back in staging, approve, export, import, then publish; use the kill switch for an emergency)" if kind == "rollback" else ""))
+    # Editing, adding a language and publishing work the same in every known environment (Stage 1 simplification). The retired
+    # approval and rollback workflows stay unavailable in production until the cleanup stage removes them.
+    if kind in ("approve", "rollback") and env == "production":
+        raise TranslationError("production_edit_blocked", 403, "This workflow is not available in production")
     if kind == "export" and env != "staging":
         raise TranslationError("package_export_staging_only", 403)
     if kind == "import" and env != "production":
@@ -262,8 +264,8 @@ def add_language(code, name_en, name_native, direction, actor_id: str = "", *, b
 
 
 def update_language(code: str, changes: dict) -> dict:
-    """Super Admin only (route). Production may only enable/disable; names and direction change only in a non-production draft."""
-    env = require_env("any_known")
+    """Super Admin only (route). Status, names and direction can be changed in any known environment; direction is locked once published."""
+    require_env("any_known")
     lang = get_language(code)
     upd = {}
     if "status" in changes:
@@ -274,8 +276,6 @@ def update_language(code: str, changes: dict) -> dict:
         upd["status"] = changes["status"]
     for f in ("name_en", "name_native", "direction"):
         if f in changes:
-            if env == "production":
-                raise TranslationError("production_edit_blocked", 403)
             if f == "direction":
                 if changes[f] not in DIRECTIONS:
                     raise TranslationError("invalid_direction", 422)
@@ -471,10 +471,10 @@ def _check_note(note) -> str:
 
 
 def publish(lang: str, track: str, note, actor: dict) -> dict:
-    """Super Admin only (route). Staging / development / test: publishes the working copy.
-    Production: publishes ONLY the pending, signed, imported package (an explicit second step after the import)."""
-    env = require_env("any_known")
-    note = _check_note(note)
+    """Super Admin only (route). Publishes the working copy of this language + track as a NEW version in THIS environment's own
+    database. Works the same in staging and production. The note is optional. Nothing is ever sent to another environment."""
+    require_env("any_known")
+    note = str(note or "").strip()[:NOTE_MAX]
     language = get_language(lang)
     if language["status"] == "disabled":
         raise TranslationError("language_disabled", 409)
@@ -484,34 +484,12 @@ def publish(lang: str, track: str, note, actor: dict) -> dict:
     _validate_all(work)
     pub = published_strings(track, lang)
     d = diff(pub, work)
-    promoted_from, approval = None, None
-
-    if env == "production":
-        from services import translation_promotion as _promo
-        pend = (db[STATE].find_one({"_id": STATE_ID}) or {}).get("pending", {}).get(f"{track}:{lang}")
-        if not pend:
-            raise TranslationError("no_pending_package", 409, "Import an approved staging package first")
-        if pend.get("hash") != hash_strings(work):
-            raise TranslationError("pending_package_mismatch", 409)
-        if not _promo.verify_seal(pend):
-            raise TranslationError("pending_package_tampered", 409)
-        promoted_from = {"environment": "staging", "version": pend["source_version"], "hash": pend["hash"],
-                         "package_hash": pend.get("package_hash", ""), "imported_by": pend.get("imported_by"),
-                         "imported_at": pend.get("imported_at")}
-        approval = pend.get("approval")
-    elif track == "legal":
-        changed = d["added"] + d["changed"]
-        unreviewed = _legal_unreviewed(lang, changed, work)
-        if unreviewed:
-            raise TranslationError("legal_review_required", 409, unreviewed)
-
     if not work or (not any(d.values()) and pub):
         raise TranslationError("nothing_to_publish", 409)
-    doc = _insert_version(track, lang, work, note, actor, promoted_from=promoted_from, approval=approval)
+    doc = _insert_version(track, lang, work, note, actor)
     db[VALUES].update_many({"lang": lang, "track": track, "key": {"$in": list(work)}}, {"$set": {"status": "published", "submitted": False}})
     _activate_language(lang)
-    if env == "production":
-        db[STATE].update_one({"_id": STATE_ID}, {"$unset": {f"pending.{track}:{lang}": ""}})
+    db[STATE].update_one({"_id": STATE_ID}, {"$unset": {f"pending.{track}:{lang}": ""}})      # a leftover imported-package marker, if any
     return {"lang": lang, "track": track, "version": doc["version"], "hash": doc["hash"], "count": len(work), "diff": d}
 
 
