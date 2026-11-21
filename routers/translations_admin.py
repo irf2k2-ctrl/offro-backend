@@ -1,12 +1,12 @@
-"""routers/translations_admin.py - admin API for the translation module (Phase G; dashboard UI added in Phase H).
+"""routers/translations_admin.py - admin API for the translation module (simplified: edit -> Publish Changes).
 
 Prefix /admin/translations (mounted in server.py). Uses the existing dashboard session (get_current_dashboard_user).
 
 Who may do what
   Privileged ("system Super Admin") = role_name == "Super Admin" AND is_system_role is True. A role that was merely RENAMED
-  "Super Admin" never qualifies. Privileged only: add/change a language, publish, roll back, approve for production, export or
-  import a package, kill switch, legal review. Everyone else needs the explicit "Translations" module permission:
-  view -> read endpoints, edit -> save drafts and submit. The role is checked here on every call (never trusted from the client).
+  "Super Admin" never qualifies. Privileged only: add/change a language, publish, kill switch. Everyone else needs the explicit
+  "Translations" module permission: view -> read endpoints, edit -> save values. The role is checked here on every call (never
+  trusted from the client). Staging and production run this same code, each against its own database.
 Audit
   Every sensitive operation writes a strict "started" entry BEFORE it changes anything (if that cannot be stored the operation is
   refused with 503 audit_unavailable) and an ok/failed entry afterwards. Denied attempts are recorded too.
@@ -14,12 +14,10 @@ Audit
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import Response
 
 from routers.dashboard_auth import get_current_dashboard_user
 from services import app_environment as _env
 from services import translation_audit as audit
-from services import translation_promotion as promo
 from services import translations as T
 
 router = APIRouter(prefix="/translations", tags=["Translations"])
@@ -77,19 +75,11 @@ def _actor(user: dict) -> dict:
     return {"id": a["id"], "name": a["name"]}
 
 
-# Failure details that are safe to write to the audit log: codes, counts, versions, hashes, key NAMES. Never translation text.
-_AUDIT_DETAIL_KEYS = ("phase", "new_version", "intent_id", "counts", "impact_hash", "from_version", "to_version", "previous_owner_id", "takeover")
-
-
 def _safe_failure_details(e: T.TranslationError) -> dict:
+    """Failure details that are safe for the audit log: for invalid_values, key NAMES with error codes (never translation text)."""
     d, out = e.detail, {}
-    if isinstance(d, dict):
-        if e.code == "invalid_values":
-            out["blockers"] = {str(k)[:100]: str(v)[:40] for k, v in list(d.items())[:30]}
-        else:
-            out.update({k: d[k] for k in _AUDIT_DETAIL_KEYS if k in d})
-    elif isinstance(d, list) and e.code == "legal_review_required":
-        out["blockers"] = {str(k)[:100]: "legal_review_required" for k in d[:30]}
+    if isinstance(d, dict) and e.code == "invalid_values":
+        out["blockers"] = {str(k)[:100]: str(v)[:40] for k, v in list(d.items())[:30]}
     return out
 
 
@@ -124,9 +114,6 @@ def _run_sensitive(request: Request, user: dict, action: str, fn, *, lang="", tr
 async def environment(user: dict = Depends(require_perm("view"))):
     out = {"environment": _env.status(), "caller_is_system_super_admin": is_system_super_admin(user),
            "kill_switch": T.kill_switch_state()}
-    if is_system_super_admin(user):
-        out["package_config"] = promo.config_status()
-        out["pending_packages"] = promo.pending_packages()
     return out
 
 
@@ -199,22 +186,6 @@ async def preview(lang: str, track: str = "app", user: dict = Depends(require_pe
         raise _http(e)
 
 
-@router.get("/versions")
-async def versions(lang: str, track: str = "app", user: dict = Depends(require_perm("view"))):
-    try:
-        T.get_language(lang)
-        T._check_track(track)
-    except T.TranslationError as e:
-        raise _http(e)
-    out = []
-    for v in T.db[T.VERSIONS].find({"lang": lang, "track": track}).sort("version", -1):
-        out.append({"version": v["version"], "hash": v["hash"], "count": len(v["strings"]), "note": v.get("note", ""),
-                    "published_by": v.get("published_by"), "published_at": v["published_at"].isoformat() + "Z",
-                    "restored_from": v.get("restored_from"), "promoted_from": v.get("promoted_from"),
-                    "approved": bool(v.get("approval")), "environment": v.get("environment", "")})
-    return {"lang": lang, "track": track, "versions": out}
-
-
 @router.get("/audit")
 async def audit_log(action: str = "", lang: str = "", before: str = "", limit: int = 50,
                     user: dict = Depends(require_perm("view"))):
@@ -240,19 +211,6 @@ async def put_value(lang: str, key: str, data: dict, request: Request, user: dic
     if not ok:
         res["audit_warning"] = "The edit was saved but its audit entry could not be written"
     return res
-
-
-@router.post("/submit")
-async def submit_drafts(data: dict, request: Request, user: dict = Depends(require_perm("edit"))):
-    admin, ip, env = audit.admin_ref(user), _ip(request), T.environment()
-    lang, track = str(data.get("lang", "")), str(data.get("track", "app"))
-    try:
-        n = T.submit(lang, track)
-    except T.TranslationError as e:
-        audit.record("submit", admin, "failed", environment=env, lang=lang, track=track, details={"code": e.code}, ip=ip)
-        raise _http(e)
-    audit.record("submit", admin, "ok", environment=env, lang=lang, track=track, details={"submitted": n}, ip=ip)
-    return {"lang": lang, "track": track, "submitted": n}
 
 
 # ── Super Admin operations ────────────────────────────────────────────────────────────────────────────────────────────
@@ -281,103 +239,9 @@ async def publish(data: dict, request: Request, user: dict = Depends(require_sup
                           lang=lang, track=track)
 
 
-@router.get("/rollback-preview")
-async def rollback_preview(lang: str, version: int, track: str = "app", section: str = "", page: int = 1, page_size: int = 50,
-                           format: str = "json", user: dict = Depends(require_super_admin("rollback_preview"))):
-    """Read-only (no audit entry, nothing written). What restoring `version` would do, including the unpublished drafts it would lose.
-    Totals are always complete; rows are paged (section + page + page_size) and `format=csv` returns every row."""
-    try:
-        if format == "csv":
-            text = T.rollback_impact_csv(lang, track, version, section or None)
-            return Response(content=text.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                            headers={"Cache-Control": "no-store",
-                                     "Content-Disposition": f'attachment; filename="rollback-impact-{lang}-{track}-v{int(version)}.csv"'})
-        if format != "json":
-            raise T.TranslationError("invalid_format", 422)
-        return T.rollback_preview(lang, track, version, section or None, page, page_size)
-    except T.TranslationError as e:
-        raise _http(e)
-
-
-@router.get("/rollback-status")
-async def rollback_status(lang: str, track: str = "app", user: dict = Depends(require_super_admin("rollback_status"))):
-    try:
-        return T.rollback_status(lang, track, _actor(user))
-    except T.TranslationError as e:
-        raise _http(e)
-
-
-@router.post("/rollback")
-async def rollback(request: Request, user: dict = Depends(require_super_admin("rollback"))):
-    try:
-        data = await request.json()
-    except Exception:
-        data = None
-    if not isinstance(data, dict):
-        audit.record("rollback", audit.admin_ref(user), "failed", environment=T.environment(), details={"code": "bad_request"}, ip=_ip(request))
-        raise HTTPException(422, {"code": "bad_request", "detail": "The request body must be a JSON object"})
-    lang, track = str(data.get("lang", "")), str(data.get("track", "app"))
-    confirm = data.get("confirm_impact_hash")
-    return _run_sensitive(request, user, "rollback", lambda: T.rollback(lang, track, data.get("version"), data.get("note"), _actor(user), confirm),
-                          lang=lang, track=track, details={"to_version": data.get("version"), "confirm_provided": bool(confirm)})
-
-
-@router.post("/rollback/resume")
-async def rollback_resume(request: Request, user: dict = Depends(require_super_admin("rollback_resume"))):
-    """Finish (resume) or cancel (abort) an unfinished rollback. Abort exists only until the new version has been written."""
-    try:
-        data = await request.json()
-    except Exception:
-        data = None
-    if not isinstance(data, dict):
-        audit.record("rollback_resume", audit.admin_ref(user), "failed", environment=T.environment(), details={"code": "bad_request"}, ip=_ip(request))
-        raise HTTPException(422, {"code": "bad_request", "detail": "The request body must be a JSON object"})
-    lang, track, action = str(data.get("lang", "")), str(data.get("track", "app")), str(data.get("action", "resume"))
-    audit_action = "rollback_abort" if action == "abort" else "rollback_resume"
-    return _run_sensitive(request, user, audit_action, lambda: T.rollback_resume(lang, track, _actor(user), action),
-                          lang=lang, track=track, details={"action": action[:10]})
-
-
-@router.post("/approve-for-production")
-async def approve(data: dict, request: Request, user: dict = Depends(require_super_admin("approve_for_production"))):
-    lang, track = str(data.get("lang", "")), str(data.get("track", "app"))
-    def fn():
-        r = T.approve_for_production(lang, track, data.get("version"), data.get("note"), _actor(user))
-        return {"lang": lang, "track": track, "version": r["version"], "approved": True}
-    return _run_sensitive(request, user, "approve_for_production", fn, lang=lang, track=track)
-
-
-@router.get("/package")
-async def export_package(lang: str, version: int, request: Request, track: str = "app",
-                         user: dict = Depends(require_super_admin("package_export"))):
-    """Staging only. Returns {payload, signature, alg}; the file is carried to production and uploaded there."""
-    out = {}
-    def fn():
-        out.update(promo.build_package(lang, track, version, _actor(user)))
-        return {"version": out["payload"]["version"], "hash": out["payload"]["hash"]}
-    _run_sensitive(request, user, "package_export", fn, lang=lang, track=track, version=version)
-    return out
-
-
-@router.post("/package/import")
-async def import_package(data: dict, request: Request, user: dict = Depends(require_super_admin("package_import"))):
-    """Production only. Verifies the package and stores it as a DRAFT. It does NOT publish."""
-    def fn():
-        return promo.import_package(data, _actor(user))
-    return _run_sensitive(request, user, "package_import", fn,
-                          lang=str((data.get("payload") or {}).get("lang", ""))[:20] if isinstance(data, dict) else "")
-
-
 @router.post("/kill-switch")
 async def kill_switch(data: dict, request: Request, user: dict = Depends(require_super_admin("kill_switch"))):
     """enabled=true: the app ignores every remote override and uses its bundled text. Affects this environment only."""
     return _run_sensitive(request, user, "kill_switch",
                           lambda: T.set_kill_switch(data.get("enabled"), data.get("reason"), _actor(user)),
                           details={"enabled": data.get("enabled")})
-
-
-@router.post("/legal/review")
-async def legal_review(data: dict, request: Request, user: dict = Depends(require_super_admin("legal_review"))):
-    lang, key = str(data.get("lang", "")), str(data.get("key", ""))
-    return _run_sensitive(request, user, "legal_review",
-                          lambda: T.record_legal_review(lang, key, _actor(user), data.get("note")), lang=lang)

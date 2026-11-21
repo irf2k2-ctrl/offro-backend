@@ -14,16 +14,12 @@ from tools.sync_translation_keys import parse_arb
 DB = sys.modules["database"].db
 FIXTURE_ARB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_data", "app_en_fixture.arb")
 
-# strong, unrelated secrets (no placeholder-looking words)
-STAGING_SECRET = "Rk7vQ2xLm9ZpT4nB8wYc5HdJ3aUe6FgN1sXo"
-PROD_OWN_SECRET = "Vh3nW8qZc1LpD6tYb9RjK4mXe2UaS7oFgT5i"
-
 app = FastAPI()
 app.include_router(TA.router, prefix="/admin")
 app.include_router(TP.router)
 client = TestClient(app)
 
-ALL = ["view", "add", "edit", "delete", "approve", "export"]
+ALL = ["view", "add", "edit", "delete"]
 
 
 def make_user(token, *, role_name="Custom Role", perms=None, system=False, status="active", name="Asha Admin"):
@@ -54,18 +50,15 @@ def fake_super(token="fake-token"):
     return make_user(token, role_name="Super Admin", system=False, perms={}, name="Renamed Role")
 
 
-def setup_env(monkeypatch, env="staging", own=STAGING_SECRET, verify=None):
+def setup_env(monkeypatch, env="staging"):
+    """Declare which environment this server is (None = not set). Staging and production behave identically."""
     for n in ("RAILWAY_ENVIRONMENT_NAME", "RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_ID",
-              "TRANSLATION_PACKAGE_SECRET", "TRANSLATION_PACKAGE_VERIFY_SECRET", "TRANSLATION_PUBLIC_RATE_PER_MIN"):
+              "TRANSLATION_PUBLIC_RATE_PER_MIN"):
         monkeypatch.delenv(n, raising=False)
     if env:
         monkeypatch.setenv("OFFRO_ENVIRONMENT", env)
     else:
         monkeypatch.delenv("OFFRO_ENVIRONMENT", raising=False)
-    if own:
-        monkeypatch.setenv("TRANSLATION_PACKAGE_SECRET", own)
-    if verify:
-        monkeypatch.setenv("TRANSLATION_PACKAGE_VERIFY_SECRET", verify)
     TP.reset_rate_limit()
     T.ensure_indexes()
 
@@ -76,7 +69,7 @@ def sync_fixture_keys():
 
 def wipe_translation_data():
     """Simulate a different environment's (empty) database for the translation collections."""
-    for c in (T.LANGS, T.KEYS, T.VALUES, T.VERSIONS, T.STATE, T.REVIEWS, T.ROLLBACKS, "translation_audit"):
+    for c in (T.LANGS, T.KEYS, T.VALUES, T.VERSIONS, T.STATE, "translation_audit"):
         DB.drop_collection(c)
     T.ensure_indexes()
 

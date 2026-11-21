@@ -67,8 +67,7 @@
     environment_unknown: 'This server does not know whether it is staging or production, so changes are refused. Ask the developer to set OFFRO_ENVIRONMENT.',
     language_exists: 'That language already exists. Nothing was changed.',
     language_disabled: 'This language is disabled, so nothing can be published for it.',
-    version_conflict: 'Another publish happened at the same time. Nothing was changed. Try again.',
-    rollback_in_progress: 'An older, unfinished rollback is blocking changes to this language and text type. Ask the developer to finish or clear it.'
+    version_conflict: 'Another publish happened at the same time. Nothing was changed. Try again.'
   };
   function messageFor(data, status) {
     var d = data && data.detail, code = d && typeof d === 'object' ? d.code : '';

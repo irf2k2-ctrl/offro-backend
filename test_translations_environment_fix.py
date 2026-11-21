@@ -97,7 +97,6 @@ class TestEnvironmentIdentification:
             assert r.status_code in (503, 404), r.text
         assert DB.translation_languages.count_documents({}) == 0
         assert client.get(A + "/languages", headers=sa).status_code == 200
-        assert client.get(A + "/versions?lang=ar", headers=sa).status_code == 404         # unknown language, not a crash
         assert client.get(A + "/audit", headers=sa).status_code == 200
 
 
@@ -147,11 +146,10 @@ class TestLanguages:
     def test_the_other_tabs_load_for_a_new_language(self):
         sa = super_admin()
         add_ar(sa)
-        assert client.get(A + "/versions?lang=ar", headers=sa).json()["versions"] == []
         assert client.get(A + "/strings?lang=ar", headers=sa).json()["total"] == 0
         assert client.get(A + "/preview?lang=ar", headers=sa).status_code == 200
         assert client.get(A + "/audit", headers=sa).json()["entries"]                 # add_language is audited
-        assert client.get(A + "/environment", headers=sa).json()["package_config"]["environment"] == "staging"
+        assert client.get(A + "/environment", headers=sa).json()["environment"]["classification"] == "staging"
         assert client.get(A + "/kill-switch", headers=sa).status_code == 200
 
 
