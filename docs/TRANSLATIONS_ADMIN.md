@@ -7,7 +7,7 @@ There is no approval, review, promotion, package-transfer or rollback workflow.
 
 ## What exists
 - **Admin API** (`/admin/translations`, `routers/translations_admin.py`):
-  `GET /environment`, `GET /languages` (also returns `supported_countries`), `POST /languages` (optional `countries`), `PATCH /languages/{code}`, `PUT /languages/{code}/countries`, `GET /strings`, `GET /preview`,
+  `GET /environment`, `GET /languages` (also returns `supported_countries`), `POST /languages` (optional `countries`), `PATCH /languages/{code}`, `PUT /languages/{code}/countries`, `GET /draft` (Download Draft, XLSX), `POST /import` (Import, multipart), `GET /strings`, `GET /preview`,
   `PUT /strings/{lang}/{key}`, `POST /publish`, `GET /audit` (read-only, no dashboard tab), `GET /kill-switch`, `POST /kill-switch`.
 - **Public API** (`routers/translations_public.py`): `GET /translations/manifest`, `GET /translations/{lang}?track=app|legal`
   (ETag/304; per-IP in-process rate limit, default 60/min, `TRANSLATION_PUBLIC_RATE_PER_MIN` 10-600; per-process only, not a distributed limiter).
@@ -15,6 +15,19 @@ There is no approval, review, promotion, package-transfer or rollback workflow.
 - **Dashboard** (`templates/partials/translations.html`, `static/js/translations.js`, `static/css/translations.css`): two sections only.
   **Overview**: languages, **countries** each language is offered in, number of Modified strings, completion, emergency kill switch, add language (with a country multi-select). The Live version column was removed from this table; versions, hashes and the manifest are unchanged.
   **Translations**: search/filter and **Publish Changes** in the top toolbar, English read-only reference, edit Arabic, status Modified / Published.
+
+## Modified / Published status (every language, every track)
+One rule in the common service (`services/translations.py: effective_status`): a text is **Published** exactly when it equals the text in the last **published** version of that language + track (the baseline), otherwise **Modified**. It is never compared with an earlier draft, so Welcome -> Welcome back (Modified) -> Hello (Modified) -> Welcome (Published) -> Welcome again (Modified). It applies to manual edits and imports alike, and the key list derives the status from the baseline when it is read, so a stale stored flag cannot show the wrong status. No language-specific code exists. Publishing, versions, hashes, audit and Super Admin rules are unchanged.
+
+## Download Draft and Import (Translation tab)
+- **Download Draft** (view permission): an `.xlsx` for the selected language + text type. Sheet `Translations`: Key (stable identifier) | Feature / Screen | English (reference) | translation | Status. Sheet `Info`: schema marker, language, text type, environment, published baseline version/hash. Only the translation column is unlocked. Cells are always plain text. Plural strings (bundled-only) and deprecated keys are not included.
+- **Import** (edit permission, same as a manual edit): choose the edited file, **Check file** shows the summary without writing, **Apply import** stores the changes. Rows are matched by Key, never by displayed text. English and every other column are ignored (counted as `english_edits_ignored`).
+- Each value is validated exactly like a manual edit (placeholders, length, hidden characters, URL/e-mail/phone must exist in English). It is compared with the published baseline: a different text becomes **Modified**, the published text becomes **Published**, a text equal to the current working value is left alone (its status is kept). A blank cell never deletes anything.
+- Summary: Total, Valid (= Updated + Unchanged), Updated, Unchanged, Invalid, Missing (Missing = editable keys not present in the file). Total = Valid + Invalid.
+- **Partial import is intentional.** Check file writes nothing and shows the counts and the first invalid rows. **Apply import stores every valid changed row and skips every invalid row** (unknown / wrong-text-type / plural / deprecated / missing key, failed validation, formulas, non-text cells; a duplicate key rejects EVERY occurrence). An invalid row is never written, in whole or in part. Unchanged and missing rows are left as they are. The dialog states this before you apply.
+- **Environment safety:** the file records the environment it was downloaded from (Info sheet). Check file and Apply import both compare it with the environment the server is running and reject the whole file with `environment_mismatch` when it is missing, unknown or different, before any database access. A staging file cannot be imported into production, or the reverse; each environment's translation database stays independent.
+- Whole-file rejections (nothing written): wrong environment, not an `.xlsx`, empty, larger than 2 MB, macros, not a Download Draft file, a different language or text type than the one selected, more than 5000 rows.
+- **Import never publishes** and creates no version. Changes follow Modified -> Publish Changes -> Published. Applying is audited (`import_draft`: counts only, no text); downloading is audited (`export_draft`). Import is refused when the environment is not identified.
 
 ## Country <-> language mapping
 - Many to many: a language can be offered in several countries and a country can have several languages. English (the built-in base language, not a stored record) can be mapped too.

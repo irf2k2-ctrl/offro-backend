@@ -347,6 +347,21 @@ def working_strings(track: str, lang: str) -> dict:
     return out
 
 
+def effective_status(published: dict, key: str, value) -> str:
+    """The ONE rule for Modified / Published, for every language and every track: a value is 'published' exactly when it equals the
+    text in the last PUBLISHED version (the baseline), otherwise 'modified'. It is never compared with an earlier draft, so editing
+    to something else and back to the published wording returns to Published. No language-specific logic."""
+    return "published" if key in published and published[key] == value else "modified"
+
+
+def _store_value(lang: str, key: str, track: str, clean: str, status: str, actor_id: str, source: str) -> None:
+    db[VALUES].update_one(
+        {"lang": lang, "key": key},
+        {"$set": {"lang": lang, "key": key, "track": track, "value": clean, "value_hash": value_hash(clean), "status": status,
+                  "updated_by": actor_id, "updated_at": datetime.utcnow(), "source": source,
+                  "schema": SCHEMA}}, upsert=True)
+
+
 def set_value(lang: str, key: str, value, actor_id: str = "") -> dict:
     require_env("edit")
     language = get_language(lang)
@@ -360,12 +375,8 @@ def set_value(lang: str, key: str, value, actor_id: str = "") -> dict:
     clean = validate_value(kd, value)
     track = track_of(kd)
     old = db[VALUES].find_one({"lang": lang, "key": key})
-    status = "published" if published_strings(track, lang).get(key) == clean else "modified"
-    db[VALUES].update_one(
-        {"lang": lang, "key": key},
-        {"$set": {"lang": lang, "key": key, "track": track, "value": clean, "value_hash": value_hash(clean), "status": status,
-                  "updated_by": actor_id, "updated_at": datetime.utcnow(), "source": "dashboard",
-                  "schema": SCHEMA}}, upsert=True)
+    status = effective_status(published_strings(track, lang), key, clean)
+    _store_value(lang, key, track, clean, status, actor_id, "dashboard")
     return {"lang": lang, "key": key, "track": track, "status": status,
             "old_hash": value_hash(old["value"]) if old else "", "new_hash": value_hash(clean)}
 

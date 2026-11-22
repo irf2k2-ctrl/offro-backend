@@ -93,6 +93,17 @@
     unsupported_country: 'One of the selected countries is not supported. Nothing was changed.',
     invalid_countries: 'The country selection is not valid. Nothing was changed.',
     language_disabled: 'This language is disabled, so nothing can be published for it.',
+    not_xlsx: 'Please choose an Excel (.xlsx) file that was downloaded with Download Draft.',
+    empty_file: 'The file is empty.',
+    file_too_large: 'The file is too large.',
+    invalid_file: 'The file could not be read. Download a fresh draft and try again.',
+    missing_sheet: 'This is not a Download Draft file (the Translations or Info sheet is missing).',
+    not_a_draft_file: 'This is not a Download Draft file. Download a draft, edit it, then import it.',
+    macros_not_allowed: 'Files with macros are not accepted.',
+    too_many_rows: 'The file has too many rows.',
+    environment_mismatch: 'This file was downloaded from a different environment (staging or production) than this server. Nothing was changed. Download a fresh draft here.',
+    language_mismatch: 'This file belongs to a different language than the one selected. Nothing was changed.',
+    track_mismatch: 'This file belongs to a different text type (App text / Legal text) than the one selected. Nothing was changed.',
     version_conflict: 'Another publish happened at the same time. Nothing was changed. Try again.'
   };
   function messageFor(data, status) {
@@ -113,9 +124,11 @@
     opts = opts || {};
     var init = { method: opts.method || 'GET', credentials: 'include', headers: { 'Accept': 'application/json' } };
     if (opts.json !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(opts.json); }
+    if (opts.form) init.body = opts.form;                                  // multipart: the browser sets the boundary itself
     var res;
     try { res = await fetch(API + path, init); } catch (e) { throw new ApiError(0, 'Could not reach the server. Check your connection.'); }
     if (res.status === 401) { window.location.href = '/admin'; throw new ApiError(401, messageFor(null, 401)); }
+    if (opts.blob && res.ok) return { blob: await res.blob(), name: ((res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/) || [])[1] || 'translations.xlsx' };
     var data = null; try { data = await res.json(); } catch (e) { data = null; }
     if (!res.ok) throw new ApiError(res.status, messageFor(data, res.status), data && data.detail && data.detail.code);
     return data;
@@ -154,11 +167,12 @@
           if (f.required && (f.type === 'multicheck' ? !vals[f.id].length : !vals[f.id])) { err.textContent = f.type === 'check' ? 'Please tick the box to confirm.' : f.label + ' is required.'; err.hidden = false; return; }
         }
         ok.disabled = true;
-        try { if (o.run) await o.run(vals); close(vals); }
+        try { var kept = o.run ? await o.run(vals) : null; if (kept === 'keep') { ok.disabled = false; return; } close(vals); }
         catch (e) { err.textContent = e.message || 'Failed.'; err.hidden = false; }
         ok.disabled = false;
       };
       m.hidden = false;
+      if (o.onOpen) o.onOpen();
       var first = m.querySelector('textarea,input,select'); if (first) first.focus();
     });
   }
@@ -269,9 +283,12 @@
     var pages = Math.max(1, Math.ceil(d.total / d.page_size));
     // The one Publish Changes button lives in the top toolbar, next to the search box (same action, same rules as before).
     var publish = isSA() && envKnown() ? '<button type="button" class="btn-p trn-publish" data-act="publish">Publish Changes</button>' : '';
+    // Download Draft (view permission) and Import (edit permission) for the selected language + text type. Import never publishes.
+    var xfer = '<button type="button" class="btn-s trn-xfer" data-act="downloaddraft">Download Draft</button>' +
+      (edit ? '<button type="button" class="btn-s trn-xfer" data-act="importdraft">Import</button>' : '');
     setHtml($('trn_pane_strings'),
       h`<div class="trn-toolbar">${raw(selectors())}<select data-change="filter" aria-label="Filter">${raw(filt)}</select>` +
-      h`<input type="search" placeholder="Search key or English text" value="${st.q}" data-input="q" aria-label="Search">${raw(publish)}</div>` +
+      h`<input type="search" placeholder="Search key or English text" value="${st.q}" data-input="q" aria-label="Search">${raw(publish)}${raw(xfer)}</div>` +
       (!envKnown() ? '<p class="trn-note">Changes are disabled until the environment is identified.</p>' : '') +
       (st.track === 'legal' ? '<p class="trn-note">Legal text can be edited and published here, but the customer app does not read legal text yet, so publishing it does not change what customers see.</p>' : '') +
       (d.rows.length ? '<div class="table-wrap"><table class="trn-table"><thead><tr><th>Key</th><th>English (source)</th><th>Translation</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
@@ -284,14 +301,59 @@
     try {
       var r = await api('/strings/' + encodeURIComponent(st.lang) + '/' + encodeURIComponent(key), { method: 'PUT', json: { value: ta.value } });
       ta.setAttribute('data-orig', ta.value); btn.hidden = true;
-      var s = tr.querySelector('[data-status]'); s.textContent = 'modified'; s.className = 'trn-pill warn';
-      if (r && r.audit_warning) alertMsg(r.audit_warning); else alertMsg('Saved. Status is now Modified: ' + key + '. Press Publish Changes to make it live.', true);
+      var back = r && r.status === 'published';                           // the text equals the published baseline again
+      var s = tr.querySelector('[data-status]'); s.textContent = back ? 'published' : 'modified'; s.className = 'trn-pill ' + (back ? 'ok' : 'warn');
+      if (r && r.audit_warning) alertMsg(r.audit_warning);
+      else alertMsg(back ? 'Saved. This text is the same as the published text, so its status is Published: ' + key + '.'
+                         : 'Saved. Status is now Modified: ' + key + '. Press Publish Changes to make it live.', true);
     } catch (e) { err.textContent = e.message; err.hidden = false; }
     btn.disabled = false;
   }
 
   // ── actions ──────────────────────────────────────────────────────────────────────────────
   var NOTE = { id: 'note', label: 'Note (optional)', type: 'note', required: false };
+  // Import: step 1 checks the file and shows the summary (nothing is written); step 2 stores the changes as Modified (never publishes).
+  function importSummary(r, applied) {
+    var valid = r.valid !== undefined ? r.valid : r.updated + r.unchanged;
+    var rows = [['Total records', r.total], ['Valid records', valid], ['Updated records', r.updated], ['Unchanged records', r.unchanged], ['Invalid records', r.invalid], ['Missing records', r.missing]];
+    var out = '<table class="trn-table trn-import-summary"><tbody>' + rows.map(function (x) { return h`<tr><th>${x[0]}</th><td data-sum="${x[0]}">${x[1]}</td></tr>`; }).join('') + '</tbody></table>';
+    if (r.invalid_rows && r.invalid_rows.length) out += '<div class="trn-hint">Invalid (first ' + Math.min(r.invalid_rows.length, 20) + '): ' + r.invalid_rows.slice(0, 20).map(function (x) { return esc('row ' + x.row + ' ' + (x.key || '(no key)') + ': ' + x.code); }).join('; ') + '</div>';
+    if (r.missing_keys && r.missing_keys.length) out += '<div class="trn-hint">Not in the file (first ' + Math.min(r.missing_keys.length, 10) + '): ' + r.missing_keys.slice(0, 10).map(esc).join(', ') + '</div>';
+    if (r.baseline_changed) out += '<div class="trn-hint">Note: the published text changed since this file was downloaded. Changes were compared with the CURRENT published text.</div>';
+    if (applied) out += '<div class="trn-hint">Imported changes are Modified. Nothing is live until you press Publish Changes.</div>';
+    else out += '<div class="trn-hint trn-partial">This is a check only: nothing has been changed yet. <strong>Apply import</strong> will store the ' + r.updated + ' updated record' + (r.updated === 1 ? '' : 's') +
+      ' as Modified and <strong>skip the ' + r.invalid + ' invalid record' + (r.invalid === 1 ? '' : 's') + '</strong> (invalid and duplicate rows are never written). Unchanged and missing records are left as they are.</div>';
+    return out;
+  }
+  function importDraft(lang, track) {
+    var previewed = false, lo = langObj(lang);
+    function send(apply) {
+      var inp = $('trn_imp_file'), file = inp && inp.files && inp.files[0];
+      if (!file) throw new ApiError(0, 'Choose the edited .xlsx file first.');
+      if (!/\.xlsx$/i.test(file.name)) throw new ApiError(0, messageFor({ detail: { code: 'not_xlsx' } }, 400));
+      var fd = new FormData(); fd.append('file', file); fd.append('lang', lang); fd.append('track', track); fd.append('apply', apply ? '1' : '');
+      return api('/import', { method: 'POST', form: fd });
+    }
+    return dialog({ title: 'Import translations (' + (lo ? lo.name_en : lang) + ', ' + TRACK_LABEL[track] + ')', okLabel: 'Check file', wide: true,
+      text: 'Upload the edited draft. Rows are matched by key; English is never changed. Changed texts become Modified; nothing is published.',
+      html: '<div class="mb-2"><input type="file" id="trn_imp_file" accept=".xlsx" aria-label="Edited draft file"></div><div id="trn_imp_out"></div>',
+      onOpen: function () { $('trn_imp_file').onchange = function () { previewed = false; $('trn_modal_ok').textContent = 'Check file'; setHtml($('trn_imp_out'), ''); }; },
+      run: async function () {
+        if (!previewed) {
+          var r = await send(false); setHtml($('trn_imp_out'), importSummary(r, false));
+          if (!r.updated) { $('trn_modal_ok').textContent = 'Check file'; return 'keep'; }
+          previewed = true; $('trn_modal_ok').textContent = 'Apply import (' + r.updated + ')'; return 'keep';
+        }
+        var res = await send(true);
+        st.importResult = res;
+      } }).then(function (v) {
+        if (v && st.importResult) {
+          var r = st.importResult; st.importResult = null;
+          alertMsg('Import applied: ' + r.updated + ' updated, ' + r.unchanged + ' unchanged, ' + r.invalid + ' invalid, ' + r.missing + ' missing. Updated texts are Modified; press Publish Changes to make them live.', true);
+          reload();
+        }
+      });
+  }
   async function reload() { await boot(true); }
   async function doAction(name, el) {
     alertMsg('');
@@ -308,6 +370,16 @@
         text: on ? 'Apps will ignore remote translations and use their bundled text (' + envName() + ' only).' : 'Apps may use remote translations again (' + envName() + ' only).',
         run: async function (f) { await api('/kill-switch', { method: 'POST', json: { enabled: on, reason: f.note } }); } }).then(function (r) { if (r) reload(); });
     }
+    if (name === 'downloaddraft') {
+      try {
+        var f = await api('/draft?lang=' + encodeURIComponent(lang) + '&track=' + encodeURIComponent(track), { blob: true });
+        var a = document.createElement('a'); a.href = URL.createObjectURL(f.blob); a.download = f.name; document.body.appendChild(a); a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        alertMsg('Draft downloaded. Edit only the translation column, then use Import.', true);
+      } catch (e) { alertMsg(e.message); }
+      return;
+    }
+    if (name === 'importdraft') return importDraft(lang, track);
     if (name === 'editcountries') {
       var code = el.getAttribute('data-lang'), lo = code === 'en' ? st.base : langObj(code);
       if (!lo) return;

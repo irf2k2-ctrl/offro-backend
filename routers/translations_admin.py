@@ -13,11 +13,12 @@ Audit
 """
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 
 from routers.dashboard_auth import get_current_dashboard_user
 from services import app_environment as _env
 from services import translation_audit as audit
+from services import translation_draft as D
 from services import translations as T
 from utils import countries as _countries
 
@@ -163,13 +164,14 @@ async def list_strings(lang: str, track: str = "app", q: str = "", filter: str =
     if filter not in ("all", "missing", "modified", "published"):
         raise HTTPException(400, {"code": "invalid_filter"})
     work = {v["key"]: v for v in T.db[T.VALUES].find({"lang": lang, "track": track})}
+    baseline = T.published_strings(track, lang)          # Modified/Published is always judged against this, never against a stored flag
     rows, ql = [], q.strip().lower()
     for k in T.db[T.KEYS].find({"deprecated": {"$ne": True}}).sort("key", 1):
         if T.track_of(k) != track:
             continue
         v = work.get(k["key"])
         locked = bool(k.get("is_plural"))
-        status = "locked" if locked else (v["status"] if v else "missing")
+        status = "locked" if locked else (T.effective_status(baseline, k["key"], v["value"]) if v else "missing")
         if filter != "all" and status != filter:
             continue
         if ql and ql not in k["key"].lower() and ql not in k.get("english", "").lower():
@@ -200,6 +202,45 @@ async def audit_log(action: str = "", lang: str = "", before: str = "", limit: i
 @router.get("/kill-switch")
 async def get_kill_switch(user: dict = Depends(require_perm("view"))):
     return T.kill_switch_state()
+
+
+# ── Download Draft / Import (XLSX) ─────────────────────────────────────────────────────────────────────────────────────
+@router.get("/draft")
+async def download_draft(lang: str, request: Request, track: str = "app", user: dict = Depends(require_perm("view"))):
+    """The editable spreadsheet for one language + track (key, feature, English reference, translation). Read only."""
+    try:
+        data, name = D.build_draft(lang, track)
+    except T.TranslationError as e:
+        raise _http(e)
+    audit.record("export_draft", audit.admin_ref(user), "ok", environment=T.environment(), lang=lang, track=track,
+                 details={"bytes": len(data)}, ip=_ip(request))
+    return Response(content=data, media_type=D.XLSX_MIME,
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store",
+                             "X-Content-Type-Options": "nosniff"})
+
+
+@router.post("/import")
+async def import_draft(request: Request, file: UploadFile = File(...), lang: str = Form(...), track: str = Form("app"),
+                       apply: str = Form(""), user: dict = Depends(require_perm("edit"))):
+    """Checks an edited draft (apply empty: nothing is written) or stores its changed translations as Modified (apply=1).
+    Never publishes. Edit permission, like a manual edit."""
+    name = (file.filename or "").lower()
+    if not name.endswith(".xlsx"):
+        raise _http(T.TranslationError("not_xlsx", 422))
+    data = await file.read(D.MAX_BYTES + 1)
+    do_apply = str(apply).strip().lower() in ("1", "true", "yes")
+    actor = audit.admin_ref(user)["id"]
+    if not do_apply:
+        try:
+            return D.import_draft(lang, track, data, actor, apply=False)
+        except T.TranslationError as e:
+            raise _http(e)
+
+    def fn():
+        res = D.import_draft(lang, track, data, actor, apply=True)
+        res["audit_details"] = {k: res[k] for k in ("total", "updated", "unchanged", "invalid", "missing")}
+        return res
+    return _run_sensitive(request, user, "import_draft", fn, lang=lang[:20], track=track[:10])
 
 
 # ── draft editing (edit permission; same in every known environment) ────────────────────────────────────────────────────
