@@ -1377,14 +1377,22 @@ def get_admin_banners_public():
 
 # ─── Default Images (fallback for stores/products/offers/cities) ──────────────
 @router.get("/default-images")
-def get_default_images():
+def get_default_images(country: str = ""):
     """Return default/fallback images configured by admin.
-    Supports both legacy string and new array format per field."""
+    Supports both legacy string and new array format per field.
+
+    Optional `?country=SA` (an ISO code from the country master): per category the images mapped to that country are returned when
+    there are any, otherwise the images with no country (All countries); the Service Unavailable screen follows the same rule.
+    Without a (valid) country only the images with no country are returned, so nothing country-specific reaches another country and,
+    when nothing is mapped, the response is exactly what it always was. Always done on the server."""
+    from services import default_images as _di
+    iso = _di.public_country(country)
     doc = db.settings.find_one({"_type": "default_images"})
-    if not doc:
+    if not doc and not _di.has_any_variant_for(iso):
         return {"store": "", "product": "", "offer": "", "city": "",
                 "merchant_banner": "", "merchant_banner_explore_url": "", "no_service_url": "",
                 "no_service_title": "", "no_service_message": ""}
+    doc, _specific = _di.apply_country(doc or {}, iso)
 
     def _first(val):
         """Return first HTTP URL from string or list."""
@@ -1420,4 +1428,7 @@ def get_default_images():
         "no_service_url":   _ns_val,
         "no_service_title": str(doc.get("no_service_title", "") or ""),
         "no_service_message": str(doc.get("no_service_message", "") or ""),
+        # additive: which country the answer was chosen for ("" = none / unknown) and which categories used a country-specific image
+        "country": iso,
+        "country_specific": _specific,
     }

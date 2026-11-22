@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from pymongo.errors import DuplicateKeyError
 import uuid, qrcode, io, base64
 import time as _time
+from services import default_images as _di          # country mapping for Default Images
+from utils import countries as _countries_mod
 
 # In-memory cache for /stores list (15-second TTL)
 _store_cache = {"data": None, "ts": 0.0}
@@ -4481,30 +4483,41 @@ async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=
 # DEFAULT IMAGES MANAGEMENT
 # ════════════════════════════════════════════════════════
 
-@router.get("/default-images")
-def admin_get_default_images(a=Depends(get_current_admin)):
-    doc = db.settings.find_one({"_type": "default_images"})
+def _di_error(e):
+    """Country-mapping refusals as HTTP errors: {"code", "message"} so the dashboard can show a clear message."""
+    return HTTPException(status_code=e.status, detail={"code": e.code, "message": e.message})
 
-    def _as_list(v):
-        if isinstance(v, list): return v
-        if v: return [v]
-        return []
+
+@router.get("/default-images")
+def admin_get_default_images(country: str = "", a=Depends(get_current_admin)):
+    """Default images for the dashboard. `?country=` filters what is listed: omitted / all = everything (as before), an ISO code
+    (e.g. SA) = images mapped to that country, global = images with no country (All countries). The URL arrays keep their original
+    shape; `items` adds each image's countries, `no_service_variants` the country-specific Service Unavailable entries."""
+    try:
+        flt = _di.clean_filter(country)
+    except _di.DefaultImageError as e:
+        raise _di_error(e)
+    doc = db.settings.find_one({"_type": "default_images"})
+    items = _di.admin_items(doc or {}, flt)
+    extra = {"items": items, "filter": flt, "no_service_variants": _di.admin_variants(flt),
+             "countries": _countries_mod.supported_countries()}
 
     if not doc:
         return {"store": [], "product": [], "offer": [], "city": [], "merchant_banner": [],
                 "merchant_banner_explore_url": "",
-                "no_service_url": "", "no_service_title": "", "no_service_message": ""}
+                "no_service_url": "", "no_service_title": "", "no_service_message": "", **extra}
     return {
-        "store":              _as_list(doc.get("store", "")),
-        "product":            _as_list(doc.get("product", "")),
-        "offer":              _as_list(doc.get("offer", "")),
-        "city":               _as_list(doc.get("city", "")),
-        "merchant_banner":    _as_list(doc.get("merchant_banner", "")),
+        "store":              [i["url"] for i in items["store"]],
+        "product":            [i["url"] for i in items["product"]],
+        "offer":              [i["url"] for i in items["offer"]],
+        "city":               [i["url"] for i in items["city"]],
+        "merchant_banner":    [i["url"] for i in items["merchant_banner"]],
         # The ONE default merchant-banner media marked "Explore <City>" (empty = none).
         "merchant_banner_explore_url": doc.get("merchant_banner_explore_url", "") or "",
         "no_service_url":     doc.get("no_service_url", ""),
         "no_service_title":   doc.get("no_service_title", ""),
         "no_service_message": doc.get("no_service_message", ""),
+        **extra,
     }
 
 
@@ -4516,23 +4529,77 @@ def admin_update_default_image_urls(body: dict, a=Depends(get_current_admin)):
     action = body.get("action", "add")
     if field not in ["store", "product", "offer", "city", "merchant_banner"]:
         raise HTTPException(400, "Invalid image type")
+    try:
+        countries = _di.clean_countries(body.get("countries"))      # validated BEFORE anything is stored; [] = All countries
+    except _di.DefaultImageError as e:
+        raise _di_error(e)
     if action == "add" and url:
-        db.settings.update_one(
-            {"_type": "default_images"},
-            {"$addToSet": {field: url}},
-            upsert=True
-        )
+        _di_add_url(field, url)
+        if countries:
+            _di.set_mapping(field, url, countries, str(a.get("_id", "")))
     elif action == "remove" and url:
         db.settings.update_one(
             {"_type": "default_images"},
             {"$pull": {field: url}}
         )
+        _di.clear_mapping(field, url)
         # Removing the media that carried the "Explore <City>" flag clears the flag too.
         if field == "merchant_banner":
             db.settings.update_one(
                 {"_type": "default_images", "merchant_banner_explore_url": url},
                 {"$unset": {"merchant_banner_explore_url": ""}}
             )
+    return {"ok": True, "countries": countries if action == "add" else []}
+
+
+def _di_add_url(field: str, url: str) -> None:
+    """Appends one URL to a category array (same behaviour as before, including converting an old single-string value)."""
+    existing_doc = db.settings.find_one({"_type": "default_images"}, {field: 1})
+    existing_val = (existing_doc or {}).get(field, []) if existing_doc else []
+    if isinstance(existing_val, str):
+        db.settings.update_one({"_type": "default_images"},
+                               {"$set": {field: [existing_val, url] if existing_val else [url]}}, upsert=True)
+    else:
+        db.settings.update_one({"_type": "default_images"}, {"$addToSet": {field: url}}, upsert=True)
+
+
+@router.put("/default-images/countries")
+def admin_set_default_image_countries(body: dict, a=Depends(get_current_admin)):
+    """Edit the countries of ONE existing image: {type, url, countries}. [] = All countries. The image itself is never changed."""
+    _check_perm(a, "Settings", "edit")
+    try:
+        return {"ok": True, **_di.update_image_countries(body.get("type"), body.get("url"), body.get("countries"), str(a.get("_id", "")))}
+    except _di.DefaultImageError as e:
+        raise _di_error(e)
+
+
+@router.post("/default-images/no-service-variants")
+def admin_create_no_service_variant(body: dict, a=Depends(get_current_admin)):
+    """A country-specific Service Unavailable screen {url, title, message, countries (at least one)}. The existing single config
+    stays the 'All countries' one."""
+    _check_perm(a, "Settings", "edit")
+    try:
+        return {"ok": True, "variant": _di.create_variant(body, str(a.get("_id", "")))}
+    except _di.DefaultImageError as e:
+        raise _di_error(e)
+
+
+@router.put("/default-images/no-service-variants/{variant_id}")
+def admin_update_no_service_variant(variant_id: str, body: dict, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
+    try:
+        return {"ok": True, "variant": _di.update_variant(variant_id, body, str(a.get("_id", "")))}
+    except _di.DefaultImageError as e:
+        raise _di_error(e)
+
+
+@router.delete("/default-images/no-service-variants/{variant_id}")
+def admin_delete_no_service_variant(variant_id: str, a=Depends(get_current_admin)):
+    _check_perm(a, "Settings", "edit")
+    try:
+        _di.delete_variant(variant_id)
+    except _di.DefaultImageError as e:
+        raise _di_error(e)
     return {"ok": True}
 
 
@@ -4607,13 +4674,19 @@ async def admin_update_default_images(
     offer_file: UploadFile = File(None),
     city_file: UploadFile = File(None),
     merchant_banner_file: UploadFile = File(None),
+    countries: str = Form(""),
     a=Depends(get_current_admin),
 ):
     _check_perm(a, "Settings", "edit")
     """
-    File-upload variant. All image types store as arrays ($addToSet) — uploads never replace,
+    File-upload variant. Optional `countries` (comma separated ISO codes, validated before anything is uploaded) maps the uploaded
+    image to those countries; empty = All countries (as before). All image types store as arrays ($addToSet) — uploads never replace,
     they always append. Uploads go to Cloudinary when configured; fall back to base64 otherwise.
     """
+    try:
+        clean_countries = _di.clean_countries(countries)
+    except _di.DefaultImageError as e:
+        raise _di_error(e)
     for field, f in [
         ("store", store_file),
         ("product", product_file),
@@ -4652,7 +4725,9 @@ async def admin_update_default_images(
                     {"$addToSet": {field: final_url}},
                     upsert=True,
                 )
-    return {"ok": True}
+            if clean_countries:
+                _di.set_mapping(field, final_url, clean_countries, str(a.get("_id", "")))
+    return {"ok": True, "countries": clean_countries}
 
 
 # ══════════════════════════════════════════════════════════════════

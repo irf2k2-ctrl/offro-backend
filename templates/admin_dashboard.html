@@ -29,6 +29,14 @@ body.rbac-ready .sidebar a[onclick][style*="display: none"] { opacity: 0; }
 .sidebar .logout:hover{background:rgba(255,100,80,.15)!important;}
 .main{margin-left:230px;padding:24px;min-height:100vh;}
 .page-title{font-size:18px;font-weight:700;color:var(--primary);margin-bottom:18px;white-space:normal;overflow:visible;}
+.di-countries{display:flex;flex-wrap:wrap;gap:6px 14px;margin:6px 0}
+.di-country{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;cursor:pointer;margin:0}
+.di-country-label{font-size:12px;font-weight:700;color:var(--muted)}
+.di-country-hint,.di-note{font-size:11px;color:var(--muted);padding-bottom:6px}
+.di-chip{display:inline-block;padding:1px 8px;margin:1px 3px 1px 0;border-radius:999px;font-size:11px;background:#eef3f0;border:1px solid #d5dfd9;white-space:nowrap}
+.di-chip-all{background:#fff;color:#888;border-style:dashed}
+.di-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:4000}
+.di-modal-box{background:#fff;border-radius:12px;padding:18px;max-width:440px;width:92%;max-height:90vh;overflow:auto}
 .card-stat{background:#fff;border:1px solid #d4e8de;border-radius:12px;padding:24px;text-align:center;}
 .card-stat h3{font-size:30px;color:var(--primary);font-weight:700;margin:0;}
 .card-stat p{color:var(--muted);margin:4px 0 0;font-size:12px;}
@@ -1508,6 +1516,14 @@ function _secUrl(u) {
       <strong style="color:var(--primary)">Use public HTTPS URLs or upload files.</strong>
     </p>
     <div id="di_msg" style="margin-bottom:14px;font-weight:600;font-size:13px"></div>
+    <div class="di-filter" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+      <label for="di_country_filter" style="font-weight:700;font-size:13px;margin:0"><i class="fas fa-filter me-1"></i>Country</label>
+      <select id="di_country_filter" class="form-select" style="max-width:280px" onchange="diFilterChanged()">
+        <option value="all">All images (every country)</option>
+        <option value="global">Images for all countries (no country selected)</option>
+      </select>
+      <span class="di-country-hint" style="margin:0">Pick a country to see only the images shown to customers in that country. An image mapped to several countries appears under each.</span>
+    </div>
 
     <!-- One table-card per type -->
     <div style="display:flex;flex-direction:column;gap:24px">
@@ -1522,10 +1538,16 @@ function _secUrl(u) {
           <thead style="background:#f8f9fa"><tr>
             <th style="width:70px">Preview</th>
             <th>Image URL</th>
+            <th style="width:200px">Countries</th>
             <th style="width:90px">Action</th>
           </tr></thead>
-          <tbody id="di_store_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+          <tbody id="di_store_body"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
         </table>
+        <div class="di-country-pick" style="padding:10px 16px 0;border-top:1px solid var(--border);background:#fafafa">
+          <label class="di-country-label"><i class="fas fa-globe me-1"></i>Show this image in (optional)</label>
+          <div id="di_store_countries" class="di-countries"></div>
+          <div class="di-country-hint">Select one or more countries. Leave all unticked to show it in <strong>all countries</strong>. Applies to the next image you add or upload.</div>
+        </div>
         <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
           <input type="text" id="di_store_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste image URL (https://...)">
           <input type="file" id="di_store_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
@@ -1544,10 +1566,16 @@ function _secUrl(u) {
           <thead style="background:#f8f9fa"><tr>
             <th style="width:70px">Preview</th>
             <th>Image URL</th>
+            <th style="width:200px">Countries</th>
             <th style="width:90px">Action</th>
           </tr></thead>
-          <tbody id="di_product_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+          <tbody id="di_product_body"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
         </table>
+        <div class="di-country-pick" style="padding:10px 16px 0;border-top:1px solid var(--border);background:#fafafa">
+          <label class="di-country-label"><i class="fas fa-globe me-1"></i>Show this image in (optional)</label>
+          <div id="di_product_countries" class="di-countries"></div>
+          <div class="di-country-hint">Select one or more countries. Leave all unticked to show it in <strong>all countries</strong>. Applies to the next image you add or upload.</div>
+        </div>
         <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
           <input type="text" id="di_product_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste image URL (https://...)">
           <input type="file" id="di_product_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
@@ -1567,10 +1595,16 @@ function _secUrl(u) {
           <thead style="background:#f8f9fa"><tr>
             <th style="width:70px">Preview</th>
             <th>Image URL</th>
+            <th style="width:200px">Countries</th>
             <th style="width:90px">Action</th>
           </tr></thead>
-          <tbody id="di_offer_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+          <tbody id="di_offer_body"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
         </table>
+        <div class="di-country-pick" style="padding:10px 16px 0;border-top:1px solid var(--border);background:#fafafa">
+          <label class="di-country-label"><i class="fas fa-globe me-1"></i>Show this image in (optional)</label>
+          <div id="di_offer_countries" class="di-countries"></div>
+          <div class="di-country-hint">Select one or more countries. Leave all unticked to show it in <strong>all countries</strong>. Applies to the next image you add or upload.</div>
+        </div>
         <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
           <input type="text" id="di_offer_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste image URL (https://...)">
           <input type="file" id="di_offer_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
@@ -1592,10 +1626,16 @@ function _secUrl(u) {
           <thead style="background:#f8f9fa"><tr>
             <th style="width:70px">Preview</th>
             <th>Image URL</th>
+            <th style="width:200px">Countries</th>
             <th style="width:90px">Action</th>
           </tr></thead>
-          <tbody id="di_city_body"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+          <tbody id="di_city_body"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
         </table>
+        <div class="di-country-pick" style="padding:10px 16px 0;border-top:1px solid var(--border);background:#fafafa">
+          <label class="di-country-label"><i class="fas fa-globe me-1"></i>Show this image in (optional)</label>
+          <div id="di_city_countries" class="di-countries"></div>
+          <div class="di-country-hint">Select one or more countries. Leave all unticked to show it in <strong>all countries</strong>. Applies to the next image you add or upload.</div>
+        </div>
         <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
           <input type="text" id="di_city_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste image URL (https://...)">
           <input type="file" id="di_city_file_new" accept="image/*" class="form-control" style="flex:1;min-width:160px">
@@ -1618,10 +1658,16 @@ function _secUrl(u) {
             <th style="width:70px">Preview</th>
             <th>Image URL</th>
             <th style="width:110px;text-align:center" title="Show 'Explore City Name' on the Home hero for this media (only one)">Explore City</th>
+            <th style="width:200px">Countries</th>
             <th style="width:90px">Action</th>
           </tr></thead>
-          <tbody id="di_merchant_banner_body"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
+          <tbody id="di_merchant_banner_body"><tr><td colspan="5" style="text-align:center;color:#aaa;padding:16px">No images yet</td></tr></tbody>
         </table>
+        <div class="di-country-pick" style="padding:10px 16px 0;border-top:1px solid var(--border);background:#fafafa">
+          <label class="di-country-label"><i class="fas fa-globe me-1"></i>Show this image in (optional)</label>
+          <div id="di_merchant_banner_countries" class="di-countries"></div>
+          <div class="di-country-hint">Select one or more countries. Leave all unticked to show it in <strong>all countries</strong>. Applies to the next image you add or upload.</div>
+        </div>
         <div style="padding:12px 16px;border-top:1px solid var(--border);background:#fafafa;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="text" id="di_merchant_banner_url_new" class="form-control" style="flex:1;min-width:200px" placeholder="Paste HTTPS image URL…">
           <input type="file" id="di_merchant_banner_file_new" accept="image/*,video/mp4" class="form-control" style="flex:1;min-width:160px">
@@ -1672,6 +1718,24 @@ function _secUrl(u) {
             <input type="text" id="di_no_service_msg" class="form-control" placeholder="e.g. We're expanding! Check back soon.">
           </div>
           <button class="btn" onclick="diSaveNoService()"><i class="fas fa-save me-1"></i>Save No Service Config</button>
+          <div class="di-note" style="margin-top:6px">This is the <strong>default for all countries</strong>. Add a country-specific screen below to show a different image, title and message to customers of selected countries.</div>
+        </div>
+        <div style="padding:0 16px 16px">
+          <h4 style="font-size:14px;margin:6px 0 8px"><i class="fas fa-globe me-1"></i>Country-specific screens</h4>
+          <table class="table table-sm mb-2" id="di_ns_var_table">
+            <thead style="background:#f8f9fa"><tr><th style="width:70px">Preview</th><th>Title / message</th><th style="width:200px">Countries</th><th style="width:140px">Action</th></tr></thead>
+            <tbody id="di_ns_var_body"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:16px">No country-specific screens yet</td></tr></tbody>
+          </table>
+          <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:#fafafa">
+            <div class="mb-2"><label style="font-size:12px;color:var(--muted);font-weight:600">Image (upload or paste an https URL)</label>
+              <div class="d-flex gap-2 flex-wrap mt-1"><input type="file" id="di_nsv_file" accept="image/*" class="form-control" style="flex:1;min-width:160px">
+              <input type="text" id="di_nsv_url" class="form-control" style="flex:1;min-width:200px" placeholder="https://example.com/image.jpg"></div></div>
+            <div class="row g-2 mb-2"><div class="col-md-6"><input type="text" id="di_nsv_title" class="form-control" maxlength="120" placeholder="Title (blank = use the default title)"></div>
+              <div class="col-md-6"><input type="text" id="di_nsv_msg" class="form-control" maxlength="500" placeholder="Message (blank = use the default message)"></div></div>
+            <label class="di-country-label"><i class="fas fa-globe me-1"></i>Show this screen in (select at least one)</label>
+            <div id="di_nsv_countries" class="di-countries"></div>
+            <button class="btn mt-2" onclick="diAddNsVariant()"><i class="fas fa-plus me-1"></i>Add country-specific screen</button>
+          </div>
         </div>
       </div>
 
@@ -8412,17 +8476,146 @@ async function diSaveNoService() {
   } catch(e) { showToast('Error: ' + e.message, true); }
 }
 
+// ── Default Images: country mapping ──────────────────────────────────────────────────────
+let _diCountries = [], _diFilter = 'all', _diItems = {}, _diVariants = [];
+const _DI_CHECK_IDS = ['store', 'product', 'offer', 'city', 'merchant_banner', 'nsv'];
+function _diCountryName(iso) { const c = _diCountries.find(x => x.iso === iso); return c ? ((c.flag ? c.flag + ' ' : '') + c.name) : iso; }
+function diChips(list) {
+  return (list && list.length)
+    ? list.map(i => `<span class="di-chip" title="${escHtml(i)}">${escHtml(_diCountryName(i))}</span>`).join('')
+    : '<span class="di-chip di-chip-all">All countries</span>';
+}
+function diBoxesHtml(selected) {
+  selected = selected || [];
+  return _diCountries.map(c => `<label class="di-country"><input type="checkbox" value="${escHtml(c.iso)}" ${selected.includes(c.iso) ? 'checked' : ''}> ${escHtml((c.flag ? c.flag + ' ' : '') + c.name)}</label>`).join('');
+}
+function diChecked(id) {
+  const box = document.getElementById(id);
+  return box ? Array.from(box.querySelectorAll('input[type=checkbox]:checked')).map(i => i.value) : [];
+}
+function diClearChecked(id) {
+  const box = document.getElementById(id);
+  if (box) box.querySelectorAll('input[type=checkbox]').forEach(i => { i.checked = false; });
+}
+// The selectors are built from the SERVER's country list (the one country master). Existing ticks survive a refresh.
+function diRenderCountryUi() {
+  _DI_CHECK_IDS.forEach(t => {
+    const box = document.getElementById('di_' + t + '_countries');
+    if (!box) return;
+    const keep = diChecked('di_' + t + '_countries');
+    box.innerHTML = diBoxesHtml(keep) || '<span class="di-country-hint">No supported countries are available.</span>';
+  });
+  const f = document.getElementById('di_country_filter');
+  if (f) {
+    const opts = '<option value="all">All images (every country)</option><option value="global">Images for all countries (no country selected)</option>'
+      + _diCountries.map(c => `<option value="${escHtml(c.iso)}">${escHtml((c.flag ? c.flag + ' ' : '') + c.name)}</option>`).join('');
+    if (f.getAttribute('data-built') !== String(_diCountries.length)) { f.innerHTML = opts; f.setAttribute('data-built', String(_diCountries.length)); }
+    f.value = _diFilter;
+  }
+}
+function diFilterChanged() {
+  const f = document.getElementById('di_country_filter');
+  _diFilter = f ? f.value : 'all';
+  loadDefaultImages();
+}
+async function diErr(r) {
+  let t = ''; try { t = await r.text(); } catch (e) {}
+  try { const j = JSON.parse(t); const d = j.detail; if (d && typeof d === 'object' && d.message) return d.message; if (typeof d === 'string') return d; } catch (e) {}
+  return t || ('Error ' + r.status);
+}
+// Small dialog with the country checkboxes, used to edit the countries of an existing image / screen.
+function diCountryDialog(title, selected, onSave) {
+  const old = document.getElementById('di_country_modal'); if (old) old.remove();
+  const m = document.createElement('div'); m.id = 'di_country_modal'; m.className = 'di-modal';
+  m.innerHTML = `<div class="di-modal-box" role="dialog" aria-modal="true" aria-label="${escHtml(title)}">
+    <div style="font-weight:700;margin-bottom:6px">${escHtml(title)}</div>
+    <div class="di-country-hint">Select every country where this should be shown. Select none for all countries.</div>
+    <div id="di_cm_boxes" class="di-countries">${diBoxesHtml(selected)}</div>
+    <div id="di_cm_err" style="color:#b3261e;font-size:12px;min-height:16px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button class="btn btn-secondary" id="di_cm_cancel">Cancel</button><button class="btn" id="di_cm_save">Save countries</button></div></div>`;
+  document.body.appendChild(m);
+  document.getElementById('di_cm_cancel').onclick = () => m.remove();
+  document.getElementById('di_cm_save').onclick = async () => {
+    const btn = document.getElementById('di_cm_save'); btn.disabled = true;
+    try { await onSave(diChecked('di_cm_boxes')); m.remove(); }
+    catch (e) { document.getElementById('di_cm_err').textContent = e.message || 'Failed'; btn.disabled = false; }
+  };
+}
+function diEditCountries(type, url) {
+  const cur = ((_diItems[type] || []).find(i => i.url === url) || {}).countries || [];
+  diCountryDialog('Countries for this image', cur, async (list) => {
+    const r = await fetch('/admin/default-images/countries', { method:'PUT', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ type, url, countries: list }) });
+    if (!r.ok) throw new Error(await diErr(r));
+    const msg = document.getElementById('di_msg'); if (msg) { msg.textContent = '✓ Countries updated'; msg.style.color = 'green'; }
+    loadDefaultImages();
+  });
+}
+function diRenderVariants() {
+  const tb = document.getElementById('di_ns_var_body'); if (!tb) return;
+  if (!_diVariants.length) { tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#aaa;padding:16px">No country-specific screens yet</td></tr>'; return; }
+  tb.innerHTML = _diVariants.map(v => `<tr>
+    <td style="padding:6px 10px;vertical-align:middle">${(v.url || '').startsWith('http') ? `<img src="${_secUrl(v.url)}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd" onerror="this.style.display='none'">` : '<span style="font-size:10px;color:#999">IMG</span>'}</td>
+    <td style="padding:6px 10px;vertical-align:middle;font-size:12px"><strong>${escHtml(v.title || '(default title)')}</strong><div style="color:var(--muted)">${escHtml(v.message || '(default message)')}</div></td>
+    <td style="padding:6px 10px;vertical-align:middle">${diChips(v.countries)}</td>
+    <td style="padding:6px 10px;vertical-align:middle;white-space:nowrap">
+      <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px" onclick="diEditVariantCountries('${_secJs(v.id)}')">Edit</button>
+      <button class="btn btn-sm" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px" onclick="diDeleteVariant('${_secJs(v.id)}')"><i class="fas fa-trash-alt"></i></button></td></tr>`).join('');
+}
+function diEditVariantCountries(id) {
+  const v = _diVariants.find(x => x.id === id); if (!v) return;
+  diCountryDialog('Countries for this screen', v.countries, async (list) => {
+    if (!list.length) throw new Error('Select at least one country (or delete the screen to use the default).');
+    const r = await fetch('/admin/default-images/no-service-variants/' + encodeURIComponent(id), { method:'PUT', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ countries: list }) });
+    if (!r.ok) throw new Error(await diErr(r));
+    loadDefaultImages();
+  });
+}
+async function diDeleteVariant(id) {
+  if (!confirm('Delete this country-specific screen? Customers there will see the default screen.')) return;
+  const r = await fetch('/admin/default-images/no-service-variants/' + encodeURIComponent(id), { method:'DELETE', credentials:'include' });
+  if (!r.ok) { showToast(await diErr(r), true); return; }
+  showToast('Screen deleted ✓'); loadDefaultImages();
+}
+async function diAddNsVariant() {
+  const countries = diChecked('di_nsv_countries');
+  if (!countries.length) { showToast('Select at least one country', true); return; }
+  let url = (document.getElementById('di_nsv_url').value || '').trim();
+  const file = document.getElementById('di_nsv_file').files[0];
+  try {
+    if (file) {
+      const fd = new FormData(); fd.append('file', file);
+      const u = await fetch('/admin/upload-image', { method:'POST', credentials:'include', body: fd });
+      if (!u.ok) throw new Error(await diErr(u));
+      const ud = await u.json(); url = ud.url || ud.image_url || ud.secure_url || url;
+    }
+    if (!url) { showToast('Choose an image or paste an https URL', true); return; }
+    const r = await fetch('/admin/default-images/no-service-variants', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ url, title: document.getElementById('di_nsv_title').value, message: document.getElementById('di_nsv_msg').value, countries }) });
+    if (!r.ok) throw new Error(await diErr(r));
+    ['di_nsv_url', 'di_nsv_title', 'di_nsv_msg'].forEach(i => { document.getElementById(i).value = ''; });
+    document.getElementById('di_nsv_file').value = ''; diClearChecked('di_nsv_countries');
+    showToast('Country-specific screen added ✓'); loadDefaultImages();
+  } catch (e) { showToast(e.message || 'Failed', true); }
+}
+
 async function loadDefaultImages() {
   try {
-    const r = await fetch('/admin/default-images', {credentials:'include'});
+    const r = await fetch('/admin/default-images?country=' + encodeURIComponent(_diFilter), {credentials:'include'});
     if (!r.ok) throw new Error(await r.text());
     if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
     if (!r.ok) { console.error('loadDefaultImages error', r.status); return; }
     const d = await r.json();
+    _diCountries = Array.isArray(d.countries) ? d.countries : [];
+    diRenderCountryUi();
+    _diItems = d.items || {};
     for (const type of ['store', 'product', 'offer', 'city', 'merchant_banner']) {
       const urls = Array.isArray(d[type]) ? d[type] : (d[type] ? [d[type]] : []);
-      _renderDiTable(type, urls, type === 'merchant_banner' ? (d.merchant_banner_explore_url || '') : '');
+      const byUrl = {};
+      ((_diItems[type]) || []).forEach(i => { byUrl[i.url] = i.countries || []; });
+      _renderDiTable(type, urls, type === 'merchant_banner' ? (d.merchant_banner_explore_url || '') : '', byUrl);
     }
+    _diVariants = d.no_service_variants || [];
+    diRenderVariants();
     // Load no-service config — API returns no_service_url (string)
     const nsUrl = d.no_service_url || '';
     if (nsUrl) {
@@ -8443,7 +8636,7 @@ async function loadDefaultImages() {
   } catch(e) { console.error('Default images load failed', e); }
 }
 
-function _renderDiTable(type, urls, exploreUrl) {
+function _renderDiTable(type, urls, exploreUrl, countriesByUrl) {
   const tbody = document.getElementById(`di_${type}_body`);
   const count = document.getElementById(`di_${type}_count`);
   if (!tbody) return;
@@ -8454,7 +8647,7 @@ function _renderDiTable(type, urls, exploreUrl) {
   if (count) count.textContent = plural;
   if (!urls.length) {
     const emptyTxt = type === 'merchant_banner' ? 'No media yet' : 'No images yet';
-    tbody.innerHTML = `<tr><td colspan="${type === 'merchant_banner' ? 4 : 3}" style="text-align:center;color:#aaa;padding:16px">${emptyTxt}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${type === 'merchant_banner' ? 5 : 4}" style="text-align:center;color:#aaa;padding:16px">${emptyTxt}</td></tr>`;
     return;
   }
   tbody.innerHTML = urls.map((url, i) => {
@@ -8494,10 +8687,15 @@ function _renderDiTable(type, urls, exploreUrl) {
              title="Explore City Name" onchange="diSetExplore('${_secJs(safeUrl)}', this.checked, this)">
          </td>`
       : '';
+    const mapped = (countriesByUrl || {})[url] || [];
+    const countryCell = `<td style="padding:6px 10px;vertical-align:middle">${diChips(mapped)}
+      <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:2px 8px;margin-left:2px" title="Edit countries"
+        onclick="diEditCountries('${_secJs(type)}','${_secJs(safeUrl)}')">Edit</button></td>`;
     return `<tr>
       ${previewCell}
       ${urlCell}
       ${exploreCell}
+      ${countryCell}
       <td style="padding:6px 10px;vertical-align:middle">
         <button class="btn btn-sm" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px"
           onclick="diRemoveUrl('${_secJs(type)}','${_secJs(safeUrl)}')">
@@ -8535,11 +8733,12 @@ async function diAddUrl(type) {
     const r = await fetch('/admin/default-images/urls', {
       method:'PUT', credentials:'include',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ type, url, action:'add' })
+      body: JSON.stringify({ type, url, action:'add', countries: diChecked(`di_${type}_countries`) })
     });
-    if (!r.ok) throw new Error(await r.text());
+    if (!r.ok) throw new Error(await diErr(r));
     msg.textContent = `✓ Added to ${type} images`; msg.style.color='green';
     if (inp) inp.value = '';
+    diClearChecked(`di_${type}_countries`);
     loadDefaultImages();
   } catch(e) { msg.textContent = '✗ ' + e.message; msg.style.color='red'; }
 }
@@ -8566,12 +8765,14 @@ async function diUploadFile(type) {
   if (!file) { msg.textContent = 'Please select a file first'; msg.style.color='red'; return; }
   const fd = new FormData();
   fd.append(`${type}_file`, file);
+  fd.append('countries', diChecked(`di_${type}_countries`).join(','));
   try {
     msg.textContent = 'Uploading...'; msg.style.color='var(--primary)';
     const r = await fetch('/admin/default-images', { method:'PUT', credentials:'include', body:fd });
-    if (!r.ok) throw new Error(await r.text());
+    if (!r.ok) throw new Error(await diErr(r));
     msg.textContent = `✓ Image uploaded and added to ${type}`; msg.style.color='green';
     if (fileInput) fileInput.value = '';
+    diClearChecked(`di_${type}_countries`);
     loadDefaultImages();
   } catch(e) { msg.textContent = '✗ ' + (e.message || 'Upload failed'); msg.style.color='red'; }
 }
@@ -8594,6 +8795,7 @@ async function diUploadMerchantBanner() {
 
   const fd = new FormData();
   fd.append('merchant_banner_file', file);
+  fd.append('countries', diChecked('di_merchant_banner_countries').join(','));
 
   try {
     const r = await fetch('/admin/default-images', { method: 'PUT', credentials: 'include', body: fd });
@@ -8603,6 +8805,7 @@ async function diUploadMerchantBanner() {
     }
     if (statusEl) { statusEl.textContent = '✅ Added!'; statusEl.style.color = 'green'; }
     if (fileInput) fileInput.value = '';
+    diClearChecked('di_merchant_banner_countries');
     // Also update global di_msg for consistency
     const msg = document.getElementById('di_msg');
     if (msg) { msg.textContent = '✓ Merchant banner image uploaded'; msg.style.color = 'green'; }

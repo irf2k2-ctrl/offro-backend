@@ -350,6 +350,13 @@ def startup():
             print("⚠️  WhatsApp campaign indexes skipped (see logs)")
     except Exception as e:
         print(f"⚠️  WhatsApp campaign indexes skipped ({type(e).__name__})")
+    # Default Images country mapping (Stage 3): unique indexes on two NEW collections; idempotent, no data touched.
+    try:
+        from services import default_images as _default_images
+        if not _default_images.ensure_indexes_safe():
+            print("⚠️  Default image country indexes skipped (see logs)")
+    except Exception as e:
+        print(f"⚠️  Default image country indexes skipped ({type(e).__name__})")
     # WhatsApp webhook diagnostics (visible, privacy-safe log lines) + template-test delivery status. Passive: registers a
     # status handler only; sends nothing. Kept in its own block so a failure here can never affect the campaign worker setup.
     try:
