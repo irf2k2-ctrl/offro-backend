@@ -191,7 +191,6 @@ def test_the_other_views_are_unchanged():
         b, pg, calls = UI._page(p, _fixture(), route_factory([]))
         pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
         assert pg.locator(".trn-doc-grid").count() == 0
-        assert pg.locator("select[data-change=track] option").all_inner_texts() == ["App text", "Legal text", "Legal documents"]
-        pg.select_option("select[data-change=track]", "legal"); pg.wait_for_selector("tr[data-row=loginTitle]")
-        assert pg.locator(".trn-doc-grid").count() == 0 and any("track=legal" in c[1] for c in calls)
+        assert pg.locator("select[data-change=track] option").all_inner_texts() == ["App text", "Legal documents"]
+        assert any("track=app" in c[1] for c in calls)                                    # the App text view still loads as before
         b.close()

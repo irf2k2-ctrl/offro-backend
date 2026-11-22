@@ -771,7 +771,15 @@ def _accounts_query(a, search: str = "", role: str = "", city: str = "") -> dict
     search = (search or "").strip()
     if search:
         rx = {"$regex": _re.escape(search), "$options": "i"}
-        clauses.append({"$or": [{"name": rx}, {"phone": rx}]})
+        # Name or phone, plus COUNTRY: the term can be a country name ("india", min 3 letters, any part of the name) or an ISO code
+        # ("in", exact) of the one country master. It only widens what the SEARCH matches; the admin's own city and country scope
+        # clauses above stay ANDed, so a restricted user searching another country's name gets nothing.
+        _alts = [{"name": rx}, {"phone": rx}]
+        _t = search.lower()
+        for _c in _countries_mod.supported_countries():
+            if _c["iso"].lower() == _t or (len(_t) >= 3 and _t in _c["name"].lower()):
+                _alts.append(_dc.account_query(_c["iso"]))
+        clauses.append({"$or": _alts})
     if city:
         clauses.append({"city": city})
     if role == "merchant_only":

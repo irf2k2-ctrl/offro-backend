@@ -102,6 +102,6 @@ def test_requires_admin():
 def test_dashboard_template_wires_the_column_consistently():
     html = open("templates/admin_dashboard.html", encoding="utf-8").read()
     head = re.search(r'<div id="section-accounts".*?</thead>', html, re.S).group(0)
-    assert len(re.findall(r"<th[ >]", head)) == 12 and "Created" in head
+    assert len(re.findall(r"<th[ >]", head)) == 13 and "Created" in head
     assert "fmtAccountCreated(a.created_at_iso)" in html and "qs.set('sort', _acctSort)" in html
     assert 'colspan="11"' not in html[html.index("async function loadAccounts"):html.index("function goAcctPage")]

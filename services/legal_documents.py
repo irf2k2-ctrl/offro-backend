@@ -210,6 +210,33 @@ def list_for_language(lang: str) -> list:
     return rows
 
 
+def language_summaries(langs: list) -> dict:
+    """Overview table: per language code, the state of the Legal Documents that have English text (the same documents, statuses and
+    Stage 1 Modified / Published rule as the editor; read only). Same shape as T.language_status() entries, plus `total` and `last_updated`
+    (UTC ISO, newest of the last published version and the last draft edit, or None)."""
+    docs = [r for r in list_documents() if r["has_english"] and not r["too_long"]]
+    out = {}
+    for lang in langs:
+        baseline = T.published_strings(T.DOCUMENT_TRACK, lang)
+        work = {v["key"]: v for v in T.db[T.VALUES].find({"lang": lang, "track": T.DOCUMENT_TRACK, "key": {"$regex": "^" + KEY_PREFIX}})}
+        modified = missing = 0
+        for r in docs:
+            v = work.get(r["key"])
+            st = T.effective_status(baseline, r["key"], v["value"]) if v else "missing"
+            modified += st == "modified"
+            missing += st == "missing"
+        lv = T.latest_version(T.DOCUMENT_TRACK, lang)
+        stamps = [x for x in ((lv or {}).get("published_at"),) if isinstance(x, datetime)]
+        e = T.db[T.VALUES].find_one({"lang": lang, "track": T.DOCUMENT_TRACK, "updated_at": {"$type": "date"}}, sort=[("updated_at", -1)])
+        if e:
+            stamps.append(e["updated_at"])
+        out[lang] = {"total": len(docs), "missing": missing, "draft_changes": modified,
+                     "complete": bool(docs) and missing == 0 and modified == 0 and bool(lv),
+                     "published_version": lv["version"] if lv else None,
+                     "last_updated": max(stamps).isoformat() + "Z" if stamps else None}
+    return out
+
+
 def save_translation(lang: str, slug: str, value, actor_id: str) -> dict:
     """Same path as every other translation (T.set_value: validation, environment, language checks, Stage 1 status), plus the hash of
     the English text it was written against so the editor can tell when the English changed afterwards."""

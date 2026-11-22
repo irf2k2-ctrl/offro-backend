@@ -139,8 +139,14 @@ def _last_updated(lang: str) -> dict:
 async def list_languages(user: dict = Depends(require_perm("view"))):
     rows = []
     mapping = T.all_language_countries()
+    docs = {}
+    try:
+        docs = LD.language_summaries([x["code"] for x in T.db[T.LANGS].find({}, {"code": 1})])
+    except Exception:                                  # additive information only: never stop the language list
+        docs = {}
     for l in T.db[T.LANGS].find().sort("code", 1):
         l.pop("_id", None)
+        l["legal_documents"] = docs.get(l["code"])
         l["countries"] = mapping.get(l["code"], [])
         l["created_at"] = l["created_at"].isoformat() + "Z" if isinstance(l.get("created_at"), datetime) else l.get("created_at")
         l["status_indicators"] = T.language_status(l["code"])
@@ -344,6 +350,30 @@ async def patch_language(code: str, data: dict, request: Request, user: dict = D
         return {"code": d["code"], "status": d["status"], "direction": d["direction"],
                 "name_en": d["name_en"], "name_native": d["name_native"]}
     return _run_sensitive(request, user, "update_language", fn, lang=code[:20], details={"fields": sorted(data)[:6]})
+
+
+@router.get("/languages/{code}/delete-impact")
+async def language_delete_impact(code: str, user: dict = Depends(require_super_admin("delete_language_impact"))):
+    """What a delete would remove (counts only). Super Admin only; changes nothing."""
+    if code.lower() == T.BASE_LANGUAGE:
+        raise _http(T.TranslationError("english_not_deletable", 409))
+    try:
+        l = T.get_language(code)
+    except T.TranslationError as e:
+        raise _http(e)
+    return {"code": code, "name_en": l.get("name_en"), "status": l.get("status"), **T.language_delete_impact(code)}
+
+
+@router.delete("/languages/{code}")
+async def delete_language(code: str, request: Request, confirm: str = "",
+                          user: dict = Depends(require_super_admin("delete_language"))):
+    """Deletes one language and its own translations (see T.delete_language). Super Admin only; `?confirm=<code>` is required."""
+    def fn():
+        r = T.delete_language(code, confirm, audit.admin_ref(user)["id"])
+        r["audit_details"] = {"deleted": r["deleted"], "name_en": r.get("name_en")}
+        r.pop("expected", None)
+        return r
+    return _run_sensitive(request, user, "delete_language", fn, lang=code[:20])
 
 
 @router.post("/publish")

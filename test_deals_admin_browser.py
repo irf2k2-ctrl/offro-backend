@@ -78,10 +78,10 @@ def test_accounts_tab_shows_created_column_in_ist_with_safe_fallback_and_sorts(b
     page.evaluate("showSection('accounts', null)")
     page.wait_for_selector("#accounts_table tr td")
     heads = page.eval_on_selector_all("#section-accounts thead th", "e => e.map(x => x.innerText.trim())")
-    assert heads[:1] == ["Name"] and any(h.startswith("Created") for h in heads) and len(heads) == 12
+    assert heads[:1] == ["Name"] and any(h.startswith("Created") for h in heads) and len(heads) == 13
     # The Name cell now also carries the account's country after the name; the account NAME itself is the <strong> element.
     rows = page.eval_on_selector_all("#accounts_table tr", "rs => rs.map(r => Array.from(r.cells).map((c, i) => (i === 0 && c.querySelector('strong') ? c.querySelector('strong') : c).innerText.trim()))")
-    assert all(len(r) == 12 for r in rows)
+    assert all(len(r) == 13 for r in rows)
     ci = [h.startswith("Created") for h in heads].index(True)
     by = {r[0]: r[ci] for r in rows}
     assert by["Ravi Merchant"] == "05 Mar 2026, 03:50 pm".replace("pm", "pm") or by["Ravi Merchant"].lower() == "05 mar 2026, 03:50 pm"   # 10:20 UTC = 15:50 IST

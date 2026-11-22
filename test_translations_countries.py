@@ -257,13 +257,13 @@ def test_accounts_list_returns_country_fields_and_tolerates_missing_country(admi
         assert (by["Nobody"]["country_iso"], by["Nobody"]["country_name"], by["Nobody"]["country_flag"]) == ("", "", "")
 
 
-def test_accounts_dashboard_shows_country_after_the_name_and_hardcodes_nothing():
-    assert "${escHtml(a.full_name||'—')}</strong>${acctCountryHtml(a)}</td>" in DASH
+def test_accounts_dashboard_shows_country_in_its_own_column_and_hardcodes_nothing():
+    assert "${escHtml(a.full_name||'—')}</strong></td>" in DASH and "<td>${acctCountryHtml(a).trim() || '—'}</td>" in DASH
     fn = re.search(r"function acctCountryHtml\(a\) \{.*?\n\}", DASH, re.S).group(0)
     assert "a.country_iso" in fn and "a.country_flag" in fn and "a.country_name" in fn and "escHtml(" in fn
     for name in ("Saudi", "India", "Jordan", "Nepal", "Philippines"):
         assert name not in fn
-    assert "<th>Name</th><th>Phone</th>" in DASH                                            # layout/columns unchanged
+    assert "<th>Name</th><th>Phone</th><th>Country</th><th>Ref ID</th>" in DASH             # Country is its own column; Name and Phone stay where they were
 
 
 def test_account_country_label_is_rendered_and_escaped_in_a_browser():

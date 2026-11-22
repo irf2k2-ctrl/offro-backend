@@ -75,4 +75,4 @@ def test_empty_banner_takes_no_space_and_content_cannot_overflow_the_page():
 
 
 def test_stylesheet_cache_buster_was_bumped():
-    assert "/static/css/translations.css?v=h3" in (ROOT / "templates/admin_dashboard.html").read_text(encoding="utf-8")
+    assert "/static/css/translations.css?v=h4" in (ROOT / "templates/admin_dashboard.html").read_text(encoding="utf-8")

@@ -20,6 +20,9 @@
   var API = '/admin/translations';
   var DENIED = 'You do not have permission to view Translations. Ask a Super Admin to grant the module to your role.';
   var TRACK_LABEL = { app: 'App text', legal: 'Legal text', documents: 'Legal documents' };
+  // Overview TRACK column. The old 'Legal text' track (short UI strings tagged legal, never read by the app) is no longer offered; that row
+  // now shows the real Legal Documents status of the language.
+  var OVERVIEW_TRACK_LABEL = { app: 'App text', documents: 'Legal Documents' };
   // 'documents' is its own text type (whole legal / information documents, edited side by side with the English) with its own versions.
   function apiTrack(t) { return t; }
 
@@ -117,7 +120,11 @@
     empty_value: 'The translation cannot be empty.',
     html_not_allowed: 'HTML tags and entities are not allowed. Use plain text (headings with #, lists with - or 1.).',
     url_email_or_phone_not_in_english: 'The translation contains a link, e-mail address or phone number that is not in the English text. Use only the ones from the English text.',
-    key_deprecated: 'This document no longer has English text, so it cannot be edited.'
+    key_deprecated: 'This document no longer has English text, so it cannot be edited.',
+    english_not_deletable: 'English is the built-in base language and can never be deleted.',
+    unknown_language: 'That language no longer exists. The list has been refreshed.',
+    confirmation_mismatch: 'The delete was not confirmed. Nothing was changed.',
+    delete_incomplete: 'The language was disabled but could not be fully removed. Nothing else was changed. Press Delete again to finish.'
   };
   function messageFor(data, status) {
     var d = data && data.detail, code = d && typeof d === 'object' ? d.code : '';
@@ -171,9 +178,14 @@
       var err = $('trn_modal_err'); err.hidden = true;
       $('trn_modal_ok').textContent = o.okLabel || 'Confirm';
       var ok = $('trn_modal_ok'), cancel = $('trn_modal_cancel');
+      // Typed confirmation: the action button stays disabled until the exact text is typed (checked again on click).
+      var typedOk = function () { return !o.typedExpect || ($('trn_f_typed').value || '').trim() === o.typedExpect; };
+      ok.disabled = !typedOk();
+      if (o.typedExpect) $('trn_f_typed').addEventListener('input', function () { ok.disabled = !typedOk(); err.hidden = true; });
       function close(v) { m.hidden = true; ok.onclick = null; cancel.onclick = null; if (box) box.style.maxWidth = ''; resolve(v); }
       cancel.onclick = function () { close(null); };
       ok.onclick = async function () {
+        if (!typedOk()) { err.textContent = 'Type ' + o.typedExpect + ' exactly to confirm.'; err.hidden = false; ok.disabled = true; return; }
         var vals = {};
         for (var i = 0; i < (o.fields || []).length; i++) {
           var f = o.fields[i];
@@ -181,9 +193,9 @@
           if (f.required && (f.type === 'multicheck' ? !vals[f.id].length : !vals[f.id])) { err.textContent = f.type === 'check' ? 'Please tick the box to confirm.' : f.label + ' is required.'; err.hidden = false; return; }
         }
         ok.disabled = true;
-        try { var kept = o.run ? await o.run(vals) : null; if (kept === 'keep') { ok.disabled = false; return; } close(vals); }
+        try { var kept = o.run ? await o.run(vals) : null; if (kept === 'keep') { ok.disabled = !typedOk(); return; } close(vals); }
         catch (e) { err.textContent = e.message || 'Failed.'; err.hidden = false; }
-        ok.disabled = false;
+        ok.disabled = !typedOk();
       };
       m.hidden = false;
       if (o.onOpen) o.onOpen();
@@ -214,7 +226,7 @@
   }
   function selectors(withFilter) {
     var lo = st.langs.map(function (l) { return h`<option value="${l.code}" ${raw(l.code === st.lang ? 'selected' : '')}>${l.name_en} (${l.code})</option>`; }).join('');
-    var to = ['app', 'legal', 'documents'].map(function (t) { return h`<option value="${t}" ${raw(t === st.track ? 'selected' : '')}>${TRACK_LABEL[t]}</option>`; }).join('');
+    var to = ['app', 'documents'].map(function (t) { return h`<option value="${t}" ${raw(t === st.track ? 'selected' : '')}>${TRACK_LABEL[t]}</option>`; }).join('');
     return h`<select data-change="lang" aria-label="Language">${raw(lo)}</select><select data-change="track" aria-label="Track">${raw(to)}</select>`;
   }
 
@@ -226,19 +238,29 @@
     return '<span class="trn-pill off">Not published</span>';
   }
   function countriesCell(l) {
-    var edit = isSA() && envKnown() ? h` <button type="button" class="btn-s trn-edit-countries" data-act="editcountries" data-lang="${l.code}" aria-label="Edit countries for ${l.name_en}">Edit</button>` : '';
+    var edit = isSA() && envKnown() ? h` <button type="button" class="btn-s trn-edit-countries trn-pen" data-act="editcountries" data-lang="${l.code}" aria-label="Edit countries for ${l.name_en}" title="Edit countries"><i class="fas fa-pen"></i></button>` : '';
     return '<div class="trn-countries-cell">' + countryChips(l.countries) + edit + '</div>';
+  }
+  // Delete (Super Admin, identified environment). The server enforces both again; the button only mirrors that.
+  function deleteBtn(l) {
+    if (!(isSA() && envKnown())) return '';
+    return h` <button type="button" class="btn-s trn-delete" data-act="deletelang" data-lang="${l.code}" aria-label="Delete language ${l.name_en} (removes App text and Legal Documents)" title="Delete the whole language: removes both App text and Legal Documents"><i class="fas fa-trash me-1"></i>Delete</button>`;
   }
   function renderOverview() {
     var rows = '';
     st.langs.forEach(function (l) {
-      ['app', 'legal'].forEach(function (tr) {
-        var s = (l.status_indicators || {})[tr]; if (!s) return;
+      var firstRow = true;                                    // Delete is shown once per language, on its first row only; Open stays on both
+      ['app', 'documents'].forEach(function (tr) {
+        var s = tr === 'documents' ? (l.legal_documents || {}) : (l.status_indicators || {})[tr]; if (!s) return;
         var draft = s.draft_changes ? h`${s.draft_changes} modified` : '—';
+        var lastUpd = tr === 'documents' ? s.last_updated : (l.last_updated || {})[tr];
+        var miss = s.missing === undefined ? '—' : s.missing + ' missing';
+        var pill = tr === 'documents' && s.missing === undefined ? '—' : statusPill(s);
         rows += h`<tr><td>${l.name_en} <span class="trn-key">${l.code}</span><div class="trn-hint">${l.name_native} · ${l.direction.toUpperCase()} · ${l.status}</div></td>` +
-          h`<td>${raw(countriesCell(l))}</td><td>${TRACK_LABEL[tr]}</td><td>${raw(draft)}</td>` +
-          h`<td>${s.missing} missing</td><td>${raw(statusPill(s))}</td><td>${fmt((l.last_updated || {})[tr])}</td>` +
-          h`<td><button type="button" class="btn-s" data-act="open" data-lang="${l.code}" data-track="${tr}">Open</button></td></tr>`;
+          h`<td>${raw(countriesCell(l))}</td><td>${OVERVIEW_TRACK_LABEL[tr]}</td><td>${raw(draft)}</td>` +
+          h`<td>${miss}</td><td>${raw(pill)}</td><td>${fmt(lastUpd)}</td>` +
+          h`<td class="trn-rowact"><button type="button" class="btn-s" data-act="open" data-lang="${l.code}" data-track="${tr}">Open</button>${raw(firstRow ? deleteBtn(l) : '')}</td></tr>`;
+        firstRow = false;
       });
     });
     var base = st.base || { code: 'en', name_en: 'English', name_native: 'English', direction: 'ltr' };
@@ -321,25 +343,30 @@
       var d = await api('/documents?lang=' + encodeURIComponent(st.lang));
       if (my !== st.seq) return;
       st.docs = d.documents || [];
-      var avail = st.docs.filter(function (x) { return x.has_english && !x.too_long; });
-      if (!avail.some(function (x) { return x.slug === st.doc; })) st.doc = avail.length ? avail[0].slug : '';
+      var avail = st.docs.filter(listable);
+      if (!avail.some(function (x) { return x.slug === st.doc; })) { var first = avail.filter(function (x) { return x.has_english; })[0] || avail[0]; st.doc = first ? first.slug : ''; }
       st.docData = st.doc ? await api('/documents/' + encodeURIComponent(st.doc) + '?lang=' + encodeURIComponent(st.lang)) : null;
       if (my !== st.seq) return;
       renderDocuments();
     } catch (e) { if (my === st.seq) setHtml(p, h`<div class="trn-alert">${e.message}</div>`); }
   }
+  // Listed in the dropdown: every document that has English text, and the documents stored in the EXISTING collections (Policies, Terms, About)
+  // even before their English text has been saved there (so Terms & Conditions / Merchant Terms are never silently missing).
+  function listable(x) { return !x.too_long && (x.has_english || x.source === 'policies' || x.source === 'terms' || x.source === 'settings'); }
   function statusLabel(s) { return s === 'published' ? 'Published' : s === 'modified' ? 'Modified' : 'Not translated'; }
   function renderDocuments() {
     var d = st.docData, lo = langObj(st.lang), dir = lo ? lo.direction : 'ltr', edit = canEdit();
-    var avail = st.docs.filter(function (x) { return x.has_english && !x.too_long; });
-    var opts = avail.map(function (x) { return h`<option value="${x.slug}" ${raw(x.slug === st.doc ? 'selected' : '')}>${x.title} · ${statusLabel(x.status)}</option>`; }).join('');
+    var avail = st.docs.filter(listable);
+    var opts = avail.map(function (x) { return h`<option value="${x.slug}" ${raw(x.slug === st.doc ? 'selected' : '')}>${x.title} · ${x.has_english ? statusLabel(x.status) : 'No English text yet'}</option>`; }).join('');
     var publish = isSA() && envKnown() ? '<button type="button" class="btn-p trn-publish" data-act="publish">Publish Changes</button>' : '';
     var xfer = '<button type="button" class="btn-s trn-xfer" data-act="downloaddraft">Download Draft</button>' + (edit ? '<button type="button" class="btn-s trn-xfer" data-act="importdraft">Import</button>' : '');
     var add = isSA() && envKnown() ? '<button type="button" class="btn-s" data-act="adddoc">Add document</button>' : '';
-    var pending = st.docs.filter(function (x) { return !x.has_english; }).map(function (x) { return x.title; });
+    var pending = st.docs.filter(function (x) { return !x.has_english && !listable(x); }).map(function (x) { return x.title; });
     var tooLong = st.docs.filter(function (x) { return x.too_long; }).map(function (x) { return x.title; });
     var body;
-    if (!d) {
+    if (d && !d.has_english) {
+      body = h`<div class="trn-empty" data-no-english>${d.title} has no English text saved yet, so there is nothing to translate. Save its English text first (Terms &amp; Conditions / Policies / About Us in the left menu); it appears here automatically.</div>`;
+    } else if (!d) {
       body = '<div class="trn-empty">No document has English text yet.' + (isSA() ? ' Use <strong>Add document</strong> to add one.' : '') + '</div>';
     } else {
       var langName = lo ? lo.name_en + ' (' + lo.code + ')' : st.lang;
@@ -504,6 +531,18 @@
         fields: [{ id: 'countries', label: 'Countries', type: 'multicheck', selected: lo.countries || [], hint: 'Select none to offer the language in every country.' }],
         run: async function (f) { await api('/languages/' + encodeURIComponent(code) + '/countries', { method: 'PUT', json: { countries: f.countries } }); } })
         .then(function (r) { if (r) { alertMsg('Countries saved for ' + lo.name_en + '.', true); reload(); } });
+    }
+    if (name === 'deletelang') {
+      var dcode = el.getAttribute('data-lang'), dlo = langObj(dcode); if (!dlo) return;
+      var impact = '';
+      try { var im = await api('/languages/' + encodeURIComponent(dcode) + '/delete-impact');
+        impact = h`<div class="trn-hint" data-delete-impact><strong>Deleting ${dlo.name_en} removes the whole language: both tracks, App text and Legal Documents.</strong> This will also remove ${im.values} saved translation${im.values === 1 ? '' : 's'} (app text and legal documents, drafts and published), ${im.versions} published version${im.versions === 1 ? '' : 's'} and its country mapping. Other languages are not affected, and the audit history is kept.</div>`; } catch (e) { impact = ''; }
+      return dialog({ title: 'Delete ' + dlo.name_en, okLabel: 'Delete', html: impact,
+        typedExpect: dlo.name_en,
+        fields: [{ id: 'typed', label: 'To confirm, type the language name exactly: ' + dlo.name_en, type: 'text' }],
+        text: 'Are you sure you want to delete ' + dlo.name_en + '? This action cannot be undone.',
+        run: async function () { await api('/languages/' + encodeURIComponent(dcode) + '?confirm=' + encodeURIComponent(dcode), { method: 'DELETE' }); } })
+        .then(function (r) { if (r) { if (st.lang === dcode) st.lang = ''; alertMsg(dlo.name_en + ' was deleted.', true); reload(); } });
     }
     if (name === 'fillar') {
       $('trn_nl_code').value = 'ar'; $('trn_nl_en').value = 'Arabic'; $('trn_nl_native').value = 'العربية'; $('trn_nl_dir').value = 'rtl';

@@ -331,6 +331,44 @@ def update_language(code: str, changes: dict) -> dict:
     return db[LANGS].find_one({"code": code})
 
 
+def language_delete_impact(code: str) -> dict:
+    """What deleting [code] would remove (read only). Counts per collection, so the admin can see the effect before confirming."""
+    return {"values": db[VALUES].count_documents({"lang": code}),
+            "versions": db[VERSIONS].count_documents({"lang": code}),
+            "country_mapping": db[LANG_COUNTRIES].count_documents({"lang": code})}
+
+
+def delete_language(code, confirm, actor_id: str = "") -> dict:
+    """Super Admin only (route). Permanently deletes ONE language and everything that belongs to it:
+         translation_languages (the record), translation_values (working copy + published status, every track incl. legal documents),
+         translation_versions (published snapshots, every track), translation_language_countries (its country mapping).
+    Nothing of any other language is touched (every delete is filtered on this language code), English is not a stored language and
+    can never be deleted, and the audit log (translation_audit) is history and is kept.
+    Safety: `confirm` must equal the language code (a typed confirmation the route requires, so a stray call cannot delete); the
+    environment must be identified. Without multi-document transactions, the order makes a failure harmless: the language is first
+    DISABLED (the public manifest and files stop serving it at once), its dependants are removed next, and the language record is
+    removed LAST - so an interrupted delete leaves a disabled language that can simply be deleted again, never orphaned data."""
+    require_env("delete_language")
+    code = str(code or "").strip()
+    if code.lower() == BASE_LANGUAGE:
+        raise TranslationError("english_not_deletable", 409)
+    lang = get_language(code)                                   # unknown_language (404)
+    if str(confirm or "").strip() != code:
+        raise TranslationError("confirmation_mismatch", 400)
+    impact = language_delete_impact(code)
+    db[LANGS].update_one({"code": code}, {"$set": {"status": "disabled"}})
+    try:
+        r_values = db[VALUES].delete_many({"lang": code}).deleted_count
+        r_versions = db[VERSIONS].delete_many({"lang": code}).deleted_count
+        r_countries = db[LANG_COUNTRIES].delete_many({"lang": code}).deleted_count
+        db[LANGS].delete_one({"code": code})
+    except Exception:
+        logger.exception("language delete interrupted for %s; the language stays disabled and can be deleted again", code)
+        raise TranslationError("delete_incomplete", 500, "The language was disabled but could not be fully removed. Nothing else was changed; try Delete again.")
+    return {"code": code, "name_en": lang.get("name_en"), "deleted": {"values": r_values, "versions": r_versions, "country_mapping": r_countries},
+            "expected": impact}
+
+
 # ── drafts (working copy) ─────────────────────────────────────────────────────────────────────────────────────────────
 def latest_version(track: str, lang: str):
     d = db[VERSIONS].find({"track": track, "lang": lang}).sort("version", -1).limit(1)

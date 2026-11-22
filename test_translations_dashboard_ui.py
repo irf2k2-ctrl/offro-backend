@@ -299,15 +299,14 @@ def test_browser_publish_changes_sends_an_optional_note_to_this_server_only():
         b.close()
 
 
-def test_browser_legal_track_says_publishing_does_not_change_the_customer_app():
+def test_browser_legal_text_track_is_no_longer_offered_in_the_text_type_dropdown():
+    """The old "Legal text" track (short UI strings tagged legal; the customer app never read it) was removed from the dropdown: only App text
+    and Legal documents remain. Backend support for the track and every stored record are untouched (see test_translations_delete_language.py)."""
     with pw.sync_playwright() as p:
         b, pg, calls = _page(p, _fixture())
         pg.click("[data-act=tab][data-tab=strings]"); pg.wait_for_selector("tr[data-row=loginTitle]")
-        assert "does not read legal text" not in pg.inner_text("#trn_pane_strings")
-        pg.select_option("select[data-change=track]", "legal"); pg.wait_for_selector("tr[data-row=loginTitle]")
-        assert "does not read legal text yet" in pg.inner_text("#trn_pane_strings")
-        pg.click("[data-act=publish]")
-        assert "does not change what customers see" in pg.inner_text("#trn_modal_text")
+        assert pg.locator("select[data-change=track] option").all_inner_texts() == ["App text", "Legal documents"]
+        assert pg.locator("select[data-change=track] option[value=legal]").count() == 0
         b.close()
 
 

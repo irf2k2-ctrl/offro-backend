@@ -49,6 +49,13 @@
 .trn .trn-country{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;margin:0;cursor:pointer}
 .trn .trn-nl-countries{margin:6px 0 2px}
 .trn .trn-edit-countries{padding:1px 8px;font-size:11px}
+/* yellow pen = edit countries; Delete sits beside Open (same small button size) */
+.trn .trn-pen{padding:1px 7px;line-height:1.4;color:#e0a100;border-color:#e0a100;background:#fff8e1}
+.trn .trn-pen:hover{background:#ffecb3}
+.trn .trn-pen .fa-pen{color:#e0a100}
+.trn .trn-rowact{white-space:nowrap}
+.trn .trn-delete{margin-left:6px;color:#c0392b;border-color:#c0392b;background:#fff}
+.trn .trn-delete:hover{background:#fdecea}
 /* Publish Changes sits in the top toolbar next to the search box; it wraps with the toolbar on narrow screens */
 .trn .trn-toolbar .trn-publish{white-space:nowrap}
 /* Download Draft / Import buttons (toolbar) and the import summary */

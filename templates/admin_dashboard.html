@@ -76,7 +76,7 @@ td[style*="sticky"]{background:#fff;}
   white-space:nowrap;color:rgba(192,57,43,.11);pointer-events:none;user-select:none;-webkit-user-select:none;z-index:1000;}
 @media print{.nu-watermark{color:rgba(192,57,43,.18);}}
 /* Account country after the name (styling only): small, muted, may wrap under the name on narrow screens */
-.acct-country{display:inline-block;margin-left:4px;font-size:11px;font-weight:500;color:var(--muted);white-space:normal;}
+.acct-country{display:inline-block;font-size:11px;font-weight:500;color:var(--muted);white-space:normal;}
 /* Accounts tab action buttons: one colour per meaning (styling only) */
 .acct-btn-view{background:#1f6feb !important;}    .acct-btn-view:hover{background:#1a5fcc !important;}
 .acct-btn-approve{background:#198754 !important;} .acct-btn-approve:hover{background:#157347 !important;}
@@ -182,7 +182,7 @@ function _secUrl(u) {
 }
 </script>
 <link rel="stylesheet" href="/static/css/wa_campaigns.css?v=2g3">
-<link rel="stylesheet" href="/static/css/translations.css?v=h3">
+<link rel="stylesheet" href="/static/css/translations.css?v=h4">
 </head>
 <body>
 
@@ -466,7 +466,7 @@ function _secUrl(u) {
     <div class="page-title" style="margin:0">🧑‍💼 Accounts</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <input id="acct_search" class="form-control" style="max-width:210px;"
-        placeholder="🔍 Name / Phone..." oninput="filterAccounts()">
+        placeholder="🔍 Name / Phone / Country..." oninput="filterAccounts()">
       <select id="acct_role_filter" class="form-select" style="max-width:150px;" onchange="filterAccounts()">
         <option value="">All Roles</option>
         <option value="user_only">👤 User only</option>
@@ -480,7 +480,7 @@ function _secUrl(u) {
   </div>
   <div class="table-wrap"><table>
     <thead><tr>
-      <th>Name</th><th>Phone</th><th>Ref ID</th><th>City</th>
+      <th>Name</th><th>Phone</th><th>Country</th><th>Ref ID</th><th>City</th>
       <th>Roles</th><th>Stores</th><th>Products</th><th>Banners</th>
       <th>Points</th>
       <th id="acct_created_th" onclick="toggleAcctSort()" style="cursor:pointer;white-space:nowrap;"
@@ -7567,7 +7567,7 @@ async function loadAccounts(page) {
   if (city)   qs.set('city', city);
   if (_acctSort) qs.set('sort', _acctSort);
   const tb = document.getElementById('accounts_table');
-  const fail = (msg) => { if (tb) tb.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:32px;color:#c0392b;">
+  const fail = (msg) => { if (tb) tb.innerHTML = `<tr><td colspan="13" style="text-align:center;padding:32px;color:#c0392b;">
         ⚠️ ${msg}<br>
         <button onclick="loadAccounts()" style="margin-top:8px;padding:6px 16px;background:#3E5F55;color:#fff;border:none;border-radius:6px;cursor:pointer;">Retry</button>
       </td></tr>`; };
@@ -7608,7 +7608,7 @@ function filterAccounts() {
   _acctSearchTimer = setTimeout(() => { _acctPage = 1; loadAccounts(); }, 300);
 }
 
-// Country after the account name, e.g. "🇸🇦 Saudi Arabia – SA". All three values come from the server's country master; an account with
+// Country in its own column, e.g. "🇸🇦 Saudi Arabia – SA". All three values come from the server's country master; an account with
 // no country (and a number that does not tell) shows nothing. Escaped like every other value here; wraps on narrow screens.
 function acctCountryHtml(a) {
   const iso = a && a.country_iso ? String(a.country_iso) : '';
@@ -7624,7 +7624,7 @@ function renderAccountsPage() {
   if (!tbody) return;
 
   if (!page.length) {
-    tbody.innerHTML = `<tr><td colspan="12" class="text-center text-muted py-4">No accounts found</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13" class="text-center text-muted py-4">No accounts found</td></tr>`;
     renderPagination('accounts_pagination', total, _acctPage, 'goAcctPage');
     return;
   }
@@ -7638,8 +7638,9 @@ function renderAccountsPage() {
     else { stBg = a.status === 'active' ? '#1a6640' : '#c0392b'; stLbl = a.status === 'active' ? 'Active' : 'Blocked'; stCls=''; }
     const shortId = (a.account_id||'').slice(-6).toUpperCase();
     return `<tr>
-      <td><strong>${escHtml(a.full_name||'—')}</strong>${acctCountryHtml(a)}</td>
+      <td><strong>${escHtml(a.full_name||'—')}</strong></td>
       <td style="font-family:monospace;font-size:12px;">${escHtml(a.mobile_number||'')}</td>
+      <td>${acctCountryHtml(a).trim() || '—'}</td>
       <td><span title="${a.account_id}" onclick="navigator.clipboard?.writeText('${_secJs(a.account_id)}');showToast('ID copied!','success')"
         style="font-size:10px;font-family:monospace;background:#f0f4f0;border:1px solid var(--border);border-radius:5px;padding:2px 6px;cursor:pointer;color:var(--primary)">
         #${shortId} 📋</span></td>
@@ -10336,7 +10337,7 @@ function rbacLogsNext() { rbacLogSkip += rbacLogLimit; rbacLoadLogs(); }
 <script src="/static/js/wa_campaigns_templates.js?v=2g3"></script>
 <script src="/static/js/wa_campaigns_editor.js?v=2g3"></script>
 <script src="/static/js/wa_campaigns_admin.js?v=2g3"></script>
-<script src="/static/js/translations.js?v=h2"></script>
+<script src="/static/js/translations.js?v=h5"></script>
 
 </body>
 </html>
