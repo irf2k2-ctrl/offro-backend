@@ -210,7 +210,16 @@ def test_the_fixed_code_is_used_only_through_the_guarded_helpers():
                     s = open(p, encoding="utf-8", errors="ignore").read()
                     if "TEST_OTP" in s or "test_mode" in s or "admin_otp_test_mode" in s:
                         hits.append(os.path.relpath(p, root).replace(os.sep, "/"))
-    assert sorted(hits) == ["services/admin_login_otp.py", "services/admin_otp_test_mode.py"]
+    # services/app_environment.py is the only other file allowed to mention the module, and only to read the three Railway STAGING
+    # identifiers (constants) it uses to recognise Staging. It can never reach the fixed code or the activation switch: the strict
+    # check right below pins exactly what it may touch. (It was added after this list was written, in the same commit as this test.)
+    assert sorted(hits) == ["services/admin_login_otp.py", "services/admin_otp_test_mode.py", "services/app_environment.py"]
+    env_src = open(os.path.join(root, "services", "app_environment.py"), encoding="utf-8").read()
+    import re
+    assert set(re.findall(r"\b_m\.(\w+)", env_src)) == {"STAGING_PROJECT_ID", "STAGING_ENVIRONMENT_ID", "STAGING_SERVICE_ID"}
+    assert env_src.count("admin_otp_test_mode") == 1 and "TEST_OTP" not in env_src and "test_mode" not in env_src.replace("admin_otp_test_mode", "")
+    for forbidden in ("is_active", "applies_to", "mobile_allowed", "allowed_digits", "ADMIN_OTP_STAGING_TEST_MODE", "ADMIN_OTP_TEST_MOBILES"):
+        assert forbidden not in env_src, forbidden
     src = open(os.path.join(root, "services", "admin_login_otp.py"), encoding="utf-8").read()
     assert src.count("TM.TEST_OTP") == 2 and src.count("TM.applies_to(") == 1 and src.count("TM.is_active()") >= 2
 

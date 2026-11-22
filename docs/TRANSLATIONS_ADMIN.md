@@ -2,7 +2,7 @@
 
 Workflow: **edit a translation -> its status becomes `modified` -> Publish Changes -> the translation is published on the server** (this environment's database, served by the public API below).
 
-**Remote delivery to the Flutter app is NOT active yet in production.** Today only Flutter builds made with `ENABLE_REMOTE_TRANSLATIONS=true` **and** pointed at the exact staging host fetch published translations (Phase K, staging testing only); production builds do not fetch anything, so publishing in a production dashboard changes nothing in the production app. Updating app text **without a new APK or app build** becomes available for production only after **Stage 5 (Flutter production enablement) is completed and the resulting Flutter build is released** to users. Until then, everything below describes what the server stores and serves, not what the app already shows.
+**Remote delivery to the Flutter app is NOT active yet in production.** Today only Flutter builds made with `ENABLE_REMOTE_TRANSLATIONS=true` **and** pointed at the exact staging host fetch published translations (Phase K, staging testing only); production builds do not fetch anything, so publishing in a production dashboard changes nothing in the production app. Updating app text **without a new APK or app build** becomes available for production only after the **Flutter build that enables remote translations for production (Stage 5, see the Flutter repo's `docs/REMOTE_TRANSLATIONS.md`) is released** to users. Until then, everything below describes what the server stores and serves, not what the app already shows.
 There is no approval, review, promotion, package-transfer or rollback workflow.
 
 ## What exists
@@ -30,7 +30,7 @@ There is no approval, review, promotion, package-transfer or rollback workflow.
 ## Staging and production are independent
 Staging and production run this same code and the same dashboard, and each reads and writes ONLY its own database. There is no promotion, synchronisation, package transfer or connection between them, and no translation code makes a network call to another environment.
 Separation is guaranteed by **configuration**, not by anything in this code or its mock-database tests: each environment MUST run with its **own, independent `MONGO_URL`** (a different database or cluster) and its own `OFFRO_ENVIRONMENT` (`staging` or `production`). If both pointed at the same database they would share translations and no test would notice. Verify both values in each Railway service during production setup, before any production publish.
-Translation data is copied to production only by a separate, one-time, manually run transfer.
+Translation data is copied to production only by a separate, one-time, manually run transfer: `tools/transfer_translations.py` (see `docs/TRANSLATIONS_TRANSFER.md`). It is never run by the server, never scheduled, and is a dry run unless `--apply` is given. The full release procedure is `docs/GO_LIVE_TRANSLATIONS.md`.
 
 ## Environment identification
 - Set `OFFRO_ENVIRONMENT=staging` on the Staging service and `OFFRO_ENVIRONMENT=production` on Production (explicit, primary setting).
