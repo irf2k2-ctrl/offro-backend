@@ -265,8 +265,8 @@ def test_the_escaping_helper_really_escapes_when_run(tmp_path):
     runner = tmp_path / "t.js"
     runner.write_text("var window={}, document={readyState:'x',addEventListener(){}};\n" + script + "\nvar h=window.__t.h, raw=window.__t.raw;" +
                       "\nvar bad='<img src=x onerror=alert(1)>\"\\'&';\n"
-                      "console.log(JSON.stringify([h`<b>${bad}</b>`, h`${raw('<i>ok</i>')}`, h`${null}${undefined}${false}`]));\n")
-    out = subprocess.run(["node", str(runner)], capture_output=True, text=True, timeout=60)
+                      "console.log(JSON.stringify([h`<b>${bad}</b>`, h`${raw('<i>ok</i>')}`, h`${null}${undefined}${false}`]));\n", encoding="utf-8")
+    out = subprocess.run(["node", str(runner)], capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert out.returncode == 0, out.stderr[-300:]
     import json
     a, b, c = json.loads(out.stdout)

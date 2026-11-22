@@ -9,6 +9,7 @@ import uuid, qrcode, io, base64
 import time as _time
 from services import default_images as _di          # country mapping for Default Images
 from utils import countries as _countries_mod
+from services import dashboard_country as _dc        # Dashboard user country access (Stage 4)
 
 # In-memory cache for /stores list (15-second TTL)
 _store_cache = {"data": None, "ts": 0.0}
@@ -235,6 +236,107 @@ def _city_filter(a):
     if not cities:
         return {"city": "____IMPOSSIBLE_CITY_NONE____"}
     return {"city": {"$in": cities}}
+
+def _scope(a, id_fields=("merchant_id",), phone_fields=()):
+    """Data scope of the current dashboard user: the existing city scope (unchanged) AND, for a country-restricted user, the
+    country of the record's owner account. No country on the user (every legacy user) / Super Admin = exactly _city_filter(a)."""
+    city = _city_filter(a)
+    iso = _dc.scope(a)
+    if not iso:
+        return city
+    ctry = _dc.owned_query(iso, id_fields, phone_fields)
+    return {"$and": [x for x in (city, ctry) if x]}
+
+
+def _country_only(a, id_fields=("merchant_id",), phone_fields=()):
+    """Country scope WITHOUT the city part - for collections that carry no city (orders, reviews ...). {} = unrestricted."""
+    iso = _dc.scope(a)
+    return _dc.owned_query(iso, id_fields, phone_fields) if iso else {}
+
+
+_REVIEW_REF = {   # review kind -> (reference collection, review field holding its id, owner id fields, owner phone fields)
+    "store":      ("stores", "store_id", ("merchant_id",), ("merchant_phone", "phone")),
+    "product":    ("merchant_products", "product_id", ("merchant_id",), ("merchant_phone",)),
+    "influencer": ("influencers", "influencer_id", ("account_id",), ("phone",)),
+}
+
+
+def _ids_in_country(a, kind):
+    """str ids of the stores / products / influencers of the admin's country (None = unrestricted)."""
+    if not _dc.scope(a):
+        return None
+    coll, _f, idf, phf = _REVIEW_REF[kind]
+    return {str(d["_id"]) for d in db[coll].find(_country_only(a, idf, phf), {"_id": 1})}
+
+
+def _guard_review(a, coll_name, review_id, kind):
+    """Country guard for a review id endpoint. Called BEFORE the endpoint's own try/except so the 404 is not rewritten.
+    A review that does not exist falls through to the endpoint's own 'not found' answer."""
+    if not _dc.scope(a):
+        return
+    try:
+        rv = db[coll_name].find_one({"_id": ObjectId(review_id)})
+    except Exception:
+        return
+    if not rv:
+        return
+    coll, fld, idf, phf = _REVIEW_REF[kind]
+    ref = None
+    try:
+        ref = db[coll].find_one({"_id": ObjectId(str(rv.get(fld) or ""))})
+    except Exception:
+        ref = None
+    _dc.require_record(a, ref, idf, phf)
+
+
+def _scan_counts(accts) -> dict:
+    """{account id (str): number of RECORDED successful QR scans}. A scan is one `redemptions` record (written by POST /user/redeem
+    only after every check passed), so failed / refused scans are never in it. Shown value = the larger of this and the account's
+    stored `scans` counter: the counter carries scans migrated from the old app and is now also incremented by /user/redeem, while
+    the records cover accounts whose counter lagged behind. Accounts with no scans show 0."""
+    ids = [str(x["_id"]) for x in accts]
+    out = {i: 0 for i in ids}
+    if ids:
+        for row in db.redemptions.aggregate([{"$match": {"user_id": {"$in": ids}}}, {"$group": {"_id": "$user_id", "n": {"$sum": 1}}}]):
+            out[str(row["_id"])] = int(row["n"])
+    return {str(x["_id"]): max(out.get(str(x["_id"]), 0), _int0(x.get("scans"))) for x in accts}
+
+
+def _int0(v) -> int:
+    try:
+        return max(0, int(v or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _guard_account(a, acct):
+    """404 when a country-restricted user asks for an account of another country (or one whose country cannot be told)."""
+    _dc.require_account(a, acct)
+
+
+def _guard_banner(a, bid):
+    """Country guard for the merchant-banner id endpoints (no-op for unrestricted users)."""
+    if not _dc.scope(a):
+        return
+    try:
+        b = db.merchant_banners.find_one({"_id": ObjectId(bid)})
+    except Exception:
+        b = None
+    if b is None:                                   # promo_sliders mirror of an approved banner: follow its source banner
+        try:
+            sl = db.promo_sliders.find_one({"_id": ObjectId(bid)})
+            if sl:
+                b = sl
+                if sl.get("source_banner_id"):
+                    b = db.merchant_banners.find_one({"_id": ObjectId(str(sl["source_banner_id"]))}) or sl
+        except Exception:
+            b = None
+    _dc.require_record(a, b, ("merchant_id",), ("merchant_phone",))
+
+
+def _guard_store(a, store):
+    _dc.require_record(a, store, ("merchant_id",), ("merchant_phone", "phone"))
+
 
 def _safe_date(v, field):
     """Return a date string WITHOUT corrupting 'DD Mon YYYY' format.
@@ -596,15 +698,30 @@ def update_terms(type: str, data: dict, a=Depends(get_current_admin)):
 @router.get("/merchants")
 def list_merchants(a=Depends(get_current_admin)):
     # DEPRECATED: Use /accounts?role=merchant instead. Kept for store creation dropdown.
+    _q = {"roles": "merchant"}
+    _iso = _dc.scope(a)
+    if _iso:
+        _q = {"$and": [_q, _dc.account_query(_iso)]}
     return [{"_id": str(m["_id"]), "name": m.get("name"), "phone": m.get("phone"),
              "city": m.get("city"), "area": m.get("area"), "status": m.get("status", "active"),
              "store_count": db.stores.count_documents({"merchant_id": str(m["_id"])})}
-            for m in db.accounts.find({"roles": "merchant"})]
+            for m in db.accounts.find(_q)]
 
 @router.put("/merchants/{id}")
 def update_merchant(id: str, data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Merchants", "edit")
     upd = {f: data[f] for f in ["name","phone","city","area"] if data.get(f) is not None}
+    if _dc.scope(a):
+        try:
+            _guard_account(a, db.accounts.find_one({"_id": ObjectId(id)}))
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(404, "Not found")
+        if "phone" in upd:                      # a phone change could move the account to another country
+            _new = _countries_mod.account_country({"phone": upd["phone"]})
+            if not _new or _new["iso"] != _dc.scope(a):
+                raise HTTPException(403, "That phone number belongs to a country outside your access")
     if upd:
         db.accounts.update_one({"_id": ObjectId(id)}, {"$set": upd})
         db.merchants.update_one({"_id": ObjectId(id)}, {"$set": upd})  # sync
@@ -615,6 +732,7 @@ def toggle_merchant(id: str, a=Depends(get_current_admin)):
     _check_perm(a, "Merchants", "edit")
     m = db.accounts.find_one({"_id": ObjectId(id)}) or db.merchants.find_one({"_id": ObjectId(id)})
     if not m: raise HTTPException(404, "Not found")
+    _guard_account(a, m)
     ns = "inactive" if m.get("status") == "active" else "active"
     db.accounts.update_one({"_id": ObjectId(id)}, {"$set": {"status": ns}})
     db.merchants.update_one({"_id": ObjectId(id)}, {"$set": {"status": ns}})  # sync
@@ -623,6 +741,13 @@ def toggle_merchant(id: str, a=Depends(get_current_admin)):
 @router.delete("/merchants/{id}")
 def delete_merchant(id: str, a=Depends(get_current_admin)):
     _check_perm(a, "Merchants", "delete")
+    if _dc.scope(a):
+        try:
+            _guard_account(a, db.accounts.find_one({"_id": ObjectId(id)}))
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(404, "Not found")
     db.accounts.delete_one({"_id": ObjectId(id)})
     db.merchants.delete_one({"_id": ObjectId(id)})  # sync
     db.stores.delete_many({"merchant_id": id})
@@ -640,6 +765,9 @@ def _accounts_query(a, search: str = "", role: str = "", city: str = "") -> dict
     scope = _city_filter(a)
     if scope:
         clauses.append(scope)
+    _iso = _dc.scope(a)
+    if _iso:
+        clauses.append(_dc.account_query(_iso))
     search = (search or "").strip()
     if search:
         rx = {"$regex": _re.escape(search), "$options": "i"}
@@ -743,10 +871,11 @@ def list_accounts(
             meta = {"total": total, "page": page, "page_size": page_size,
                     "pages": pages, "cities": cities}
         else:
-            all_accounts = list(db.accounts.find({**_city_filter(a)}).sort("created_at", -1))
+            all_accounts = list(db.accounts.find(_accounts_query(a)).sort("created_at", -1))
     except Exception as e:
         raise HTTPException(500, f"DB fetch failed: {e}")
 
+    _scans = _scan_counts(all_accounts)
     for acct in all_accounts:
         try:
             phone   = str(acct.get("phone") or "")
@@ -825,7 +954,7 @@ def list_accounts(
                 "total_points":  total_pts,
                 "visit_pts":     visit_pts,
                 "pool_pts":      pool_pts,
-                "scans":         int(acct.get("scans") or 0),
+                "scans":         _scans.get(str(acct["_id"]), 0),
                 "store_count":   store_count,
                 "product_count": product_count,
                 "banner_count":  banner_count,
@@ -854,11 +983,13 @@ def list_accounts(
 def accounts_debug(a=Depends(get_current_admin)):
     """Debug endpoint — returns raw info about why accounts may fail."""
     try:
-        count = db.accounts.count_documents({})
+        _iso = _dc.scope(a)
+        _q = _dc.account_query(_iso) if _iso else {}
+        count = db.accounts.count_documents(_q)
         sample = None
         err = None
         try:
-            raw = db.accounts.find_one()
+            raw = db.accounts.find_one(_q)
             if raw:
                 sample = {k: str(v)[:80] for k, v in raw.items() if k != '_id'}
                 sample['_id'] = str(raw['_id'])
@@ -883,7 +1014,8 @@ def fix_account_roles(a=Depends(get_current_admin)):
     """
     fixed = []
     skipped = 0
-    for acct in db.accounts.find():
+    _iso = _dc.scope(a)
+    for acct in db.accounts.find(_dc.account_query(_iso) if _iso else {}):
         acct_id = str(acct["_id"])
         phone   = acct.get("phone", "")
         mid     = acct.get("merchant_id", acct_id)
@@ -945,6 +1077,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
         ]})
     if not acct:
         raise HTTPException(404, "Account not found")
+    _guard_account(a, acct)
 
     phone      = acct.get("phone", "")
     mid        = acct.get("merchant_id", "")
@@ -1053,7 +1186,7 @@ def get_account_detail(account_id: str, a=Depends(get_current_admin)):
         "visit_pts":     visit_pts,
         "pool_pts":      pool_pts,
         "total_pts":     visit_pts + pool_pts,
-        "scans":         acct.get("scans", 0),
+        "scans":         _scan_counts([acct]).get(acct_id, 0),
         "store_count":   store_count,
         "banner_count":  banner_count,
         "voucher_count": voucher_count,
@@ -1069,6 +1202,12 @@ def toggle_account_status(account_id: str, data: dict, a=Depends(get_current_adm
     """Toggle account status in unified accounts collection."""
     from bson import ObjectId
     new_status = data.get("status", "active")
+    if _dc.scope(a):
+        try:
+            _acct = db.accounts.find_one({"_id": ObjectId(account_id)})
+        except Exception:
+            _acct = None
+        _guard_account(a, _acct)
     try:
         db.accounts.update_one(
             {"_id": ObjectId(account_id)},
@@ -1101,6 +1240,7 @@ def process_account_deletion(account_id: str, data: dict, a=Depends(get_current_
     acct = db.accounts.find_one({"_id": oid})
     if not acct:
         raise HTTPException(404, "Account not found")
+    _guard_account(a, acct)
     if acct.get("status") != "delete_requested":
         raise HTTPException(400, "Account does not have a pending deletion request")
 
@@ -1344,8 +1484,8 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
 @router.get("/stores")
 def list_stores(a=Depends(get_current_admin)):
     global _store_cache
-    city_f = _city_filter(a)
-    is_restricted = bool(city_f)  # True if user has city restrictions
+    city_f = _scope(a)
+    is_restricted = bool(city_f)  # True if user has city or country restrictions
     now_ts = _time.time()
     # Only use cache for unrestricted (Super Admin) users
     if not is_restricted and _store_cache["data"] is not None and (now_ts - _store_cache["ts"]) < _STORE_CACHE_TTL:
@@ -1503,6 +1643,7 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     try: merchant = db.accounts.find_one({"_id": ObjectId(mid)}) or db.merchants.find_one({"_id": ObjectId(mid)})
     except: raise HTTPException(400, "Invalid merchant_id")
     if not merchant: raise HTTPException(404, "Merchant not found")
+    _guard_account(a, merchant)
 
     # Upload image to Cloudinary once; fall back to storing base64 in "image" if CDN not set
     _raw_img  = data.get("image","") or ""
@@ -1536,7 +1677,7 @@ def create_store(data: dict, a=Depends(get_current_admin)):
 @router.get("/stores/slim")
 def get_stores_slim(a=Depends(get_current_admin)):
     """Lightweight store list for ratings — no images, no heavy data."""
-    stores = list(db.stores.find({**_city_filter(a)}, {
+    stores = list(db.stores.find(_scope(a), {
         "_id":1,"store_name":1,"category":1,"city":1,"area":1,
         "rating":1,"admin_rating":1,"user_rating":1,"rating_count":1,"status":1
     }))
@@ -1561,6 +1702,7 @@ def get_store_detail(id: str, a=Depends(get_current_admin)):
     except Exception:
         raise HTTPException(404, "Not found")
     if not s: raise HTTPException(404, "Not found")
+    _guard_store(a, s)
     return {
         "_id":            str(s["_id"]),
         "store_name":     s.get("store_name", ""),
@@ -1590,6 +1732,7 @@ def get_store_qr(id: str, a=Depends(get_current_admin)):
         store = db.stores.find_one({"_id": ObjectId(id)})
         if not store:
             raise HTTPException(404, "Store not found")
+        _guard_store(a, store)
         qr = store.get("qr_code", "")
         # Generate if missing
         if not qr:
@@ -1608,6 +1751,9 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
     """Update any store field — used by admin dashboard Edit Store form."""
     store = db.stores.find_one({"_id": ObjectId(id)})
     if not store: raise HTTPException(404, "Not found")
+    _guard_store(a, store)
+    if data.get("merchant_id") and str(data["merchant_id"]).strip() and _dc.scope(a):   # cannot hand a store to another country's merchant
+        _dc.require_account(a, _dc._account_by_key(str(data["merchant_id"]).strip()))
     upd = {f: data[f] for f in ["store_name","category","city","state","area","address","phone","lat","lng","about"] if data.get(f) is not None}
     if "points_per_scan" in data and data["points_per_scan"] is not None:
         upd["points_per_scan"] = int(data["points_per_scan"])
@@ -1691,6 +1837,8 @@ def _renewal_store(a, id):
     except Exception:
         raise HTTPException(404, "Store not found")
     store = db.stores.find_one({"_id": oid, **_city_filter(a)})
+    if store:
+        _guard_store(a, store)
     if not store:
         raise HTTPException(404, "Store not found")
     return store
@@ -1898,6 +2046,13 @@ def set_store_rating(id: str, data: dict, a=Depends(get_current_admin)):
     rating = float(data.get("admin_rating", 0))
     if not (0 <= rating <= 5):
         raise HTTPException(400, "Rating must be between 0 and 5")
+    if _dc.scope(a):
+        try:
+            _guard_store(a, db.stores.find_one({"_id": ObjectId(id)}))
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(404, "Not found")
     db.stores.update_one(
         {"_id": ObjectId(id)},
         {"$set": {"admin_rating": rating, "rating": rating}}
@@ -1914,6 +2069,9 @@ def list_reviews(store_id: str = "", a=Depends(get_current_admin)):
     query = {}
     if store_id:
         query["store_id"] = store_id
+    _ok = _ids_in_country(a, "store")
+    if _ok is not None:
+        query = {"$and": [query, {"store_id": {"$in": sorted(_ok)}}]}
     result = []
     for r in db.reviews.find(query).sort("created_at", -1).limit(500):
         store_name = ""
@@ -1941,6 +2099,7 @@ def list_reviews(store_id: str = "", a=Depends(get_current_admin)):
 def set_review_visibility(review_id: str, body: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Reports", "edit")
     """Toggle a store review's visibility in the app."""
+    _guard_review(a, "reviews", review_id, "store")
     try:
         visible = bool(body.get("visible", True))
         result = db.reviews.update_one(
@@ -1957,6 +2116,7 @@ def set_review_visibility(review_id: str, body: dict, a=Depends(get_current_admi
 def delete_review(review_id: str, a=Depends(get_current_admin)):
     _check_perm(a, "Reports", "delete")
     """Delete an inappropriate review and recalculate store rating."""
+    _guard_review(a, "reviews", review_id, "store")
     try:
         r = db.reviews.find_one({"_id": ObjectId(review_id)})
         if not r:
@@ -1982,6 +2142,13 @@ def delete_review(review_id: str, a=Depends(get_current_admin)):
 def approve_store(id: str, a=Depends(get_current_admin)):
     _check_perm(a, "Stores", "approve")
     global _store_cache; _store_cache["data"] = None
+    if _dc.scope(a):
+        try:
+            _guard_store(a, db.stores.find_one({"_id": ObjectId(id)}))
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(404, "Not found")
     db.stores.update_one({"_id": ObjectId(id)}, {"$set": {"status": "active"}})
     return {"message": "Store approved and live"}
 
@@ -1991,6 +2158,7 @@ def toggle_store(id: str, a=Depends(get_current_admin)):
     global _store_cache; _store_cache["data"] = None
     s = db.stores.find_one({"_id": ObjectId(id)})
     if not s: raise HTTPException(404, "Not found")
+    _guard_store(a, s)
     ns = "inactive" if s.get("status") == "active" else "active"
     db.stores.update_one({"_id": ObjectId(id)}, {"$set": {"status": ns}})
     return {"status": ns}
@@ -2002,6 +2170,13 @@ def delete_store(id: str, a=Depends(get_current_admin)):
     # Soft delete: marks store instead of hard-removing.
     # Prevents phantom duplicates (waiting_approval siblings) re-appearing after delete.
     ts = datetime.utcnow().isoformat()
+    if _dc.scope(a):
+        try:
+            _guard_store(a, db.stores.find_one({"_id": ObjectId(id)}))
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(404, "Not found")
     db.stores.update_one(
         {"_id": ObjectId(id)},
         {"$set": {"status": "deleted", "is_deleted": True, "deleted_at": ts}}
@@ -2015,7 +2190,8 @@ def list_users(a=Depends(get_current_admin)):
     # DEPRECATED: Use /accounts instead. Returns from accounts collection.
     result = []
     cols = db.list_collection_names()
-    for u in db.accounts.find():
+    _iso = _dc.scope(a)
+    for u in db.accounts.find(_dc.account_query(_iso) if _iso else {}):
         uid = str(u["_id"])
         result.append({
             "_id": uid, "name": u.get("name"), "phone": u.get("phone"),
@@ -2033,6 +2209,7 @@ def list_users(a=Depends(get_current_admin)):
 def user_history(id: str, a=Depends(get_current_admin)):
     u = db.accounts.find_one({"_id": ObjectId(id)}) or db.users.find_one({"_id": ObjectId(id)})
     if not u: raise HTTPException(404, "Not found")
+    _guard_account(a, u)
     cols = db.list_collection_names()
     history = []
     if "redemptions" in cols:
@@ -2057,6 +2234,7 @@ def adjust_points(id: str, data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Users", "edit")
     u = db.accounts.find_one({"_id": ObjectId(id)}) or db.users.find_one({"_id": ObjectId(id)})
     if not u: raise HTTPException(404, "Not found")
+    _guard_account(a, u)
     t = data.get("type","credit"); pts = int(data.get("points",0))
     if pts <= 0: raise HTTPException(400, "Points must be > 0")
     vp = u.get("visit_points",0); pp = u.get("pool_points",0)
@@ -2078,22 +2256,29 @@ def adjust_points(id: str, data: dict, a=Depends(get_current_admin)):
 @router.get("/stats")
 def admin_stats(a=Depends(get_current_admin)):
     cols = db.list_collection_names()
-    total_accounts  = db.accounts.count_documents({})
-    total_merchants = db.accounts.count_documents({"roles": "merchant"})
+    _iso = _dc.scope(a)
+    _aq = _dc.account_query(_iso) if _iso else {}
+    def _and(q):
+        return {"$and": [q, _aq]} if _aq else q
+    total_accounts  = db.accounts.count_documents(_aq)
+    total_merchants = db.accounts.count_documents(_and({"roles": "merchant"}))
     # App Users = accounts that are NOT merchants (pure user accounts)
-    app_users = db.accounts.count_documents({"roles": {"$not": {"$elemMatch": {"$eq": "merchant"}}}})
+    app_users = db.accounts.count_documents(_and({"roles": {"$not": {"$elemMatch": {"$eq": "merchant"}}}}))
     # Fallback: also check 'users' collection if app_users is 0 and it exists
-    if app_users == 0 and "users" in cols:
+    if app_users == 0 and "users" in cols and not _iso:
         app_users = db.users.count_documents({})
+    _sq = _scope(a) if _iso else {}
+    def _sand(q):
+        return {"$and": [q, _sq]} if _sq else q
     return {
         "total_accounts":  total_accounts,
         "total_users":     total_accounts,
         "app_users":       app_users,
         "total_merchants": total_merchants,
-        "active_merchants": db.accounts.count_documents({"roles": "merchant", "status": "active"}),
-        "total_stores":    db.stores.count_documents({"is_deleted": {"$ne": True}, "status": {"$ne": "deleted"}}),
-        "waiting_approval": db.stores.count_documents({"status": "waiting_approval"}),
-        "total_deals":     db.deals.count_documents({}) if "deals" in cols else 0,
+        "active_merchants": db.accounts.count_documents(_and({"roles": "merchant", "status": "active"})),
+        "total_stores":    db.stores.count_documents(_sand({"is_deleted": {"$ne": True}, "status": {"$ne": "deleted"}})),
+        "waiting_approval": db.stores.count_documents(_sand({"status": "waiting_approval"})),
+        "total_deals":     (db.deals.count_documents(_sand({}) if _iso else {}) if "deals" in cols else 0),
     }
 
 # ===================== SUBSCRIPTIONS (Admin view) =====================
@@ -2101,7 +2286,7 @@ def admin_stats(a=Depends(get_current_admin)):
 @router.get("/subscriptions")
 def list_subscriptions(a=Depends(get_current_admin)):
     result = []
-    for s in db.subscriptions.find({**_city_filter(a)}).sort("created_at", -1):
+    for s in db.subscriptions.find(_scope(a, ("merchant_id",), ("merchant_phone",))).sort("created_at", -1):
         fd = s.get("from_date"); ed = s.get("end_date")
         if s.get("entity_type") == "influencer":
             # Influencer pending orders have no merchant_id/store_id at all —
@@ -2162,7 +2347,7 @@ def list_subscriptions(a=Depends(get_current_admin)):
 def list_merchant_transactions(a=Depends(get_current_admin)):
     """All payment transactions made by merchants (subscriptions + invoices)."""
     result = []
-    for inv in db.invoices.find({**_city_filter(a)}).sort("created_at", -1):
+    for inv in db.invoices.find(_scope(a, ("merchant_id",), ("merchant_phone",))).sort("created_at", -1):
         fd = inv.get("from_date"); ed = inv.get("end_date")
         result.append({
             "invoice_no":    inv.get("invoice_no", ""),
@@ -2451,7 +2636,7 @@ def _resolve_influencer_photo(raw: str, existing_url: str = "") -> str:
 
 @router.get("/influencers")
 def list_influencers(a=Depends(get_current_admin)):
-    query = _city_filter(a)
+    query = _scope(a, ("account_id",), ("phone",))
     docs = list(db.influencers.find(query).sort("created_at", -1))
     return [_influencer_row(d) for d in docs]
 
@@ -2497,6 +2682,10 @@ def create_influencer(body: dict, a=Depends(get_current_admin)):
     # long enough to absorb a rapid double-click, far too short to ever
     # block two genuinely different admins legitimately adding two
     # different influencers who simply happen to share a name and city.
+    if _dc.scope(a):                                # the influencer's phone decides its country
+        _ci = _countries_mod.account_country({"phone": (body.get("phone", "") or "").strip()})
+        if not _ci or _ci["iso"] != _dc.scope(a):
+            raise HTTPException(403, "The phone number must belong to your country")
     _dedup_window_start = now - timedelta(seconds=10)
     _recent_dup = db.influencers.find_one({
         "name": {"$regex": f"^{name}$", "$options": "i"},
@@ -2534,6 +2723,7 @@ def update_influencer(influencer_id: str, body: dict, a=Depends(get_current_admi
     existing = db.influencers.find_one({"_id": oid})
     if not existing:
         raise HTTPException(404, "Influencer not found")
+    _dc.require_record(a, existing, ("account_id",), ("phone",))
     is_super_admin = a.get("role_name") == "Super Admin"
     assigned = a.get("assigned_cities", [])
     if not is_super_admin:
@@ -2601,6 +2791,7 @@ def delete_influencer(influencer_id: str, a=Depends(get_current_admin)):
     existing = db.influencers.find_one({"_id": oid})
     if not existing:
         raise HTTPException(404, "Influencer not found")
+    _dc.require_record(a, existing, ("account_id",), ("phone",))
     if a.get("role_name") != "Super Admin":
         assigned = a.get("assigned_cities", [])
         if "*" not in assigned and existing.get("city") not in assigned:
@@ -2669,7 +2860,7 @@ def save_review_visibility(body: dict, a=Depends(get_current_admin)):
 @router.get("/withdraw-requests")
 def get_withdraw_requests(a=Depends(get_current_admin)):
     """Get all pending gift voucher withdrawal requests"""
-    requests = list(db.withdraw_requests.find({**_city_filter(a)}).sort("_id", -1))
+    requests = list(db.withdraw_requests.find(_scope(a, ("user_id",), ("phone",))).sort("_id", -1))
     result = []
     for r in requests:
         result.append({
@@ -2700,6 +2891,7 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
     req = db.withdraw_requests.find_one({"_id": ObjectId(request_id)})
     if not req:
         raise HTTPException(404, "Request not found")
+    _dc.require_record(a, req, ("user_id",), ("phone",))
     if req.get("status") == "fulfilled":
         raise HTTPException(400, "Already fulfilled")
     
@@ -3001,6 +3193,19 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
     if not title or not body:
         raise HTTPException(400, "title and body are required")
 
+    _iso = _dc.scope(a)
+    if _iso:
+        # Country-restricted user: FCM topics are global, so topic targets (offers / city) are refused; a broadcast goes only to the
+        # accounts of the user's own country, and a specific recipient must belong to it.
+        if target == "specific":
+            from routers.users import _phone_variants as _pv
+            _rec = db.accounts.find_one({"phone": {"$in": _pv((data.get("target_phone") or "").strip())}})
+            _dc.require_account(a, _rec)
+        elif target in ("all", "all_users"):
+            use_topic = False
+        else:
+            raise HTTPException(403, "This target is not available for a country-restricted user")
+
     sent_at = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d %b %Y, %I:%M %p")
     sent_count = 0
     fcm_error  = ""
@@ -3156,8 +3361,11 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
                 fail_count = 0
                 seen_tokens = set()
                 cursor_fields = {"fcm_token": 1}
-                for coll in (db.accounts, db.users):
-                    for rec in coll.find({"fcm_token": {"$exists": True, "$ne": ""}}, cursor_fields).limit(3000):
+                _bq = {"fcm_token": {"$exists": True, "$ne": ""}}
+                if _iso:
+                    _bq = {"$and": [_bq, _dc.account_query(_iso)]}
+                for coll in ((db.accounts,) if _iso else (db.accounts, db.users)):
+                    for rec in coll.find(_bq, cursor_fields).limit(3000):
                         tok = (rec.get("fcm_token") or "").strip()
                         if not tok or tok in seen_tokens:
                             continue
@@ -3252,8 +3460,14 @@ def fcm_tokens_list(a=Depends(get_current_admin)):
     """
     tokens = []
     seen = set()
+    _iso = _dc.scope(a)
     for coll_name, coll in [("accounts", db.accounts), ("users", db.users)]:
-        for rec in coll.find({"fcm_token": {"$exists": True, "$ne": ""}}, {"fcm_token": 1, "phone": 1}).limit(500):
+        if _iso and coll_name != "accounts":        # the legacy users collection has no reliable country -> never shown to a restricted user
+            continue
+        _fq = {"fcm_token": {"$exists": True, "$ne": ""}}
+        if _iso:
+            _fq = {"$and": [_fq, _dc.account_query(_iso)]}
+        for rec in coll.find(_fq, {"fcm_token": 1, "phone": 1}).limit(500):
             tok = (rec.get("fcm_token") or "").strip()
             if not tok or tok in seen:
                 continue
@@ -3625,7 +3839,7 @@ def list_merchant_banners(a=Depends(get_current_admin)):
 
     # signature -> list of approved created_at datetimes sharing that signature
     _approved_signatures = {}
-    for s in db.promo_sliders.find({"source_banner_id": {"$exists": True, "$ne": ""}}).sort("created_at", -1):
+    for s in db.promo_sliders.find({"$and": [{"source_banner_id": {"$exists": True, "$ne": ""}}, _scope(a, ("merchant_id",), ("merchant_phone",))]} if _dc.scope(a) else {"source_banner_id": {"$exists": True, "$ne": ""}}).sort("created_at", -1):
         row = _enrich_and_build(s, "promo_sliders", override_status="approved")
         if row:
             result.append(row)
@@ -3641,7 +3855,7 @@ def list_merchant_banners(a=Depends(get_current_admin)):
     # Skip approved ones here, AND skip stray pending duplicates that share the
     # same merchant/title/store AND were created within the dedup window of an
     # already-approved banner ("duplicate" bug) — see _DEDUP_WINDOW note above.
-    for b in db.merchant_banners.find().sort("created_at", -1):
+    for b in db.merchant_banners.find(_scope(a, ("merchant_id",), ("merchant_phone",)) if _dc.scope(a) else {}).sort("created_at", -1):
         _st = b.get("approval_status", b.get("status", "pending_approval"))
         if _st == "approved" and not b.get("deleted_by_admin"):
             continue
@@ -3678,6 +3892,8 @@ def list_merchant_banners(a=Depends(get_current_admin)):
 
 @router.post("/merchant-banners/cleanup-duplicates")
 def cleanup_duplicate_merchant_banners(a=Depends(get_current_admin)):
+    if _dc.scope(a):                                # a bulk operation across every country
+        raise HTTPException(403, "Not permitted for a country-restricted user")
     """
     Hard-deletes duplicate banners — both plain merchant_banners duplicates AND
     the cross-collection case where one duplicate got approved (→ promo_sliders)
@@ -3787,6 +4003,7 @@ def cleanup_duplicate_merchant_banners(a=Depends(get_current_admin)):
 @router.put("/merchant-banners/{bid}/approve")
 def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "approve")
+    _guard_banner(a, bid)
     """Approve a merchant banner — publishes it as a promo slider.
     IDEMPOTENT: If already approved, returns success without creating
     a duplicate promo_slider. One submitted banner = one banner record."""
@@ -3975,6 +4192,7 @@ def approve_merchant_banner(bid: str, a=Depends(get_current_admin)):
 @router.put("/merchant-banners/{bid}/reject")
 def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "approve")
+    _guard_banner(a, bid)
     reason = body.get("reason","")
     db.merchant_banners.update_one({"_id": ObjectId(bid)}, {"$set": {
         "approval_status":"rejected",
@@ -3988,6 +4206,7 @@ def reject_merchant_banner(bid: str, body: dict = {}, a=Depends(get_current_admi
 @router.put("/merchant-banners/{bid}")
 def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "edit")
+    _guard_banner(a, bid)
     """FIX 9: Admin edit merchant banner fields + status."""
     allowed = {"title", "image_url", "from_date", "end_date", "status", "duration_days"}
     update_data = {k: v for k, v in data.items() if k in allowed}
@@ -4019,6 +4238,7 @@ def update_merchant_banner(bid: str, data: dict, a=Depends(get_current_admin)):
 @router.delete("/merchant-banners/{bid}")
 def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "delete")
+    _guard_banner(a, bid)
     """Soft-delete: marks banner as inactive + deleted_by_admin in BOTH collections.
     PERMANENT FIX: Searches merchant_banners first, then promo_sliders.
     Always syncs deleted_by_admin flag to both so Flutter shows 'Removed by Admin'."""
@@ -4059,6 +4279,7 @@ def delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
 @router.delete("/merchant-banners/{bid}/hard")
 def hard_delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "delete")
+    _guard_banner(a, bid)
     """Permanently delete ONE specific banner record by id, plus its DIRECT
     linked counterpart only (merchant_banners doc <-> its own promo_slider via
     source_banner_id). Intentionally never matches by title/content — that
@@ -4097,6 +4318,7 @@ def hard_delete_merchant_banner(bid: str, a=Depends(get_current_admin)):
 @router.put("/merchant-banners/{bid}/toggle")
 def toggle_merchant_banner(bid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "edit")
+    _guard_banner(a, bid)
     """Toggle is_active ON/OFF for a merchant banner.
     PERMANENT FIX: Searches merchant_banners first, then promo_sliders (approved banners live there).
     Always syncs both collections to stay in agreement."""
@@ -4168,7 +4390,7 @@ def list_all_invoices(a=Depends(get_current_admin)):
     seen_invoice_nos = set()   # FIX T1: dedup by invoice_no, not by ObjectId
 
     # 1. Primary: central invoices collection (most authoritative — always wins)
-    for inv in db.invoices.find().sort("created_at", -1):
+    for inv in db.invoices.find(_scope(a, ("merchant_id",), ("merchant_phone",)) if _dc.scope(a) else {}).sort("created_at", -1):
         ino = inv.get("invoice_no", str(inv["_id"])[:8].upper())
         if ino and ino in seen_invoice_nos: continue
         if ino: seen_invoice_nos.add(ino)
@@ -4211,7 +4433,7 @@ def list_all_invoices(a=Depends(get_current_admin)):
         })
 
     # 2. Paid banners not already in invoices collection
-    for b in db.merchant_banners.find({"payment_status":"paid"}).sort("created_at",-1):
+    for b in db.merchant_banners.find({"$and": [{"payment_status":"paid"}, _scope(a, ("merchant_id",), ("merchant_phone",))]} if _dc.scope(a) else {"payment_status":"paid"}).sort("created_at",-1):
         ino = b.get("invoice_no", str(b["_id"])[:8].upper())
         if ino and ino in seen_invoice_nos: continue   # FIX T1: skip if invoice already in set
         if ino: seen_invoice_nos.add(ino)
@@ -4296,6 +4518,9 @@ def list_reviews(
     query = {}
     if store_id:
         query["store_id"] = store_id
+    _ok = _ids_in_country(a, "store")
+    if _ok is not None:
+        query = {"$and": [query, {"store_id": {"$in": sorted(_ok)}}]}
     reviews = list(
         db.reviews.find(query)
         .sort("created_at", -1)
@@ -4329,6 +4554,7 @@ def list_reviews(
 @router.delete("/reviews/{review_id}")
 def delete_review(review_id: str, a=Depends(get_current_admin)):
     """Admin deletes an inappropriate review."""
+    _guard_review(a, "reviews", review_id, "store")
     try:
         res = db.reviews.delete_one({"_id": ObjectId(review_id)})
     except Exception:
@@ -4341,7 +4567,8 @@ def delete_review(review_id: str, a=Depends(get_current_admin)):
 @router.get("/reviews/stats")
 def review_stats(a=Depends(get_current_admin)):
     """Return review counts grouped by store."""
-    pipeline = [
+    _ok = _ids_in_country(a, "store")
+    pipeline = ([{"$match": {"store_id": {"$in": sorted(_ok)}}}] if _ok is not None else []) + [
         {"$group": {"_id": "$store_id", "count": {"$sum": 1}, "avg": {"$avg": "$rating"}}},
         {"$sort": {"count": -1}},
         {"$limit": 50},
@@ -4812,6 +5039,7 @@ def delete_admin_banner(bid: str, a=Depends(get_current_admin)):
 def set_product_review_visibility(review_id: str, body: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Reports", "edit")
     """Toggle a product review's visibility in the app."""
+    _guard_review(a, "product_reviews", review_id, "product")
     try:
         visible = bool(body.get("visible", True))
         result = db.product_reviews.update_one(
@@ -4828,6 +5056,7 @@ def set_product_review_visibility(review_id: str, body: dict, a=Depends(get_curr
 def delete_product_review(review_id: str, a=Depends(get_current_admin)):
     _check_perm(a, "Reports", "delete")
     """Admin: delete a product review by ID."""
+    _guard_review(a, "product_reviews", review_id, "product")
     try:
         db.product_reviews.delete_one({"_id": ObjectId(review_id)})
     except Exception:
@@ -4846,6 +5075,9 @@ def delete_product_review(review_id: str, a=Depends(get_current_admin)):
 def list_influencer_reviews(a=Depends(get_current_admin)):
     """Admin: list all influencer reviews across all influencers."""
     reviews = list(db.influencer_reviews.find().sort("created_at", -1))
+    _ok = _ids_in_country(a, "influencer")
+    if _ok is not None:
+        reviews = [r for r in reviews if str(r.get("influencer_id") or "") in _ok]
 
     iids = {r.get("influencer_id") for r in reviews if r.get("influencer_id")}
     ioids = []
@@ -4889,6 +5121,7 @@ def delete_influencer_review(review_id: str, a=Depends(get_current_admin)):
     to 0 rather than leaving a stale non-zero value with nothing behind it.
     """
     _check_perm(a, "Influencers", "delete")
+    _guard_review(a, "influencer_reviews", review_id, "influencer")
     try:
         oid = ObjectId(review_id)
     except Exception:

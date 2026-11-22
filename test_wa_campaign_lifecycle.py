@@ -922,18 +922,18 @@ def test_lifecycle_routes_are_exactly_these_and_namespaced(admin):
 
 def test_no_worker_scheduler_or_second_sender_exists():
     for path in ("services/wa_campaign_manager.py", "routers/wa_campaign_lifecycle.py"):
-        src = pathlib.Path(path).read_text()
+        src = pathlib.Path(path).read_text(encoding="utf-8")
         for forbidden in ("BackgroundTasks", "threading", "asyncio.create_task", "apscheduler", "sched.", "Timer(", "while True",
                           "send_whatsapp_message", "requests.post", "wa.send_whatsapp_template(", "WA.send_whatsapp_template("):
             assert forbidden not in src, (path, forbidden)
-    mgr = pathlib.Path("services/wa_campaign_manager.py").read_text()
+    mgr = pathlib.Path("services/wa_campaign_manager.py").read_text(encoding="utf-8")
     assert mgr.count("WA.send_whatsapp_template_checked(") == 1                      # the single call site, inside send_test_message
     assert mgr.index("WA.send_whatsapp_template_checked(") > mgr.index("def send_test_message")
     assert "WA_CAMPAIGN_WORKER_ENABLED" not in mgr
 
 
 def test_sender_function_is_called_only_after_every_local_gate():
-    src = pathlib.Path("services/wa_campaign_manager.py").read_text()
+    src = pathlib.Path("services/wa_campaign_manager.py").read_text(encoding="utf-8")
     src = src[src.index("def send_test_message"):]
     order = [src.index(x) for x in ("confirm is not True", "template_problems(campaign)", "ST.sending_allowed()", "ST.is_test_number(",
                                     "E.check(canonical)", "_over_test_limits(admin_id, now)", "_claim_test_send(str(", "T.verify_live(",
@@ -943,7 +943,7 @@ def test_sender_function_is_called_only_after_every_local_gate():
 
 
 def test_nothing_at_startup_starts_processing_and_indexes_are_new_collections_only():
-    server = pathlib.Path("server.py").read_text()
+    server = pathlib.Path("server.py").read_text(encoding="utf-8")
     assert "wa_campaign_manager" in server and "ensure_indexes_safe" in server
     assert M.ensure_indexes_safe() is True
     names = {n for coll in (M.CAMPAIGNS, M.RECIPIENTS, M.TEST_SENDS) for n in _DB[coll].index_information()}

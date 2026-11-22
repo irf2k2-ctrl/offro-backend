@@ -22,7 +22,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from database import db
-from routers.admin import get_current_admin, _check_perm, _city_filter, _created_iso
+from routers.admin import get_current_admin, _check_perm, _city_filter, _created_iso, _scope
 from routers.merchant_app import _cloudinary_upload
 from routers.public import _is_deal_expired
 
@@ -72,7 +72,7 @@ def _display_status(d: dict) -> str:
 
 def _scoped_store_ids(a):
     """None = unrestricted; otherwise the set of store ids this admin may see."""
-    scope = _city_filter(a)
+    scope = _scope(a)                    # city scope (unchanged) + the owner's country for a country-restricted user
     if not scope:
         return None
     return {str(s["_id"]) for s in db.stores.find(scope, {"_id": 1})}

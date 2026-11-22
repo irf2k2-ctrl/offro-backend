@@ -142,7 +142,7 @@ def test_product_whatsapp_routes_and_startup_intact():
               "/merchant/products/order", "/merchant/products/verify", "/merchant/products/{pid}/renew/verify",
               "/products-public", "/admin/products/{vid}/extend", "/admin/pricing"):
         assert p in paths, p
-    src = open(os.path.join(os.path.dirname(server.__file__), "server.py")).read()
+    src = open(os.path.join(os.path.dirname(server.__file__), "server.py"), encoding="utf-8").read()
     for needle in ("ensure_settings", "ensure_indexes", "include_router(merchant_products.router",
                    "include_router(admin_products.router", "include_router(public_products.router",
                    "include_router(wa_template_test.router"):
@@ -152,7 +152,7 @@ def test_product_whatsapp_routes_and_startup_intact():
 # ── templates: helpers present, nothing obviously unsafe re-introduced ──
 @pytest.mark.parametrize("f", ["admin_dashboard", "merchant_dashboard"])
 def test_templates_define_escape_helpers_and_use_them(f):
-    s = open(os.path.join(os.path.dirname(server.__file__), "templates", f + ".html")).read()
+    s = open(os.path.join(os.path.dirname(server.__file__), "templates", f + ".html"), encoding="utf-8").read()
     assert s.count("function escHtml(") == 1 and "function _secJs(" in s and "function _secUrl(" in s
     assert s.count("escHtml(") > 10
     # no inline handler may interpolate a raw name/title/phone field
@@ -182,7 +182,7 @@ def test_all_five_product_collab_routers_and_startup_calls_present():
     assert any(p.startswith("/products-public") for p in paths)
     assert any(p.startswith("/merchant/products") for p in paths)
     assert any(p.startswith("/admin/products") for p in paths)
-    src = open(os.path.join(os.path.dirname(server.__file__), "server.py")).read()
+    src = open(os.path.join(os.path.dirname(server.__file__), "server.py"), encoding="utf-8").read()
     for needle in ("include_router(collaborations.merchant_router", "include_router(collaborations.influencer_router",
                    "_products_svc.ensure_settings()", "_products_svc.ensure_indexes()", "collaborations.ensure_indexes()"):
         assert needle in src, needle
@@ -193,7 +193,7 @@ def test_production_specific_features_preserved():
     assert "/gift-vouchers" in paths and "/voucher-image/{vid}" in paths
     assert "/admin/auth/login" in paths and "/admin/login" in paths     # RBAC / OTP admin login routes
     root = os.path.dirname(server.__file__)
-    login = open(os.path.join(root, "templates", "admin_login.html")).read()
+    login = open(os.path.join(root, "templates", "admin_login.html"), encoding="utf-8").read()
     assert "otp" in login.lower()                                        # Production OTP admin login page kept
-    src = open(os.path.join(root, "server.py")).read()
+    src = open(os.path.join(root, "server.py"), encoding="utf-8").read()
     assert "gift_vouchers" in src and "_ensure_otp_indexes" in src

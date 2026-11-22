@@ -30,6 +30,7 @@ from datetime import datetime
 from bson import ObjectId
 from bson.errors import InvalidId
 
+from services import dashboard_country as _dc      # country-restricted dashboard users (Stage 4)
 from services import wa_consent as C
 from services import wa_eligibility as E
 from services.wa_webhook_security import exc_summary, mask_phone
@@ -320,6 +321,8 @@ def resolve_merchants(ids=None, flt=None, admin=None) -> list:
         elif not stores:
             entry.update(qualifies=False, reason=R_NO_ACTIVE_STORE)
         elif not _in_scope([s["city"] for s in views], scope):
+            entry.update(qualifies=False, reason=R_OUT_OF_SCOPE)
+        elif admin is not None and not _dc.account_in_scope(admin, acct):        # country-restricted dashboard user
             entry.update(qualifies=False, reason=R_OUT_OF_SCOPE)
         elif not C.normalize_phone(acct.get("phone")):
             entry.update(qualifies=False, reason=R_MERCHANT_BAD_PHONE)

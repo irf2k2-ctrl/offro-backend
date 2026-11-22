@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File
 from fastapi.responses import JSONResponse, Response
 from bson import ObjectId
 from database import db
+from services import dashboard_country as _dc        # Dashboard user country access (Stage 4)
 from services.wa_webhook_security import mask_phone, safe_error, exc_summary
 from services.whatsapp import (
     send_whatsapp_message,
@@ -271,6 +272,12 @@ def store_incoming_message(phone: str, name: str, whatsapp_id: str,
         return False       # (was None) lets the webhook ask Meta to retry; other callers ignore the value
 
 
+def _chat_guard(a, customer):
+    """A country-restricted dashboard user only reaches WhatsApp conversations of numbers of its own country (404 otherwise)."""
+    if _dc.scope(a) and not _dc.account_in_scope(a, {"phone": (customer or {}).get("phone_number", "")}):
+        raise HTTPException(404, "Customer not found")
+
+
 # ── GET /admin/whatsapp/chats ─────────────────────────────────────────────────
 
 @router.get("/whatsapp/chats")
@@ -281,7 +288,9 @@ def list_chats(search: str = "", a=Depends(get_current_admin)):
             {"name":         {"$regex": search.strip(), "$options": "i"}},
             {"phone_number": {"$regex": search.strip(), "$options": "i"}},
         ]}
-    customers = list(db.customers_whatsapp.find(query).sort("last_message_time", -1).limit(200))
+    customers = list(db.customers_whatsapp.find(query).sort("last_message_time", -1).limit(200 if not _dc.scope(a) else 5000))
+    if _dc.scope(a):
+        customers = [c for c in customers if _dc.account_in_scope(a, {"phone": c.get("phone_number", "")})][:200]
     result = []
     for c in customers:
         result.append({
@@ -308,6 +317,7 @@ def get_conversation(customer_id: str, a=Depends(get_current_admin)):
     customer = db.customers_whatsapp.find_one({"_id": oid})
     if not customer:
         raise HTTPException(404, "Customer not found")
+    _chat_guard(a, customer)
 
     messages = list(db.whatsapp_chats.find({"customer_id": customer_id}).sort("timestamp", 1).limit(500))
 
@@ -375,6 +385,7 @@ async def send_reply(request: Request, a=Depends(get_current_admin)):
     customer = db.customers_whatsapp.find_one({"_id": oid})
     if not customer:
         raise HTTPException(404, "Customer not found")
+    _chat_guard(a, customer)
 
     phone = customer.get("phone_number", "")
     if not phone:
@@ -467,6 +478,7 @@ def mark_read(customer_id: str, a=Depends(get_current_admin)):
     customer = db.customers_whatsapp.find_one({"_id": oid})
     if not customer:
         raise HTTPException(404, "Customer not found")
+    _chat_guard(a, customer)
 
     db.whatsapp_chats.update_many(
         {"customer_id": customer_id, "direction": "incoming", "read": False},
@@ -489,6 +501,7 @@ def delete_conversation(customer_id: str, a=Depends(get_current_admin)):
     customer = db.customers_whatsapp.find_one({"_id": oid})
     if not customer:
         raise HTTPException(404, "Customer not found")
+    _chat_guard(a, customer)
 
     # Delete all messages for this customer
     msg_result = db.whatsapp_chats.delete_many({"customer_id": customer_id})
@@ -516,6 +529,13 @@ def delete_single_message(customer_id: str, message_id: str, a=Depends(get_curre
     except Exception:
         raise HTTPException(400, "Invalid message_id")
 
+    if _dc.scope(a):
+        try:
+            _chat_guard(a, db.customers_whatsapp.find_one({"_id": ObjectId(customer_id)}))
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(404, "Message not found")
     msg = db.whatsapp_chats.find_one({"_id": mid, "customer_id": customer_id})
     if not msg:
         raise HTTPException(404, "Message not found")

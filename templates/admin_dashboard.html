@@ -265,12 +265,13 @@ function _secUrl(u) {
       <th style="min-width:110px">Mobile</th>
       <th style="min-width:110px">Designation</th>
       <th style="min-width:110px">Role</th>
+      <th style="min-width:100px">Country</th>
       <th style="min-width:90px">Cities</th>
       <th style="min-width:70px">Status</th>
       <th style="min-width:110px">Last Login</th>
       <th style="min-width:80px">Actions</th>
     </tr></thead>
-    <tbody id="rbac_users_table"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
+    <tbody id="rbac_users_table"><tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">Loading...</td></tr></tbody>
   </table></div>
 </div>
 
@@ -2011,6 +2012,12 @@ function _secUrl(u) {
               <option value="disabled">Disabled</option>
               <option value="suspended">Suspended</option>
             </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label-custom">Country</label>
+            <select id="rbac_user_country" class="form-control"><option value="">All countries (no country restriction)</option></select>
+            <small style="color:var(--muted)">A user with a country only sees and manages data of that country, on top of the assigned cities. Leave empty for no country restriction.</small>
+            <div id="rbac_user_country_err" style="color:var(--danger);font-size:12px"></div>
           </div>
           <div class="col-12">
             <label class="form-label-custom">Assigned Cities</label>
@@ -10047,11 +10054,11 @@ const rbacLogLimit = 50;
 async function rbacLoadUsers() {
   try {
     let res = await fetch("/admin/auth/users", { credentials: "include" });
-    if (res.status===403||res.status===401) { document.getElementById("rbac_users_table").innerHTML = _accessDeniedHtml("User Management"); return; } if (!res.ok) { document.getElementById("rbac_users_table").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>'; return; }
+    if (res.status===403||res.status===401) { document.getElementById("rbac_users_table").innerHTML = _accessDeniedHtml("User Management"); return; } if (!res.ok) { document.getElementById("rbac_users_table").innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>'; return; }
     let users = await res.json();
     let html = "";
     if (users.length === 0) {
-      html = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">No dashboard users yet</td></tr>';
+      html = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted)">No dashboard users yet</td></tr>';
     } else {
       for (let u of users) {
         let statusBadge = u.status === "active" ? '<span style="color:#2d8a56;font-weight:600">● Active</span>'
@@ -10060,7 +10067,7 @@ async function rbacLoadUsers() {
         let cities = (u.assigned_cities || []).join(", ") || "—";
         if (u.assigned_cities && u.assigned_cities.includes("*")) cities = "All Cities";
         let lastLogin = u.last_login_at ? new Date(u.last_login_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : "Never";
-        html += '<tr><td style="position:sticky;left:0;background:#fff;z-index:1"><strong>' + (escHtml(u.full_name||"")) + '</strong></td><td>' + (escHtml(u.mobile||"")) + '</td><td>' + (escHtml(u.designation||"—")) + '</td><td>' + (escHtml(u.role_name||"—")) + '</td><td style="font-size:11px">' + escHtml(cities) + '</td><td>' + statusBadge + '</td><td style="font-size:11px">' + lastLogin + '</td><td><button class="btn btn-sm" onclick="rbacEditUser(\''+_secJs(u.id)+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteUser(\''+_secJs(u.id)+'\',\''+_secJs(u.full_name)+'\')"><i class="fas fa-trash text-danger"></i></button></td></tr>';
+        html += '<tr><td style="position:sticky;left:0;background:#fff;z-index:1"><strong>' + (escHtml(u.full_name||"")) + '</strong></td><td>' + (escHtml(u.mobile||"")) + '</td><td>' + (escHtml(u.designation||"—")) + '</td><td>' + (escHtml(u.role_name||"—")) + '</td><td style="font-size:11px">' + (u.country ? escHtml(u.country_name || u.country) : "All countries") + '</td><td style="font-size:11px">' + escHtml(cities) + '</td><td>' + statusBadge + '</td><td style="font-size:11px">' + lastLogin + '</td><td><button class="btn btn-sm" onclick="rbacEditUser(\''+_secJs(u.id)+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteUser(\''+_secJs(u.id)+'\',\''+_secJs(u.full_name)+'\')"><i class="fas fa-trash text-danger"></i></button></td></tr>';
       }
     }
     document.getElementById("rbac_users_table").innerHTML = html;
@@ -10086,6 +10093,16 @@ async function rbacShowUserModal(userId) {
     document.getElementById("rbac_user_role").innerHTML = opts;
   } catch (e) { console.error("rbacLoadRoles for modal", e); }
 
+  // Country selector: the one country master, served by the backend (never a list in the page)
+  try {
+    let cres = await fetch("/admin/auth/countries", { credentials: "include" });
+    let cdata = cres.ok ? await cres.json() : [];
+    let copts = '<option value="">All countries (no country restriction)</option>';
+    for (let c of cdata) copts += '<option value="' + escHtml(c.iso) + '">' + escHtml((c.flag ? c.flag + " " : "") + c.name) + '</option>';
+    document.getElementById("rbac_user_country").innerHTML = copts;
+  } catch (e) { console.error("rbac countries", e); }
+  document.getElementById("rbac_user_country_err").innerText = "";
+
   // Render city checkboxes
   let cityHtml = "";
   for (let c of RBAC_CITIES) {
@@ -10105,6 +10122,7 @@ async function rbacShowUserModal(userId) {
       document.getElementById("rbac_user_email").value = u.email || "";
       document.getElementById("rbac_user_role").value = u.role_id || "";
       document.getElementById("rbac_user_status").value = u.status || "active";
+      document.getElementById("rbac_user_country").value = u.country || "";
       for (let c of (u.assigned_cities || [])) {
         let chk = document.querySelector('.rbac-city-chk[value="' + c + '"]');
         if (chk) chk.checked = true;
@@ -10116,6 +10134,7 @@ async function rbacShowUserModal(userId) {
     document.getElementById("rbac_user_designation").value = "";
     document.getElementById("rbac_user_email").value = "";
     document.getElementById("rbac_user_status").value = "active";
+    document.getElementById("rbac_user_country").value = "";
   }
 
   new bootstrap.Modal(document.getElementById("rbacUserModal")).show();
@@ -10142,7 +10161,8 @@ async function rbacSaveUser() {
     alert("PIN must be exactly 4 or 6 digits"); return;
   }
 
-  let body = { full_name: name, mobile, designation, email: email || null, role_id: roleId, status, assigned_cities: cities };
+  let country = document.getElementById("rbac_user_country").value;
+  let body = { full_name: name, mobile, designation, email: email || null, role_id: roleId, status, assigned_cities: cities, country: country };
   if (pin) body.pin = pin;  // only sent if non-empty
 
   try {
@@ -10150,7 +10170,12 @@ async function rbacSaveUser() {
     let method = userId ? "PUT" : "POST";
     let res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
     let data = await res.json();
-    if (!res.ok) { alert(data.detail || "Failed to save user"); return; }
+    if (!res.ok) {
+      let d = data.detail;
+      let msg = (d && typeof d === "object") ? (d.message || d.code || "Failed to save user") : (d || "Failed to save user");
+      document.getElementById("rbac_user_country_err").innerText = /country/i.test(String(msg)) ? msg : "";
+      alert(msg); return;
+    }
     bootstrap.Modal.getInstance(document.getElementById("rbacUserModal")).hide();
     rbacLoadUsers();
     document.getElementById("rbac_users_msg").innerText = "✓ User " + (userId ? "updated" : "created") + " successfully";

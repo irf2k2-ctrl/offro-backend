@@ -1212,6 +1212,54 @@ def withdraw(data: dict, user=Depends(get_current_user)):
 # ══════════════════════════════════════════════════════════════════════════════
 # QR REDEEM  (unchanged)
 # ══════════════════════════════════════════════════════════════════════════════
+_CREDITS = "redemption_credits"     # ids of the redemptions whose credit is currently being applied (per redemption, so concurrent ones never collide)
+
+
+def _credit_redemption(user, user_token, rid, points):
+    """Credit ONE redemption to the account (and the legacy users mirror). Each update is a single atomic write that adds the points AND
+    puts this redemption's id into the `redemption_credits` set, and it only matches while that id is not in the set - so applying the
+    same redemption twice credits once. Other redemptions' ids are untouched, so two concurrent redemptions cannot overwrite each other."""
+    db.accounts.update_one({"_id": user["_id"], _CREDITS: {"$ne": rid}},
+                           {"$inc": {"visit_points": points, "visit_pts": points, "scans": 1}, "$addToSet": {_CREDITS: rid}})
+    # Keep legacy users collection in sync
+    if user.get("user_id"):
+        db.users.update_one({"token": user_token, _CREDITS: {"$ne": rid}},
+                            {"$inc": {"visit_points": points}, "$addToSet": {_CREDITS: rid}})
+
+
+def _undo_redemption(user, user_token, redemption_id, points):
+    """Compensation for POST /user/redeem: take back exactly what THIS redemption credited, then delete its record. Each reversal only
+    matches a document whose `redemption_credits` still contains this redemption's id and removes that id in the same write, so it
+    reverses only a credit that really happened, only once (a repeated rollback matches nothing), and never another redemption's credit."""
+    import logging
+    log = logging.getLogger("offro.redeem")
+    rid = str(redemption_id)
+    steps = (
+        (db.accounts, {"_id": user["_id"], _CREDITS: rid},
+         {"$inc": {"visit_points": -points, "visit_pts": -points, "scans": -1}, "$pull": {_CREDITS: rid}}),
+        (db.users, {"token": user_token, _CREDITS: rid},
+         {"$inc": {"visit_points": -points}, "$pull": {_CREDITS: rid}}),
+    )
+    for coll, flt, upd in steps:
+        try:
+            coll.update_one(flt, upd)
+        except Exception:
+            log.exception("redeem rollback: could not reverse the credit on %s for redemption %s", coll.name, rid)
+    try:
+        db.redemptions.delete_one({"_id": redemption_id})
+    except Exception:
+        log.exception("redeem rollback: could not delete redemption %s", rid)
+
+
+def _settle_redemption(user, user_token, rid):
+    """After a fully successful redemption: drop its id from the in-flight set (best effort - a leftover id is harmless)."""
+    for coll, flt in ((db.accounts, {"_id": user["_id"]}), (db.users, {"token": user_token})):
+        try:
+            coll.update_one({**flt, _CREDITS: rid}, {"$pull": {_CREDITS: rid}})
+        except Exception:
+            pass
+
+
 @router.post("/redeem")
 def redeem_qr(data: dict, request: Request):
     store_id   = data.get("store_id")
@@ -1246,11 +1294,14 @@ def redeem_qr(data: dict, request: Request):
     if recent:
         raise HTTPException(status_code=429, detail="Already redeemed from this store today. Try again tomorrow.")
 
-    db.accounts.update_one({"_id": user["_id"]}, {"$inc": {"visit_points": points_to_add, "visit_pts": points_to_add}})
-    # Keep legacy users collection in sync
-    if user.get("user_id"):
-        db.users.update_one({"token": user_token}, {"$inc": {"visit_points": points_to_add}})
+    # Points and the `scans` counter must exist ONLY for a scan whose redemption is recorded, and the deployment cannot be assumed to
+    # support multi-document transactions (a standalone MongoDB has none), so the order is: (1) record the redemption - if that fails
+    # nothing else has been touched; (2) credit the account(s); (3) if crediting fails, undo it and remove the redemption.
+    # `scans` is the account's QR-scan counter shown in Dashboard > Accounts (before Stage 4 only the one-time migration ever set it).
+    redemption_id = ObjectId()
+    rid = str(redemption_id)
     db.redemptions.insert_one({
+        "_id":         redemption_id,
         "user_id":     user_id,
         "store_id":    store_id,
         "store_name":  store.get("store_name"),
@@ -1258,6 +1309,12 @@ def redeem_qr(data: dict, request: Request):
         "points":      points_to_add,
         "created_at":  datetime.utcnow(),
     })
+    try:
+        _credit_redemption(user, user_token, rid, points_to_add)
+    except Exception:
+        _undo_redemption(user, user_token, redemption_id, points_to_add)
+        raise HTTPException(status_code=500, detail="Could not record the redemption. Nothing was changed - please try again.")
+    _settle_redemption(user, user_token, rid)
     updated = db.accounts.find_one({"_id": user["_id"]}) or db.users.find_one({"_id": user["_id"]})
     return {
         "message":      f"✅ {points_to_add} points added!",

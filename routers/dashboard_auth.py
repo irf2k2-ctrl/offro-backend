@@ -13,6 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from bson import ObjectId
 from database import db
+from services import dashboard_country as _dc          # country access for dashboard users (Stage 4)
+from utils import countries as _countries
 
 router = APIRouter(prefix="/auth", tags=["Dashboard RBAC & Auth"])
 
@@ -661,7 +663,8 @@ async def get_current_user_info(user: dict = Depends(get_current_dashboard_user)
         "profile_photo_url": user.get("profile_photo_url"),
         "role": role.get("role_name", "Unknown"),
         "permissions": role.get("permissions", {}),
-        "assigned_cities": user.get("assigned_cities", [])
+        "assigned_cities": user.get("assigned_cities", []),
+        "country": str(user.get("country") or "").strip().upper(),
     }
 
 
@@ -739,6 +742,29 @@ async def revoke_all_trusted_devices(
 # DASHBOARD USERS CRUD
 # ═══════════════════════════════════════════════════════════════
 
+def _check_user_in_actor_country(actor: dict, target: dict) -> None:
+    """A country-restricted dashboard user can only manage dashboard users of its own country (404: existence is not revealed)."""
+    iso = _dc.scope(actor)
+    if iso and str(target.get("country") or "").strip().upper() != iso:
+        raise HTTPException(status_code=404, detail="User not found")
+
+
+def _validate_country_change(actor: dict, target: dict, raw, target_id: str) -> str:
+    """The new `country` for `target`, or an HTTP error.
+      * must be a supported ISO code (or '' = no restriction) - 422 otherwise;
+      * nobody changes their OWN country unless they are Super Admin (so a restricted user cannot lift or move its own restriction);
+      * a country-restricted actor can only keep its own country on users it manages (cannot move a user elsewhere / unrestrict it)."""
+    new = _dc.clean_country(raw)
+    old = str(target.get("country") or "").strip().upper()
+    is_super = actor.get("role", {}).get("role_name") == _dc.SUPER_ADMIN
+    if str(actor.get("_id")) == str(target_id) and new != old and not is_super:
+        raise HTTPException(status_code=403, detail="You cannot change your own country assignment")
+    actor_iso = _dc.scope(actor)
+    if actor_iso and new != actor_iso:
+        raise HTTPException(status_code=403, detail="You can only assign your own country")
+    return new
+
+
 def _serialize_user(u: dict) -> dict:
     return {
         "id": str(u["_id"]),
@@ -751,9 +777,17 @@ def _serialize_user(u: dict) -> dict:
         "role_name": u.get("role_name", "Unassigned"),
         "status": u.get("status", "active"),
         "assigned_cities": u.get("assigned_cities", []),
+        "country": str(u.get("country") or "").strip().upper(),
+        "country_name": (_countries.country_info(str(u.get("country") or "")) or {}).get("name", ""),
         "last_login_at": u.get("last_login_at").isoformat() if u.get("last_login_at") else None,
         "created_at": u.get("created_at").isoformat() if u.get("created_at") else None,
     }
+
+
+@router.get("/countries")
+async def list_countries(user: dict = Depends(get_current_dashboard_user)):
+    """The country master (read-only), for the Country selector of the dashboard-user form. Same list as everywhere else."""
+    return _countries.supported_countries()
 
 
 @router.get("/users")
@@ -761,7 +795,11 @@ async def list_users(
     request: Request,
     user: dict = Depends(require_permission("User Management", "view"))
 ):
-    users = list(db.dashboard_users.find({}, {"pin": 0}).sort("created_at", -1))
+    _q = {}
+    _iso = _dc.scope(user)
+    if _iso:                                   # a country-restricted user only sees dashboard users of its own country
+        _q = {"country": _iso}
+    users = list(db.dashboard_users.find(_q, {"pin": 0}).sort("created_at", -1))
     for u in users:
         role = db.dashboard_roles.find_one({"_id": u["role_id"]}) if u.get("role_id") else None
         u["role_name"] = role["role_name"] if role else "Unassigned"
@@ -782,9 +820,18 @@ async def create_user(
     assigned_cities = data.get("assigned_cities", [])
     email = data.get("email") or None
     profile_photo_url = data.get("profile_photo_url") or None
+    country = _dc.clean_country(data.get("country"))          # '' = no country restriction (as every existing user)
 
     if not full_name or not mobile or not pin or not role_id:
         raise HTTPException(status_code=400, detail="full_name, mobile, pin, and role_id are required")
+    _actor_iso = _dc.scope(user)
+    if _actor_iso == _dc.INVALID_SCOPE:                       # corrupted country on the acting user: fail closed
+        raise HTTPException(status_code=403, detail="Your country assignment is invalid; ask a Super Admin to correct it")
+    if _actor_iso:
+        # A country-restricted user can only create users of its OWN country (omitted = its own) and never a Super Admin.
+        if country and country != _actor_iso:
+            raise HTTPException(status_code=403, detail="You can only assign your own country")
+        country = _actor_iso
 
     if not (pin.isdigit() and len(pin) in (4, 6)):
         raise HTTPException(status_code=400, detail="PIN must be 4 or 6 digits")
@@ -792,8 +839,11 @@ async def create_user(
     if db.dashboard_users.find_one({"mobile": mobile}):
         raise HTTPException(status_code=409, detail="Mobile number already registered")
 
-    if not db.dashboard_roles.find_one({"_id": ObjectId(role_id)}):
+    _role = db.dashboard_roles.find_one({"_id": ObjectId(role_id)})
+    if not _role:
         raise HTTPException(status_code=400, detail="Invalid role_id")
+    if _actor_iso and _role.get("role_name") == _dc.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="A country-restricted user cannot create a Super Admin")
 
     doc = {
         "full_name": full_name,
@@ -804,6 +854,7 @@ async def create_user(
         "profile_photo_url": profile_photo_url,
         "role_id": ObjectId(role_id),
         "assigned_cities": assigned_cities if assigned_cities else [],
+        "country": country,
         "status": "active",
         "login_attempts": 0,
         "lockout_until": None,
@@ -822,7 +873,7 @@ async def create_user(
         "User Management", "ADD",
         record_id=str(result.inserted_id),
         record_name=full_name,
-        after_value={"full_name": full_name, "mobile": mobile, "role_id": role_id, "assigned_cities": assigned_cities}
+        after_value={"full_name": full_name, "mobile": mobile, "role_id": role_id, "assigned_cities": assigned_cities, "country": country}
     )
 
     return {"message": "User created", "id": str(result.inserted_id)}
@@ -841,11 +892,14 @@ async def update_user(
     existing = db.dashboard_users.find_one({"_id": ObjectId(user_id)})
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
+    _check_user_in_actor_country(user, existing)
 
     updates = {}
     for field in ("full_name", "email", "designation", "profile_photo_url", "status", "assigned_cities"):
         if field in data:
             updates[field] = data[field]
+    if "country" in data:
+        updates["country"] = _validate_country_change(user, existing, data.get("country"), user_id)
 
     if "mobile" in data and str(data["mobile"]).strip():
         new_mobile = str(data["mobile"]).strip()
@@ -857,8 +911,11 @@ async def update_user(
         updates["mobile"] = new_mobile
 
     if "role_id" in data and data["role_id"]:
-        if not db.dashboard_roles.find_one({"_id": ObjectId(data["role_id"])}):
+        _new_role = db.dashboard_roles.find_one({"_id": ObjectId(data["role_id"])})
+        if not _new_role:
             raise HTTPException(status_code=400, detail="Invalid role_id")
+        if _dc.scope(user) and _new_role.get("role_name") == _dc.SUPER_ADMIN:
+            raise HTTPException(status_code=403, detail="A country-restricted user cannot assign the Super Admin role")
         updates["role_id"] = ObjectId(data["role_id"])
 
     if "pin" in data and str(data.get("pin", "")).strip():
@@ -882,6 +939,7 @@ async def update_user(
         "designation": existing.get("designation"),
         "status": existing.get("status"),
         "assigned_cities": existing.get("assigned_cities"),
+        "country": existing.get("country", ""),
         "role_id": str(existing.get("role_id")) if existing.get("role_id") else None
     }
 
@@ -920,6 +978,7 @@ async def reset_pin(
     existing = db.dashboard_users.find_one({"_id": ObjectId(user_id)})
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
+    _check_user_in_actor_country(user, existing)
 
     db.dashboard_users.update_one(
         {"_id": ObjectId(user_id)},
@@ -951,6 +1010,7 @@ async def delete_user(
     existing = db.dashboard_users.find_one({"_id": ObjectId(user_id)})
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
+    _check_user_in_actor_country(user, existing)
 
     super_role = db.dashboard_roles.find_one({"role_name": "Super Admin"})
     if super_role and existing.get("role_id") == super_role["_id"]:
@@ -1162,6 +1222,10 @@ async def list_activity_logs(
     if role_name != "Super Admin" and "*" not in assigned_cities:
         if assigned_cities:
             query["city"] = {"$in": assigned_cities}
+
+    _iso = _dc.scope(user)
+    if _iso:                                   # only the activity of dashboard users of its own country
+        query["mobile"] = {"$in": [u.get("mobile", "") for u in db.dashboard_users.find({"country": _iso}, {"mobile": 1})]}
 
     if user_name:
         query["user_name"] = {"$regex": user_name, "$options": "i"}

@@ -12,7 +12,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from database import db
-from routers.admin import get_current_admin, _check_perm, _city_filter
+from routers.admin import get_current_admin, _check_perm, _city_filter, _scope, _country_only, _dc
 from routers.merchant_app import _cloudinary_upload, _make_thumb_url
 from services import products as P
 
@@ -122,7 +122,7 @@ def _admin_fields(data: dict, store):
 @router.get("/products")
 def list_products(a=Depends(get_current_admin)):
     P.expire_due()
-    flt = {"status": {"$ne": "deleted"}, **_city_filter(a)}
+    flt = {"status": {"$ne": "deleted"}, **_scope(a)}
     return [_row(p) for p in db[PRODUCTS].find(flt).sort("_id", -1)]
 
 
@@ -131,6 +131,8 @@ def list_products(a=Depends(get_current_admin)):
 def create_product(data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Products", "add")
     merchant, store = _resolve_merchant(data)
+    if _dc.scope(a):                                    # the owner decides the country; an OffrO-owned product has none -> refused
+        _dc.require_account(a, _dc._account_by_key((merchant or {}).get("_id")))
     fields = _admin_fields(data, store)
     payment = None
     if data.get("pay_mode") or data.get("pay_amount"):
@@ -151,10 +153,12 @@ def create_product(data: dict, a=Depends(get_current_admin)):
 
 
 # ── edit / lifecycle ───────────────────────────────────────────────────────────
-def _get(vid, allow_deleted=False):
+def _get(vid, allow_deleted=False, a=None):
     doc = db[PRODUCTS].find_one({"_id": _oid(vid)})
     if not doc:
         raise HTTPException(404, "Product not found")
+    if a is not None:                                   # a country-restricted user only reaches products of its own country
+        _dc.require_record(a, doc, ("merchant_id",), ("merchant_phone",))
     if doc.get("status") == "deleted" and not allow_deleted:
         raise HTTPException(410, "This product was deleted")
     return doc
@@ -163,7 +167,7 @@ def _get(vid, allow_deleted=False):
 @router.put("/products/{vid}")
 def update_product(vid: str, data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Products", "edit")
-    doc = _get(vid)
+    doc = _get(vid, a=a)
     upd = {}
     for src, dst in (("title", "title"), ("text", "description"), ("offer_text", "description"),
                      ("price", "price"), ("original_price", "original_price"),
@@ -208,7 +212,7 @@ def update_product(vid: str, data: dict, a=Depends(get_current_admin)):
 @router.put("/products/{vid}/approve")
 def approve_product(vid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Products", "approve")
-    doc = _get(vid)
+    doc = _get(vid, a=a)
     expired = P.is_expired_by_date(doc)
     db[PRODUCTS].update_one({"_id": doc["_id"]}, {"$set": {
         "status": "expired" if expired else "approved", "is_active": not expired,
@@ -219,7 +223,7 @@ def approve_product(vid: str, a=Depends(get_current_admin)):
 @router.put("/products/{vid}/reject")
 def reject_product(vid: str, body: dict = {}, a=Depends(get_current_admin)):
     _check_perm(a, "Products", "approve")
-    doc = _get(vid)
+    doc = _get(vid, a=a)
     db[PRODUCTS].update_one({"_id": doc["_id"]}, {"$set": {
         "status": "rejected", "is_active": False, "rejection_reason": (body or {}).get("reason", ""),
         "rejected_at": datetime.utcnow(), "updated_at": datetime.utcnow()}})
@@ -230,14 +234,14 @@ def reject_product(vid: str, body: dict = {}, a=Depends(get_current_admin)):
 def delete_product(vid: str, a=Depends(get_current_admin)):
     """Soft delete — same terminal state as a merchant delete (frees the slot)."""
     _check_perm(a, "Products", "delete")
-    _guard(P.soft_delete, _get(vid, allow_deleted=True), "admin")
+    _guard(P.soft_delete, _get(vid, allow_deleted=True, a=a), "admin")
     return {"ok": True}
 
 
 @router.put("/products/{vid}/activate")
 def activate_product(vid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Products", "edit")
-    doc = _get(vid)
+    doc = _get(vid, a=a)
     if doc.get("status") == "expired" or P.is_expired_by_date(doc):
         raise HTTPException(400, "This product has expired. Extend it first.")
     db[PRODUCTS].update_one({"_id": doc["_id"]}, {"$set": {"is_active": True, "updated_at": datetime.utcnow()}})
@@ -248,7 +252,7 @@ def activate_product(vid: str, a=Depends(get_current_admin)):
 def deactivate_product(vid: str, a=Depends(get_current_admin)):
     """Deactivated products stay approved and keep occupying the merchant's slot until they expire."""
     _check_perm(a, "Products", "edit")
-    doc = _get(vid)
+    doc = _get(vid, a=a)
     db[PRODUCTS].update_one({"_id": doc["_id"]}, {"$set": {"is_active": False, "updated_at": datetime.utcnow()}})
     return {"ok": True}
 
@@ -271,7 +275,7 @@ def extend_product(vid: str, data: dict, a=Depends(get_current_admin)):
                                someone activates it
       pending / rejected / deleted -> refused with a clear error"""
     _check_perm(a, "Products", "edit")
-    doc = _get(vid, allow_deleted=True)
+    doc = _get(vid, allow_deleted=True, a=a)
     status = doc.get("status")
     if status == "deleted":
         raise HTTPException(410, "This product was deleted and cannot be extended.")
@@ -314,7 +318,8 @@ def extend_product(vid: str, data: dict, a=Depends(get_current_admin)):
 def summary(a=Depends(get_current_admin)):
     today = P.ist_today()
     base = {"status": {"$ne": "deleted"}}
-    c = lambda q: db[PRODUCTS].count_documents({**base, **q})
+    _ctry = _country_only(a)
+    c = lambda q: db[PRODUCTS].count_documents({"$and": [{**base, **q}, _ctry]} if _ctry else {**base, **q})
     return {
         "total": c({}),
         "live": c({"status": "approved", "end_date": {"$gte": today}}),
@@ -333,7 +338,8 @@ def revenue(a=Depends(get_current_admin)):
 
     def _sum(since):
         r = list(db[ORDERS].aggregate([
-            {"$match": {"status": "paid", "total": {"$gt": 0}, "created_at": {"$gte": since}}},
+            {"$match": {"$and": [{"status": "paid", "total": {"$gt": 0}, "created_at": {"$gte": since}}, _country_only(a)]}
+             if _dc.scope(a) else {"status": "paid", "total": {"$gt": 0}, "created_at": {"$gte": since}}},
             {"$group": {"_id": None, "t": {"$sum": "$total"}}}]))
         return r[0]["t"] if r else 0
     return {"today": _sum(today), "this_month": _sum(month), "lifetime": _sum(epoch)}
@@ -342,7 +348,8 @@ def revenue(a=Depends(get_current_admin)):
 @router.get("/products/expiring")
 def expiring(days: int = 7, a=Depends(get_current_admin)):
     today = P.ist_today()
-    docs = db[PRODUCTS].find({"status": "approved", "end_date": {"$gte": today, "$lte": today + timedelta(days=days)}}
+    _q = {"status": "approved", "end_date": {"$gte": today, "$lte": today + timedelta(days=days)}}
+    docs = db[PRODUCTS].find({"$and": [_q, _country_only(a)]} if _dc.scope(a) else _q
                              ).sort("end_date", 1).limit(100)
     return [{"id": str(d["_id"]), "title": d.get("title", ""), "merchant_name": d.get("merchant_name", ""),
              "merchant_phone": d.get("merchant_phone", ""), "store_name": d.get("store_name", ""),
@@ -352,7 +359,8 @@ def expiring(days: int = 7, a=Depends(get_current_admin)):
 @router.get("/products/top-merchants")
 def top_merchants(limit: int = 10, a=Depends(get_current_admin)):
     rows = db[PRODUCTS].aggregate([
-        {"$match": {"status": "approved", "merchant_id": {"$nin": ["", None]}}},
+        {"$match": {"$and": [{"status": "approved", "merchant_id": {"$nin": ["", None]}}, _country_only(a)]}
+         if _dc.scope(a) else {"status": "approved", "merchant_id": {"$nin": ["", None]}}},
         {"$group": {"_id": "$merchant_id", "merchant_name": {"$first": "$merchant_name"},
                     "merchant_phone": {"$first": "$merchant_phone"}, "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}, {"$limit": limit}])
@@ -364,6 +372,9 @@ def top_merchants(limit: int = 10, a=Depends(get_current_admin)):
 @router.get("/product-reviews")
 def list_reviews(a=Depends(get_current_admin)):
     reviews = list(db.product_reviews.find().sort("created_at", -1))
+    if _dc.scope(a):                                    # keep only reviews of products of the user's country
+        _ok = {str(p["_id"]) for p in db[PRODUCTS].find(_country_only(a), {"_id": 1})}
+        reviews = [r for r in reviews if str(r.get("product_id") or "") in _ok]
     oids = []
     for pid in {r.get("product_id") for r in reviews if r.get("product_id")}:
         try:
