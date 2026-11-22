@@ -922,12 +922,16 @@ def get_public_categories_hyphen_alias():
 
 # =================== PUBLIC TERMS ===================
 @router.get("/terms/{type}")
-def get_terms_public(type: str):
+def get_terms_public(type: str, lang: str = ""):
     if type not in ("merchant", "user"):
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="type must be merchant or user")
     doc = db.terms.find_one({"type": type}) or {}
-    return {"type": type, "content": doc.get("content", "")}
+    out = {"type": type, "content": doc.get("content", "")}
+    if lang:      # optional ?lang=: the published translation when there is one, otherwise the same English text as before
+        from services import legal_documents as _ld
+        out.update(_ld.localize(_ld.slug_for("terms", type), out["content"], lang))
+    return out
 
 
 # =================== TERMS ===================
@@ -963,12 +967,15 @@ def reverse_geocode_endpoint(lat: float, lng: float):
 
 
 @router.get("/policy/{policy_type}")
-def get_policy(policy_type: str):
+def get_policy(policy_type: str, lang: str = ""):
     doc = db.policies.find_one({"type": policy_type}) or {}
     content = doc.get("content", "")
     if not content:
         defaults = {"privacy": _default_privacy(), "refund": _default_refund(), "kyc": _default_kyc()}
         content = defaults.get(policy_type, "")
+    if lang:      # optional ?lang=: the published translation when there is one, otherwise the same English text as before
+        from services import legal_documents as _ld
+        return _ld.localize(_ld.slug_for("policies", policy_type), content, lang)
     return {"content": content}
 
 # =================== SOCIAL LINKS (public) ===================
@@ -1248,8 +1255,11 @@ def validate_discount(body: dict):
 
 # =================== ABOUT US (public) ===================
 @router.get("/about")
-def get_about_public():
+def get_about_public(lang: str = ""):
     doc = db.settings.find_one({"key": "about_us"}) or {}
+    if lang:      # optional ?lang=: the published translation when there is one, otherwise the same English text as before
+        from services import legal_documents as _ld
+        return _ld.localize("about_us", doc.get("content", ""), lang)
     return {"content": doc.get("content", "")}
 
 # =================== PROMO SLIDERS (public - for Flutter app) ===================

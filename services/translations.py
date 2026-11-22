@@ -9,6 +9,7 @@ What this is
 Collections (each environment has its OWN database, chosen by its own MONGO_URL; nothing is shared or synced between environments)
   translation_languages   code (unique), name_en, name_native, direction, status (draft|active|disabled), bundled
   translation_keys        key (unique), english, placeholders, is_plural, group (app|legal), screen_group, max_length, deprecated
+                          (+ group "documents", kind "document" = a whole legal / information document: see services/legal_documents.py)
   translation_values      lang, key, track, value, status (modified|published), updated_by/at   [the working copy]
   translation_versions    track, lang, version (unique together), strings, hash, note, published_by/at   [immutable snapshots;
                           the app detects changes by comparing version + hash from the manifest]
@@ -19,7 +20,8 @@ Collections (each environment has its OWN database, chosen by its own MONGO_URL;
                           come from the one country master, utils.phone.SUPPORTED_COUNTRIES. An empty list means "no restriction".]
   (translation_audit lives in services/translation_audit.py)
 
-Tracks: "app" (ordinary text) and "legal" (keys with group "legal"). They are versioned and published separately, so an ordinary
+Tracks: "app" (ordinary text), "legal" (keys with group "legal") and "documents" (whole legal / information documents, group "documents";
+never part of the override files the app downloads, only served through the document endpoints). They are versioned and published separately, so an ordinary
 publish can never carry or overwrite legal wording. The legal track is edited and published like any other text. NOTE: the Flutter app
 currently reads ONLY the "app" track, so publishing legal text does not change what customers see.
 
@@ -53,10 +55,13 @@ LANG_COUNTRIES = "translation_language_countries"
 BASE_LANGUAGE = "en"          # the app's built-in source language; it has no translation_languages record
 STATE_ID = "state"
 TRACKS = ("app", "legal")
+DOCUMENT_TRACK = "documents"   # whole legal / information documents: own versions, never part of the app's override files (services/legal_documents.py)
+EDITABLE_TRACKS = TRACKS + (DOCUMENT_TRACK,)
 DIRECTIONS = ("ltr", "rtl")
 LANG_STATUSES = ("draft", "active", "disabled")
 DEFAULT_MAX_LENGTH = 500
 ABSOLUTE_MAX_LENGTH = 2000
+DOCUMENT_MAX_LENGTH = 30000   # whole legal / information documents (kind "document", see services/legal_documents.py); fits one spreadsheet cell
 NOTE_MAX = 300
 
 _KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,99}$")
@@ -132,7 +137,8 @@ def validate_value(key_doc: dict, value) -> str:
     v = unicodedata.normalize("NFC", value).strip()
     if not v:
         raise TranslationError("empty_value", 422)
-    limit = min(int(key_doc.get("max_length") or DEFAULT_MAX_LENGTH), ABSOLUTE_MAX_LENGTH)
+    is_doc = key_doc.get("kind") == "document"
+    limit = min(int(key_doc.get("max_length") or DEFAULT_MAX_LENGTH), DOCUMENT_MAX_LENGTH if is_doc else ABSOLUTE_MAX_LENGTH)
     if len(v) > limit:
         raise TranslationError("too_long", 422, {"max_length": limit})
     for ch in v:
@@ -143,12 +149,13 @@ def validate_value(key_doc: dict, value) -> str:
             raise TranslationError("hidden_or_bidi_control_character", 422)
     if _TAG_RE.search(v) or _ENTITY_RE.search(v):
         raise TranslationError("html_not_allowed", 422)
-    names = _PLACEHOLDER_RE.findall(v)
-    if "{" in _PLACEHOLDER_RE.sub("", v) or "}" in _PLACEHOLDER_RE.sub("", v):
-        raise TranslationError("malformed_placeholder", 422)
-    expected = sorted(set(key_doc.get("placeholders") or []))
-    if sorted(set(names)) != expected:
-        raise TranslationError("placeholder_mismatch", 422, {"expected": expected, "found": sorted(set(names))})
+    if not is_doc:      # a document is plain long text, not a format string: braces are literal and there is nothing to preserve
+        names = _PLACEHOLDER_RE.findall(v)
+        if "{" in _PLACEHOLDER_RE.sub("", v) or "}" in _PLACEHOLDER_RE.sub("", v):
+            raise TranslationError("malformed_placeholder", 422)
+        expected = sorted(set(key_doc.get("placeholders") or []))
+        if sorted(set(names)) != expected:
+            raise TranslationError("placeholder_mismatch", 422, {"expected": expected, "found": sorted(set(names))})
     if not _risky_tokens(v) <= _risky_tokens(key_doc.get("english", "")):
         raise TranslationError("url_email_or_phone_not_in_english", 422)
     return v
@@ -195,7 +202,7 @@ def sync_keys(entries: list) -> dict:
         added += 1 if res.upserted_id is not None else 0
         updated += 0 if res.upserted_id is not None else 1
         seen.add(key)
-    dep = db[KEYS].update_many({"key": {"$nin": list(seen)}, "deprecated": {"$ne": True}}, {"$set": {"deprecated": True}})
+    dep = db[KEYS].update_many({"key": {"$nin": list(seen)}, "kind": {"$ne": "document"}, "deprecated": {"$ne": True}}, {"$set": {"deprecated": True}})
     return {"added": added, "updated": updated, "deprecated": dep.modified_count}
 
 
@@ -207,11 +214,12 @@ def get_key(key: str) -> dict:
 
 
 def track_of(key_doc: dict) -> str:
-    return "legal" if key_doc.get("group") == "legal" else "app"
+    g = key_doc.get("group")
+    return "legal" if g == "legal" else DOCUMENT_TRACK if g == DOCUMENT_TRACK else "app"
 
 
 def _check_track(track: str) -> str:
-    if track not in TRACKS:
+    if track not in EDITABLE_TRACKS:
         raise TranslationError("invalid_track", 422)
     return track
 
@@ -303,7 +311,7 @@ def update_language(code: str, changes: dict) -> dict:
     if "status" in changes:
         if changes["status"] not in ("active", "disabled"):
             raise TranslationError("invalid_status", 422)
-        if changes["status"] == "active" and not latest_version("app", code) and not latest_version("legal", code):
+        if changes["status"] == "active" and not any(latest_version(t, code) for t in EDITABLE_TRACKS):
             raise TranslationError("nothing_published_yet", 409)
         upd["status"] = changes["status"]
     for f in ("name_en", "name_native", "direction"):

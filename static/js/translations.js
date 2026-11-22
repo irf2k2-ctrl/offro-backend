@@ -19,7 +19,9 @@
 
   var API = '/admin/translations';
   var DENIED = 'You do not have permission to view Translations. Ask a Super Admin to grant the module to your role.';
-  var TRACK_LABEL = { app: 'App text', legal: 'Legal text' };
+  var TRACK_LABEL = { app: 'App text', legal: 'Legal text', documents: 'Legal documents' };
+  // 'documents' is its own text type (whole legal / information documents, edited side by side with the English) with its own versions.
+  function apiTrack(t) { return t; }
 
   // ── output helpers ───────────────────────────────────────────────────────────────────────
   function esc(v) {
@@ -43,7 +45,7 @@
   }
 
   // ── state ────────────────────────────────────────────────────────────────────────────────
-  var st = { env: null, langs: [], countries: [], tab: 'overview', lang: '', track: 'app', filter: 'all', q: '', page: 1, strings: null, seq: 0 };
+  var st = { env: null, langs: [], countries: [], tab: 'overview', lang: '', track: 'app', filter: 'all', q: '', page: 1, strings: null, seq: 0, docs: [], doc: '', docData: null };
 
   function envName() { return st.env && st.env.environment ? st.env.environment.classification : 'unknown'; }
   // Every action that changes data needs a SAFELY IDENTIFIED environment. 'unknown' (not set / invalid / conflicting) disables them all;
@@ -104,7 +106,18 @@
     environment_mismatch: 'This file was downloaded from a different environment (staging or production) than this server. Nothing was changed. Download a fresh draft here.',
     language_mismatch: 'This file belongs to a different language than the one selected. Nothing was changed.',
     track_mismatch: 'This file belongs to a different text type (App text / Legal text) than the one selected. Nothing was changed.',
-    version_conflict: 'Another publish happened at the same time. Nothing was changed. Try again.'
+    version_conflict: 'Another publish happened at the same time. Nothing was changed. Try again.',
+    unknown_document: 'This document does not exist.',
+    document_exists: 'A document with that name already exists, so nothing was changed. Existing documents are never replaced.',
+    invalid_slug: 'The document id must be 2-48 characters: lowercase letters, digits and underscores, starting with a letter.',
+    invalid_title: 'Enter a title of up to 80 characters.',
+    empty_content: 'The English text cannot be empty.',
+    not_editable_here: 'The English text of this document is managed where it was created (Policies, Terms or About). It cannot be changed here.',
+    too_long: 'This text is too long for this document.',
+    empty_value: 'The translation cannot be empty.',
+    html_not_allowed: 'HTML tags and entities are not allowed. Use plain text (headings with #, lists with - or 1.).',
+    url_email_or_phone_not_in_english: 'The translation contains a link, e-mail address or phone number that is not in the English text. Use only the ones from the English text.',
+    key_deprecated: 'This document no longer has English text, so it cannot be edited.'
   };
   function messageFor(data, status) {
     var d = data && data.detail, code = d && typeof d === 'object' ? d.code : '';
@@ -148,9 +161,10 @@
       (o.fields || []).forEach(function (f) {
         if (f.type === 'select') fh += h`<div class="mb-2"><label class="small fw-bold">${f.label}</label><select id="trn_f_${f.id}" class="form-select">${raw((f.options || []).map(function (op) { return h`<option value="${op[0]}">${op[1]}</option>`; }).join(''))}</select></div>`;
         else if (f.type === 'multicheck') fh += h`<div class="mb-2"><label class="small fw-bold">${f.label}</label>${raw(countryBoxes('trn_f_' + f.id, f.selected))}<div class="trn-hint">${f.hint || ''}</div></div>`;
+        else if (f.type === 'long') fh += h`<div class="mb-2"><label class="small fw-bold">${f.label}</label><textarea id="trn_f_${f.id}" rows="10" class="trn-long">${f.value || ''}</textarea></div>`;
         else if (f.type === 'check') fh += h`<div class="mb-2"><label class="small fw-bold"><input type="checkbox" id="trn_f_${f.id}"> ${f.label}</label></div>`;
         else if (f.type === 'note') fh += h`<div class="mb-2"><label class="small fw-bold">${f.label}</label><textarea id="trn_f_${f.id}" rows="3" maxlength="300"></textarea></div>`;
-        else fh += h`<div class="mb-2"><label class="small fw-bold">${f.label}</label><input type="text" id="trn_f_${f.id}" maxlength="80"></div>`;
+        else fh += h`<div class="mb-2"><label class="small fw-bold">${f.label}</label><input type="text" id="trn_f_${f.id}" maxlength="80" value="${f.value || ''}"></div>`;
       });
       setHtml($('trn_modal_fields'), (o.html || '') + fh);
       var box = m.querySelector('.trn-modal-box'); if (box) box.style.maxWidth = o.wide ? '880px' : '';
@@ -200,7 +214,7 @@
   }
   function selectors(withFilter) {
     var lo = st.langs.map(function (l) { return h`<option value="${l.code}" ${raw(l.code === st.lang ? 'selected' : '')}>${l.name_en} (${l.code})</option>`; }).join('');
-    var to = ['app', 'legal'].map(function (t) { return h`<option value="${t}" ${raw(t === st.track ? 'selected' : '')}>${TRACK_LABEL[t]}</option>`; }).join('');
+    var to = ['app', 'legal', 'documents'].map(function (t) { return h`<option value="${t}" ${raw(t === st.track ? 'selected' : '')}>${TRACK_LABEL[t]}</option>`; }).join('');
     return h`<select data-change="lang" aria-label="Language">${raw(lo)}</select><select data-change="track" aria-label="Track">${raw(to)}</select>`;
   }
 
@@ -260,9 +274,10 @@
   async function loadStrings() {
     var my = ++st.seq, p = $('trn_pane_strings');
     if (!st.lang) { setHtml(p, '<div class="trn-empty">Select or add a language first.</div>'); return; }
+    if (st.track === 'documents') return loadDocuments(my);
     setHtml(p, '<div class="trn-empty"><i class="fas fa-spinner fa-spin"></i> Loading...</div>');
     try {
-      var d = await api('/strings?lang=' + encodeURIComponent(st.lang) + '&track=' + st.track + '&filter=' + st.filter + '&q=' + encodeURIComponent(st.q) + '&page=' + st.page);
+      var d = await api('/strings?lang=' + encodeURIComponent(st.lang) + '&track=' + apiTrack(st.track) + '&filter=' + st.filter + '&q=' + encodeURIComponent(st.q) + '&page=' + st.page);
       if (my !== st.seq) return;
       st.strings = d; renderStrings();
     } catch (e) { if (my === st.seq) setHtml(p, h`<div class="trn-alert">${e.message}</div>`); }
@@ -290,10 +305,109 @@
       h`<div class="trn-toolbar">${raw(selectors())}<select data-change="filter" aria-label="Filter">${raw(filt)}</select>` +
       h`<input type="search" placeholder="Search key or English text" value="${st.q}" data-input="q" aria-label="Search">${raw(publish)}${raw(xfer)}</div>` +
       (!envKnown() ? '<p class="trn-note">Changes are disabled until the environment is identified.</p>' : '') +
-      (st.track === 'legal' ? '<p class="trn-note">Legal text can be edited and published here, but the customer app does not read legal text yet, so publishing it does not change what customers see.</p>' : '') +
+      (st.track === 'legal' ? '<p class="trn-note">Legal text can be edited and published here, but the customer app does not read legal text yet, so publishing it does not change what customers see. Whole documents (Privacy Policy, Terms, About Us ...) are translated in the <strong>Legal documents</strong> view, and the customer app does show those.</p>' : '') +
       (d.rows.length ? '<div class="table-wrap"><table class="trn-table"><thead><tr><th>Key</th><th>English (source)</th><th>Translation</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
         : '<div class="trn-empty">No translation keys match.' + (d.total === 0 && st.filter === 'all' && !st.q ? ' The key list is created from the app text during the localization phase.' : '') + '</div>') +
       h`<div class="trn-toolbar"><button type="button" class="btn-s" data-act="prev" ${raw(d.page <= 1 ? 'disabled' : '')}>Previous</button><span>Page ${d.page} of ${pages} · ${d.total} key${d.total === 1 ? '' : 's'}</span><button type="button" class="btn-s" data-act="next" ${raw(d.page >= pages ? 'disabled' : '')}>Next</button></div>`);
+  }
+
+  // ── legal & information documents (side-by-side editor) ──────────────────────────────────
+  // Left: the English source, READ ONLY (a readonly element with no save action; the server has no route that changes English here).
+  // Right: the selected language, editable. Saving uses the same endpoint, permission, validation and Modified/Published rule as every
+  // other translation (PUT /strings/{lang}/doc_<slug>); publishing is the same Publish Changes of the legal text type.
+  async function loadDocuments(my) {
+    var p = $('trn_pane_strings');
+    try {
+      var d = await api('/documents?lang=' + encodeURIComponent(st.lang));
+      if (my !== st.seq) return;
+      st.docs = d.documents || [];
+      var avail = st.docs.filter(function (x) { return x.has_english && !x.too_long; });
+      if (!avail.some(function (x) { return x.slug === st.doc; })) st.doc = avail.length ? avail[0].slug : '';
+      st.docData = st.doc ? await api('/documents/' + encodeURIComponent(st.doc) + '?lang=' + encodeURIComponent(st.lang)) : null;
+      if (my !== st.seq) return;
+      renderDocuments();
+    } catch (e) { if (my === st.seq) setHtml(p, h`<div class="trn-alert">${e.message}</div>`); }
+  }
+  function statusLabel(s) { return s === 'published' ? 'Published' : s === 'modified' ? 'Modified' : 'Not translated'; }
+  function renderDocuments() {
+    var d = st.docData, lo = langObj(st.lang), dir = lo ? lo.direction : 'ltr', edit = canEdit();
+    var avail = st.docs.filter(function (x) { return x.has_english && !x.too_long; });
+    var opts = avail.map(function (x) { return h`<option value="${x.slug}" ${raw(x.slug === st.doc ? 'selected' : '')}>${x.title} · ${statusLabel(x.status)}</option>`; }).join('');
+    var publish = isSA() && envKnown() ? '<button type="button" class="btn-p trn-publish" data-act="publish">Publish Changes</button>' : '';
+    var xfer = '<button type="button" class="btn-s trn-xfer" data-act="downloaddraft">Download Draft</button>' + (edit ? '<button type="button" class="btn-s trn-xfer" data-act="importdraft">Import</button>' : '');
+    var add = isSA() && envKnown() ? '<button type="button" class="btn-s" data-act="adddoc">Add document</button>' : '';
+    var pending = st.docs.filter(function (x) { return !x.has_english; }).map(function (x) { return x.title; });
+    var tooLong = st.docs.filter(function (x) { return x.too_long; }).map(function (x) { return x.title; });
+    var body;
+    if (!d) {
+      body = '<div class="trn-empty">No document has English text yet.' + (isSA() ? ' Use <strong>Add document</strong> to add one.' : '') + '</div>';
+    } else {
+      var langName = lo ? lo.name_en + ' (' + lo.code + ')' : st.lang;
+      var own = isSA() && envKnown() && (st.docs.filter(function (x) { return x.slug === d.slug; })[0] || {}).editable_english_here;
+      var dis = edit ? '' : 'disabled';
+      body = h`<div class="trn-doc-grid">` +
+        h`<section class="trn-doc-panel trn-doc-panel-en" aria-label="English source">` +
+          h`<header><span class="trn-doc-lang">English (en)</span><span class="trn-pill off">Read-only source</span>${raw(own ? '<button type="button" class="btn-s trn-doc-editen" data-act="editenglish">Edit English</button>' : '')}</header>` +
+          h`<textarea class="trn-doc-en" dir="ltr" readonly aria-readonly="true" tabindex="0" aria-label="English text of ${d.title} (read only)">${d.english}</textarea>` +
+          h`<footer class="trn-hint">${d.english.length} characters · the English text cannot be changed here</footer></section>` +
+        h`<section class="trn-doc-panel" aria-label="${langName} translation">` +
+          h`<header><span class="trn-doc-lang" data-doc-lang>${langName}</span><span class="trn-pill ${d.status === 'published' ? 'ok' : d.status === 'modified' ? 'warn' : 'off'}" data-doc-status>${statusLabel(d.status)}</span></header>` +
+          h`<textarea class="trn-doc-val" dir="${dir}" lang="${st.lang}" data-orig="${d.value || ''}" data-input="docval" ${raw(dis)} aria-label="${langName} translation of ${d.title}" placeholder="Translate the English text on the left. Keep the headings (#), lists (- or 1.) and links exactly as they are.">${d.value || ''}</textarea>` +
+          h`<footer><span class="trn-hint" data-doc-count>${(d.value || '').length} / ${d.max_length} characters</span>` +
+          h`${raw(edit ? '<button type="button" class="btn-p" data-act="savedoc" hidden>Save</button>' : '')}</footer><div class="trn-rowerr" data-doc-err hidden></div></section></div>` +
+        (d.english_changed ? '<p class="trn-note trn-doc-stale">The English text was changed after this translation was saved. Review the translation against the current English.</p>' : '') +
+        '<p class="trn-hint">Saving makes the translation Modified. It reaches customers only after Publish Changes. Customers whose language has no published translation see the English text.</p>';
+    }
+    setHtml($('trn_pane_strings'),
+      h`<div class="trn-toolbar">${raw(selectors())}<select data-change="doc" class="trn-doc-select" aria-label="Document" ${raw(avail.length ? '' : 'disabled')}>${raw(opts)}</select>${raw(add)}${raw(publish)}${raw(xfer)}</div>` +
+      (!envKnown() ? '<p class="trn-note">Changes are disabled until the environment is identified.</p>' : '') +
+      (pending.length ? h`<p class="trn-hint">No English text yet (not listed above): ${pending.join(', ')}.</p>` : '') +
+      (tooLong.length ? h`<p class="trn-note">Too long to translate here: ${tooLong.join(', ')}.</p>` : '') +
+      body);
+  }
+  async function saveDoc() {
+    var ta = document.querySelector('#trn_pane_strings .trn-doc-val'), btn = document.querySelector('#trn_pane_strings [data-act=savedoc]'), err = document.querySelector('#trn_pane_strings [data-doc-err]');
+    if (!ta || !btn || !st.docData) return;
+    err.hidden = true; btn.disabled = true;
+    try {
+      var r = await api('/strings/' + encodeURIComponent(st.lang) + '/' + encodeURIComponent(st.docData.key), { method: 'PUT', json: { value: ta.value } });
+      ta.setAttribute('data-orig', ta.value); btn.hidden = true;
+      var back = r && r.status === 'published';
+      var s = document.querySelector('#trn_pane_strings [data-doc-status]'); s.textContent = back ? 'Published' : 'Modified'; s.className = 'trn-pill ' + (back ? 'ok' : 'warn');
+      st.docData.value = ta.value; st.docData.status = back ? 'published' : 'modified';
+      st.docs.forEach(function (x) { if (x.slug === st.doc) x.status = st.docData.status; });
+      var sel = document.querySelector('#trn_pane_strings select[data-change=doc]');
+      if (sel) Array.prototype.forEach.call(sel.options, function (o) { if (o.value === st.doc) o.textContent = st.docData.title + ' · ' + statusLabel(st.docData.status); });
+      if (r && r.audit_warning) alertMsg(r.audit_warning);
+      else alertMsg(back ? 'Saved. This text is the same as the published text, so its status is Published.' : 'Saved. Status is now Modified. Press Publish Changes to make it live.', true);
+    } catch (e) { err.textContent = e.message; err.hidden = false; }
+    btn.disabled = false;
+  }
+  function docDirty() {
+    var ta = document.querySelector('#trn_pane_strings .trn-doc-val');
+    return !!(ta && ta.value !== ta.getAttribute('data-orig'));
+  }
+  function addDocument() {
+    var known = [['faq', 'FAQ'], ['contact_us', 'Contact Us'], ['cancellation_policy', 'Cancellation Policy'], ['disclaimer', 'Disclaimer'], ['how_offro_works', 'How Offro Works'], ['merchant_policy', 'Merchant Policy']]
+      .filter(function (k) { return st.docs.some(function (x) { return x.slug === k[0] && !x.has_english; }); });
+    var hint = known.length ? '<p class="trn-hint">Types waiting for English text: ' + known.map(function (k) { return esc(k[1] + ' (' + k[0] + ')'); }).join(', ') + '. Use the same id to fill one.</p>' : '';
+    return dialog({ title: 'Add document', okLabel: 'Add document', wide: true,
+      text: 'Adds the English text of a document that does not exist yet. An existing document is never replaced. Translate it afterwards in this editor.',
+      html: hint,
+      fields: [{ id: 'slug', label: 'Document id (lowercase letters, digits, underscores)', type: 'text', required: true },
+               { id: 'title', label: 'Title', type: 'text', required: true },
+               { id: 'audience', label: 'Shown to', type: 'select', options: [['customer', 'Customers'], ['merchant', 'Merchants']] },
+               { id: 'content', label: 'English text', type: 'long', required: true }],
+      run: async function (f) { var r = await api('/documents', { method: 'POST', json: { slug: f.slug.toLowerCase(), title: f.title, audience: f.audience, content: f.content } }); st.doc = r.slug; } })
+      .then(function (r) { if (r) { alertMsg('Document added. It can now be translated.', true); loadStrings(); } });
+  }
+  function editEnglish() {
+    var d = st.docData; if (!d) return;
+    return dialog({ title: 'Edit English text: ' + d.title, okLabel: 'Save English text', wide: true,
+      text: 'This changes the English source for every language. Existing translations stay as they are and are flagged for review.',
+      fields: [{ id: 'title', label: 'Title', type: 'text', required: true, value: d.title }, { id: 'content', label: 'English text', type: 'long', required: true, value: d.english }],
+      run: async function (f) { await api('/documents/' + encodeURIComponent(d.slug) + '/english', { method: 'PUT', json: { content: f.content, title: f.title } }); } })
+      .then(function (r) { if (r) { alertMsg('English text saved.', true); loadStrings(); } });
   }
   async function saveRow(tr) {
     var key = tr.getAttribute('data-row'), ta = tr.querySelector('textarea'), err = tr.querySelector('.trn-rowerr'), btn = tr.querySelector('[data-act=save]');
@@ -357,11 +471,11 @@
   async function reload() { await boot(true); }
   async function doAction(name, el) {
     alertMsg('');
-    var lang = st.lang, track = st.track;
+    var lang = st.lang, track = apiTrack(st.track), isDocs = st.track === 'documents';
     if (name === 'publish') {
-      var legalNote = track === 'legal' ? ' The customer app does not read legal text yet, so this does not change what customers see.' : ' Apps receive it the next time they check, unless the kill switch is ON.';
+      var legalNote = isDocs ? ' Customers see the published translation of a document the next time they open it; where a language has none they see English.' : track === 'legal' ? ' The customer app does not read legal text yet, so this does not change what customers see.' : ' Apps receive it the next time they check, unless the kill switch is ON.';
       return dialog({ title: 'Publish Changes', okLabel: 'Publish Changes', fields: [NOTE],
-        text: 'Makes every modified ' + TRACK_LABEL[track] + ' translation for ' + lang + ' live in ' + envName() + ' only.' + legalNote,
+        text: 'Makes every modified ' + (isDocs ? 'legal document' : TRACK_LABEL[track]) + ' translation for ' + lang + ' live in ' + envName() + ' only.' + legalNote,
         run: async function (f) { await api('/publish', { method: 'POST', json: { lang: lang, track: track, note: f.note } }); } }).then(function (r) { if (r) { alertMsg('Published.', true); reload(); } });
     }
     if (name === 'killswitch') {
@@ -380,6 +494,8 @@
       return;
     }
     if (name === 'importdraft') return importDraft(lang, track);
+    if (name === 'adddoc') return addDocument();
+    if (name === 'editenglish') return editEnglish();
     if (name === 'editcountries') {
       var code = el.getAttribute('data-lang'), lo = code === 'en' ? st.base : langObj(code);
       if (!lo) return;
@@ -411,18 +527,21 @@
       else if (a === 'open') { st.lang = el.getAttribute('data-lang'); st.track = el.getAttribute('data-track'); st.page = 1; st.tab = 'strings'; renderTabs(); paneLoad(); }
       else if (a === 'refresh') reload();
       else if (a === 'save') saveRow(el.closest('tr'));
+      else if (a === 'savedoc') saveDoc();
       else if (a === 'prev') { st.page = Math.max(1, st.page - 1); loadStrings(); }
       else if (a === 'next') { st.page += 1; loadStrings(); }
       else doAction(a, el);
     });
     root.addEventListener('change', function (ev) {
       var a = ev.target.getAttribute('data-change'); if (!a) return;
-      if (a === 'lang') st.lang = ev.target.value; else if (a === 'track') st.track = ev.target.value; else if (a === 'filter') st.filter = ev.target.value;
+      if (docDirty() && (a === 'lang' || a === 'track' || a === 'doc') && !window.confirm('You have an unsaved translation. Discard it?')) { renderDocuments(); return; }
+      if (a === 'lang') st.lang = ev.target.value; else if (a === 'track') st.track = ev.target.value; else if (a === 'filter') st.filter = ev.target.value; else if (a === 'doc') st.doc = ev.target.value;
       st.page = 1; paneLoad();
     });
     root.addEventListener('input', function (ev) {
       var a = ev.target.getAttribute('data-input');
       if (a === 'val') { var tr = ev.target.closest('tr'), b = tr.querySelector('[data-act=save]'); if (b) b.hidden = ev.target.value === ev.target.getAttribute('data-orig'); }
+      else if (a === 'docval') { var b2 = document.querySelector('#trn_pane_strings [data-act=savedoc]'); if (b2) b2.hidden = ev.target.value === ev.target.getAttribute('data-orig'); var c2 = document.querySelector('#trn_pane_strings [data-doc-count]'); if (c2 && st.docData) c2.textContent = ev.target.value.length + ' / ' + st.docData.max_length + ' characters'; }
       else if (a === 'q') { clearTimeout(searchTimer); var v = ev.target.value; searchTimer = setTimeout(function () { st.q = v; st.page = 1; loadStrings(); }, 350); }
     });
   }

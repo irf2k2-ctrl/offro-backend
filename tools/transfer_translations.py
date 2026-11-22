@@ -131,7 +131,8 @@ def export_package(source_db, source_environment: str, tracks=TRACKS, source_fp:
              "is_plural": bool(d.get("is_plural", False)), "group": d.get("group", "app"),
              "screen_group": d.get("screen_group", ""), "description": d.get("description", ""),
              "max_length": int(d.get("max_length") or 500), "deprecated": bool(d.get("deprecated", False))}
-            for d in source_db[KEYS].find({}).sort("key", 1)]
+            for d in source_db[KEYS].find({}).sort("key", 1)
+            if d.get("group", "app") in TRACKS]       # whole legal / information documents (group "documents") are per environment: never exported
     versions = []
     for d in source_db[VERSIONS].find({}):
         if d.get("environment") not in (None, "", source_environment):

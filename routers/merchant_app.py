@@ -1288,8 +1288,11 @@ def delete_deal(deal_id: str, m=Depends(get_merchant)):
 # ───────────── terms (public read) ─────────────
 
 @router.get("/terms")
-def merchant_terms():
+def merchant_terms(lang: str = ""):
     doc = db.terms.find_one({"type": "merchant"}) or {}
+    if lang and doc.get("content"):      # optional ?lang=: the published translation when there is one, otherwise the same English text
+        from services import legal_documents as _ld
+        return _ld.localize("merchant_terms", doc["content"], lang)
     return {"content": doc.get("content", "Merchant terms and conditions will be posted here.")}
 
 @router.post("/accept-terms")

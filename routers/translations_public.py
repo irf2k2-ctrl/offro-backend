@@ -2,6 +2,8 @@
 
 GET /translations/manifest      kill switch + active languages with their published version and hash per track
 GET /translations/{lang}        the published override file for one language (?track=app|legal, default app)
+GET /legal/documents            the customer-facing documents that have English text
+GET /legal/{slug}?lang=xx       one document: the published translation for xx, else English
 
   * Published data only: drafts are never returned. No login, no personal data. It exposes nothing the app does not already
     ship in its own bundled files.
@@ -20,6 +22,7 @@ from collections import deque
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from services import legal_documents as LD
 from services import translations as T
 
 router = APIRouter(tags=["Translations (public)"])
@@ -102,3 +105,21 @@ async def language_file(lang: str, request: Request, track: str = "app"):
     if _etag_matches(request.headers.get("if-none-match", ""), etag):
         return Response(status_code=304, headers=headers)
     return JSONResponse(data, headers=headers)
+
+
+@router.get("/legal/documents")
+async def legal_documents(request: Request):
+    if _rate_limited(_client_ip(request)):
+        return _limited_response()
+    return JSONResponse({"documents": LD.public_list()}, headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/legal/{slug}")
+async def legal_document(slug: str, request: Request, lang: str = ""):
+    """One document. Published translation for `lang` when there is one, otherwise English (never a draft). 404 when unknown or empty."""
+    if _rate_limited(_client_ip(request)):
+        return _limited_response()
+    data = LD.public_document(slug, lang) if LD.SLUG_RE.match(slug) else None
+    if data is None:
+        return JSONResponse({"detail": "not_available"}, status_code=404, headers={"Cache-Control": "no-store"})
+    return JSONResponse(data, headers={"Cache-Control": "no-cache"})

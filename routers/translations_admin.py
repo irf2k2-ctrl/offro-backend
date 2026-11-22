@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Resp
 from routers.dashboard_auth import get_current_dashboard_user
 from services import app_environment as _env
 from services import translation_audit as audit
+from services import legal_documents as LD
 from services import translation_draft as D
 from services import translations as T
 from utils import countries as _countries
@@ -163,6 +164,8 @@ async def list_strings(lang: str, track: str = "app", q: str = "", filter: str =
         raise _http(e)
     if filter not in ("all", "missing", "modified", "published"):
         raise HTTPException(400, {"code": "invalid_filter"})
+    if track == T.DOCUMENT_TRACK:
+        LD.refresh_keys_safe()
     work = {v["key"]: v for v in T.db[T.VALUES].find({"lang": lang, "track": track})}
     baseline = T.published_strings(track, lang)          # Modified/Published is always judged against this, never against a stored flag
     rows, ql = [], q.strip().lower()
@@ -204,10 +207,57 @@ async def get_kill_switch(user: dict = Depends(require_perm("view"))):
     return T.kill_switch_state()
 
 
+# ── Legal & Information Documents (the document editor) ────────────────────────────────────────────────────────────────
+@router.get("/documents")
+async def list_documents(lang: str, user: dict = Depends(require_perm("view"))):
+    """Every document type with its translation status for one language. The English text is never part of this list."""
+    LD.refresh_keys_safe()
+    try:
+        return {"lang": lang, "documents": LD.list_for_language(lang), "max_length": T.DOCUMENT_MAX_LENGTH}
+    except T.TranslationError as e:
+        raise _http(e)
+
+
+@router.get("/documents/{slug}")
+async def get_document(slug: str, lang: str, user: dict = Depends(require_perm("view"))):
+    """English (read only) + the selected language's translation + its Modified/Published status. Saving goes through
+    PUT /strings/{lang}/doc_<slug>, the same endpoint (permission, validation, audit, status rule) as every other translation."""
+    LD.refresh_keys_safe()
+    try:
+        return LD.document_view(slug, lang)
+    except T.TranslationError as e:
+        raise _http(e)
+
+
+@router.post("/documents")
+async def create_document(data: dict, request: Request, user: dict = Depends(require_super_admin("create_document"))):
+    """Adds a document type (English text) that has no storage yet. Never replaces an existing document."""
+    slug = str(data.get("slug", "")).strip().lower()
+
+    def fn():
+        r = LD.create_document(slug, data.get("title"), data.get("content"), data.get("audience"), audit.admin_ref(user)["id"])
+        r["audit_details"] = {"slug": slug, "length": len(str(data.get("content") or ""))}
+        return r
+    return _run_sensitive(request, user, "create_document", fn, track=T.DOCUMENT_TRACK, details={"slug": slug[:50]})
+
+
+@router.put("/documents/{slug}/english")
+async def update_document_english(slug: str, data: dict, request: Request,
+                                  user: dict = Depends(require_super_admin("update_document_english"))):
+    """Changes the English text of a document stored in `legal_documents` only. Policies / Terms / About keep their own editors."""
+    def fn():
+        r = LD.update_own_english(slug, data.get("content"), audit.admin_ref(user)["id"], data.get("title"))
+        r["audit_details"] = {"slug": slug, "length": len(str(data.get("content") or ""))}
+        return r
+    return _run_sensitive(request, user, "update_document_english", fn, track=T.DOCUMENT_TRACK, details={"slug": slug[:50]})
+
+
 # ── Download Draft / Import (XLSX) ─────────────────────────────────────────────────────────────────────────────────────
 @router.get("/draft")
 async def download_draft(lang: str, request: Request, track: str = "app", user: dict = Depends(require_perm("view"))):
     """The editable spreadsheet for one language + track (key, feature, English reference, translation). Read only."""
+    if track == T.DOCUMENT_TRACK:
+        LD.refresh_keys_safe()
     try:
         data, name = D.build_draft(lang, track)
     except T.TranslationError as e:
@@ -228,6 +278,8 @@ async def import_draft(request: Request, file: UploadFile = File(...), lang: str
     if not name.endswith(".xlsx"):
         raise _http(T.TranslationError("not_xlsx", 422))
     data = await file.read(D.MAX_BYTES + 1)
+    if track == T.DOCUMENT_TRACK:
+        LD.refresh_keys_safe()
     do_apply = str(apply).strip().lower() in ("1", "true", "yes")
     actor = audit.admin_ref(user)["id"]
     if not do_apply:
@@ -248,7 +300,12 @@ async def import_draft(request: Request, file: UploadFile = File(...), lang: str
 async def put_value(lang: str, key: str, data: dict, request: Request, user: dict = Depends(require_perm("edit"))):
     admin, ip, env = audit.admin_ref(user), _ip(request), T.environment()
     try:
-        res = T.set_value(lang, key, data.get("value"), admin["id"])
+        if key.startswith(LD.KEY_PREFIX):
+            LD.refresh_keys_safe()          # the document keys are derived from the document sources; make sure this one exists
+        if key.startswith(LD.KEY_PREFIX) and (T.db[T.KEYS].find_one({"key": key}) or {}).get("kind") == LD.KIND:
+            res = LD.save_translation(lang, LD.slug_of_key(key), data.get("value"), admin["id"])
+        else:
+            res = T.set_value(lang, key, data.get("value"), admin["id"])
     except T.TranslationError as e:
         audit.record("edit", admin, "failed", environment=env, lang=lang, key=key, details={"code": e.code}, ip=ip)
         raise _http(e)
@@ -292,6 +349,8 @@ async def patch_language(code: str, data: dict, request: Request, user: dict = D
 @router.post("/publish")
 async def publish(data: dict, request: Request, user: dict = Depends(require_super_admin("publish"))):
     lang, track = str(data.get("lang", "")), str(data.get("track", "app"))
+    if track == T.DOCUMENT_TRACK:
+        LD.refresh_keys_safe()
     return _run_sensitive(request, user, "publish", lambda: T.publish(lang, track, data.get("note"), _actor(user)),
                           lang=lang, track=track)
 

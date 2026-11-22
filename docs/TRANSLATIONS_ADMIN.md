@@ -63,3 +63,30 @@ Translation data is copied to production only by a separate, one-time, manually 
 
 ## Old data that may still exist (not removed)
 The retired workflows are removed from the code only; no database was modified. Existing databases may still contain `translation_rollbacks`, `translation_legal_reviews`, a `pending` entry in `translation_state`, and older fields (`submitted`, `approval`, `promoted_from`, `restored_from`) on values or versions. They are ignored by the code and harmless; remove them manually later only if you want to, after backing up. An old unfinished rollback claim, if one ever existed, no longer blocks anything.
+
+## Legal & information documents (Stage 2)
+
+The customer / merchant apps show long documents. Their **English** text stays exactly where it already is and is edited exactly as before:
+
+| Document | English text lives in | Public URL (unchanged) |
+|---|---|---|
+| Privacy Policy | `policies` type `privacy` | `GET /policy/privacy` |
+| Refund Policy | `policies` type `refund` | `GET /policy/refund` |
+| KYC Policy | `policies` type `kyc` | `GET /policy/kyc` |
+| Terms & Conditions | `terms` type `user` | `GET /terms/user` |
+| Merchant Terms & Conditions | `terms` type `merchant` | `GET /terms/merchant`, `GET /merchant/terms` |
+| About Us | `settings` key `about_us` | `GET /about` |
+| Contact Us, Cancellation Policy, Disclaimer, FAQ, How Offro Works, Merchant Policy, and any type you add | new collection `legal_documents` (English only) | `GET /legal/{slug}` |
+
+Any other `policies` / `terms` type found in the database is listed automatically (slug `policy_<type>` / `terms_<type>`), so nothing existing is hidden. Run `python tools/inspect_legal_documents.py` (read-only) in each environment to see exactly what it holds.
+
+**Editor** (Translations > text type "Legal documents"): choose the document, the language, then edit on the right while the English source stays read-only on the left (side by side, stacked on narrow screens). Only documents that have English text are selectable. A Super Admin can **Add document** (a new type, or one of the types above that has no text yet; an existing document is never replaced) and **Edit English** for documents stored in `legal_documents`. Policies / Terms / About keep their own editors (Dashboard > Policies etc.).
+
+**Storage.** A document is a key `doc_<slug>` of the existing translation registry (group `documents`, kind `document`, up to 30,000 characters, braces are literal text) with its **own text type `documents`** (its own versions, separate from App text and Legal text). So every existing rule applies unchanged: the working copy in `translation_values`, immutable versions on Publish Changes, the language-independent Modified/Published rule (Stage 1), permissions (view / edit; publish and Add document are Super Admin only), audit, kill switch and the per-environment database. There is no second status mechanism and **no migration**: the only new collection is `legal_documents`, created on first use. English changed after a translation was saved is flagged ("English text was changed ...").
+
+**Validation** is the normal translation validation (no HTML, no hidden characters, links / e-mails / phone numbers must already be in the English text). Markdown-style headings (`#`), lists (`-`, `1.`) and `[text](url)` links are plain text and are kept as typed.
+
+**What the app receives.** The existing URLs accept an optional `?lang=xx`. With it the response is the **published** translation (`translated: true`, `lang`, `direction`) or, when there is none (language not added / not active, nothing published, kill switch ON), the English text (`translated: false`). Without `lang` the response is exactly what it was before. `GET /legal/documents` lists the documents that have English text; `GET /legal/{slug}?lang=xx` returns one. Drafts are never returned. The Flutter app asks in the language it is showing (English requests are unchanged).
+
+**Operations notes.** `tools/sync_translation_keys.py --apply` does not deprecate document keys (they are derived from the sources and refreshed whenever the editor, a save, an import or a publish of the documents text type runs). A document over 30,000 characters is listed as "too long to translate here" and is not editable. Download Draft / Import / Publish Changes work for the Legal documents text type like for the others. Document translations are **never** part of the override files the app downloads (`/translations/{lang}` and the manifest do not list the documents track) and are **never** exported by `tools/transfer_translations.py`: the English of each environment is its own, so its translations are too.
+
