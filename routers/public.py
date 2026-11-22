@@ -794,19 +794,36 @@ def get_all_active_deals(city: str = ""):
 
 # =================== CITIES ===================
 @router.get("/cities")
-def get_cities():
+def get_cities(country: str = None, lang: str = ""):
     """Return list of cities that OFFRO is active in, with optional background image.
     Used by the Flutter home screen hero section to show city imagery.
     Falls back to a default image if no image is configured for the city.
+
+    Optional, additive parameters (a request without them returns exactly what it always did):
+      ?country=SA  only the active cities mapped to that country (ISO code from the country master). A missing/blank value = no
+                   filtering (older apps); a value that is not a supported country returns [] - never another country's cities.
+                   Cities with no country yet are not returned to a country-specific request. The filter is applied here, on the server.
+      ?lang=ar     `display_name` is the city's name in that language (its own translation, else the English name).
+    Every city also carries `id`, `country`, `names` and `display_name`; `name` is always the English/canonical name.
     """
+    from services import cities as _city
+    want = str(country).strip() if country is not None else ""
+    iso = _city.normalize_country(want) if want else None
+    if want and not iso:
+        return []
     DEFAULT_CITY_IMAGE = "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=800&q=80"
     # Query supports both old ("active" bool) and new ("status" string) field formats
-    docs = list(db.cities.find({
+    _q = {
         "$or": [
             {"status": {"$ne": "inactive"}},
             {"active": True, "status": {"$exists": False}},
         ]
-    }).sort("sort_order", 1))
+    }
+    if iso:
+        _q = {"$and": [_q, {"country": iso}]}
+    docs = list(db.cities.find(_q).sort("sort_order", 1))
+    if iso and not docs:
+        return []                                   # a country-specific request never falls back to other countries' cities or to store cities
     if docs:
         result = []
         for d in docs:
@@ -818,6 +835,10 @@ def get_cities():
                 "slug":       d.get("slug", d.get("name", "").lower()),
                 "image_url":  raw_img,
                 "sort_order": d.get("sort_order", 0),
+                "id":           str(d.get("_id", "")),
+                "country":      d.get("country", "") or "",
+                "names":        d.get("names") if isinstance(d.get("names"), dict) else {},
+                "display_name": _city.display_name(d, lang),
             })
         return result
     # Fallback: derive cities from active stores
