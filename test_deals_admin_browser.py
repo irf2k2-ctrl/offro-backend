@@ -79,7 +79,8 @@ def test_accounts_tab_shows_created_column_in_ist_with_safe_fallback_and_sorts(b
     page.wait_for_selector("#accounts_table tr td")
     heads = page.eval_on_selector_all("#section-accounts thead th", "e => e.map(x => x.innerText.trim())")
     assert heads[:1] == ["Name"] and any(h.startswith("Created") for h in heads) and len(heads) == 12
-    rows = page.eval_on_selector_all("#accounts_table tr", "rs => rs.map(r => Array.from(r.cells).map(c => c.innerText.trim()))")
+    # The Name cell now also carries the account's country after the name; the account NAME itself is the <strong> element.
+    rows = page.eval_on_selector_all("#accounts_table tr", "rs => rs.map(r => Array.from(r.cells).map((c, i) => (i === 0 && c.querySelector('strong') ? c.querySelector('strong') : c).innerText.trim()))")
     assert all(len(r) == 12 for r in rows)
     ci = [h.startswith("Created") for h in heads].index(True)
     by = {r[0]: r[ci] for r in rows}
@@ -88,7 +89,7 @@ def test_accounts_tab_shows_created_column_in_ist_with_safe_fallback_and_sorts(b
     page.click("#acct_created_th")
     page.wait_for_function("document.getElementById('acct_sort_ind').textContent === '▼'")
     page.wait_for_timeout(300)
-    first = page.eval_on_selector_all("#accounts_table tr", "rs => rs.map(r => r.cells[0].innerText.trim())")
+    first = page.eval_on_selector_all("#accounts_table tr", "rs => rs.map(r => (r.cells[0].querySelector('strong') || r.cells[0]).innerText.trim())")
     assert first[0] == "Ravi Merchant" and first[-1] == "Old Timer"            # newest first, undated last
     page.click("#acct_created_th")
     page.wait_for_function("document.getElementById('acct_sort_ind').textContent === '▲'")

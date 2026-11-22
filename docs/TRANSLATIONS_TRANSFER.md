@@ -22,6 +22,8 @@ the next Publish contains every string).
 **Not copied:** the kill switch (production keeps its own, default OFF), the audit trail, drafts / Modified values, older versions.
 The `legal` track is copied but the app does not request it.
 
+Note: the country <-> language mapping (`translation_language_countries`) is a per-environment setting and is NOT transferred; set it on production in its dashboard (see TRANSLATIONS_ADMIN.md).
+
 ## Checks (all before the first write)
 * package format and its own SHA-256 (detects a damaged or edited file);
 * language registry (code, direction, status, names), key registry (names, groups);

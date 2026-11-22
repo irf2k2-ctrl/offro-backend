@@ -13,6 +13,10 @@ Collections (each environment has its OWN database, chosen by its own MONGO_URL;
   translation_versions    track, lang, version (unique together), strings, hash, note, published_by/at   [immutable snapshots;
                           the app detects changes by comparing version + hash from the manifest]
   translation_state       one document: kill_switch (+ who/when/why)
+  translation_language_countries
+                          lang (unique), countries [ISO codes], updated_by/at   [which countries a language is offered in; many to many,
+                          English (the built-in base language, not a stored language) included. Names/codes/flags are NOT stored: they
+                          come from the one country master, utils.phone.SUPPORTED_COUNTRIES. An empty list means "no restriction".]
   (translation_audit lives in services/translation_audit.py)
 
 Tracks: "app" (ordinary text) and "legal" (keys with group "legal"). They are versioned and published separately, so an ordinary
@@ -38,12 +42,15 @@ from pymongo.errors import DuplicateKeyError
 
 from database import db
 from services import app_environment as _env
+from utils import countries as _countries
 
 logger = logging.getLogger("offro.translations")
 
 SCHEMA = 1
 LANGS, KEYS, VALUES, VERSIONS, STATE = (
     "translation_languages", "translation_keys", "translation_values", "translation_versions", "translation_state")
+LANG_COUNTRIES = "translation_language_countries"
+BASE_LANGUAGE = "en"          # the app's built-in source language; it has no translation_languages record
 STATE_ID = "state"
 TRACKS = ("app", "legal")
 DIRECTIONS = ("ltr", "rtl")
@@ -153,6 +160,7 @@ def ensure_indexes():
     db[KEYS].create_index("key", unique=True, name="translation_keys_key")
     db[VALUES].create_index([("lang", 1), ("key", 1)], unique=True, name="translation_values_lang_key")
     db[VERSIONS].create_index([("track", 1), ("lang", 1), ("version", 1)], unique=True, name="translation_versions_track_lang_version")
+    db[LANG_COUNTRIES].create_index("lang", unique=True, name="translation_language_countries_lang")
 
 
 def ensure_indexes_safe() -> bool:
@@ -216,7 +224,55 @@ def get_language(code: str) -> dict:
     return d
 
 
-def add_language(code, name_en, name_native, direction, actor_id: str = "", *, bundled: bool = False) -> dict:
+# ── country mapping (many to many: a language in several countries, a country with several languages) ──────────────────
+def clean_countries(countries) -> list:
+    """Validated, de-duplicated, sorted ISO codes. Every code must be in the country master (nothing else is ever stored)."""
+    if countries is None:
+        return []
+    if not isinstance(countries, (list, tuple)):
+        raise TranslationError("invalid_countries", 422)
+    allowed = _countries.supported_iso_codes()
+    out = set()
+    for c in countries:
+        iso = str(c or "").strip().upper() if isinstance(c, str) else ""
+        if iso not in allowed:
+            raise TranslationError("unsupported_country", 422, {"country": str(c)[:10]})
+        out.add(iso)
+    return sorted(out)
+
+
+def language_countries(lang: str) -> list:
+    """The saved countries of one language (ISO codes, sorted). [] when none are saved."""
+    d = db[LANG_COUNTRIES].find_one({"lang": lang})
+    if not d:
+        return []
+    allowed = _countries.supported_iso_codes()        # a country later removed from the master is simply not shown
+    return sorted({c for c in (d.get("countries") or []) if c in allowed})
+
+
+def all_language_countries() -> dict:
+    allowed = _countries.supported_iso_codes()
+    out = {}
+    for d in db[LANG_COUNTRIES].find():
+        out[d["lang"]] = sorted({c for c in (d.get("countries") or []) if c in allowed})
+    return out
+
+
+def set_language_countries(lang: str, countries, actor_id: str = "") -> list:
+    """Replaces the saved country list of [lang] ('en' or an existing language). Takes effect at once: it is a setting about where
+    a language is offered, not translated text, so it is not versioned and needs no publish. Writes only to THIS environment."""
+    require_env("any_known")
+    lang = str(lang or "").strip()
+    if lang != BASE_LANGUAGE:
+        get_language(lang)                                    # unknown_language (404) otherwise
+    clean = clean_countries(countries)
+    db[LANG_COUNTRIES].update_one(
+        {"lang": lang}, {"$set": {"countries": clean, "updated_by": actor_id, "updated_at": datetime.utcnow(), "schema": SCHEMA}},
+        upsert=True)
+    return clean
+
+
+def add_language(code, name_en, name_native, direction, actor_id: str = "", *, bundled: bool = False, countries=None) -> dict:
     require_env("add_language")
     code = str(code or "").strip()
     if not _LANG_RE.match(code):
@@ -226,12 +282,16 @@ def add_language(code, name_en, name_native, direction, actor_id: str = "", *, b
     name_en, name_native = str(name_en or "").strip()[:60], str(name_native or "").strip()[:60]
     if not name_en or not name_native:
         raise TranslationError("language_names_required", 422)
+    clean = clean_countries(countries)                       # validated BEFORE anything is written
     doc = {"code": code, "name_en": name_en, "name_native": name_native, "direction": direction, "status": "draft",
            "bundled": bool(bundled), "created_by": actor_id, "created_at": datetime.utcnow(), "schema": SCHEMA}
     try:
         db[LANGS].insert_one(doc)
     except DuplicateKeyError:
         raise TranslationError("language_exists", 409)
+    if clean:
+        set_language_countries(code, clean, actor_id)
+    doc["countries"] = clean
     return doc
 
 
@@ -437,6 +497,7 @@ def public_manifest() -> dict:
     if kill_switch_on():
         return {"schema": SCHEMA, "kill_switch": True, "overrides_enabled": False, "languages": []}
     langs = []
+    mapping = all_language_countries()
     for l in db[LANGS].find({"status": "active"}).sort("code", 1):
         tracks = {}
         for t in TRACKS:
@@ -445,8 +506,14 @@ def public_manifest() -> dict:
                 tracks[t] = {"version": v["version"], "hash": v["hash"]}
         if tracks:
             langs.append({"code": l["code"], "name_en": l["name_en"], "name_native": l["name_native"],
-                          "direction": l["direction"], "tracks": tracks})
-    return {"schema": SCHEMA, "kill_switch": False, "overrides_enabled": True, "languages": langs}
+                          "direction": l["direction"], "tracks": tracks, "countries": mapping.get(l["code"], [])})
+    # Where each language is offered, for the language chooser. English is included (it is the built-in base language). Only languages
+    # the app can actually offer (English and active languages) are listed; an empty list means "no restriction". Additive: older
+    # apps ignore this key, and nothing here is part of any version hash.
+    offered = {BASE_LANGUAGE} | {l["code"] for l in langs}
+    language_countries = {code: mapping.get(code, []) for code in sorted(offered)}
+    return {"schema": SCHEMA, "kill_switch": False, "overrides_enabled": True, "languages": langs,
+            "language_countries": language_countries}
 
 
 def public_language(lang: str, track: str):

@@ -7,14 +7,23 @@ There is no approval, review, promotion, package-transfer or rollback workflow.
 
 ## What exists
 - **Admin API** (`/admin/translations`, `routers/translations_admin.py`):
-  `GET /environment`, `GET /languages`, `POST /languages`, `PATCH /languages/{code}`, `GET /strings`, `GET /preview`,
+  `GET /environment`, `GET /languages` (also returns `supported_countries`), `POST /languages` (optional `countries`), `PATCH /languages/{code}`, `PUT /languages/{code}/countries`, `GET /strings`, `GET /preview`,
   `PUT /strings/{lang}/{key}`, `POST /publish`, `GET /audit` (read-only, no dashboard tab), `GET /kill-switch`, `POST /kill-switch`.
 - **Public API** (`routers/translations_public.py`): `GET /translations/manifest`, `GET /translations/{lang}?track=app|legal`
   (ETag/304; per-IP in-process rate limit, default 60/min, `TRANSLATION_PUBLIC_RATE_PER_MIN` 10-600; per-process only, not a distributed limiter).
 - **Service** (`services/translations.py`): registry, validation, editing, publishing, kill switch, public data. Audit: `services/translation_audit.py`.
 - **Dashboard** (`templates/partials/translations.html`, `static/js/translations.js`, `static/css/translations.css`): two sections only.
-  **Overview**: languages, live version, number of Modified strings, completion, emergency kill switch, add language.
-  **Translations**: search/filter, English read-only reference, edit Arabic, status Modified / Published, **Publish Changes**.
+  **Overview**: languages, **countries** each language is offered in, number of Modified strings, completion, emergency kill switch, add language (with a country multi-select). The Live version column was removed from this table; versions, hashes and the manifest are unchanged.
+  **Translations**: search/filter and **Publish Changes** in the top toolbar, English read-only reference, edit Arabic, status Modified / Published.
+
+## Country <-> language mapping
+- Many to many: a language can be offered in several countries and a country can have several languages. English (the built-in base language, not a stored record) can be mapped too.
+- The country choices are **not a separate list**: the API returns the one country master (`utils.phone.SUPPORTED_COUNTRIES`: ISO code, name, calling code; the flag is computed from the ISO code). Adding a country to that master makes it appear here automatically.
+- Stored in `translation_language_countries` (`lang`, `countries` = ISO codes). Super Admin only, audited (`set_language_countries`), this environment's database only. It is a setting about where a language is offered, not translated text, so it is **not versioned and needs no publish**: it takes effect at once and never changes a version, hash or language file.
+- **Empty selection = no restriction** (offered in every country), so an existing language such as Arabic is not hidden until someone maps it.
+- The public manifest carries `language_countries` (`{"ar": ["SA"], "en": ["IN", "SA"]}`, active languages and English) and a `countries` list per language. Older apps ignore it. With the kill switch ON the mapping is omitted and the app lists every bundled language.
+- The Flutter app can only list languages it contains (currently English and Arabic). A language added here (for example Hindi) can be mapped, but it cannot appear in the app until a build that bundles it.
+- Not part of the one-time staging -> production transfer (that copies languages, keys, values, versions). Set the mapping on production in its own dashboard.
 
 ## Rules
 - Only values are editable; keys come from the app (`tools/sync_translation_keys.py`, dry-run by default). English is the built-in read-only reference and is never stored or edited here.

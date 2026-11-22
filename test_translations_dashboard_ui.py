@@ -203,7 +203,9 @@ def test_browser_overview_shows_real_data_and_super_admin_controls():
     with pw.sync_playwright() as p:
         b, pg, calls = _page(p, _fixture())
         txt = pg.inner_text("#trn_pane_overview")
-        assert "Arabic" in txt and "v2" in txt and "3 modified" in txt and "1 missing" in txt and "01 Nov 2026" in txt
+        assert "Arabic" in txt and "3 modified" in txt and "1 missing" in txt and "01 Nov 2026" in txt
+        # The Live version column was removed from the Overview on purpose (backend versioning/hash/manifest are unchanged).
+        assert "live version" not in txt.lower() and "v2" not in txt
         assert "awaiting review" not in txt and "approval" not in txt.lower() and "Review" not in txt
         tabs = pg.locator("#trn_tabs button").all_inner_texts()
         assert [t.strip() for t in tabs] == ["Overview", "Translations"]
@@ -369,7 +371,8 @@ def test_browser_empty_staging_shows_english_base_and_lets_super_admin_add_arabi
         pg.click("[data-act=fillar]")
         assert pg.input_value("#trn_nl_code") == "ar" and pg.input_value("#trn_nl_dir") == "rtl" and pg.input_value("#trn_nl_en") == "Arabic"
         pg.click("[data-act=addlang]"); pg.wait_for_selector("#trn_alert:not([hidden])")
-        assert sent == [{"code": "ar", "name_en": "Arabic", "name_native": "العربية", "direction": "rtl"}]
+        # the add form now also carries the selected countries (none selected = every country)
+        assert sent == [{"code": "ar", "name_en": "Arabic", "name_native": "العربية", "direction": "rtl", "countries": []}]
         b.close()
 
 

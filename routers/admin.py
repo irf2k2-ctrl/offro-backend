@@ -801,12 +801,22 @@ def list_accounts(
                 if not eff_mid:
                     eff_mid = acct_id
 
+            # Country shown after the name: from the one country master (utils.phone.SUPPORTED_COUNTRIES) via utils.countries.
+            # Blank (never an error) when the account has none and its number does not tell.
+            try:
+                from utils import countries as _ctry
+                _cinfo = _ctry.account_country(acct) or {}
+            except Exception:
+                _cinfo = {}
             result.append({
                 "account_id":    acct_id,
                 "merchant_id":   eff_mid,
                 "user_id":       acct.get("user_id", acct_id),
                 "full_name":     str(acct.get("name") or ""),
                 "mobile_number": phone,
+                "country_iso":   _cinfo.get("iso", ""),
+                "country_name":  _cinfo.get("name", ""),
+                "country_flag":  _cinfo.get("flag", ""),
                 "city":          str(acct.get("city") or ""),
                 "roles":         roles,
                 "status":        str(acct.get("status") or "active"),

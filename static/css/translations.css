@@ -42,3 +42,12 @@
 .trn .trn-modal-err{color:#b3261e;font-size:13px;margin:8px 0}
 .trn .trn-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 .trn .trn-modal textarea,.trn .trn-modal input[type=text]{width:100%;padding:6px 8px;border:1px solid var(--border,#ccc);border-radius:6px}
+/* Country mapping (chips in the Overview table, checkbox groups in the add form and the edit dialog) */
+.trn .trn-countries-cell{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.trn .trn-chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#eef3f0;border:1px solid var(--border,#d5dfd9);color:var(--text,#222);white-space:nowrap}
+.trn .trn-countries{display:flex;flex-wrap:wrap;gap:6px 14px;margin:6px 0}
+.trn .trn-country{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;margin:0;cursor:pointer}
+.trn .trn-nl-countries{margin:6px 0 2px}
+.trn .trn-edit-countries{padding:1px 8px;font-size:11px}
+/* Publish Changes sits in the top toolbar next to the search box; it wraps with the toolbar on narrow screens */
+.trn .trn-toolbar .trn-publish{white-space:nowrap}

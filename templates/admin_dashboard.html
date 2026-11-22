@@ -67,6 +67,8 @@ td[style*="sticky"]{background:#fff;}
 .nu-watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-28deg);font-size:min(13vw,150px);font-weight:800;letter-spacing:.06em;
   white-space:nowrap;color:rgba(192,57,43,.11);pointer-events:none;user-select:none;-webkit-user-select:none;z-index:1000;}
 @media print{.nu-watermark{color:rgba(192,57,43,.18);}}
+/* Account country after the name (styling only): small, muted, may wrap under the name on narrow screens */
+.acct-country{display:inline-block;margin-left:4px;font-size:11px;font-weight:500;color:var(--muted);white-space:normal;}
 /* Accounts tab action buttons: one colour per meaning (styling only) */
 .acct-btn-view{background:#1f6feb !important;}    .acct-btn-view:hover{background:#1a5fcc !important;}
 .acct-btn-approve{background:#198754 !important;} .acct-btn-approve:hover{background:#157347 !important;}
@@ -7535,6 +7537,15 @@ function filterAccounts() {
   _acctSearchTimer = setTimeout(() => { _acctPage = 1; loadAccounts(); }, 300);
 }
 
+// Country after the account name, e.g. "🇸🇦 Saudi Arabia – SA". All three values come from the server's country master; an account with
+// no country (and a number that does not tell) shows nothing. Escaped like every other value here; wraps on narrow screens.
+function acctCountryHtml(a) {
+  const iso = a && a.country_iso ? String(a.country_iso) : '';
+  if (!iso) return '';
+  const label = [a.country_flag || '', a.country_name || iso].filter(Boolean).join(' ') + ' \u2013 ' + iso;
+  return ` <span class="acct-country" title="${escHtml(a.country_name || iso)}">${escHtml(label)}</span>`;
+}
+
 function renderAccountsPage() {
   const page  = accountsList;
   const total = _acctTotal;
@@ -7556,7 +7567,7 @@ function renderAccountsPage() {
     else { stBg = a.status === 'active' ? '#1a6640' : '#c0392b'; stLbl = a.status === 'active' ? 'Active' : 'Blocked'; stCls=''; }
     const shortId = (a.account_id||'').slice(-6).toUpperCase();
     return `<tr>
-      <td><strong>${escHtml(a.full_name||'—')}</strong></td>
+      <td><strong>${escHtml(a.full_name||'—')}</strong>${acctCountryHtml(a)}</td>
       <td style="font-family:monospace;font-size:12px;">${escHtml(a.mobile_number||'')}</td>
       <td><span title="${a.account_id}" onclick="navigator.clipboard?.writeText('${_secJs(a.account_id)}');showToast('ID copied!','success')"
         style="font-size:10px;font-family:monospace;background:#f0f4f0;border:1px solid var(--border);border-radius:5px;padding:2px 6px;cursor:pointer;color:var(--primary)">

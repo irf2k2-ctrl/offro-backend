@@ -6,6 +6,10 @@
  * single source of truth for permissions, the environment check (an unidentified environment refuses every change) and the audit log;
  * the browser only shows what the API returns and hides controls the caller cannot use.
  *
+ * Country mapping: a language (and English, the built-in base language) can be offered in several countries, and a country can have
+ * several languages. The country choices always come from the server (the one country master); this file has no country list.
+ * An empty selection means "no restriction" (offered in every country).
+ *
  * Output safety: every HTML string is built with the h`...` tag, which escapes every interpolated value unless wrapped in raw()
  * (only used for markup produced by this file). innerHTML is assigned only through setHtml(). Server values are never put in
  * attributes unescaped, and never evaluated.
@@ -39,7 +43,7 @@
   }
 
   // ── state ────────────────────────────────────────────────────────────────────────────────
-  var st = { env: null, langs: [], tab: 'overview', lang: '', track: 'app', filter: 'all', q: '', page: 1, strings: null, seq: 0 };
+  var st = { env: null, langs: [], countries: [], tab: 'overview', lang: '', track: 'app', filter: 'all', q: '', page: 1, strings: null, seq: 0 };
 
   function envName() { return st.env && st.env.environment ? st.env.environment.classification : 'unknown'; }
   // Every action that changes data needs a SAFELY IDENTIFIED environment. 'unknown' (not set / invalid / conflicting) disables them all;
@@ -58,6 +62,26 @@
   }
   function canEdit() { return envKnown() && canPerm('edit'); }
   function langObj(code) { for (var i = 0; i < st.langs.length; i++) if (st.langs[i].code === code) return st.langs[i]; return null; }
+  function countryObj(iso) { for (var i = 0; i < st.countries.length; i++) if (st.countries[i].iso === iso) return st.countries[i]; return null; }
+  function countryLabel(c) { return (c.flag ? c.flag + ' ' : '') + c.name; }
+  // Mapped countries as small chips, from the server's list (an unknown code is skipped). Nothing selected = every country.
+  function countryChips(codes) {
+    var out = (codes || []).map(function (iso) { var c = countryObj(iso); return c ? h`<span class="trn-chip" title="${c.iso}">${countryLabel(c)}</span>` : ''; }).join('');
+    return out || '<span class="trn-hint">All countries</span>';
+  }
+  // Checkbox group for choosing countries (the options are the server's supported countries).
+  function countryBoxes(id, selected) {
+    selected = selected || [];
+    if (!st.countries.length) return '<div class="trn-hint">No supported countries are available.</div>';
+    return h`<div class="trn-countries" id="${id}">` + st.countries.map(function (c) {
+      return h`<label class="trn-country"><input type="checkbox" value="${c.iso}" ${raw(selected.indexOf(c.iso) >= 0 ? 'checked' : '')}> ${countryLabel(c)}</label>`;
+    }).join('') + '</div>';
+  }
+  function checkedIn(id) {
+    var box = $(id), out = [];
+    if (box) Array.prototype.forEach.call(box.querySelectorAll('input[type=checkbox]'), function (i) { if (i.checked) out.push(i.value); });
+    return out;
+  }
 
   // ── API ──────────────────────────────────────────────────────────────────────────────────
   function ApiError(status, message, code) { this.status = status; this.message = message; this.code = code; }
@@ -66,6 +90,8 @@
     nothing_to_publish: 'There are no changes to publish.',
     environment_unknown: 'This server does not know whether it is staging or production, so changes are refused. Ask the developer to set OFFRO_ENVIRONMENT.',
     language_exists: 'That language already exists. Nothing was changed.',
+    unsupported_country: 'One of the selected countries is not supported. Nothing was changed.',
+    invalid_countries: 'The country selection is not valid. Nothing was changed.',
     language_disabled: 'This language is disabled, so nothing can be published for it.',
     version_conflict: 'Another publish happened at the same time. Nothing was changed. Try again.'
   };
@@ -108,6 +134,7 @@
       var fh = '';
       (o.fields || []).forEach(function (f) {
         if (f.type === 'select') fh += h`<div class="mb-2"><label class="small fw-bold">${f.label}</label><select id="trn_f_${f.id}" class="form-select">${raw((f.options || []).map(function (op) { return h`<option value="${op[0]}">${op[1]}</option>`; }).join(''))}</select></div>`;
+        else if (f.type === 'multicheck') fh += h`<div class="mb-2"><label class="small fw-bold">${f.label}</label>${raw(countryBoxes('trn_f_' + f.id, f.selected))}<div class="trn-hint">${f.hint || ''}</div></div>`;
         else if (f.type === 'check') fh += h`<div class="mb-2"><label class="small fw-bold"><input type="checkbox" id="trn_f_${f.id}"> ${f.label}</label></div>`;
         else if (f.type === 'note') fh += h`<div class="mb-2"><label class="small fw-bold">${f.label}</label><textarea id="trn_f_${f.id}" rows="3" maxlength="300"></textarea></div>`;
         else fh += h`<div class="mb-2"><label class="small fw-bold">${f.label}</label><input type="text" id="trn_f_${f.id}" maxlength="80"></div>`;
@@ -122,8 +149,9 @@
       ok.onclick = async function () {
         var vals = {};
         for (var i = 0; i < (o.fields || []).length; i++) {
-          var f = o.fields[i]; vals[f.id] = f.type === 'check' ? ($('trn_f_' + f.id).checked ? '1' : '') : ($('trn_f_' + f.id).value || '').trim();
-          if (f.required && !vals[f.id]) { err.textContent = f.type === 'check' ? 'Please tick the box to confirm.' : f.label + ' is required.'; err.hidden = false; return; }
+          var f = o.fields[i];
+          vals[f.id] = f.type === 'multicheck' ? checkedIn('trn_f_' + f.id) : f.type === 'check' ? ($('trn_f_' + f.id).checked ? '1' : '') : ($('trn_f_' + f.id).value || '').trim();
+          if (f.required && (f.type === 'multicheck' ? !vals[f.id].length : !vals[f.id])) { err.textContent = f.type === 'check' ? 'Please tick the box to confirm.' : f.label + ' is required.'; err.hidden = false; return; }
         }
         ok.disabled = true;
         try { if (o.run) await o.run(vals); close(vals); }
@@ -169,6 +197,10 @@
     if (s.published_version) return '<span class="trn-pill warn">Needs attention</span>';
     return '<span class="trn-pill off">Not published</span>';
   }
+  function countriesCell(l) {
+    var edit = isSA() && envKnown() ? h` <button type="button" class="btn-s trn-edit-countries" data-act="editcountries" data-lang="${l.code}" aria-label="Edit countries for ${l.name_en}">Edit</button>` : '';
+    return '<div class="trn-countries-cell">' + countryChips(l.countries) + edit + '</div>';
+  }
   function renderOverview() {
     var rows = '';
     st.langs.forEach(function (l) {
@@ -176,14 +208,14 @@
         var s = (l.status_indicators || {})[tr]; if (!s) return;
         var draft = s.draft_changes ? h`${s.draft_changes} modified` : '—';
         rows += h`<tr><td>${l.name_en} <span class="trn-key">${l.code}</span><div class="trn-hint">${l.name_native} · ${l.direction.toUpperCase()} · ${l.status}</div></td>` +
-          h`<td>${TRACK_LABEL[tr]}</td><td>${s.published_version ? 'v' + s.published_version : '—'}</td><td>${raw(draft)}</td>` +
+          h`<td>${raw(countriesCell(l))}</td><td>${TRACK_LABEL[tr]}</td><td>${raw(draft)}</td>` +
           h`<td>${s.missing} missing</td><td>${raw(statusPill(s))}</td><td>${fmt((l.last_updated || {})[tr])}</td>` +
           h`<td><button type="button" class="btn-s" data-act="open" data-lang="${l.code}" data-track="${tr}">Open</button></td></tr>`;
       });
     });
     var base = st.base || { code: 'en', name_en: 'English', name_native: 'English', direction: 'ltr' };
     var baseRow = h`<tr><td>${base.name_en} <span class="trn-key">${base.code}</span><div class="trn-hint">${base.name_native} · ${(base.direction || 'ltr').toUpperCase()} · built-in</div></td>` +
-      h`<td colspan="7" class="trn-hint">Source language. Its text comes from the app and is not edited here.</td></tr>`;
+      h`<td>${raw(countriesCell(base))}</td><td colspan="6" class="trn-hint">Source language. Its text comes from the app and is not edited here.</td></tr>`;
     var add = '';
     if (isSA() && envKnown()) {
       var arHint = langObj('ar') ? '' : '<p class="trn-note">Arabic is not added yet. <button type="button" class="btn-s" data-act="fillar">Fill in Arabic</button> then press Add language.</p>';
@@ -191,7 +223,9 @@
         '<div><label>Code (e.g. ar)</label><input id="trn_nl_code" maxlength="10"></div><div><label>English name</label><input id="trn_nl_en" maxlength="60"></div>' +
         '<div><label>Native name</label><input id="trn_nl_native" maxlength="60"></div>' +
         '<div><label>Direction</label><select id="trn_nl_dir"><option value="ltr">Left to right</option><option value="rtl">Right to left</option></select></div>' +
-        '<div><button type="button" class="btn-p" data-act="addlang">Add language</button></div></div></div>';
+        '<div><button type="button" class="btn-p" data-act="addlang">Add language</button></div></div>' +
+        '<div class="trn-nl-countries"><label class="small fw-bold">Countries (select one or more)</label>' + countryBoxes('trn_nl_countries', []) +
+        '<div class="trn-hint">Only supported countries are listed. Select none to offer the language in every country.</div></div></div>';
     }
     var none = st.langs.length ? '' : '<div class="trn-empty">No translation languages added yet.' +
       (!envKnown() ? ' Adding languages is disabled until the environment is identified.' : ' Add one below (for example Arabic).') + '</div>';
@@ -204,7 +238,7 @@
     setHtml($('trn_pane_overview'),
       '<div class="section-header"><div></div><button type="button" class="btn-p" data-act="refresh"><i class="fas fa-sync me-1"></i> Refresh</button></div>' +
       (envKnown() ? '' : '<div class="trn-alert">The environment is not identified, so every change is disabled until it is.</div>') +
-      '<div class="table-wrap"><table class="trn-table"><thead><tr><th>Language</th><th>Track</th><th>Live version</th><th>Modified</th><th>Completion</th><th>Status</th><th>Last updated</th><th></th></tr></thead><tbody>' + baseRow + rows + '</tbody></table></div>' +
+      '<div class="table-wrap"><table class="trn-table"><thead><tr><th>Language</th><th>Countries</th><th>Track</th><th>Modified</th><th>Completion</th><th>Status</th><th>Last updated</th><th></th></tr></thead><tbody>' + baseRow + rows + '</tbody></table></div>' +
       none + kill + add);
   }
 
@@ -233,17 +267,16 @@
         h`<div class="trn-hint">${hint}</div>${raw(extra)}<div class="trn-rowerr" hidden></div></td><td><span class="trn-pill ${r.status === 'published' ? 'ok' : r.status === 'modified' ? 'warn' : 'off'}" data-status>${r.status}</span></td><td>${raw(btns)}</td></tr>`;
     }).join('');
     var pages = Math.max(1, Math.ceil(d.total / d.page_size));
-    var actions = '';
-    if (isSA() && envKnown()) actions += '<button type="button" class="btn-p" data-act="publish">Publish Changes</button>';
+    // The one Publish Changes button lives in the top toolbar, next to the search box (same action, same rules as before).
+    var publish = isSA() && envKnown() ? '<button type="button" class="btn-p trn-publish" data-act="publish">Publish Changes</button>' : '';
     setHtml($('trn_pane_strings'),
       h`<div class="trn-toolbar">${raw(selectors())}<select data-change="filter" aria-label="Filter">${raw(filt)}</select>` +
-      h`<input type="search" placeholder="Search key or English text" value="${st.q}" data-input="q" aria-label="Search"></div>` +
+      h`<input type="search" placeholder="Search key or English text" value="${st.q}" data-input="q" aria-label="Search">${raw(publish)}</div>` +
       (!envKnown() ? '<p class="trn-note">Changes are disabled until the environment is identified.</p>' : '') +
       (st.track === 'legal' ? '<p class="trn-note">Legal text can be edited and published here, but the customer app does not read legal text yet, so publishing it does not change what customers see.</p>' : '') +
       (d.rows.length ? '<div class="table-wrap"><table class="trn-table"><thead><tr><th>Key</th><th>English (source)</th><th>Translation</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
         : '<div class="trn-empty">No translation keys match.' + (d.total === 0 && st.filter === 'all' && !st.q ? ' The key list is created from the app text during the localization phase.' : '') + '</div>') +
-      h`<div class="trn-toolbar"><button type="button" class="btn-s" data-act="prev" ${raw(d.page <= 1 ? 'disabled' : '')}>Previous</button><span>Page ${d.page} of ${pages} · ${d.total} key${d.total === 1 ? '' : 's'}</span><button type="button" class="btn-s" data-act="next" ${raw(d.page >= pages ? 'disabled' : '')}>Next</button></div>` +
-      '<div class="trn-actions">' + actions + '</div>');
+      h`<div class="trn-toolbar"><button type="button" class="btn-s" data-act="prev" ${raw(d.page <= 1 ? 'disabled' : '')}>Previous</button><span>Page ${d.page} of ${pages} · ${d.total} key${d.total === 1 ? '' : 's'}</span><button type="button" class="btn-s" data-act="next" ${raw(d.page >= pages ? 'disabled' : '')}>Next</button></div>`);
   }
   async function saveRow(tr) {
     var key = tr.getAttribute('data-row'), ta = tr.querySelector('textarea'), err = tr.querySelector('.trn-rowerr'), btn = tr.querySelector('[data-act=save]');
@@ -275,12 +308,21 @@
         text: on ? 'Apps will ignore remote translations and use their bundled text (' + envName() + ' only).' : 'Apps may use remote translations again (' + envName() + ' only).',
         run: async function (f) { await api('/kill-switch', { method: 'POST', json: { enabled: on, reason: f.note } }); } }).then(function (r) { if (r) reload(); });
     }
+    if (name === 'editcountries') {
+      var code = el.getAttribute('data-lang'), lo = code === 'en' ? st.base : langObj(code);
+      if (!lo) return;
+      return dialog({ title: 'Countries for ' + lo.name_en, okLabel: 'Save countries',
+        text: 'Choose every country where this language is offered. Applies to ' + envName() + ' only and takes effect immediately.',
+        fields: [{ id: 'countries', label: 'Countries', type: 'multicheck', selected: lo.countries || [], hint: 'Select none to offer the language in every country.' }],
+        run: async function (f) { await api('/languages/' + encodeURIComponent(code) + '/countries', { method: 'PUT', json: { countries: f.countries } }); } })
+        .then(function (r) { if (r) { alertMsg('Countries saved for ' + lo.name_en + '.', true); reload(); } });
+    }
     if (name === 'fillar') {
       $('trn_nl_code').value = 'ar'; $('trn_nl_en').value = 'Arabic'; $('trn_nl_native').value = 'العربية'; $('trn_nl_dir').value = 'rtl';
       return;
     }
     if (name === 'addlang') {
-      var body = { code: $('trn_nl_code').value.trim(), name_en: $('trn_nl_en').value.trim(), name_native: $('trn_nl_native').value.trim(), direction: $('trn_nl_dir').value };
+      var body = { code: $('trn_nl_code').value.trim(), name_en: $('trn_nl_en').value.trim(), name_native: $('trn_nl_native').value.trim(), direction: $('trn_nl_dir').value, countries: checkedIn('trn_nl_countries') };
       if (!body.code || !body.name_en || !body.name_native) { alertMsg('Fill in the code and both names.'); return; }
       try { await api('/languages', { method: 'POST', json: body }); alertMsg('Language added as a draft.', true); st.lang = body.code; reload(); } catch (e) { alertMsg(e.message); }
     }
@@ -321,7 +363,7 @@
     $('trn_denied').hidden = true; $('trn_body').hidden = false;
     try {
       var r = await Promise.all([api('/environment'), api('/languages')]);
-      st.env = r[0]; st.langs = r[1].languages; st.base = r[1].base_language || null;
+      st.env = r[0]; st.langs = r[1].languages; st.base = r[1].base_language || null; st.countries = r[1].supported_countries || [];
     } catch (e) {
       if (e.status === 403) { $('trn_body').hidden = true; $('trn_denied').hidden = false; $('trn_denied_text').textContent = DENIED; return; }
       $('trn_body').hidden = false; alertMsg(e.message); return;

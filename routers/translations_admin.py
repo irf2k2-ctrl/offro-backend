@@ -19,6 +19,7 @@ from routers.dashboard_auth import get_current_dashboard_user
 from services import app_environment as _env
 from services import translation_audit as audit
 from services import translations as T
+from utils import countries as _countries
 
 router = APIRouter(prefix="/translations", tags=["Translations"])
 MODULE = "Translations"
@@ -135,16 +136,20 @@ def _last_updated(lang: str) -> dict:
 @router.get("/languages")
 async def list_languages(user: dict = Depends(require_perm("view"))):
     rows = []
+    mapping = T.all_language_countries()
     for l in T.db[T.LANGS].find().sort("code", 1):
         l.pop("_id", None)
+        l["countries"] = mapping.get(l["code"], [])
         l["created_at"] = l["created_at"].isoformat() + "Z" if isinstance(l.get("created_at"), datetime) else l.get("created_at")
         l["status_indicators"] = T.language_status(l["code"])
         l["last_updated"] = _last_updated(l["code"])
         rows.append(l)
     # English is the app's built-in source language, not a stored record (nothing to seed, nothing to duplicate).
     base = {"code": "en", "name_en": "English", "name_native": "English", "direction": "ltr", "bundled": True,
+            "countries": mapping.get(T.BASE_LANGUAGE, []),
             "note": "Built-in source language. Its text comes from the app and is not edited here."}
-    return {"languages": rows, "base_language": base}
+    # The countries an administrator can pick come from the one country master (utils.phone.SUPPORTED_COUNTRIES); this API keeps no list.
+    return {"languages": rows, "base_language": base, "supported_countries": _countries.supported_countries()}
 
 
 @router.get("/strings")
@@ -218,9 +223,20 @@ async def put_value(lang: str, key: str, data: dict, request: Request, user: dic
 async def add_language(data: dict, request: Request, user: dict = Depends(require_super_admin("add_language"))):
     def fn():
         d = T.add_language(data.get("code"), data.get("name_en"), data.get("name_native"), data.get("direction"),
-                           audit.admin_ref(user)["id"])
-        return {"code": d["code"], "status": d["status"], "direction": d["direction"]}
+                           audit.admin_ref(user)["id"], countries=data.get("countries"))
+        return {"code": d["code"], "status": d["status"], "direction": d["direction"], "countries": d.get("countries", []),
+                "audit_details": {"countries": d.get("countries", [])}}
     return _run_sensitive(request, user, "add_language", fn, lang=str(data.get("code", ""))[:20])
+
+
+@router.put("/languages/{code}/countries")
+async def put_language_countries(code: str, data: dict, request: Request,
+                                 user: dict = Depends(require_super_admin("set_language_countries"))):
+    """Replaces the countries a language (or English, 'en') is offered in. Super Admin only; audited; this environment only."""
+    def fn():
+        saved = T.set_language_countries(code, data.get("countries"), audit.admin_ref(user)["id"])
+        return {"code": code, "countries": saved, "audit_details": {"countries": saved}}
+    return _run_sensitive(request, user, "set_language_countries", fn, lang=code[:20])
 
 
 @router.patch("/languages/{code}")
