@@ -102,9 +102,6 @@ td[style*="sticky"]{background:#fff;}
 .cat-chip{display:inline-flex;align-items:center;gap:5px;background:var(--light);color:var(--primary);padding:3px 11px;border-radius:20px;font-size:12px;font-weight:500;margin:3px;}
 .cat-chip button{background:none;border:none;cursor:pointer;color:var(--primary);font-size:13px;line-height:1;padding:0;}
 .terms-editor{width:100%;min-height:260px;font-family:monospace;font-size:13px;border:1px solid var(--border);border-radius:8px;padding:12px;resize:vertical;background:white;}
-.plan-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;background:var(--bg);padding:10px 14px;border-radius:8px;border:1px solid var(--border);}
-.plan-row label{font-size:13px;font-weight:600;min-width:90px;color:var(--text);}
-.plan-row input{flex:1;max-width:140px;}
 
 /* ── Star Ratings ── */
 
@@ -183,7 +180,7 @@ function _secUrl(u) {
 </script>
 <link rel="stylesheet" href="/static/css/wa_campaigns.css?v=2g3">
 <link rel="stylesheet" href="/static/css/translations.css?v=h4">
-<link rel="stylesheet" href="/static/css/pricing_plans.css?v=pp2">
+<link rel="stylesheet" href="/static/css/pricing_plans.css?v=pp3">
 </head>
 <body>
 
@@ -217,7 +214,6 @@ function _secUrl(u) {
   <div class="sep"></div>
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
-  <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
   <a href="#" onclick="showSection('pricing_plans',this)"><i class="fas fa-layer-group fa-fw"></i> Pricing &amp; Plans</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('reviews',this)"><i class="fas fa-comment-dots fa-fw"></i> Rating &amp; Review</a>
@@ -867,112 +863,6 @@ function _secUrl(u) {
       </div>
       <!-- Categories grid with image upload -->
       <div id="categories_list" style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;"></div>
-    </div>
-  </div>
-
-  <!-- PRICING -->
-  <div id="section-pricing" class="section">
-    <div class="page-title">Pricing & GST</div>
-    <div class="table-wrap" style="padding:24px;max-width:640px;">
-      <div class="mb-4">
-        <label class="form-label fw-bold">GST Percentage (%)</label>
-        <input id="gst_input" class="form-control" type="number" style="max-width:160px;" placeholder="18">
-      </div>
-      <div style="font-size:13px;font-weight:800;letter-spacing:.8px;color:#3E5F55;margin-bottom:10px;">STORE PRICING</div>
-      <div id="plans_editor"></div>
-      <hr style="margin:24px 0;">
-      <div style="background:#f0f9f4;border-radius:12px;padding:20px;border:1px solid #c3dfc6;">
-        <div class="fw-bold mb-3" style="color:#3E5F55;font-size:15px;">💰 Reward Redemption / Conversion Settings</div>
-        <div class="mb-3">
-          <label class="form-label">Points → ₹ Conversion Rate <small style="color:#6b8c7e;">(₹ per 1 point)</small></label>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:18px;color:#3E5F55;">₹</span>
-            <input id="conversion_rate_input" class="form-control" type="number" step="0.01" min="0.01" style="max-width:140px;" placeholder="0.10">
-            <span style="color:#6b8c7e;font-size:13px;">per point &nbsp;→&nbsp; e.g. 100 pts = ₹<span id="rate_example">10</span></span>
-          </div>
-          <small class="text-muted">Default: ₹0.10 per point (100 pts = ₹10)</small>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Minimum Points to Redeem Rewards</label>
-          <input id="min_withdraw_input" class="form-control" type="number" min="1" style="max-width:160px;" placeholder="200">
-          <small class="text-muted">Users need at least this many points to request reward redemption</small>
-        </div>
-      </div>
-
-      <!-- ── Influencer Subscription (one-time profile publishing fee) ── -->
-      <hr style="margin:24px 0;">
-      <div style="background:#fff0f6;border-radius:12px;padding:20px;border:1px solid #f0c6d8;">
-        <div class="fw-bold mb-3" style="color:#a1275a;font-size:15px;">🌟 Influencer Subscription <small style="color:#a1275a;font-weight:normal;">(one-time profile publishing fee)</small></div>
-        <div class="row g-3 mb-2">
-          <div class="col-md-4">
-            <label class="form-label" style="font-size:13px">Subscription Fee (₹)</label>
-            <input id="influencer_fee_input" class="form-control" type="number" min="0" step="1" placeholder="1000" oninput="recalcInfluencerTotal()">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label" style="font-size:13px">GST %</label>
-            <input id="influencer_gst_input" class="form-control" type="number" min="0" step="0.5" placeholder="18" oninput="recalcInfluencerTotal()">
-          </div>
-          <div class="col-md-4 d-flex align-items-end">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="influencer_enabled_input">
-              <label class="form-check-label" for="influencer_enabled_input" style="font-size:13px;">Enabled (require payment before publish)</label>
-            </div>
-          </div>
-        </div>
-        <div style="font-size:13px;color:#a1275a;background:#fff;border-radius:8px;padding:10px 14px;display:inline-block;">
-          GST Amount: ₹<span id="influencer_gst_amount_display">0</span>
-          &nbsp;·&nbsp; <strong>Total Payable: ₹<span id="influencer_total_display">0</span></strong>
-        </div>
-        <p style="font-size:12px;color:#a1275a;margin-top:8px;margin-bottom:0;">
-          When disabled, influencers can publish their profile without payment (admin override). Existing published influencer profiles are never retroactively charged.
-        </p>
-      </div>
-
-      <hr style="margin:24px 0;">
-      <div class="mb-2" style="border:1px solid #c3dfc6;border-radius:12px;padding:16px 18px;background:#f7fbf8;">
-      <div style="font-size:13px;font-weight:800;letter-spacing:.8px;color:#3E5F55;margin-bottom:14px;">PRODUCT SETTINGS</div>
-      <div class="mb-4">
-        <label class="form-label fw-bold">Free Product Slots <small style="color:#6b8c7e;font-weight:normal;">(free products per store)</small></label>
-        <input id="free_product_limit_input" class="form-control" type="number" min="0" style="max-width:160px;">
-        <small class="text-muted">Every store gets this many free products (a merchant with two stores gets this many in each). Active, pending and deactivated-but-not-expired products use a slot; expired, deleted and rejected ones do not. Takes effect on the next save/renewal.</small>
-      </div>
-      <div class="mb-1">
-        <label class="form-label fw-bold">Maximum Product Validity (Days)</label>
-        <input id="product_max_validity_days_input" class="form-control" type="number" min="1" style="max-width:160px;">
-      </div>
-      </div>
-
-      <button class="btn-p mt-3" onclick="savePricing()">Save All Settings</button>
-      <p id="pricing_msg" class="mt-2" style="font-size:13px;color:var(--primary);"></p>
-    </div>
-
-    <!-- ── Banner & Product Pricing (Per-Day Model) ── -->
-    <div style="margin-top:20px;background:#fff8f0;border-radius:12px;padding:20px;border:1px solid #e8d5c0;max-width:640px;">
-      <div class="fw-bold mb-3" style="color:#856404;font-size:15px;">🖼️ Banner Pricing — Per Day</div>
-      <p style="font-size:12px;color:#856404;margin-bottom:14px;">Merchant selects any number of days + start date. Total = days × rate + GST</p>
-      <div class="row g-3 mb-2">
-        <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">Banner Price per Day (₹)</label>
-          <input id="banner_price_per_day" class="form-control" type="number" min="0" step="0.50" placeholder="15">
-          <small class="text-muted">e.g. 30 days × ₹15 = ₹450 base</small>
-        </div>
-      </div>
-    </div>
-
-    <div style="margin-top:16px;background:#f0f8ff;border-radius:12px;padding:20px;border:1px solid #c0d8f0;max-width:640px;">
-      <div class="fw-bold mb-3" style="color:#0d47a1;font-size:13px;letter-spacing:.8px;">PRODUCT PRICING BY DURATION</div>
-      <p style="font-size:12px;color:#0d47a1;margin-bottom:14px;">Used only for products beyond the free slots. Merchant selects the number of days. Price = days × rate per day, plus GST. Free products cost ₹0.</p>
-      <div class="row g-3 mb-2">
-        <div class="col-md-4">
-          <label class="form-label" style="font-size:13px">Price per Day (₹)</label>
-          <input id="product_price_per_day" class="form-control" type="number" min="0" step="0.50" placeholder="10">
-          <small class="text-muted">e.g. 45 days × ₹10 = ₹450 base</small>
-        </div>
-      </div>
-      <button class="btn-p mt-2" onclick="savePricingConfig()" style="font-size:13px;padding:6px 18px;">
-        <i class="fas fa-save me-1"></i> Save Banner & Product Pricing
-      </button>
-      <p id="bv_pricing_msg" style="font-size:13px;color:var(--primary);margin-top:8px;"></p>
     </div>
   </div>
 
@@ -2548,7 +2438,7 @@ const RBAC_SECTION_MAP = {
   "Gift Vouchers":     ["gift_product_requests"],
   "Notifications":     ["notifications"],
   "Categories":        ["categories"],
-  "Pricing & GST":     ["pricing", "pricing_plans"],
+  "Pricing & GST":     ["pricing_plans"],
   "Reviews":           ["reviews"],
   "Discounts":         ["discounts"],
   "Influencers":       ["influencers"],
@@ -2778,7 +2668,6 @@ function showSection(name, el){
   if(name==="stores") loadStores();
   if(name==="gift_product_requests") loadGiftProductRequests();
   if(name==="categories"){ loadCategories().then(()=>renderCategories()); }
-  if(name==="pricing") loadPricing();
   if(name==="pricing_plans" && window.PricingPlans) PricingPlans.open();
   if(name==="terms") loadTerms();
   if(name==="policies") loadPolicies();
@@ -2939,78 +2828,6 @@ function populateCategoryDropdown(sel){
   let cats=categoriesList.length?categoriesList.map(c=>c.name||c):["Grocery","Restaurant","Pharmacy","Electronics","Clothing","Bakery","Salon","Other"];
   cats.forEach(c=>{let o=document.createElement("option");o.value=c;o.innerText=c;if(c===sel)o.selected=true;s.appendChild(o);});
 }
-
-// ===== PRICING =====
-let currentPlans=[];
-async function loadPricing(){
-  let r=await fetch("/admin/pricing",{credentials:"include"});
-  let d=await r.json();
-  document.getElementById("gst_input").value=(d.gst_percent!=null?d.gst_percent:18);
-  [["free_product_limit_input","free_product_limit"],
-   ["product_max_validity_days_input","product_max_validity_days"]].forEach(([id,k])=>{
-    const el=document.getElementById(id); if(el) el.value=(d[k]!=null?d[k]:"");
-  });
-  currentPlans=d.plans||[];
-  let rate=d.conversion_rate||0.10;
-  document.getElementById("conversion_rate_input").value=rate;
-  document.getElementById("min_withdraw_input").value=d.min_withdraw_points||200;
-  document.getElementById("rate_example").innerText=(100*rate).toFixed(2);
-  document.getElementById("conversion_rate_input").addEventListener("input",function(){
-    let v=parseFloat(this.value)||0;
-    document.getElementById("rate_example").innerText=(100*v).toFixed(2);
-  });
-  renderPlans();
-  // Influencer Subscription — server is the source of truth for gst_amount/
-  // total (recomputed here on load purely for display; the actual charge is
-  // always recalculated server-side at payment time, never trusted from here).
-  let infsub=d.influencer_subscription||{};
-  document.getElementById("influencer_fee_input").value=(infsub.fee!=null?infsub.fee:0);
-  document.getElementById("influencer_gst_input").value=(infsub.gst_percent!=null?infsub.gst_percent:18);
-  document.getElementById("influencer_enabled_input").checked=!!infsub.enabled;
-  recalcInfluencerTotal();
-}
-function recalcInfluencerTotal(){
-  let fee=parseFloat(document.getElementById("influencer_fee_input").value)||0;
-  let gstPct=parseFloat(document.getElementById("influencer_gst_input").value)||0;
-  let gstAmt=Math.round(fee*gstPct/100*100)/100;
-  let total=Math.round((fee+gstAmt)*100)/100;
-  document.getElementById("influencer_gst_amount_display").innerText=gstAmt;
-  document.getElementById("influencer_total_display").innerText=total;
-}
-function renderPlans(){
-  let html=currentPlans.map((p,i)=>`
-    <div class="plan-row">
-      <label>${escHtml(p.label)}</label>
-      <span style="font-size:12px;color:var(--muted);">₹</span>
-      <input class="form-control" type="number" value="${p.price}" min="1" id="plan_price_${i}" style="max-width:130px;">
-    </div>`).join("");
-  document.getElementById("plans_editor").innerHTML=html;
-}
-async function savePricing(){
-  let gstRaw=document.getElementById("gst_input").value; let gst=gstRaw===''||gstRaw===null?18:parseFloat(gstRaw);
-  let rate=parseFloat(document.getElementById("conversion_rate_input").value)||0.10;
-  let minW=parseInt(document.getElementById("min_withdraw_input").value)||200;
-  let plans=currentPlans.map((p,i)=>({...p,price:parseInt(document.getElementById("plan_price_"+i).value)||p.price}));
-  const productSettings = {};
-  [["free_product_limit_input","free_product_limit"],
-   ["product_max_validity_days_input","product_max_validity_days"]].forEach(([id,k])=>{
-    const v=document.getElementById(id)?.value; if(v!==''&&v!=null) productSettings[k]=Number(v);
-  });
-  let influencerSub={
-    fee: parseFloat(document.getElementById("influencer_fee_input").value)||0,
-    gst_percent: parseFloat(document.getElementById("influencer_gst_input").value)||0,
-    enabled: document.getElementById("influencer_enabled_input").checked,
-  };
-  let r=await fetch("/admin/pricing",{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({gst_percent:gst,plans,conversion_rate:rate,min_withdraw_points:minW,...productSettings,influencer_subscription:influencerSub}),credentials:"include"});
-  let _pmsg="❌ Error saving"; if(r.ok) _pmsg="✅ All settings saved!"; else { try{ const _e=await r.json(); _pmsg="❌ "+(_e.detail||"Error saving"); }catch(e){} }
-  document.getElementById("pricing_msg").innerText=_pmsg;
-  setTimeout(()=>document.getElementById("pricing_msg").innerText="",2500);
-}
-
-
-
-
 
 // ===== SOCIAL MEDIA =====
 async function loadSocialLinks(){
@@ -7181,35 +6998,6 @@ async function deleteMerchantProduct(id) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// BANNER & PRODUCT PRICING (merged into Pricing & GST section)
-// ═══════════════════════════════════════════════════════════
-async function loadPricingConfig() {
-  try {
-    const r = await fetch('/admin/banner-pricing', {credentials:'include'});
-    if (!r.ok) return;
-    const d = await r.json();
-    const safe = (id, val) => { const el = document.getElementById(id); if(el) el.value = val ?? ''; };
-    safe('banner_price_per_day',  d.banner_price_per_day  ?? 15);
-    safe('product_price_per_day', d.product_price_per_day ?? 10);
-  } catch(_) {}
-}
-
-async function savePricingConfig() {
-  const gv = id => parseFloat(document.getElementById(id)?.value) || 0;
-  const body = {
-    banner_price_per_day:  gv('banner_price_per_day'),
-    product_price_per_day: gv('product_price_per_day'),
-  };
-  try {
-    const r = await fetch('/admin/banner-pricing', {method:'PUT', credentials:'include',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    const msg = document.getElementById('bv_pricing_msg');
-    if (msg) { msg.textContent = r.ok ? '✅ Banner & Product pricing saved!' : '❌ Error saving'; }
-    setTimeout(() => { if(msg) msg.textContent=''; }, 2500);
-  } catch(e) { console.error(e); }
-}
-
-// ═══════════════════════════════════════════════════════════
 // EXTENDED loadMerchantTxns — adds banner & product invoices
 // ═══════════════════════════════════════════════════════════
 let _allTxnRows = [];
@@ -7335,14 +7123,13 @@ function renderTxnRows(rows) {
 
 
 // ═══════════════════════════════════════════════════════════
-// HOOK into showSection — load merchant submissions + pricing
+// HOOK into showSection — load merchant submissions
 // ═══════════════════════════════════════════════════════════
 const _origShowSec = window.showSection;
 window.showSection = function(name, el) {
   if (_origShowSec) _origShowSec(name, el);
   if (name === 'promo_sliders')   { loadMerchantBanners(); }
   if (name === 'product_cards')    { loadMerchantProducts(); }
-  if (name === 'pricing')         { loadPricingConfig(); }
   if (name === 'merchant_txns')   { loadMerchantTxnsFull(); }
   // Stop WA chat polling when leaving the wa_chat section
   if (name !== 'wa_chat' && typeof _waPollTimer !== 'undefined' && _waPollTimer) {
@@ -7429,11 +7216,6 @@ async function adminExtendProduct(vid) {
 // Override loadMerchantTxns to use the full version
 window.loadMerchantTxns = loadMerchantTxnsFull;
 
-// On initial page load — if payments section is active, load full data
-document.addEventListener('DOMContentLoaded', () => {
-  // Load banner/product pricing into Pricing section automatically
-  setTimeout(loadPricingConfig, 800);
-});
 </script>
 
 
@@ -10342,7 +10124,7 @@ function rbacLogsNext() { rbacLogSkip += rbacLogLimit; rbacLoadLogs(); }
 <script src="/static/js/wa_campaigns_editor.js?v=2g3"></script>
 <script src="/static/js/wa_campaigns_admin.js?v=2g3"></script>
 <script src="/static/js/translations.js?v=h5"></script>
-<script src="/static/js/pricing_plans.js?v=pp2"></script>
+<script src="/static/js/pricing_plans.js?v=pp3"></script>
 
 </body>
 </html>

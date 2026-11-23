@@ -262,6 +262,7 @@
     } else if (e.key === 'infl') {
       title = 'Edit influencer subscription fee';
       f = field('pp_f_price', 'Fee (' + sym + ')', e.vals ? e.vals.price : (p.influencer.price === null ? '' : p.influencer.price), 'number', 'min="0" step="any"');
+      if (p.is_india) f += field('pp_f_gst', 'Influencer GST (%)', e.vals && e.vals.gst !== undefined ? e.vals.gst : (p.influencer.tax && p.influencer.tax.percent !== undefined ? p.influencer.tax.percent : ''), 'number', 'min="0" max="100" step="any"');
     } else if (e.key === 'banner') {
       title = 'Edit banner price per day';
       f = field('pp_f_price', 'Price per day (' + sym + ')', e.vals ? e.vals.price : (p.banner.price === null ? '' : p.banner.price), 'number', 'min="0" step="any"');
@@ -407,13 +408,13 @@
     var e = st.edit, section = SECTION_OF[st.tab], body;
     if (!e) return;
     if (e.key === 'store') body = { plans: [{ id: e.id, price: val('pp_f_price') }] };
-    else if (e.key === 'infl') body = { fee: val('pp_f_price') };
+    else if (e.key === 'infl') { body = { fee: val('pp_f_price') }; if ($('pp_f_gst')) body.gst_percent = val('pp_f_gst'); }
     else if (e.key === 'banner') body = { price_per_day: val('pp_f_price') };
     else body = { price_per_day: val('pp_f_price'), free_product_limit: val('pp_f_free'), product_max_validity_days: val('pp_f_valid') };
     try {
       await put('/countries/' + encodeURIComponent(st.country) + '/prices/' + section, body);
       st.edit = null; await afterSave(true);
-    } catch (er) { e.err = er.message; e.vals = { price: val('pp_f_price'), free: val('pp_f_free'), valid: val('pp_f_valid') }; render(); }
+    } catch (er) { e.err = er.message; e.vals = { price: val('pp_f_price'), free: val('pp_f_free'), valid: val('pp_f_valid'), gst: $('pp_f_gst') ? val('pp_f_gst') : undefined }; render(); }
   }
   async function onToggle(key, id, to) {
     var on = to === '1', section = SECTION_OF[st.tab], body;

@@ -2,6 +2,7 @@
 Run:  python -m pytest test_product_service.py -q -W ignore"""
 import sys, threading
 from datetime import datetime, timedelta
+import pytest
 from bson import ObjectId
 from services import products as P
 db = sys.modules["database"].db
@@ -11,7 +12,16 @@ def reset(limit=10, price=10):
     db.pricing.insert_one({"free_product_limit": limit, "product_price_per_day": price,
                            "product_max_validity_days": 365, "gst_percent": 18})
 M = {"_id": ObjectId(), "name": "M", "phone": "1"}
-END = (P.ist_today() + timedelta(days=29)).strftime("%Y-%m-%d")   # today..END = 30 days
+def _end_date():
+    """today..END = 30 days, from the clock at the moment it is asked (IST business day)."""
+    return (P.ist_today() + timedelta(days=29)).strftime("%Y-%m-%d")
+END = _end_date()   # placeholder only; refreshed before every test so a run that crosses midnight IST cannot skew it
+
+@pytest.fixture(autouse=True)
+def _fresh_end_date():
+    global END
+    END = _end_date()
+    yield
 S1, S2 = "store-1", "store-2"          # two stores of the SAME merchant M
 def seed(n, status="approved", active=True, end_days=30, merchant=M, store=S1):
     for i in range(n):

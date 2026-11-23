@@ -23,7 +23,8 @@ SID = ""
 @pytest.fixture(autouse=True)
 def _api_fixtures():
     """Merchant account, admin session and an active store (rebuilt for every test)."""
-    global SID
+    global SID, END
+    END = _end_date()
     fake.accounts.insert_one({"token": "mt", "merchant_id": MID, "name": "Mer", "phone": "999", "roles": ["merchant"]})
     role = fake.dashboard_roles.find_one({"role_name": "Super Admin"}) or {"_id": fake.dashboard_roles.insert_one({"role_name": "Super Admin", "permissions": {}}).inserted_id}
     fake.dashboard_users.delete_many({"token": "at"})
@@ -32,7 +33,10 @@ def _api_fixtures():
     yield
 
 H = {"Authorization": "Bearer mt"}; A = {"Authorization": "Bearer at"}
-END = (P.ist_today() + timedelta(days=29)).strftime("%Y-%m-%d")   # today..END = 30 days
+def _end_date():
+    """today..END = 30 days, from the clock at the moment it is asked (IST business day)."""
+    return (P.ist_today() + timedelta(days=29)).strftime("%Y-%m-%d")
+END = _end_date()   # placeholder only; refreshed before every test (see _api_fixtures) so a run that crosses midnight IST cannot skew it
 
 def settings(**kw):
     fake.pricing.delete_many({})

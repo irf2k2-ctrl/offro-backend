@@ -330,12 +330,11 @@ def test_existing_pricing_endpoints_are_untouched():
     assert c.get("/merchant/plans").json()[0]["total"] == 588.82
 
 
-def test_dashboard_template_wires_the_module_beneath_pricing_and_gst():
+def test_dashboard_template_wires_the_module_in_place_of_the_old_screen():
     t = open("templates/admin_dashboard.html", encoding="utf-8").read()
-    i, j = t.index("showSection('pricing',this)"), t.index("showSection('pricing_plans',this)")
-    assert 0 < j - i < 300 and "Pricing &amp; Plans" in t[j:j + 200]
+    assert "showSection('pricing',this)" not in t and "showSection('pricing_plans',this)" in t
     assert t.index("{% include \"partials/pricing_plans.html\" %}") > 0 and "/static/js/pricing_plans.js" in t and "/static/css/pricing_plans.css" in t
-    assert '["pricing", "pricing_plans"]' in t and 'PricingPlans.open()' in t
+    assert '"Pricing & GST":     ["pricing_plans"]' in t and 'PricingPlans.open()' in t
     p = open("templates/partials/pricing_plans.html", encoding="utf-8").read()
     assert 'id="section-pricing_plans"' in p
 
