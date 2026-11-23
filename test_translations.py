@@ -369,13 +369,30 @@ class TestPublic:
         self.published()
         r = client.get("/translations/ar")
         etag = r.headers["etag"]
-        assert r.headers["cache-control"].startswith("public")
+        assert r.headers["cache-control"] == "no-cache"   # revalidate every time: a new publish is never hidden by a cached copy
         assert client.get("/translations/ar", headers={"If-None-Match": etag}).status_code == 304
         assert client.get("/translations/ar", headers={"If-None-Match": "W/" + etag}).status_code == 304
         assert client.get("/translations/ar", headers={"If-None-Match": '"other"'}).status_code == 200
         m = client.get("/translations/manifest")
         assert m.headers["cache-control"] == "no-cache"
         assert client.get("/translations/manifest", headers={"If-None-Match": m.headers["etag"]}).status_code == 304
+
+    def test_republished_value_with_placeholder_reaches_the_public_api(self):
+        """Same flow as the Rewards `walletVoucherRate` edit (a text with a placeholder, published a second time): the manifest
+        version/hash moves, the language file carries the new text with its placeholder, and the OLD ETag is no longer answered with a
+        304, so nothing stale is served. (`otpSent` stands in for walletVoucherRate: the fixture registry has no Rewards keys.)"""
+        sa = self.published()
+        put(sa, "otpSent", "رمز إلى {phone} (v2)"); publish(sa, note="v2")
+        m1 = client.get("/translations/manifest").json()["languages"][0]["tracks"]["app"]
+        f1 = client.get("/translations/ar")
+        assert f1.json()["strings"]["otpSent"] == "رمز إلى {phone} (v2)"
+        put(sa, "otpSent", "رمز إلى {phone} (v3)"); publish(sa, note="v3")
+        m2 = client.get("/translations/manifest").json()["languages"][0]["tracks"]["app"]
+        f2 = client.get("/translations/ar")
+        assert m2["version"] > m1["version"] and m2["hash"] != m1["hash"]
+        assert f2.json()["strings"]["otpSent"] == "رمز إلى {phone} (v3)" and f2.json()["hash"] == m2["hash"]
+        assert f2.headers["cache-control"] == "no-cache"
+        assert client.get("/translations/ar", headers={"If-None-Match": f1.headers["etag"]}).status_code == 200
 
     def test_etag_changes_after_a_new_version(self):
         sa = self.published()

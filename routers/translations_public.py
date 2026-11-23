@@ -101,7 +101,9 @@ async def language_file(lang: str, request: Request, track: str = "app"):
     if data is None:
         return JSONResponse({"detail": "not_available"}, status_code=404, headers={"Cache-Control": "no-store"})
     etag = '"' + data["hash"] + '"'
-    headers = {"ETag": etag, "Cache-Control": "public, max-age=300"}
+    # `no-cache` = "store it, but revalidate with the ETag before every use": a newly published version can never be hidden behind a
+    # 5-minute shared-cache copy, while an unchanged file still costs only a body-less 304.
+    headers = {"ETag": etag, "Cache-Control": "no-cache"}
     if _etag_matches(request.headers.get("if-none-match", ""), etag):
         return Response(status_code=304, headers=headers)
     return JSONResponse(data, headers=headers)
