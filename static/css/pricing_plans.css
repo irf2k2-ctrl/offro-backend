@@ -1,0 +1,36 @@
+/* Pricing & Plans module (admin dashboard). Prefix pp- keeps it isolated from the rest of the dashboard. */
+.pp{min-width:0;max-width:100%}
+.pp .pp-sub{font-size:13px;color:var(--muted,#6b8c7e);margin:-8px 0 14px}
+.pp .pp-note{background:#fff7e3;border:1px solid #f0d58a;border-radius:8px;padding:10px 14px;font-size:13px;color:#5b4300;margin-bottom:12px}
+.pp .pp-tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid var(--border,#d4e8de);margin-bottom:14px}
+.pp .pp-tab{background:none;border:0;border-bottom:3px solid transparent;padding:10px 13px;font-size:13px;color:#4b5a55;cursor:pointer;min-height:40px}
+.pp .pp-tab.active{color:var(--primary,#3E5F55);font-weight:700;border-bottom-color:var(--primary,#3E5F55)}
+.pp .pp-card{background:#fff;border:1px solid var(--border,#d4e8de);border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 2px 8px rgba(62,95,85,.06)}
+.pp .pp-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;margin-bottom:12px}
+.pp .pp-title{font-size:16px;font-weight:700}
+.pp .pp-help{font-size:12.5px;color:#4b5a55;margin-top:2px}
+.pp .pp-meta{font-size:12.5px;color:#4b5a55}
+.pp .pp-meta b{color:var(--text,#2c3e35)}
+.pp .pp-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pp select,.pp input[type=text],.pp input[type=number]{font:inherit;font-size:14px;padding:8px 10px;border:1px solid #b9c6c1;border-radius:6px;min-height:38px;background:#fff;color:var(--text,#2c3e35);max-width:100%}
+.pp label{font-size:12.5px;color:#4b5a55;display:block;margin-bottom:3px}
+.pp .pp-btn{border:1px solid #c5d0cc;background:#fff;color:#2f4d44;border-radius:6px;padding:7px 13px;font-size:13px;min-height:36px;cursor:pointer}
+.pp .pp-btn.pri{background:var(--primary,#3E5F55);color:#fff;border-color:var(--primary,#3E5F55)}
+.pp .pp-btn:disabled{opacity:.5;cursor:not-allowed}
+.pp .pp-tablewrap{overflow-x:auto;border:1px solid #e1e8e5;border-radius:8px}
+.pp table.pp-table{border-collapse:collapse;width:100%;min-width:640px}
+.pp .pp-table th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:#4b5a55;padding:10px 12px;background:#eef2f0;border-bottom:1px solid #dbe3e0}
+.pp .pp-table td{padding:11px 12px;font-size:13.5px;border-bottom:1px solid #e8eeec;vertical-align:middle}
+.pp .pp-actions{white-space:nowrap;display:flex;gap:6px}
+.pp .pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600}
+.pp .pill.a{background:#dcf1e4;color:#14532d}.pp .pill.i{background:#e9ecea;color:#44504c}.pp .pill.w{background:#fde8c8;color:#7a3e00}
+.pp .pp-alert{border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:12px}
+.pp .pp-alert.err{background:#fdecea;border:1px solid #f1b5ae;color:#7a1810}
+.pp .pp-alert.ok{background:#dcf1e4;border:1px solid #9fd3b2;color:#14532d}
+.pp .pp-edit{background:#f4f8f6;border:1px solid #b9d0c7;border-radius:10px;padding:14px;margin-bottom:14px}
+.pp .pp-edit h4{font-size:14px;font-weight:700;margin:0 0 10px}
+.pp .pp-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;align-items:end}
+.pp .pp-form .full{grid-column:1/-1}
+.pp .pp-ferr{font-size:12px;color:#7a1810;margin-top:3px}
+.pp .pp-foot{font-size:12.5px;color:#4b5a55;margin-top:10px}
+.pp .pp-denied{text-align:center;padding:50px 10px;color:#4b5a55}

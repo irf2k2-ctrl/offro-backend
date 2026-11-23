@@ -1,6 +1,8 @@
 """Stage 1: (2) the language-independent Modified/Published rule and (1) Download Draft / Import (XLSX).
 Run:  python -m pytest test_translations_draft.py -q -W ignore
 """
+import builtins
+import contextlib
 import io
 import json
 import os
@@ -47,6 +49,36 @@ def sheet_rows(data):
     return [[c.value for c in row] for row in ws.iter_rows(min_row=2, max_col=5)]
 
 
+@contextlib.contextmanager
+def _no_newline_translation():
+    r"""Make openpyxl write the workbook byte-for-byte the same on every OS.
+
+    openpyxl's XML writer (et_xmlfile) opens the sheet file in TEXT mode, so on Windows every "\n" is written as "\r\n": a cell holding
+    "\r\n" is stored as "\r\r\n" and reads back as TWO line breaks. Passing newline="" turns that translation off, so the file contains
+    exactly the characters the test put in the cell. Linux/macOS output is unchanged (they never translated)."""
+    try:
+        from et_xmlfile import incremental_tree as it
+    except ImportError:                                   # a different openpyxl layout: nothing to adjust
+        yield
+        return
+    real_open, had_own = builtins.open, "open" in vars(it)
+    previous = vars(it).get("open")
+
+    def _open(file, mode="r", *a, **k):
+        if "w" in mode and "b" not in mode:
+            k.setdefault("newline", "")
+        return real_open(file, mode, *a, **k)
+
+    it.open = _open
+    try:
+        yield
+    finally:
+        if had_own:
+            it.open = previous
+        else:
+            del it.open
+
+
 def edit_file(data, changes=None, *, english=None, drop=(), add=(), blank=(), set_type=None):
     """Return a modified copy of a downloaded draft. changes: key -> new translation. add: extra [key, feature, english, translation] rows."""
     wb = load_workbook(io.BytesIO(data))
@@ -68,7 +100,9 @@ def edit_file(data, changes=None, *, english=None, drop=(), add=(), blank=(), se
     if set_type:
         for ref, v in set_type.items():
             ws[ref] = v
-    out = io.BytesIO(); wb.save(out)
+    out = io.BytesIO()
+    with _no_newline_translation():
+        wb.save(out)
     return out.getvalue()
 
 
@@ -425,8 +459,10 @@ def _no_info_sheet():
     ("empty", b"", "draft.xlsx", "empty_file"),
     ("zip without workbook", _zip_with({}) [:0] or b"PK\x03\x04junk", "draft.xlsx", "not_xlsx"),
     ("macros", _zip_with({"xl/vbaProject.bin": "x"}), "draft.xlsx", "macros_not_allowed"),
-    ("no Info sheet", _no_info_sheet(), "draft.xlsx", "missing_sheet"),
-    ("too large", b"PK\x03\x04" + b"0" * (D.MAX_BYTES + 10), "draft.xlsx", "file_too_large"),
+    # explicit ids: without them pytest puts the raw bytes of these two payloads into the test name (a 2 MB name for "too large"),
+    # which Windows cannot hold in PYTEST_CURRENT_TEST (limit 32767 characters). Same data, same assertions.
+    pytest.param("no Info sheet", _no_info_sheet(), "draft.xlsx", "missing_sheet", id="no-info-sheet"),
+    pytest.param("too large", b"PK\x03\x04" + b"0" * (D.MAX_BYTES + 10), "draft.xlsx", "file_too_large", id="too-large"),
 ])
 def test_bad_files_are_refused_cleanly(label, blob, name, code):
     sa = base_setup()

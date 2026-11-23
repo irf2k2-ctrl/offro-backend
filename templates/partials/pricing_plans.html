@@ -1,0 +1,21 @@
+<!-- ═══════════════════════════════════════════════════════════════
+     Pricing & Plans. Included by admin_dashboard.html. Logic: /static/js/pricing_plans.js, styles: /static/css/pricing_plans.css.
+     Talks only to /admin/pricing-config/*. The server decides every permission; the browser only hides controls the caller cannot use.
+     Country-wise OffrO platform prices, tax and reward conversion. Merchant product prices and payments are not part of this module.
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="section-pricing_plans" class="section pp">
+  <div class="page-title"><i class="fas fa-layer-group me-2"></i>Pricing &amp; Plans</div>
+  <div class="pp-sub">Country-wise prices, tax and reward conversion for OffrO's own platform charges. Each country is priced independently; nothing is converted between currencies.</div>
+
+  <div id="pp_denied" class="pp-denied" hidden>
+    <div style="font-size:34px"><i class="fas fa-lock"></i></div>
+    <div style="font-weight:700;margin:8px 0">Access denied</div>
+    <div>You do not have permission to view Pricing &amp; Plans. Ask a Super Admin to grant the Pricing &amp; GST module to your role.</div>
+  </div>
+
+  <div id="pp_body">
+    <div class="pp-tabs" id="pp_tabs" role="tablist" aria-label="Pricing and Plans sections"></div>
+    <div id="pp_msg" aria-live="polite"></div>
+    <div id="pp_pane"></div>
+  </div>
+</div>

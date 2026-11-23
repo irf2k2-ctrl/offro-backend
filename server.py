@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Redirect
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, wa_campaigns, dashboard_auth, maps, smart_link
 from routers import merchant_products, admin_products, admin_deals, public_products, collaborations
 from routers import translations_admin, translations_public
+from routers import admin_pricing
 from database import db
 import base64, io, re, html as _html
 from services.security import cors_origins, SecurityMiddleware
@@ -45,6 +46,7 @@ app.include_router(wa_template_test.router, prefix="/admin")  # single-recipient
 app.include_router(wa_campaigns.router, prefix="/admin")  # WhatsApp Campaign Manager 2A: permission-gated admin API; sends nothing
 app.include_router(dashboard_auth.router, prefix="/admin")  # RBAC dashboard auth — /admin/auth/*
 app.include_router(translations_admin.router, prefix="/admin")   # Translation module admin API (Phase G): /admin/translations/*
+app.include_router(admin_pricing.router, prefix="/admin")   # Pricing & Plans module: /admin/pricing-config/* (country-wise prices, tax, reward conversion)
 app.include_router(translations_public.router)                 # Public read-only translation API (Phase G): /translations/*
 app.include_router(maps.router)
 app.include_router(smart_link.router)  # /open smart link + /.well-known app-link files
@@ -336,6 +338,13 @@ def startup():
             print("⚠️  WhatsApp campaign audit indexes skipped (see logs)")
     except Exception as e:
         print(f"⚠️  WhatsApp campaign audit indexes skipped ({type(e).__name__})")
+    # Pricing & Plans module: indexes on NEW collections only (pricing_countries, country_prices, pricing_history). The existing
+    # `pricing` document is not touched at startup.
+    try:
+        from services import pricing_config as _pc
+        _pc.ensure_indexes()
+    except Exception as e:
+        print(f"⚠️  Pricing & Plans indexes skipped ({type(e).__name__})")
     # Translation module (Phase G): indexes on NEW, empty collections only; nothing is published or changed at startup.
     try:
         from services import translations as _tr, translation_audit as _tr_audit

@@ -183,6 +183,7 @@ function _secUrl(u) {
 </script>
 <link rel="stylesheet" href="/static/css/wa_campaigns.css?v=2g3">
 <link rel="stylesheet" href="/static/css/translations.css?v=h4">
+<link rel="stylesheet" href="/static/css/pricing_plans.css?v=pp1">
 </head>
 <body>
 
@@ -217,6 +218,7 @@ function _secUrl(u) {
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
   <a href="#" onclick="showSection('pricing',this)"><i class="fas fa-rupee-sign fa-fw"></i> Pricing & GST</a>
+  <a href="#" onclick="showSection('pricing_plans',this)"><i class="fas fa-layer-group fa-fw"></i> Pricing &amp; Plans</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('reviews',this)"><i class="fas fa-comment-dots fa-fw"></i> Rating &amp; Review</a>
   <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
@@ -1746,6 +1748,7 @@ function _secUrl(u) {
 
 <!-- Translations lives INSIDE .main so it gets the sidebar offset and padding like every other section. -->
 {% include "partials/translations.html" %}
+{% include "partials/pricing_plans.html" %}
 </div>
 
 <!-- RENEW SUBSCRIPTION MODAL -->
@@ -2545,7 +2548,7 @@ const RBAC_SECTION_MAP = {
   "Gift Vouchers":     ["gift_product_requests"],
   "Notifications":     ["notifications"],
   "Categories":        ["categories"],
-  "Pricing & GST":     ["pricing"],
+  "Pricing & GST":     ["pricing", "pricing_plans"],
   "Reviews":           ["reviews"],
   "Discounts":         ["discounts"],
   "Influencers":       ["influencers"],
@@ -2776,6 +2779,7 @@ function showSection(name, el){
   if(name==="gift_product_requests") loadGiftProductRequests();
   if(name==="categories"){ loadCategories().then(()=>renderCategories()); }
   if(name==="pricing") loadPricing();
+  if(name==="pricing_plans" && window.PricingPlans) PricingPlans.open();
   if(name==="terms") loadTerms();
   if(name==="policies") loadPolicies();
   if(name==="social") loadSocialLinks();
@@ -10338,6 +10342,7 @@ function rbacLogsNext() { rbacLogSkip += rbacLogLimit; rbacLoadLogs(); }
 <script src="/static/js/wa_campaigns_editor.js?v=2g3"></script>
 <script src="/static/js/wa_campaigns_admin.js?v=2g3"></script>
 <script src="/static/js/translations.js?v=h5"></script>
+<script src="/static/js/pricing_plans.js?v=pp1"></script>
 
 </body>
 </html>
