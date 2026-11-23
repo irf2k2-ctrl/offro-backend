@@ -327,7 +327,7 @@ def test_failed_saves_write_no_history_and_no_data():
 def test_existing_pricing_endpoints_are_untouched():
     assert c.get("/admin/pricing", headers=SA_H).json()["plans"][0]["price"] == 499
     assert c.put("/admin/pricing", json={"gst_percent": 18}, headers=SA_H).status_code == 200
-    assert c.get("/merchant/plans").json()[0]["total"] == 588.82
+    assert c.get("/merchant/plans").status_code == 401        # no verified country -> India prices are not exposed (Phase 4)
 
 
 def test_dashboard_template_wires_the_module_in_place_of_the_old_screen():

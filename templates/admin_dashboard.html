@@ -1657,9 +1657,9 @@ function _secUrl(u) {
               <option value="1month">1 Month</option><option value="3months">3 Months</option>
               <option value="6months">6 Months</option><option value="12months">12 Months</option>
               <option value="custom">Custom</option></select></div>
-          <div class="col-6"><label class="form-label">Amount (excl. GST) ₹</label>
+          <div class="col-6"><label class="form-label" id="renew_amount_lbl">Amount (excl. GST) ₹</label>
             <input type="number" min="0" step="0.01" id="renew_amount" class="form-control"></div>
-          <div class="col-6"><label class="form-label">GST %</label>
+          <div class="col-6"><label class="form-label" id="renew_gst_lbl">GST %</label>
             <input type="number" min="0" max="100" step="0.01" id="renew_gst" class="form-control"></div>
           <div class="col-6"><label class="form-label">Payment Mode</label>
             <select id="renew_pay_mode" class="form-select">
@@ -3240,6 +3240,7 @@ async function openCreateStore(){
   populateCategoryDropdown("");
   if (storeModal) storeModal.show();
 }
+function _detailText(d,fb){if(typeof d==="string"&&d)return d;if(d&&typeof d==="object"&&d.message)return d.message;return fb;}
 function _renewErr(m){const e=document.getElementById("renew_msg");e.innerText=m||"";e.style.display=m?"block":"none";}
 function _renewAddDays(v,n){const d=new Date(v+"T00:00:00");d.setDate(d.getDate()+n);
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
@@ -3256,18 +3257,23 @@ async function openRenewSub(id){
   try{
     const r=await fetch(`/admin/stores/${id}/renewal-info`,{credentials:"include"});
     const d=await r.json().catch(()=>({}));
-    if(!r.ok){showToast(d.detail||"Could not load subscription info","error");return;}
+    if(!r.ok){showToast(_detailText(d.detail,"Could not load subscription info"),"error");return;}
     _renewPlanDays=d.plan_days||_renewPlanDays;
     const sel=document.getElementById("renew_plan");
     if(![...sel.options].some(o=>o.value===d.plan)){const o=document.createElement("option");o.value=d.plan;o.innerText=d.plan;sel.appendChild(o);}
     sel.value=d.plan||"custom";
-    document.getElementById("renew_amount").value=d.amount;
+    document.getElementById("renew_amount").value=(d.amount==null?"":d.amount);
     document.getElementById("renew_gst").value=d.gst_percent;
+    // Currency and tax label of the store owner's country (India: ₹ / GST, as before). An international store's rate is fixed by its country.
+    const _cc2=(d.currency_symbol||"₹"), _tl=(d.tax_label||"GST"), _intl=(d.currency_code||"INR")!=="INR";
+    document.getElementById("renew_amount_lbl").innerText=`Amount (excl. ${_tl}) ${_cc2}`;
+    document.getElementById("renew_gst_lbl").innerText=`${_tl} %`+(_intl?" (set by country)":"");
+    document.getElementById("renew_gst").readOnly=_intl;
     document.getElementById("renew_pay_mode").value=d.pay_mode;
     document.getElementById("renew_ref").value="";
     document.getElementById("renew_from").value=d.suggested_from_date;
     document.getElementById("renew_end").value=d.suggested_end_date;
-    document.getElementById("renew_prev_info").innerText=`Previous term: ${d.prev_from_date||"-"} to ${d.prev_end_date||"-"} (${d.expired?"expired":"still active"})`;
+    document.getElementById("renew_prev_info").innerText=`Previous term: ${d.prev_from_date||"-"} to ${d.prev_end_date||"-"} (${d.expired?"expired":"still active"})`+(d.price_note?` - ${d.price_note}`:"");
     renewSubModal.show();
   }catch(e){showToast("Could not load subscription info: "+e.message,"error");}
 }
@@ -3285,7 +3291,7 @@ async function submitRenewSub(){
         from_date:document.getElementById("renew_from").value,
         end_date:document.getElementById("renew_end").value})});
     const d=await r.json().catch(()=>({}));
-    if(!r.ok){_renewErr(typeof d.detail==="string"?d.detail:"Renewal failed (HTTP "+r.status+")");return;}
+    if(!r.ok){_renewErr(_detailText(d.detail,"Renewal failed (HTTP "+r.status+")"));return;}
     renewSubModal.hide();
     showToast("Subscription renewed successfully");
     await loadStores();await loadStats();

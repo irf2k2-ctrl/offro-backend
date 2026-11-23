@@ -296,10 +296,23 @@ def _need_store(fields: dict) -> str:
 
 
 # ── create / renew / delete ────────────────────────────────────────────────────
+def _money_labels() -> dict:
+    """currency / tax label of the request's country (India's values when no non-India country is active)."""
+    from services import country_context as _cc
+    return _cc.labels(_cc.current())
+
+
+def _amt(v: float, lab: dict) -> str:
+    """'₹499' for a symbol like ₹, 'SAR 115' for a letter-code symbol."""
+    sym = lab["currency_symbol"]
+    return f"{sym} {v:g}" if sym.isalpha() else f"{sym}{v:g}"
+
+
 def _paid_message(d: dict) -> str:
+    lab = _money_labels()
     return (f"All {d['free_limit']} free product slots are used. An additional product "
-            f"costs ₹{d['price_per_day']:g}/day × {d['days']} days = ₹{d['unit_price']:g} "
-            f"+ GST (₹{d['total']:g} total).")
+            f"costs {_amt(d['price_per_day'], lab)}/day × {d['days']} days = {_amt(d['unit_price'], lab)} "
+            f"+ {lab['tax_label']} ({_amt(d['total'], lab)} total).")
 
 
 def build_doc(*, merchant: dict, fields: dict, start_date: datetime, end_date: datetime,
@@ -332,6 +345,7 @@ def build_doc(*, merchant: dict, fields: dict, start_date: datetime, end_date: d
         "charged_amount": round(charged_amount, 2),   # what was actually paid (incl. GST), fixed forever
         "gst_percent": decision["gst_percent"],
         "gst_amount": decision["gst_amount"] if charged_amount else 0.0,
+        **_money_labels(),
         "rating": 0.0, "rating_count": 0,
         "created_at": now, "updated_at": now,
     }
@@ -431,9 +445,10 @@ def admin_create(*, merchant: dict, fields: dict, end_raw, from_raw=None, paymen
             if not payment or not mode or amt <= 0:
                 raise ProductError(409, _paid_message(d) + " Enter the payment mode and amount paid to create it.")
             if amt + 0.005 < expected:                      # >= expected is accepted, lower is not
-                raise ProductError(400, f"Amount paid (₹{amt:g}) is less than the expected ₹{expected:g} "
-                                        f"(₹{d['price_per_day']:g}/day × {days} days + GST). "
-                                        f"Enter at least ₹{expected:g}.")
+                _lab = _money_labels()
+                raise ProductError(400, f"Amount paid ({_amt(amt, _lab)}) is less than the expected {_amt(expected, _lab)} "
+                                        f"({_amt(d['price_per_day'], _lab)}/day × {days} days + {_lab['tax_label']}). "
+                                        f"Enter at least {_amt(expected, _lab)}.")
             doc = build_doc(merchant=merchant, fields=fields, start_date=start, end_date=end,
                             source="admin", decision=d, charged_amount=amt,
                             payment={"expected_amount": expected, "payment_mode": mode,
@@ -465,6 +480,7 @@ def _record_admin_paid_order(merchant: dict, doc: dict, d: dict) -> None:
         "pay_mode": "admin_recorded", "payment_mode": doc["payment_mode"],
         "payment_ref": doc["payment_ref"], "razorpay_order_id": None, "amount_paise": 0,
         "recorded_by_admin": True, "status": "paid", "created_at": now, "paid_at": now,
+        **_money_labels(),
     }
     oid = db[ORDERS].insert_one(order).inserted_id
     inv_no = f"PRD-{now.strftime('%Y%m%d')}-{str(doc['_id'])[-6:].upper()}"
@@ -479,6 +495,7 @@ def _record_admin_paid_order(merchant: dict, doc: dict, d: dict) -> None:
         "expected_amount": doc["expected_amount"], "total": doc["charged_amount"],
         "payment_mode": doc["payment_mode"], "payment_ref": doc["payment_ref"],
         "payment_status": "paid", "recorded_by_admin": True, "created_at": now,
+        **_money_labels(),
     })
     db[PRODUCTS].update_one({"_id": doc["_id"]}, {"$set": {"order_id": str(oid), "invoice_no": inv_no}})
     doc["order_id"], doc["invoice_no"] = str(oid), inv_no

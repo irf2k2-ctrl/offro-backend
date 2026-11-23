@@ -105,8 +105,13 @@ def test_india_banner_order_and_product_unchanged(_world):
     assert s["free_limit"] == 10 and s["price_per_day"] == 10 and s["gst_percent"] == 18
 
 
-def test_unauthenticated_plans_list_is_still_india():
-    assert c.get("/merchant/plans").json()[0]["price"] == 499
+def test_unauthenticated_plans_list_does_not_expose_india_prices():
+    # No verified country (no / invalid session): refused with a clear code - Indian prices are not shown. A signed-in India account is
+    # unchanged (see test_india_plans_banner_and_subscribe_unchanged).
+    for h in ({}, {"Authorization": "Bearer nope"}):
+        r = c.get("/merchant/plans", headers=h)
+        assert r.status_code == 401 and r.json()["detail"]["code"] == "country_context_required"
+        assert "499" not in r.text and "588" not in r.text
 
 
 # ── Saudi Arabia ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -275,3 +280,156 @@ def test_invoices_carry_currency_and_tax_label(_world):
     fake.invoices.insert_one({"invoice_no": "X2", "merchant_id": "m_in", "total": 118, "gst": 18, "created_at": __import__("datetime").datetime.utcnow()})
     old = c.get("/merchant/invoices/full", headers=IN_H).json()[0]
     assert (old["currency_code"], old["currency_symbol"], old["tax_label"]) == ("INR", "₹", "GST")
+
+
+# ══ Phase 4: admin-created products, admin store renewals, discount codes, plans endpoint ════════════════════════════
+def _prev_sub(mid, plan="1month", price=499, gst=18):
+    sid = _sid(mid)
+    fake.subscriptions.insert_one({"store_id": sid, "merchant_id": mid, "plan": plan, "price": price, "gst_percent": gst, "status": "paid",
+                                   "from_date": P.ist_today() - timedelta(days=60), "end_date": P.ist_today() - timedelta(days=30),
+                                   "created_at": P.ist_today() - timedelta(days=60)})
+    return sid
+
+
+def _renew_body(**kw):
+    b = {"plan": "1month", "from_date": (P.ist_today() + timedelta(days=1)).strftime("%Y-%m-%d"),
+         "end_date": (P.ist_today() + timedelta(days=31)).strftime("%Y-%m-%d"), "pay_mode": "cash"}
+    b.update(kw)
+    return b
+
+
+def test_admin_renewal_india_unchanged():
+    sid = _prev_sub("m_in")
+    i = c.get(f"/admin/stores/{sid}/renewal-info", headers=SA_ADMIN).json()
+    assert i["amount"] == 499 and i["gst_percent"] == 18 and i["currency_code"] == "INR" and i["tax_label"] == "GST"
+    r = c.post(f"/admin/stores/{sid}/renew-subscription", json=_renew_body(amount=499, gst_percent=18), headers=SA_ADMIN)
+    assert r.status_code == 200, r.text
+    sub = fake.subscriptions.find_one({"renewal": True})
+    assert sub["total"] == 588.82 and sub["gst_percent"] == 18 and sub["currency_code"] == "INR" and sub["tax_label"] == "GST"
+    assert "gst_percent" not in fake.invoices.find_one({"store_id": sid})                   # India's invoice document keeps its old shape
+
+
+def test_admin_renewal_sa_uses_sa_plan_currency_and_vat_ignoring_form_gst():
+    _full_sa()
+    sid = _prev_sub("m_sa", price=499, gst=18)                                              # an old row must not leak India's price / GST
+    i = c.get(f"/admin/stores/{sid}/renewal-info", headers=SA_ADMIN).json()
+    assert i["amount"] == 100 and i["gst_percent"] == 15 and i["currency_code"] == "SAR" and i["tax_label"] == "VAT"
+    r = c.post(f"/admin/stores/{sid}/renew-subscription", json=_renew_body(gst_percent=18), headers=SA_ADMIN)   # no amount typed, India GST sent
+    assert r.status_code == 200, r.text
+    sub = fake.subscriptions.find_one({"renewal": True})
+    assert (sub["price"], sub["gst_percent"], sub["gst"], sub["total"]) == (100, 15, 15, 115)
+    assert sub["currency_code"] == "SAR" and sub["tax_label"] == "VAT"
+    inv = fake.invoices.find_one({"store_id": sid})
+    assert inv["currency_code"] == "SAR" and inv["tax_label"] == "VAT" and inv["gst_percent"] == 15 and inv["total"] == 115
+
+
+def test_admin_renewal_sa_plan_without_price_needs_an_amount_never_india():
+    _full_sa()
+    sid = _prev_sub("m_sa", plan="6months")
+    i = c.get(f"/admin/stores/{sid}/renewal-info", headers=SA_ADMIN).json()
+    assert i["amount"] is None and "6months" in i["price_note"]
+    r = c.post(f"/admin/stores/{sid}/renew-subscription", json=_renew_body(plan="6months"), headers=SA_ADMIN)
+    assert r.status_code == 409 and isinstance(r.json()["detail"], str) and "SAR" not in r.json()["detail"] and "499" not in r.json()["detail"]
+    ok = c.post(f"/admin/stores/{sid}/renew-subscription", json=_renew_body(plan="6months", amount=500), headers=SA_ADMIN)
+    assert ok.status_code == 200 and fake.subscriptions.find_one({"renewal": True})["gst"] == 75        # 15% VAT, not 18%
+
+
+def test_admin_renewal_missing_tax_inactive_and_unknown_country_refused_with_text():
+    _add_sa(tax_label="", tax_percent=None)
+    _put("store_plans", {"plans": [{"id": "1month", "price": 100}]})
+    sid = _prev_sub("m_sa")
+    r = c.get(f"/admin/stores/{sid}/renewal-info", headers=SA_ADMIN)
+    assert r.status_code == 409 and isinstance(r.json()["detail"], str) and "Tax" in r.json()["detail"]
+    assert c.post(f"/admin/stores/{sid}/renew-subscription", json=_renew_body(amount=100), headers=SA_ADMIN).status_code == 409
+    jsid = _prev_sub("m_jo")
+    assert c.get(f"/admin/stores/{jsid}/renewal-info", headers=SA_ADMIN).status_code == 409
+    assert fake.subscriptions.count_documents({"renewal": True}) == 0
+
+
+def test_admin_renewal_inactive_country_refused():
+    _full_sa()
+    sid = _prev_sub("m_sa")
+    assert c.post(ADM + "/countries/SA/status", json={"status": "inactive"}, headers=SA_ADMIN).status_code == 200
+    r = c.post(f"/admin/stores/{sid}/renew-subscription", json=_renew_body(amount=100), headers=SA_ADMIN)
+    assert r.status_code == 409 and isinstance(r.json()["detail"], str)
+
+
+def _admin_product(sid, **kw):
+    b = {"store_id": sid, "title": "Tea", "logo": "http://img/x.png", "end_date": END, "price": "10"}
+    b.update(kw)
+    return c.post("/admin/products", json=b, headers=SA_ADMIN)
+
+
+@pytest.fixture
+def _noimg(monkeypatch):
+    import routers.admin_products as AP
+    monkeypatch.setattr(AP, "_cloudinary_upload", lambda img, folder="": img, raising=False)
+    monkeypatch.setattr(AP, "_make_thumb_url", lambda u: u, raising=False)
+
+
+def test_admin_product_india_unchanged(_noimg):
+    r = _admin_product(_sid("m_in"))
+    assert r.status_code == 200 and r.json()["pricing_tier"] == "free" and r.json()["currency_code"] == "INR"
+
+
+def test_admin_product_sa_uses_sa_free_window_price_and_vat(_noimg):
+    _full_sa()
+    sid = _sid("m_sa")
+    for _ in range(3):                                                                         # SA free window is 3 (India's is 10)
+        assert _admin_product(sid).json()["pricing_tier"] == "free"
+    r = _admin_product(sid)                                                                    # 4th is paid in SA - would still be free in India
+    assert r.status_code == 409 and isinstance(r.json()["detail"], str)
+    msg = r.json()["detail"]
+    assert "SAR" in msg and "VAT" in msg and "₹" not in msg and "GST" not in msg
+    low = _admin_product(sid, pay_mode="cash", pay_amount=10)
+    assert low.status_code == 400 and "SAR" in low.json()["detail"] and "₹" not in low.json()["detail"]
+    ok = _admin_product(sid, pay_mode="cash", pay_amount=34.5)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["pricing_tier"] == "paid" and ok.json()["currency_code"] == "SAR" and ok.json()["tax_label"] == "VAT"
+    o = fake.product_orders.find_one({"recorded_by_admin": True})
+    assert o["gst_percent"] == 15 and o["currency_code"] == "SAR" and o["tax_label"] == "VAT"
+    inv = fake.invoices.find_one({"type": "product"})
+    assert inv["gst_percent"] == 15 and inv["currency_code"] == "SAR" and inv["tax_label"] == "VAT"
+
+
+def test_admin_product_sa_without_product_pricing_is_refused_not_india(_noimg):
+    _add_sa()
+    _put("store_plans", {"plans": [{"id": "1month", "price": 100}]})
+    r = _admin_product(_sid("m_sa"))
+    assert r.status_code == 409 and isinstance(r.json()["detail"], str) and fake.merchant_products.count_documents({}) == 0
+
+
+def test_admin_product_inactive_country_refused(_noimg):
+    _full_sa()
+    c.post(ADM + "/countries/SA/status", json={"status": "inactive"}, headers=SA_ADMIN)
+    assert _admin_product(_sid("m_sa")).status_code == 409 and fake.merchant_products.count_documents({}) == 0
+
+
+def test_admin_product_extend_uses_the_owners_country_max_days(_noimg):
+    _full_sa()                                                                                 # SA max validity 60, India 365
+    pid = _admin_product(_sid("m_sa")).json()["id"]
+    assert c.put(f"/admin/products/{pid}/extend", json={"days": 100}, headers=SA_ADMIN).status_code == 400
+    assert c.put(f"/admin/products/{pid}/extend", json={"days": 5}, headers=SA_ADMIN).status_code == 200
+
+
+def _code(code, typ, value, **kw):
+    fake.discounts.delete_many({"code": code})
+    fake.discounts.insert_one({"code": code, "type": typ, "value": value, "active": True, "applies_to": "ALL", "max_uses": 0, "used_count": 0, **kw})
+
+
+def test_fixed_amount_codes_are_never_applied_to_another_currency():
+    _full_sa()
+    _code("FLAT50", "VALUE", 50)
+    _code("TEN", "PERCENTAGE", 10)
+    body = {"store_id": _sid("m_sa"), "plan": "1month", "from_date": "2026-12-01"}
+    r = c.post("/merchant/subscribe", json={**body, "discount_code": "FLAT50"}, headers=SAU_H)
+    assert r.status_code == 400 and "SAR" in r.json()["detail"] and fake.subscriptions.count_documents({}) == 0
+    ok = c.post("/merchant/subscribe", json={**body, "discount_code": "TEN"}, headers=SAU_H).json()
+    assert ok["amount_display"] == 103.5                                                       # (100 - 10) + 15% VAT
+    # preview endpoint agrees
+    assert c.post("/merchant/discounts/validate", json={"code": "FLAT50"}, headers=SAU_H).status_code == 400
+    assert c.post("/merchant/discounts/validate", json={"code": "TEN"}, headers=SAU_H).status_code == 200
+    # India keeps its fixed-amount codes
+    ind = c.post("/merchant/subscribe", json={"store_id": _sid("m_in"), "plan": "1month", "from_date": "2026-12-01", "discount_code": "FLAT50"}, headers=IN_H).json()
+    assert ind["amount_display"] == round((499 - 50) * 1.18, 2)
+    assert c.post("/merchant/discounts/validate", json={"code": "FLAT50"}, headers=IN_H).status_code == 200

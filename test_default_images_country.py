@@ -279,7 +279,7 @@ class TestServiceUnavailable:
     def test_variant_works_even_with_no_default_configured(self):
         h = sa(); self.variant(h, ["SA"])
         assert public("SA")["no_service_url"] == img("ns_sa")
-        assert public("IN") == {"store": "", "product": "", "offer": "", "city": "", "merchant_banner": "", "merchant_banner_explore_url": "",
+        assert public("IN") == {"store": "", "store_images": [], "product": "", "offer": "", "city": "", "merchant_banner": "", "merchant_banner_explore_url": "",
                                 "no_service_url": "", "no_service_title": "", "no_service_message": ""}
 
     def test_update_and_delete_variant(self):
@@ -403,12 +403,12 @@ class TestLegacyData:
         self.legacy()
         d = public()
         old_keys = {"store", "product", "offer", "city", "merchant_banner", "merchant_banner_explore_url", "no_service_url", "no_service_title", "no_service_message"}
-        assert set(d) == old_keys | {"country", "country_specific"}
+        assert set(d) == old_keys | {"country", "country_specific", "store_images"}   # Phase 4: store_images is additive
         assert d["country"] == "" and not any(d["country_specific"].values())
 
     def test_public_with_no_default_images_configured_is_unchanged(self):
         d = public("SA")
-        assert d == {"store": "", "product": "", "offer": "", "city": "", "merchant_banner": "", "merchant_banner_explore_url": "",
+        assert d == {"store": "", "store_images": [], "product": "", "offer": "", "city": "", "merchant_banner": "", "merchant_banner_explore_url": "",
                      "no_service_url": "", "no_service_title": "", "no_service_message": ""}
 
     def test_admin_lists_legacy_images_as_all_countries_and_in_the_global_filter(self):

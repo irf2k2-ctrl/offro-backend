@@ -95,4 +95,4 @@ def test_unknown_inactive_and_invalid_country_are_refused_without_fallback():
 
 
 def test_existing_merchant_endpoints_unchanged():
-    assert c.get("/merchant/plans").json()[0]["total"] == 588.82
+    assert c.get("/merchant/plans").status_code == 401        # no verified country -> India prices are not exposed (Phase 4)

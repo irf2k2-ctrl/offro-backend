@@ -265,12 +265,14 @@ _CHECKOUT_SCOPES = {"STORE", "BANNERS", "PRODUCTS"}  # real checkout types (excl
 _DISCOUNT_TYPES  = {"VALUE", "PERCENTAGE"}
 
 
-def _resolve_discount(discount_code: str, checkout_scope: str, pre_tax_amount: float) -> dict:
+def _resolve_discount(discount_code: str, checkout_scope: str, pre_tax_amount: float, currency: str = "INR") -> dict:
     """Authoritative discount lookup + calculation against db.discounts.
 
     checkout_scope: one of "STORE", "BANNERS", "PRODUCTS" — the scope of the
     checkout currently being performed (never "ALL"; that's a code-side value).
     pre_tax_amount: the taxable (pre-GST) order amount discount is applied against.
+    currency: ISO code of the order. A fixed-amount ("VALUE") code is an INR amount (or carries its own `currency` field) and is NEVER
+    applied to an order in another currency - there is no conversion. A percentage code works in any currency.
 
     Returns a dict with keys: code, type, applies_to, discount_value,
     discount_amount, message. discount_amount is always <= pre_tax_amount and
@@ -310,6 +312,9 @@ def _resolve_discount(discount_code: str, checkout_scope: str, pre_tax_amount: f
     if dtype not in _DISCOUNT_TYPES:
         dtype = "VALUE"
     configured_value = float(disc.get("value", 0) or 0)
+    _cur = (currency or "INR").upper()
+    if dtype == "VALUE" and str(disc.get("currency") or "INR").upper() != _cur:
+        raise HTTPException(400, f"Code '{code}' is a fixed-amount code and cannot be used for {_cur} orders. Use a percentage code.")
 
     if dtype == "PERCENTAGE":
         amount = round(pre_tax_amount * configured_value / 100.0, 2)
@@ -325,7 +330,7 @@ def _resolve_discount(discount_code: str, checkout_scope: str, pre_tax_amount: f
         "applies_to": scope,
         "discount_value": configured_value,
         "discount_amount": amount,
-        "message": f"Code '{code}' applied — ₹{amount:.2f} off",
+        "message": f"Code '{code}' applied — {'₹' if _cur == 'INR' else _cur + ' '}{amount:.2f} off",
     }
 
 
@@ -746,11 +751,16 @@ def _country_plans(ctx: dict) -> list:
 
 @router.get("/plans")
 def get_plans(request: Request):
+    # Plans are priced per COUNTRY and the country is only known from a signed-in account. With no valid session there is no verified country,
+    # so Indian prices are not shown (an international visitor must never see - or be charged - India's plans). A signed-in India (or legacy)
+    # account gets the existing response below, unchanged.
     _acct = _optional_account(request)
-    if _acct is not None:
-        _ctx = _cc.resolve(_acct)                 # None for India -> the existing response below, unchanged
-        if _ctx:
-            return _country_plans(_ctx)
+    if _acct is None:
+        raise HTTPException(401, {"code": "country_context_required",
+                                  "message": "Please sign in to see the plans for your country."})
+    _ctx = _cc.resolve(_acct)                     # None for India -> the existing response below, unchanged
+    if _ctx:
+        return _country_plans(_ctx)
     doc  = db.pricing.find_one({}) or {}
     gst  = doc.get("gst_percent", 18)
     base = doc.get("plans", [
@@ -801,7 +811,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     # ── Discount code (backend-authoritative; discount applied to pre-tax
     # price first, then GST calculated on the discounted taxable amount) ──
     discount_code = data.get("discount_code")
-    disc = _resolve_discount(discount_code, "STORE", price)
+    disc = _resolve_discount(discount_code, "STORE", price, _cur)
     discount_amount = disc["discount_amount"]
 
     taxable_amount = max(0.0, round(price - discount_amount, 2))
@@ -1768,7 +1778,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     # ── Discount code (backend-authoritative; discount applied to pre-tax
     # base_price first, then GST calculated on the discounted taxable amount) ──
     discount_code = data.get("discount_code")
-    disc = _resolve_discount(discount_code, "BANNERS", base_price)
+    disc = _resolve_discount(discount_code, "BANNERS", base_price, _cur)
     discount_amount = disc["discount_amount"]
     discount_msg    = disc["message"]
 
@@ -2305,6 +2315,11 @@ def validate_discount_code(data: dict, m=Depends(get_merchant)):
     code_scope = str(disc.get("applies_to") or "ALL").upper()
     if checkout_scope and checkout_scope in _CHECKOUT_SCOPES and code_scope != "ALL" and code_scope != checkout_scope:
         raise HTTPException(400, f"Code '{code}' is valid but can only be used for {code_scope.title()} checkout, not {checkout_scope.title()}.")
+    _ctx = _cc.resolve(m)                          # the merchant's own country (None = India)
+    _lab = _cc.labels(_ctx)
+    if str(disc.get("type", "VALUE")).upper() != "PERCENTAGE" and str(disc.get("currency") or "INR").upper() != _lab["currency_code"]:
+        raise HTTPException(400, f"Code '{code}' is a fixed-amount code and cannot be used for {_lab['currency_code']} orders. Use a percentage code.")
+    _sym = _lab["currency_symbol"]
     return {
         "code":  code,
         "type":  disc.get("type", "VALUE"),
@@ -2313,7 +2328,7 @@ def validate_discount_code(data: dict, m=Depends(get_merchant)):
         "message": (
             f"Code valid — {disc.get('value', 0):.0f}% off"
             if str(disc.get("type", "VALUE")).upper() == "PERCENTAGE"
-            else f"Code valid — ₹{disc.get('value', 0):.0f} discount applied"
+            else f"Code valid — {_sym}{' ' if _sym.isalpha() else ''}{disc.get('value', 0):.0f} discount applied"
         ),
     }
 

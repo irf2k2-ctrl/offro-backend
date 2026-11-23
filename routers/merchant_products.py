@@ -143,7 +143,7 @@ def _price_block(tier_decision: dict, discount_code):
     """Price for a PAID action from the service's decision (+ optional code)."""
     base = tier_decision["unit_price"]
     gst_pct = tier_decision["gst_percent"]
-    disc = _resolve_discount(discount_code if base > 0 else None, "PRODUCTS", base)
+    disc = _resolve_discount(discount_code if base > 0 else None, "PRODUCTS", base, _cur())
     d_amt = disc["discount_amount"]
     sub = round(max(0.0, base - d_amt), 2)
     gst = round(sub * gst_pct / 100, 2)

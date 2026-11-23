@@ -854,6 +854,49 @@ def get_cities(country: str = None, lang: str = ""):
             })
     return result
 
+def _city_keys(d: dict) -> set:
+    keys = {str(d.get("name") or "").strip().lower(), str(d.get("slug") or "").strip().lower()}
+    names = d.get("names")
+    if isinstance(names, dict):
+        keys.update(str(v or "").strip().lower() for v in names.values())
+    return {k for k in keys if k}
+
+
+@router.get("/city-status")
+def get_city_status(city: str = "", country: str = None):
+    """Is `city` inside OffrO's SERVICE AREA (an active city of the City Master, for `country` when given)?
+
+    Used by the app to tell two empty-Home situations apart:
+      supported = true  and no stores -> a city we serve that has no stores yet  -> the Default Store Image
+      supported = false               -> a place outside the service area         -> the No Service Area image/message
+    A name matches an active city by its English name, slug or any translation (case-insensitive), or when the requested text contains that
+    city's name as whole words (a GPS value such as "Riyadh Province"). A country that is not a supported country is never served.
+    When the City Master has no records at all (older installs) the active stores' cities define the service area, as in /cities."""
+    import re as _re
+    from services import cities as _city
+    want = str(country).strip() if country is not None else ""
+    iso = _city.normalize_country(want) if want else None
+    name = " ".join(str(city or "").split()).lower()
+    base = {"city": str(city or "").strip(), "country": iso or ""}
+    if (want and not iso) or not name:
+        return {**base, "supported": False}
+    _q = {"$or": [{"status": {"$ne": "inactive"}}, {"active": True, "status": {"$exists": False}}]}
+    if iso:
+        _q = {"$and": [_q, {"country": iso}]}
+    docs = list(db.cities.find(_q))
+    if iso or docs or db.cities.count_documents({}):
+        keysets = [_city_keys(d) for d in docs]
+    else:                                                    # no City Master at all: the cities of the active stores
+        keysets = [{str(c).strip().lower()} for c in db.stores.distinct("city", {"status": "active"}) if c and str(c).strip()]
+    for ks in keysets:
+        if name in ks:
+            return {**base, "supported": True}
+        for k in ks:
+            if _re.search(r"(?<!\w)" + _re.escape(k) + r"(?!\w)", name):
+                return {**base, "supported": True}
+    return {**base, "supported": False}
+
+
 @router.get("/areas")
 def get_areas(city: str = ""):
     """Return predefined area list for a given city (case-insensitive)."""
@@ -1410,7 +1453,7 @@ def get_default_images(country: str = ""):
     iso = _di.public_country(country)
     doc = db.settings.find_one({"_type": "default_images"})
     if not doc and not _di.has_any_variant_for(iso):
-        return {"store": "", "product": "", "offer": "", "city": "",
+        return {"store": "", "store_images": [], "product": "", "offer": "", "city": "",
                 "merchant_banner": "", "merchant_banner_explore_url": "", "no_service_url": "",
                 "no_service_title": "", "no_service_message": ""}
     doc, _specific = _di.apply_country(doc or {}, iso)
@@ -1440,6 +1483,8 @@ def get_default_images(country: str = ""):
 
     return {
         "store":            _first(doc.get("store", "")),
+        # additive: ALL usable store images for this country (rotation, like product/city); `store` stays the first one for older apps
+        "store_images":     [u for u in _all_urls(doc.get("store", "")) if not u.startswith("data:video")],
         "product":          _all_urls(doc.get("product", "")),
         "offer":            _first(doc.get("offer", "")),
         "city":             _all_urls(doc.get("city", "")),

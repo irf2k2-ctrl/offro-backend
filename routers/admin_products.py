@@ -15,6 +15,7 @@ from database import db
 from routers.admin import get_current_admin, _check_perm, _city_filter, _scope, _country_only, _dc
 from routers.merchant_app import _cloudinary_upload, _make_thumb_url
 from services import products as P
+from services import country_context as _cc
 
 router = APIRouter(prefix="/admin", tags=["Admin Products"])
 PRODUCTS, ORDERS = P.PRODUCTS, P.ORDERS
@@ -25,6 +26,25 @@ def _guard(fn, *a, **kw):
         return fn(*a, **kw)
     except P.ProductError as e:
         raise HTTPException(e.status_code, e.detail)
+    except HTTPException as e:                           # a country-pricing 409 ({code, message}) -> plain text for the dashboard
+        d = e.detail
+        raise HTTPException(e.status_code, d.get("message") if isinstance(d, dict) else d)
+
+
+def _owner_ctx(merchant_id):
+    """Country context of the merchant that owns a product / store: None for India, an OffrO-owned product (no merchant) and legacy
+    accounts (the existing India settings, unchanged); the country's own product settings for an international merchant. 409 with a clear
+    message when that country's pricing / VAT is not configured - never India's values."""
+    mid = str(merchant_id or "").strip()
+    if not mid:
+        return None
+    acct = db.accounts.find_one({"merchant_id": mid})
+    if not acct:
+        try:
+            acct = db.merchants.find_one({"_id": ObjectId(mid)})
+        except Exception:
+            acct = None
+    return _cc.resolve_for_admin(acct) if acct else None
 
 
 def _oid(v):
@@ -63,6 +83,7 @@ def _row(p: dict) -> dict:
         "price_per_day": float(p.get("price_per_day") or 0),
         "payment_mode": p.get("payment_mode", ""), "payment_ref": p.get("payment_ref", ""),
         "created_at": str(p.get("created_at", ""))[:19],
+        **_cc.stamp(p),                                  # currency_code / currency_symbol / tax_label (India values when absent)
     }
 
 
@@ -142,14 +163,15 @@ def create_product(data: dict, a=Depends(get_current_admin)):
             raise HTTPException(400, "Amount paid must be a number")
         payment = {"payment_mode": data.get("pay_mode", ""), "payment_ref": data.get("pay_ref", ""),
                    "amount": _amt}
-    prod = _guard(P.admin_create, merchant=merchant, fields=fields, end_raw=data.get("end_date"),
-                  from_raw=data.get("from_date"), payment=payment)
+    with _cc.activated(_owner_ctx((merchant or {}).get("_id"))):     # the store owner's country pricing and VAT
+        prod = _guard(P.admin_create, merchant=merchant, fields=fields, end_raw=data.get("end_date"),
+                      from_raw=data.get("from_date"), payment=payment)
     if data.get("is_active") is False:
         db[PRODUCTS].update_one({"_id": prod["_id"]}, {"$set": {"is_active": False}})
     return {"ok": True, "id": str(prod["_id"]), "pricing_tier": prod["pricing_tier"],
             "charged_amount": prod["charged_amount"],
             "expected_amount": prod.get("expected_amount", 0), "invoice_no": prod.get("invoice_no", ""),
-            "order_id": prod.get("order_id", "")}
+            "order_id": prod.get("order_id", ""), **_cc.stamp(prod)}
 
 
 # ── edit / lifecycle ───────────────────────────────────────────────────────────
@@ -191,7 +213,8 @@ def update_product(vid: str, data: dict, a=Depends(get_current_admin)):
                 raise HTTPException(400, "End date cannot be before the start date")
             if new_s != cur_s and new_s < P.ist_today():
                 raise HTTPException(400, "Start date cannot be in the past")
-            mx = _guard(P.get_settings)["product_max_validity_days"]
+            with _cc.activated(_owner_ctx(doc.get("merchant_id"))):
+                mx = _guard(P.get_settings)["product_max_validity_days"]
             if P.inclusive_days(new_s, new_e) > mx:
                 raise HTTPException(400, f"A product can run for at most {mx} days")
             upd.update({"start_date": new_s, "end_date": new_e,
@@ -293,7 +316,8 @@ def extend_product(vid: str, data: dict, a=Depends(get_current_admin)):
         raise HTTPException(400, "days must be a number")
     if days < 1:
         raise HTTPException(400, "days must be at least 1")
-    max_days = P.get_settings()["product_max_validity_days"]
+    with _cc.activated(_owner_ctx(doc.get("merchant_id"))):
+        max_days = _guard(P.get_settings)["product_max_validity_days"]
     if days > max_days:
         raise HTTPException(400, f"A product can run for at most {max_days} days")
     today = P.ist_today()

@@ -912,7 +912,7 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
     # discounted amount, since nothing further executes past this line.
     from routers.merchant_app import _resolve_discount, _mark_discount_used
     discount_code_in = (data.get("discount_code") or "").strip()
-    disc = _resolve_discount(discount_code_in, "INFLUENCER", pricing["fee"])
+    disc = _resolve_discount(discount_code_in, "INFLUENCER", pricing["fee"], _cur)
     discount_amount = disc["discount_amount"]
 
     # Backend computes: base fee → minus discount → taxable amount → plus
@@ -1185,7 +1185,7 @@ def validate_influencer_discount_code(data: dict, user=Depends(get_current_user)
         raise HTTPException(400, "Code is required")
     pricing, _ctx = _influencer_pricing_for(_resolve_own_account(user))
     from routers.merchant_app import _resolve_discount
-    disc = _resolve_discount(code, "INFLUENCER", pricing["fee"])
+    disc = _resolve_discount(code, "INFLUENCER", pricing["fee"], _ctx["currency_code"] if _ctx else "INR")
     if not disc["code"]:
         raise HTTPException(400, "Invalid or inactive discount code.")
     taxable = max(0.0, round(pricing["fee"] - disc["discount_amount"], 2))

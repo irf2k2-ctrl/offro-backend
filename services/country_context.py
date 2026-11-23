@@ -87,6 +87,17 @@ def resolve(account: dict) -> Optional[dict]:
             "tax_label": tax["label"], "tax_percent": float(tax["percent"] or 0.0), "tax_free": bool(tax["tax_free"]), "prices": r}
 
 
+def resolve_for_admin(account: Optional[dict]) -> Optional[dict]:
+    """resolve() for the ADMIN dashboard: same rules, but the 409 carries a plain-text detail (the dashboard shows `detail` as text)."""
+    if not account:
+        return None
+    try:
+        return resolve(account)
+    except HTTPException as e:
+        d = e.detail
+        raise HTTPException(e.status_code, d.get("message") if isinstance(d, dict) else d)
+
+
 def require_section(ctx: dict, section: str, label: str) -> dict:
     sec = ctx["prices"][section]
     if not sec.get("configured") or not sec.get("active"):

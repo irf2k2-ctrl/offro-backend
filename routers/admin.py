@@ -1839,6 +1839,29 @@ def _newest_store_subscription(store_id: str):
     return db.subscriptions.find_one({"store_id": {"$in": ids}}, sort=[("created_at", -1)])
 
 
+def _store_owner_ctx(store: dict, prev: dict = None):
+    """Country context of the store's owner (None for India / legacy accounts: the existing India renewal, unchanged). For an international
+    owner: that country's own plans, currency and tax - 409 with a clear message when they are not configured. Never India's values."""
+    from services import country_context as _cc
+    mid = str((store or {}).get("merchant_id") or (prev or {}).get("merchant_id") or "").strip()
+    if not mid:
+        return None
+    acct = db.accounts.find_one({"merchant_id": mid})
+    if not acct:
+        try:
+            acct = db.merchants.find_one({"_id": ObjectId(mid)})
+        except Exception:
+            acct = None
+    return _cc.resolve_for_admin(acct) if acct else None
+
+
+def _country_plan_price(ctx: dict, plan: str):
+    for p in ctx["prices"]["store_plans"]:
+        if p["id"] == plan and p["configured"] and p["active"]:
+            return float(p["price"])
+    return None
+
+
 def _renewal_store(a, id):
     try:
         oid = ObjectId(id)
@@ -1880,13 +1903,25 @@ def store_renewal_info(id: str, a=Depends(get_current_admin)):
         days = 30
     end = start + timedelta(days=days)
 
+    from services import country_context as _cc
+    ctx = _store_owner_ctx(store, prev)
     pricing = db.pricing.find_one({}) or {}
     price = prev.get("price", prev.get("amount", prev.get("base_price", 0))) or 0
     gst_pct = prev.get("gst_percent")
     if gst_pct is None:
         gst_pct = pricing.get("gst_percent", 18)
+    price_note = ""
+    if ctx:
+        # International store: the renewal is priced from THAT country's plans and tax (the previous subscription's amount is not reused,
+        # and India's GST is never applied). A plan with no configured price is left blank for the admin to enter.
+        gst_pct = ctx["tax_percent"]
+        cp = _country_plan_price(ctx, plan)
+        price = cp if cp is not None else None
+        if cp is None:
+            price_note = f"No {plan or 'plan'} price is configured for {ctx['name']}. Enter the amount received."
     pay_mode = prev.get("pay_mode") if prev.get("pay_mode") in _RENEW_PAY_MODES else "cash"
     return {
+        **_cc.labels(ctx), "price_note": price_note,
         "store_id": id,
         "store_name": store.get("store_name", ""),
         "subscription_id": str(prev["_id"]),
@@ -1924,9 +1959,19 @@ def renew_store_subscription(id: str, data: dict, a=Depends(get_current_admin)):
     if end_dt < datetime.utcnow():
         raise HTTPException(400, "End date must be in the future, otherwise the subscription would still be expired.")
 
+    from services import country_context as _cc
+    ctx = _store_owner_ctx(store, prev)
+    plan = str(data.get("plan") or prev.get("plan") or "custom").strip() or "custom"
     try:
-        price = round(float(data.get("amount") or 0), 2)
-        gst_pct = float(data.get("gst_percent") if data.get("gst_percent") not in (None, "") else 0)
+        _raw_amt = data.get("amount")
+        if ctx and _raw_amt in (None, "") and str(data.get("pay_mode") or "").strip().lower() != "free":
+            _cp = _country_plan_price(ctx, plan)          # no amount typed: the country's own plan price, else refuse (never India's)
+            if _cp is None:
+                raise HTTPException(409, f"No {plan} price is configured for {ctx['name']}. Enter the amount received.")
+            _raw_amt = _cp
+        price = round(float(_raw_amt or 0), 2)
+        # An international store is always taxed at ITS country's configured rate (a rate sent by the form is ignored).
+        gst_pct = ctx["tax_percent"] if ctx else float(data.get("gst_percent") if data.get("gst_percent") not in (None, "") else 0)
     except (TypeError, ValueError):
         raise HTTPException(400, "Amount and GST % must be numbers.")
     if price < 0 or not (0 <= gst_pct <= 100):
@@ -1934,7 +1979,6 @@ def renew_store_subscription(id: str, data: dict, a=Depends(get_current_admin)):
     pay_mode = str(data.get("pay_mode") or "cash").strip().lower()
     if pay_mode not in _RENEW_PAY_MODES:
         raise HTTPException(400, "Invalid payment mode.")
-    plan = str(data.get("plan") or prev.get("plan") or "custom").strip() or "custom"
     pay_ref = str(data.get("payment_ref") or "").strip()[:200]
 
     # Guard against an accidental double submit of the same renewal.
@@ -1973,6 +2017,7 @@ def renew_store_subscription(id: str, data: dict, a=Depends(get_current_admin)):
         "renewal":         True,
         "renewal_of":      str(prev["_id"]),
         "renewed_by":      admin_name,
+        **_cc.labels(ctx),
     }
     if is_free:
         sub_doc["free_activation"] = True
@@ -2016,10 +2061,12 @@ def renew_store_subscription(id: str, data: dict, a=Depends(get_current_admin)):
             "discount_amount": 0,
             "final_amount":    0 if is_free else price,
             "gst":             gst_amt,
+            **({"gst_percent": gst_pct} if ctx else {}),       # India's invoice document is unchanged
             "total":           total,
             "from_date":       from_dt,
             "end_date":        end_dt,
             "created_at":      now,
+            **_cc.labels(ctx),
         })
     except Exception as e:
         print(f"[RENEW] invoice insert failed (subscription saved): {e}")
