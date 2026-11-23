@@ -136,6 +136,10 @@ def get_settings() -> dict:
     """Read the Admin-configured product settings. Raises a clear error if the
     free limit or the per-day price has not been configured — it never falls back to a
     hard-coded number."""
+    from services import country_context as _cc
+    _ctx = _cc.current()
+    if _ctx:             # a non-India merchant's request: the country's own product settings (never India's)
+        return _cc.product_settings(_ctx)
     doc = db.pricing.find_one({}) or {}
     ppd = doc.get("product_price_per_day")
     if ppd is None:

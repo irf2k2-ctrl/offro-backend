@@ -43,7 +43,7 @@ def test_no_login_needed_and_india_matches_existing_values():
     assert p["1month"]["price"] == 499 and p["1month"]["total"] == 588.82 and p["12months"]["price"] == 3999
     assert d["banner"]["price"] == 15 and d["product"]["free_product_limit"] == 10 and d["product"]["product_max_validity_days"] == 365
     assert d["influencer"]["price"] == 999.0 and d["influencer"]["total"] == 1178.82
-    assert d["payment"] == {"supported": True, "currency": "INR", "reason": None}
+    assert d["payment"] == {"supported": True, "mode": "razorpay", "currency": "INR", "reason": None}
 
 
 def test_other_country_before_any_price_is_not_configured_and_never_india():
@@ -67,7 +67,7 @@ def test_configured_country_uses_only_its_own_price_and_tax():
     assert one["price"] == 29 and one["tax_amount"] == 4.35 and one["total"] == 33.35
     assert d["banner"]["total"] == 2.3 and d["product"]["free_product_limit"] == 3 and d["product"]["product_max_validity_days"] == 60
     assert next(x for x in d["store_plans"] if x["id"] == "3months")["configured"] is False
-    assert d["payment"] == {"supported": False, "currency": None, "reason": "international_payments_not_enabled"}
+    assert d["payment"] == {"supported": False, "mode": "manual", "currency": "SAR", "reason": "currency_not_enabled"}
 
 
 def test_deactivated_plan_is_not_offered():

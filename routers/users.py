@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
+from services import country_context as _cc
 from bson import ObjectId
 import uuid
 from datetime import datetime
@@ -746,6 +747,21 @@ def _influencer_subscription_pricing() -> dict:
     return _influencer_subscription_block(pricing)
 
 
+def _influencer_pricing_for(acct):
+    """(pricing, ctx). India (ctx None): the existing India block, unchanged. Another country: that country's own influencer fee and
+    tax. Not configured -> 409 (never India's fee and never a silent free publish); configured but switched off -> enabled False,
+    which has the same meaning as India's disabled subscription."""
+    ctx = _cc.resolve(acct) if acct else None
+    if not ctx:
+        return _influencer_subscription_pricing(), None
+    inf = ctx["prices"]["influencer"]
+    if not inf["configured"]:
+        raise HTTPException(409, {"code": "price_not_configured", "message": f"Influencer pricing is not set up for {ctx['name']} yet."})
+    fee = float(inf["price"]); pct = ctx["tax_percent"]
+    gst = round(fee * pct / 100, 2)
+    return {"fee": fee, "gst_percent": pct, "gst_amount": gst, "total": round(fee + gst, 2), "enabled": bool(inf["active"])}, ctx
+
+
 @router.get("/influencer-profile/subscription-pricing")
 def get_influencer_subscription_pricing(user=Depends(get_current_user)):
     """Returns the current admin-configured fee/GST/total for the profile
@@ -760,8 +776,9 @@ def get_influencer_subscription_pricing(user=Depends(get_current_user)):
             already_paid = bool(d) and d.get("payment_status", "PAID") == "PAID"
         except Exception:
             pass
-    pricing = _influencer_subscription_pricing()
-    pricing["currency"] = "INR"
+    pricing, _ctx = _influencer_pricing_for(acct)
+    pricing.update(_cc.labels(_ctx))
+    pricing["currency"] = pricing["currency_code"]
     pricing["already_paid"] = already_paid
     return pricing
 
@@ -862,7 +879,9 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
     # Step 2 — payment/publish decision. Never trust client-supplied
     # payment/publish state; everything below is derived from the
     # server's own record and the server's own pricing config.
-    pricing = _influencer_subscription_pricing()
+    pricing, ctx = _influencer_pricing_for(acct)
+    _cur = ctx["currency_code"] if ctx else "INR"
+    _lab = _cc.labels(ctx)
 
     if existing.get("payment_status", "PAID") == "PAID":
         # Already paid (rule: one-time payment) — publish/update only.
@@ -930,11 +949,11 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
             "base_price": pricing["fee"], "original_amount": pricing["fee"],
             "discount_code": disc["code"], "discount_amount": discount_amount,
             "final_amount": taxable, "gst": gst_amount, "total": total,
-            "created_at": now,
+            "created_at": now, **_lab,
         })
         return {"ok": True, "publish_status": "published", "payment_required": False, "total": total}
 
-    amount_paise = int(round(total * 100))
+    amount_paise = _cc.to_minor(total, _cur) if ctx else int(round(total * 100))
     from routers.merchant_app import _razorpay_request, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
 
     # ── Reuse a still-valid PAYMENT_PENDING Razorpay order instead of
@@ -948,6 +967,7 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
     # amount actually charged can never be stale. Never touches an
     # already-PAID profile's behavior (that case already returned above).
     now = datetime.utcnow()
+    manual_reason = None
     existing_pending = db.subscriptions.find_one({
         "entity_type": "influencer",
         "influencer_id": str(oid),
@@ -971,10 +991,15 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
         # existing merchant subscription/upgrade flows do.
         rp_order_id = None
         pay_mode = "manual"
-        if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+        _try_rzp = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
+        if ctx:            # another country: Razorpay only when this currency is enabled, else manual with the reason
+            _route = _cc.payment_route(_cur, _try_rzp)
+            manual_reason = _route["manual_reason"]
+            _try_rzp = _route["mode"] == "razorpay"
+        if _try_rzp:
             try:
                 order_data = {
-                    "amount": amount_paise, "currency": "INR",
+                    "amount": amount_paise, "currency": _cur,
                     "receipt": f"infl_{str(oid)[-8:]}",
                     "notes": {"influencer_id": str(oid), "account_id": str(acct["_id"]), "type": "influencer_subscription"},
                 }
@@ -994,7 +1019,7 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
             "base_price": pricing["fee"], "gst_percent": pricing["gst_percent"],
             "discount_code": disc["code"], "discount_amount": discount_amount,
             "gst_amount": gst_amount, "total": total,
-            "currency": "INR",
+            "currency": _cur, **_lab,
             "status": "pending",
             "pay_mode": pay_mode,
             "created_at": now, "updated_at": now,
@@ -1027,7 +1052,7 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
         "discount_code": disc["code"],
         "discount_amount": discount_amount,
         "total": total,
-        "currency": "INR",
+        "currency": _cur, **_lab, "manual_reason": manual_reason,
     }
 
 
@@ -1121,7 +1146,7 @@ def verify_influencer_payment(data: dict, user=Depends(get_current_user)):
         "gst": sub.get("gst_amount", 0),
         "total": sub.get("total", 0),
         "razorpay_order_id": order_id, "razorpay_payment_id": payment_id,
-        "created_at": now,
+        "created_at": now, **_cc.stamp(sub),
     })
     db.influencers.update_one({"_id": oid}, {"$set": {
         "payment_status": "PAID", "publish_status": "published",
@@ -1158,7 +1183,7 @@ def validate_influencer_discount_code(data: dict, user=Depends(get_current_user)
     code = (data.get("code") or data.get("discount_code") or "").strip()
     if not code:
         raise HTTPException(400, "Code is required")
-    pricing = _influencer_subscription_pricing()
+    pricing, _ctx = _influencer_pricing_for(_resolve_own_account(user))
     from routers.merchant_app import _resolve_discount
     disc = _resolve_discount(code, "INFLUENCER", pricing["fee"])
     if not disc["code"]:

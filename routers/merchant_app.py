@@ -4,6 +4,7 @@ Merchant App Router — self-service portal
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from database import db
+from services import country_context as _cc
 from bson import ObjectId
 from datetime import datetime, timedelta
 import uuid, qrcode, io, base64, hmac, hashlib, re
@@ -723,8 +724,33 @@ def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
 
 # ───────────── plans / pricing ─────────────
 
+def _optional_account(request: Request):
+    """The signed-in account, or None when there is no valid session (the plans list used to be public)."""
+    try:
+        return get_merchant(request)
+    except HTTPException:
+        return None
+
+
+def _country_plans(ctx: dict) -> list:
+    out = []
+    for p in ctx["prices"]["store_plans"]:
+        if not (p["configured"] and p["active"]):
+            continue
+        out.append({"id": p["id"], "label": p["label"], "price": p["price"], "gst_percent": ctx["tax_percent"],
+                    "gst_amount": p["tax_amount"], "total": p["total"], **_cc.labels(ctx)})
+    if not out:
+        raise HTTPException(409, {"code": "price_not_configured", "message": f"Store plans are not set up for {ctx['name']} yet."})
+    return out
+
+
 @router.get("/plans")
-def get_plans():
+def get_plans(request: Request):
+    _acct = _optional_account(request)
+    if _acct is not None:
+        _ctx = _cc.resolve(_acct)                 # None for India -> the existing response below, unchanged
+        if _ctx:
+            return _country_plans(_ctx)
     doc  = db.pricing.find_one({}) or {}
     gst  = doc.get("gst_percent", 18)
     base = doc.get("plans", [
@@ -762,6 +788,12 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
         {"id": "6months",  "label": "6 Months",  "price": 2299},
         {"id": "12months", "label": "12 Months", "price": 3999},
     ])}
+    ctx = _cc.resolve(m)                          # None = India: everything below runs exactly as before
+    if ctx:
+        gst = ctx["tax_percent"]
+        plans_map = {p["id"]: p for p in ctx["prices"]["store_plans"] if p["configured"] and p["active"]}
+    _cur = ctx["currency_code"] if ctx else "INR"
+    _lab = _cc.labels(ctx)
     if plan not in plans_map: raise HTTPException(400, "Invalid plan")
 
     price = plans_map[plan]["price"]
@@ -775,7 +807,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     taxable_amount = max(0.0, round(price - discount_amount, 2))
     gst_amt     = round(taxable_amount * gst / 100, 2)
     total       = round(taxable_amount + gst_amt, 2)
-    total_paise = int(total * 100)
+    total_paise = _cc.to_minor(total, _cur) if ctx else int(total * 100)
 
     from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
     end_date  = from_date + timedelta(days=plan_days(plan))
@@ -805,6 +837,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
             "created_at":       datetime.utcnow(),
             "paid_at":          datetime.utcnow(),
             "free_activation":  True,
+            **_lab,
         }
         sub_result = db.subscriptions.insert_one(sub_doc)
         sub_id = str(sub_result.inserted_id)
@@ -838,6 +871,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
             "from_date":       from_date,
             "end_date":        end_date,
             "created_at":      datetime.utcnow(),
+            **_lab,
         })
         _log_tx(_mid(m), "subscription",
                 f"Free plan activated for '{store_doc.get('store_name','')}' — {plan}",
@@ -864,6 +898,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
             "discount_value":  disc["discount_value"],
             "discount_amount": discount_amount,
             "original_amount": price,
+            **_lab,
         }
 
     # ── Razorpay integration ──
@@ -876,13 +911,19 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
 
     rp_order_id = None
     pay_mode    = "manual"   # fallback: admin confirms payment manually
+    manual_reason = None
+    if ctx:                  # another country: Razorpay only if this currency is enabled; otherwise the manual path, with the reason
+        _route = _cc.payment_route(_cur, bool(rp_configured))
+        manual_reason = _route["manual_reason"]
+        if _route["mode"] != "razorpay":
+            rp_configured = False
 
     if rp_configured:
         try:
             rp_res = _razorpay_request(
                 "POST", "/v1/orders",
                 auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
-                json_data={"amount": total_paise, "currency": "INR",
+                json_data={"amount": total_paise, "currency": _cur,
                            "receipt": f"OF_{store_id[:8]}_{plan}",
                            "notes":   {"store_id": store_id, "plan": plan}},
                 timeout=8,
@@ -929,6 +970,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
         # is exactly that pre-tax discounted subtotal.
         "final_amount":       taxable_amount,
         "created_at":         datetime.utcnow(),
+        **_lab,
     }
     sub_result = db.subscriptions.insert_one(sub_doc)
 
@@ -940,6 +982,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
         "razorpay_key":       RAZORPAY_KEY_ID if rp_configured else None,
         "amount":             total_paise,
         "amount_display":     total,
+        **_lab, "manual_reason": manual_reason,
         "plan_label":         plans_map[plan]["label"],
         "from_date":          from_date_str,
         "end_date":           end_date.strftime("%Y-%m-%d"),
@@ -1028,6 +1071,7 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
         "end_date":           sub["end_date"],
         "razorpay_payment_id": payment_id,
         "created_at":         datetime.utcnow(),
+        **_cc.stamp(sub),
     })
 
     _log_tx(_mid(m), "subscription",
@@ -1092,6 +1136,7 @@ def activate_free_subscription(data: dict, m=Depends(get_merchant)):
         "from_date":       sub["from_date"],
         "end_date":        sub["end_date"],
         "created_at":      now,
+        **_cc.stamp(sub),
     })
     _log_tx(_mid(m), "subscription",
             f"Free plan activated for '{store_doc.get('store_name','')}' — {sub['plan']}",
@@ -1128,6 +1173,7 @@ def my_invoices(m=Depends(get_merchant)):
             "from_date":       fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
             "end_date":        ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
             "created_at":      inv["created_at"].strftime("%d %b %Y") if inv.get("created_at") else "",
+            **_cc.stamp(inv),
         })
     return result
 
@@ -1541,11 +1587,16 @@ def get_my_banners(m=Depends(get_merchant)):
 # ── GET /merchant/banners/pricing  ─────────────────────────────────────────
 @router.get("/banners/pricing")
 def get_banner_pricing_merchant(m=Depends(get_merchant)):
+    ctx = _cc.resolve(m)
+    if ctx:
+        b = _cc.require_section(ctx, "banner", "Banner")
+        return {"price_per_day": float(b["price"]), "gst_pct": ctx["tax_percent"], **_cc.labels(ctx)}
     doc = _pricing_doc()
     gst_pct = float(doc.get("gst_percent", 18))
     return {
         "price_per_day":  float(doc.get("banner_price_per_day", 15)),
         "gst_pct":        gst_pct,
+        **_cc.labels(None),
     }
 
 # ── PATCH /merchant/banners/{bid}/toggle  ──────────────────────────────────
@@ -1706,6 +1757,12 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     doc = _pricing_doc()
     gst_pct       = float(doc.get("gst_percent", 18))
     price_per_day = float(doc.get("banner_price_per_day", 15))
+    ctx = _cc.resolve(m)                          # None = India: unchanged
+    if ctx:
+        price_per_day = float(_cc.require_section(ctx, "banner", "Banner")["price"])
+        gst_pct = ctx["tax_percent"]
+    _cur = ctx["currency_code"] if ctx else "INR"
+    _lab = _cc.labels(ctx)
     base_price    = round(price_per_day * days, 2)
 
     # ── Discount code (backend-authoritative; discount applied to pre-tax
@@ -1718,7 +1775,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     final_pre_tax = max(0.0, round(base_price - discount_amount, 2))
     gst_amount    = round(final_pre_tax * gst_pct / 100, 2)
     total         = round(final_pre_tax + gst_amount, 2)
-    amount_paise  = int(total * 100)
+    amount_paise  = _cc.to_minor(total, _cur) if ctx else int(total * 100)
 
     plan_label = f"{days} Day{'s' if days!=1 else ''} Banner"
 
@@ -1750,18 +1807,25 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
         "status":         "pending",
         "approval_status": "pending",
         "created_at":     datetime.utcnow().isoformat(),
+        **_lab,
     }
     inserted = db.banner_orders.insert_one(order_doc)
     order_id = str(inserted.inserted_id)
 
     rp_order_id    = None
     pay_mode       = "manual"
+    manual_reason  = None
+    _try_rzp = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
+    if ctx:                # another country: Razorpay only when this currency is enabled, else manual with the reason
+        _route = _cc.payment_route(_cur, _try_rzp)
+        manual_reason = _route["manual_reason"]
+        _try_rzp = _route["mode"] == "razorpay"
 
-    if amount_paise > 0 and RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+    if amount_paise > 0 and _try_rzp:
         try:
             rp = _razorpay_request("POST", "/v1/orders",
                 auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
-                json_data={"amount": amount_paise, "currency": "INR",
+                json_data={"amount": amount_paise, "currency": _cur,
                            "receipt": f"bnr_{order_id[:8]}"})
             rp_data = rp.json() if hasattr(rp, 'json') else {}
             rp_order_id = rp_data.get("id")
@@ -1795,6 +1859,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
         "pay_mode":          pay_mode,
         "razorpay_key":      RAZORPAY_KEY_ID,
         "razorpay_order_id": rp_order_id,
+        **_lab, "manual_reason": manual_reason,
     }
 
 # ── POST /merchant/banners/activate-free  ──────────────────────────────────
@@ -1923,6 +1988,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "end_date":       order.get("end_date", ""),
         "payment_status": "free",
         "created_at":     datetime.utcnow(),
+        **_cc.stamp(order),
     })
     db.merchant_banners.update_one({"_id": res.inserted_id}, {"$set": {"invoice_no": invoice_no}})
     _log_tx(merchant_id, "banner",
@@ -2082,6 +2148,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
         "razorpay_payment_id": razorpay_payment_id,
         "payment_status":     "paid",
         "created_at":         datetime.utcnow(),
+        **_cc.stamp(order),
     })
     # Update banner record with invoice_no
     db.merchant_banners.update_one({"_id": res.inserted_id}, {"$set": {"invoice_no": invoice_no}})
@@ -2148,6 +2215,7 @@ def get_full_invoices(m=Depends(get_merchant)):
             "total":           inv.get("total", inv.get("amount", 0)),
             "status":          inv.get("status", "paid"),
             "created_at":      _fmt_dt(inv.get("created_at")),
+            **_cc.stamp(inv),
         })
 
     # 2. Fallback: store subscriptions not yet in invoices collection
@@ -2181,6 +2249,7 @@ def get_full_invoices(m=Depends(get_merchant)):
             "total":           sub.get("total", sub.get("amount", 0)),
             "status":          sub.get("status", "paid"),
             "created_at":      _fmt_dt(sub.get("created_at")),
+            **_cc.stamp(sub),
         })
 
     # 3. Fallback: banner invoices not in central invoices
@@ -2205,6 +2274,7 @@ def get_full_invoices(m=Depends(get_merchant)):
             "total":           b.get("total", 0),
             "status":          "paid",
             "created_at":      _fmt_dt(b.get("created_at")),
+            **_cc.stamp(b),
         })
 
     result.sort(key=lambda x: x.get("created_at", ""), reverse=True)

@@ -7,11 +7,13 @@ Rules
   * The country in the URL is the only country used. A country that is unknown, inactive or has no tax configured is answered with a
     clear error / `configured: false`; India's prices or GST are NEVER substituted.
   * A section is listed only when it is configured and active; otherwise it is `{"configured": false}` (not zero, not India's value).
-  * `payment.supported` tells the app whether OffrO can charge in this country's currency today. It is true only for India (INR, the one
-    Razorpay account in use). It becomes true for another country only after the Razorpay international-currency decision is made.
+  * `payment.supported` tells the app whether OffrO can charge by Razorpay in this country's currency. India: always. Another country: only
+    when its currency is listed in RAZORPAY_INTERNATIONAL_CURRENCIES; otherwise `mode` is "manual" (admin-confirmed activation) and `reason`
+    says why. Nothing assumes a currency is supported.
 """
 from fastapi import APIRouter, HTTPException
 
+from services import country_context as CC
 from services import pricing_config as P
 
 router = APIRouter(tags=["Pricing (public)"])
@@ -43,7 +45,12 @@ def country_pricing(code: str):
     plans = [{"id": p["id"], "label": p["label"], **_row(p, money)} for p in r["store_plans"]]
     prod = _row(r["product"], money + ("free_product_limit", "product_max_validity_days"))
     inf = _row(r["influencer"], money)
-    pay_ok = iso == P.INDIA
+    if iso == P.INDIA:
+        pay = {"supported": True, "mode": "razorpay", "currency": "INR", "reason": None}
+    else:
+        route = CC.payment_route(c["currency_code"], True)
+        pay = {"supported": route["mode"] == "razorpay", "mode": route["mode"], "currency": c["currency_code"],
+               "reason": route["manual_reason"]}
     return {
         "country": {k: c[k] for k in ("code", "name", "currency_code", "currency_symbol")},
         "tax": {"label": tax["label"], "percent": tax["percent"], "tax_free": tax["tax_free"], "configured": tax["configured"],
@@ -52,6 +59,5 @@ def country_pricing(code: str):
         "influencer": inf,
         "banner": _row(r["banner"], money),
         "product": prod,
-        "payment": {"supported": pay_ok, "currency": c["currency_code"] if pay_ok else None,
-                    "reason": None if pay_ok else "international_payments_not_enabled"},
+        "payment": pay,
     }

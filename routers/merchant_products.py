@@ -5,6 +5,7 @@ Collections: merchant_products, product_orders.
 All free/paid decisions live in services/products.py; this module only does
 HTTP, Razorpay, discount codes, invoices and response shaping.
 """
+import functools
 from datetime import datetime, timedelta
 
 from bson import ObjectId
@@ -17,6 +18,7 @@ from routers.merchant_app import (
     _cloudinary_upload, _make_thumb_url, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET,
 )
 from services import products as P
+from services import country_context as _cc
 
 router = APIRouter(prefix="/merchant", tags=["Merchant Products"])
 
@@ -24,6 +26,26 @@ PRODUCTS, ORDERS = P.PRODUCTS, P.ORDERS
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
+def _country_scoped(fn):
+    """Runs the endpoint with the merchant's own country pricing active. India (the default) leaves everything exactly as it was; for
+    another country the product service reads THAT country's product settings, and a missing / inactive / untaxed country is refused
+    with a clear 409 before anything is created."""
+    @functools.wraps(fn)
+    def wrapper(*a, **kw):
+        m = kw.get("m")
+        ctx = _cc.resolve(m) if m else None
+        if ctx:
+            _cc.product_settings(ctx)
+        with _cc.activated(ctx):
+            return fn(*a, **kw)
+    return wrapper
+
+
+def _cur() -> str:
+    c = _cc.current()
+    return c["currency_code"] if c else "INR"
+
+
 def _guard(fn, *a, **kw):
     try:
         return fn(*a, **kw)
@@ -127,7 +149,8 @@ def _price_block(tier_decision: dict, discount_code):
     gst = round(sub * gst_pct / 100, 2)
     total = round(sub + gst, 2)
     return {"disc": disc, "base": base, "discount_amount": d_amt, "sub": sub,
-            "gst_pct": gst_pct, "gst": gst, "total": total, "paise": int(round(total * 100))}
+            "gst_pct": gst_pct, "gst": gst, "total": total,
+            "paise": _cc.to_minor(total, _cur()) if _cc.current() else int(round(total * 100))}
 
 
 def _razorpay_order(paise, receipt, notes=None):
@@ -135,8 +158,10 @@ def _razorpay_order(paise, receipt, notes=None):
         return None, "manual"
     if not (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET):
         return None, "manual"
+    if _cc.current() and _cc.payment_route(_cur(), True)["mode"] != "razorpay":
+        return None, "manual"                  # this country's currency is not enabled on Razorpay: manual activation path
     try:
-        body = {"amount": paise, "currency": "INR", "receipt": receipt}
+        body = {"amount": paise, "currency": _cur(), "receipt": receipt}
         if notes:
             body["notes"] = notes
         rp = _razorpay_request("POST", "/v1/orders", auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), json_data=body)
@@ -144,6 +169,14 @@ def _razorpay_order(paise, receipt, notes=None):
         return rid, ("razorpay" if rid else "manual")
     except Exception:
         return None, "manual"
+
+
+def _manual_reason(paise, pay_mode):
+    """Why a PAID order is in manual mode for a non-India merchant (None for India and for Razorpay orders)."""
+    cx = _cc.current()
+    if not cx or paise <= 0 or pay_mode == "razorpay":
+        return None
+    return _cc.payment_route(cx["currency_code"], bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET))["manual_reason"]
 
 
 def _invoice(m, prod, order, paid: bool, rp_payment_id=""):
@@ -160,6 +193,7 @@ def _invoice(m, prod, order, paid: bool, rp_payment_id=""):
         "gst": order.get("gst_amount", 0), "gst_percent": order.get("gst_percent", 0),
         "total": order.get("total", 0), "razorpay_payment_id": rp_payment_id,
         "payment_status": "paid" if paid else "free", "created_at": datetime.utcnow(),
+        **_cc.stamp(order),
     })
     db[PRODUCTS].update_one({"_id": prod["_id"]}, {"$set": {"invoice_no": no}})
     return no
@@ -169,7 +203,7 @@ def _slot_payload(store_id, exclude_id=None, days=0):
     """Quota of ONE store."""
     s = _guard(P.slots_summary, store_id, exclude_id, days)
     st = P.get_settings()
-    return {**s, "scope": "store", "store_id": str(store_id), "per_store_limit": s["free_limit"],
+    return {**s, **_cc.labels(_cc.current()), "scope": "store", "store_id": str(store_id), "per_store_limit": s["free_limit"],
             "gst_pct": s["gst_percent"], "max_validity_days": st["product_max_validity_days"]}
 
 
@@ -197,7 +231,7 @@ def _merchant_overview(m, days=0):
     limit = stg["free_product_limit"]
     used = sum(x["used"] for x in per)
     nxt = True if not per else any(x["next_is_free"] for x in per)
-    return {**base, "scope": "merchant", "stores": per, "per_store_limit": limit,
+    return {**base, **_cc.labels(_cc.current()), "scope": "merchant", "stores": per, "per_store_limit": limit,
             "free_limit": limit * n, "used": used, "free_remaining": sum(x["free_remaining"] for x in per) if per else limit,
             "next_is_free": nxt, "tier": "free" if nxt else "paid",
             "gst_pct": stg["gst_percent"], "max_validity_days": stg["product_max_validity_days"]}
@@ -213,6 +247,7 @@ def list_products(m=Depends(get_merchant)):
 
 
 @router.get("/products/slots")
+@_country_scoped
 def product_slots(exclude_id: str = "", store_id: str = "", days: int = 0, m=Depends(get_merchant)):
     """'N / limit free product slots used' + the current price per day (x days = price).
     The quota is PER STORE: pass `store_id` for that store's numbers, or `exclude_id`
@@ -231,6 +266,7 @@ def product_slots(exclude_id: str = "", store_id: str = "", days: int = 0, m=Dep
 
 # ── create ─────────────────────────────────────────────────────────────────────
 @router.post("/products/order")
+@_country_scoped
 def create_product_order(data: dict, m=Depends(get_merchant)):
     mid = _mid(m)
     store_id = (data.get("store_id") or "").strip()
@@ -248,6 +284,7 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
         "discount_amount": pb["discount_amount"], "final_amount": pb["sub"],
         "gst_percent": pb["gst_pct"], "gst_amount": pb["gst"], "total": pb["total"],
         "amount_paise": pb["paise"], "status": "created", "created_at": datetime.utcnow(),
+        **_cc.labels(_cc.current()),
     }
     oid = db[ORDERS].insert_one(order).inserted_id
     rp_id, pay_mode = _razorpay_order(pb["paise"], f"prd_{str(oid)[:8]}")
@@ -261,6 +298,7 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
         "discount_msg": disc["message"], "amount_display": pb["total"], "amount_paise": pb["paise"],
         "pay_mode": pay_mode, "razorpay_key": RAZORPAY_KEY_ID, "razorpay_order_id": rp_id,
         "free_limit": d["free_limit"], "free_remaining": max(0, d["free_limit"] - d["used"]),
+        **_cc.labels(_cc.current()), "manual_reason": _manual_reason(pb["paise"], pay_mode),
     }
 
 
@@ -310,6 +348,7 @@ def _already_done(order_id):
 
 
 @router.post("/products/activate-free")
+@_country_scoped
 def activate_free_product(data: dict, m=Depends(get_merchant)):
     """Submit a product that needs no payment (free slot, or fully discounted)."""
     order = _order(data, m)
@@ -336,6 +375,7 @@ def activate_free_product(data: dict, m=Depends(get_merchant)):
 
 
 @router.post("/products/verify")
+@_country_scoped
 def verify_product_payment(data: dict, m=Depends(get_merchant)):
     """Verify the Razorpay payment for an additional (paid) product, then create it.
 
@@ -390,6 +430,7 @@ def verify_product_payment(data: dict, m=Depends(get_merchant)):
 
 # ── edit / delete / availability ───────────────────────────────────────────────
 @router.put("/products/{pid}")
+@_country_scoped
 def update_product(pid: str, data: dict, m=Depends(get_merchant)):
     doc = _own(pid, m)
     upd = {}
@@ -458,6 +499,7 @@ def bulk_action(data: dict, m=Depends(get_merchant)):
 
 # ── renewal ────────────────────────────────────────────────────────────────────
 @router.post("/products/{pid}/renew")
+@_country_scoped
 def renew_order(pid: str, data: dict, m=Depends(get_merchant)):
     """Re-checks free/paid NOW through the same service decision; the product
     itself is excluded from the count."""
@@ -476,21 +518,24 @@ def renew_order(pid: str, data: dict, m=Depends(get_merchant)):
         "discount_amount": pb["discount_amount"], "final_amount": pb["sub"],
         "gst_percent": pb["gst_pct"], "gst_amount": pb["gst"], "total": pb["total"],
         "amount_paise": pb["paise"], "status": "created", "created_at": datetime.utcnow(),
+        **_cc.labels(_cc.current()),
     }
     oid = db[ORDERS].insert_one(order).inserted_id
     rp_id, pay_mode = _razorpay_order(pb["paise"], f"ren_{pid[:8]}", {"product_id": pid, "type": "renew"})
     db[ORDERS].update_one({"_id": oid}, {"$set": {"razorpay_order_id": rp_id, "pay_mode": pay_mode}})
-    return {"order_id": rp_id or "", "product_order_id": str(oid), "amount": pb["total"], "currency": "INR",
+    return {"order_id": rp_id or "", "product_order_id": str(oid), "amount": pb["total"], "currency": _cur(),
             "key": RAZORPAY_KEY_ID, "gst": pb["gst"], "end_date": _dstr(end), "days": days, "price_per_day": d["price_per_day"], "pricing_tier": d["tier"],
             "free_remaining": max(0, d["free_limit"] - d["used"]), "base_price": pb["base"],
             "gst_percent": pb["gst_pct"], "gst_amount": pb["gst"], "discount_code": disc["code"],
             "discount_type": disc["type"], "discount_value": disc["discount_value"],
             "discount_amount": pb["discount_amount"], "discount_msg": disc["message"],
             "amount_display": pb["total"], "amount_paise": pb["paise"], "pay_mode": pay_mode,
-            "razorpay_key": RAZORPAY_KEY_ID, "razorpay_order_id": rp_id}
+            "razorpay_key": RAZORPAY_KEY_ID, "razorpay_order_id": rp_id,
+            **_cc.labels(_cc.current()), "manual_reason": _manual_reason(pb["paise"], pay_mode)}
 
 
 @router.post("/products/{pid}/renew/verify")
+@_country_scoped
 def verify_renewal(pid: str, data: dict, m=Depends(get_merchant)):
     """Idempotent: one paid renewal order extends the product exactly once. A paid renewal uses the
     end date / days PERSISTED on the order, so it also works when verified after midnight."""
