@@ -28,7 +28,7 @@
   function setHtml(el, html) { if (el) el.innerHTML = html; }
   function $(id) { return document.getElementById(id); }
 
-  var st = { tab: 'store', country: 'IN', countries: [], canAdd: false, prices: null, edit: null, msg: null, history: null, seq: 0, loaded: false };
+  var st = { tab: 'store', country: 'IN', countries: [], canAdd: false, prices: null, edit: null, msg: null, history: null, seq: 0, loaded: false, loading: false, loadErr: null, busy: false, rseq: 0 };
 
   // ── permissions (display only; the server enforces them) ───────────────────────────────────────────────
   function canEdit() {
@@ -74,14 +74,27 @@
     return fallback;
   }
 
+  // Friendly wording for failures. Validation (422) and conflict (409) messages come from the server unchanged because they say what
+  // to fix; transport, session and server faults get plain wording instead of raw status codes.
+  function friendly(status, body) {
+    var m = errText(body, '');
+    if (status === 401) return 'Your session has expired. Please sign in again.';
+    if (status === 403) return m || 'You do not have permission to do that.';
+    if (status === 404) return m || 'That item was not found. Refresh the page and try again.';
+    if (status === 429) return 'Too many requests. Please wait a moment and try again.';
+    if (status >= 500) return 'Something went wrong on our side. Please try again in a moment.';
+    return m || 'The request could not be completed (' + status + ').';
+  }
   async function api(path, opts) {
     opts = opts || {};
     var init = { credentials: 'include', method: opts.method || 'GET' };
     if (opts.body !== undefined) { init.headers = { 'Content-Type': 'application/json' }; init.body = JSON.stringify(opts.body); }
-    var r = await fetch(API + path, init);
+    var r;
+    try { r = await fetch(API + path, init); }
+    catch (e) { var ne = new Error('Could not reach the server. Check your internet connection and try again.'); ne.status = 0; throw ne; }
     var body = null;
     try { body = await r.json(); } catch (e) { body = null; }
-    if (!r.ok) { var err = new Error(errText(body, 'Request failed (' + r.status + ')')); err.status = r.status; throw err; }
+    if (!r.ok) { var err = new Error(friendly(r.status, body)); err.status = r.status; throw err; }
     return body;
   }
 
@@ -99,15 +112,47 @@
     var d = await api('/countries/' + encodeURIComponent(st.country) + '/prices');
     if (seq === st.seq) st.prices = d;
   }
+  // Full (re)load of the active tab. The newest call wins: an older response that arrives late is dropped.
   async function refresh() {
+    var seq = ++st.rseq;
+    st.loading = true; st.loadErr = null; show(true); render();
     try {
       await loadCountries();
       if (['store', 'infl', 'banner', 'product'].indexOf(st.tab) >= 0) await loadPrices();
-      show(true);
-      render();
+      if (seq !== st.rseq) return;
+      st.loading = false; render();
     } catch (e) {
-      if (e.status === 403) show(false); else { show(true); flash('err', e.message); }
+      if (seq !== st.rseq) return;
+      st.loading = false;
+      if (e.status === 403) show(false); else { st.loadErr = e.message; render(); }
     }
+  }
+  // After a successful save: refresh the lists. If only this refresh fails the save still stands, and the message says so.
+  async function afterSave(withPrices) {
+    try { await loadCountries(); if (withPrices) await loadPrices(); st.loadErr = null; }
+    catch (e) { st.loadErr = 'Your change was saved, but the list could not be refreshed. ' + e.message; }
+    render();
+  }
+  function loaderHtml() { return '<div class="pp-loading" role="status"><span class="pp-spin" aria-hidden="true"></span>Loading pricing data...</div>'; }
+  function errorHtml() {
+    return h`<div class="pp-card"><div class="pp-alert err" role="alert">${st.loadErr}</div><div class="pp-toolbar"><button type="button" class="pp-btn pri" data-act="retry">Try again</button></div></div>`;
+  }
+  // While a save/toggle is in flight every button is disabled and the clicked one reads "Saving...", so a second click cannot send it twice.
+  function setBusy(on, btn) {
+    st.busy = on;
+    var root = $('section-pricing_plans');
+    if (root) {
+      var bs = root.querySelectorAll('button');
+      for (var i = 0; i < bs.length; i++) bs[i].disabled = on;
+    }
+    if (!btn) return;
+    if (on) { btn.setAttribute('data-label', btn.textContent); btn.textContent = 'Saving...'; }
+    else if (btn.getAttribute('data-label') !== null) { btn.textContent = btn.getAttribute('data-label'); btn.removeAttribute('data-label'); }
+  }
+  async function guarded(btn, fn) {
+    if (st.busy) return;
+    setBusy(true, btn);
+    try { await fn(); } finally { setBusy(false, btn); }
   }
   function show(ok) { var d = $('pp_denied'), b = $('pp_body'); if (d) d.hidden = ok; if (b) b.hidden = !ok; }
 
@@ -121,6 +166,8 @@
     renderTabs(); renderMsg();
     var el = $('pp_pane');
     if (!el) return;
+    if (st.loading) return setHtml(el, loaderHtml());
+    if (st.loadErr) return setHtml(el, errorHtml());
     if (st.tab === 'tax') return setHtml(el, taxView());
     if (st.tab === 'countries') return setHtml(el, countriesView());
     if (st.tab === 'reward') return setHtml(el, rewardView());
@@ -154,7 +201,7 @@
     var t = titles[st.tab];
     var html = h`<div class="pp-card">${raw(priceHead(t[0], t[1]))}`;
     if (!c) return html + '<div class="pp-help">No country is available.</div></div>';
-    if (!p) return html + '<div class="pp-help">Loading...</div></div>';
+    if (!p) return html + loaderHtml() + '</div>';
     html += taxBanner();
     html += editPanel();
     html += '<div class="pp-tablewrap"><table class="pp-table">' + priceTable() + '</table></div>';
@@ -333,6 +380,7 @@
 
   // ── history ─────────────────────────────────────────────────────────────────────────────────────────
   async function openHistory() {
+    setHtml($('pp_msg'), loaderHtml());
     try {
       var q = (st.tab === 'countries' || st.tab === 'tax' || st.tab === 'reward') ? '' : '?country=' + encodeURIComponent(st.country);
       var d = await api('/history' + q);
@@ -364,7 +412,7 @@
     else body = { price_per_day: val('pp_f_price'), free_product_limit: val('pp_f_free'), product_max_validity_days: val('pp_f_valid') };
     try {
       await put('/countries/' + encodeURIComponent(st.country) + '/prices/' + section, body);
-      st.edit = null; await loadCountries(); await loadPrices(); render();
+      st.edit = null; await afterSave(true);
     } catch (er) { e.err = er.message; e.vals = { price: val('pp_f_price'), free: val('pp_f_free'), valid: val('pp_f_valid') }; render(); }
   }
   async function onToggle(key, id, to) {
@@ -374,7 +422,7 @@
     else body = { active: on };
     try {
       await put('/countries/' + encodeURIComponent(st.country) + '/prices/' + section, body, on ? 'Activated.' : 'Deactivated.');
-      await loadCountries(); await loadPrices(); render();
+      await afterSave(true);
     } catch (er) { flash('err', er.message); }
   }
   async function onSaveTax() {
@@ -384,7 +432,7 @@
     if (!isIn) { var cc = c || {}; body.name = cc.name; body.currency_name = cc.currency_name; body.currency_code = cc.currency_code; body.currency_symbol = cc.currency_symbol; }
     try {
       await put('/countries/' + encodeURIComponent(e.code), body, 'Tax saved.');
-      st.edit = null; await loadCountries(); render();
+      st.edit = null; await afterSave(false);
     } catch (er) { e.err = er.message; e.vals = { label: val('pp_t_label'), pct: val('pp_t_pct'), free: !!($('pp_t_free') && $('pp_t_free').checked) }; render(); }
   }
   function countryBody() {
@@ -396,14 +444,14 @@
     try {
       if (e.mode === 'add') { await api('/countries', { method: 'POST', body: b }); flash('ok', 'Country added.'); }
       else { await api('/countries/' + encodeURIComponent(e.code), { method: 'PUT', body: b }); flash('ok', 'Country saved.'); }
-      st.edit = null; await loadCountries(); render();
+      st.edit = null; await afterSave(false);
     } catch (er) { e.err = er.message; e.vals = Object.assign({}, b, { code: e.mode === 'add' ? b.code : e.code }); render(); }
   }
   async function onSaveReward() {
     var e = st.edit;
     try {
       await put('/countries/' + encodeURIComponent(e.code) + '/prices/reward', { conversion_rate: val('pp_r_rate'), min_withdraw_points: val('pp_r_min') }, 'Reward settings saved.');
-      st.edit = null; await loadCountries(); render();
+      st.edit = null; await afterSave(false);
     } catch (er) { e.err = er.message; e.vals = { rate: val('pp_r_rate'), min: val('pp_r_min') }; render(); }
   }
 
@@ -411,39 +459,48 @@
     var t = ev.target.closest ? ev.target.closest('[data-act],[data-tab]') : null;
     if (!t) return;
     var tab = t.getAttribute('data-tab');
-    if (tab) { st.tab = tab; st.edit = null; st.msg = null; refresh(); return; }
+    if (tab) { if (st.busy) return; st.tab = tab; st.edit = null; st.msg = null; refresh(); return; }
     var act = t.getAttribute('data-act'), code = t.getAttribute('data-code'), key = t.getAttribute('data-key'), id = t.getAttribute('data-id');
     st.msg = act === 'history' ? st.msg : null;
     if (act === 'edit') { st.edit = { kind: 'price', key: key, id: id }; render(); }
     else if (act === 'cancel') { st.edit = null; render(); }
-    else if (act === 'save') onSave();
-    else if (act === 'toggle') onToggle(key, id, t.getAttribute('data-to'));
+    else if (act === 'save') guarded(t, onSave);
+    else if (act === 'toggle') guarded(t, function () { return onToggle(key, id, t.getAttribute('data-to')); });
     else if (act === 'edit-tax') { st.edit = { kind: 'tax', code: code }; render(); }
-    else if (act === 'save-tax') onSaveTax();
+    else if (act === 'save-tax') guarded(t, onSaveTax);
     else if (act === 'add-country') { st.edit = { kind: 'country', mode: 'add', vals: { status: 'active' } }; render(); }
     else if (act === 'edit-country') {
       var c = st.countries.filter(function (x) { return x.code === code; })[0];
       st.edit = { kind: 'country', mode: 'edit', code: code, vals: c ? { name: c.name, code: c.code, currency_name: c.currency_name, currency_code: c.currency_code, currency_symbol: c.currency_symbol, tax_label: c.tax_label, tax_percent: c.tax_percent === null ? '' : c.tax_percent, tax_free: c.tax_free, status: c.status } : {} };
       render();
     }
-    else if (act === 'save-country') onSaveCountry();
+    else if (act === 'save-country') guarded(t, onSaveCountry);
     else if (act === 'country-status') {
-      api('/countries/' + encodeURIComponent(code) + '/status', { method: 'POST', body: { status: t.getAttribute('data-to') } })
-        .then(function () { flash('ok', 'Country status updated.'); return loadCountries(); }).then(render).catch(function (er) { flash('err', er.message); });
+      guarded(t, async function () {
+        try { await api('/countries/' + encodeURIComponent(code) + '/status', { method: 'POST', body: { status: t.getAttribute('data-to') } }); flash('ok', 'Country status updated.'); await afterSave(false); }
+        catch (er) { flash('err', er.message); }
+      });
     }
     else if (act === 'edit-reward') { st.edit = { kind: 'reward', code: code }; render(); }
-    else if (act === 'save-reward') onSaveReward();
+    else if (act === 'save-reward') guarded(t, onSaveReward);
     else if (act === 'reward-toggle') {
-      put('/countries/' + encodeURIComponent(code) + '/prices/reward', { active: t.getAttribute('data-to') === '1' }, 'Reward status updated.')
-        .then(function () { return loadCountries(); }).then(render).catch(function (er) { flash('err', er.message); });
+      guarded(t, async function () {
+        try { await put('/countries/' + encodeURIComponent(code) + '/prices/reward', { active: t.getAttribute('data-to') === '1' }, 'Reward status updated.'); await afterSave(false); }
+        catch (er) { flash('err', er.message); }
+      });
     }
+    else if (act === 'retry') refresh();
     else if (act === 'history') openHistory();
     else if (act === 'close-history') { st.msg = null; renderMsg(); }
   }
   function onChange(ev) {
     if (ev.target && ev.target.id === 'pp_country') {
-      st.country = ev.target.value; st.edit = null; st.msg = null;
-      loadPrices().then(render).catch(function (er) { flash('err', er.message); });
+      if (st.busy) return;
+      st.country = ev.target.value; st.edit = null; st.msg = null; st.loadErr = null;
+      var cs = st.country, pr = loadPrices();     // loadPrices() clears st.prices synchronously, so the table shows its loading state
+      render();
+      pr.then(function () { if (cs === st.country) render(); })
+        .catch(function (er) { if (cs !== st.country) return; st.loadErr = er.message; render(); });
     }
   }
 
