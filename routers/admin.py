@@ -2936,6 +2936,11 @@ def get_withdraw_requests(a=Depends(get_current_admin)):
             "email": r.get("email",""),
             "points": r.get("points", r.get("amount", 200)),
             "voucher_value": r.get("voucher_value", round(r.get("points", r.get("amount", 200)) / 10, 2)),
+            # Requests made before per-country rewards have no currency: they were all rupees.
+            "country": r.get("country") or "IN",
+            "currency_code": r.get("currency_code") or "INR",
+            "currency_symbol": r.get("currency_symbol") or "₹",
+            "voucher_partners": r.get("voucher_partners") or [],
             "status": r.get("status","pending"),
             "voucher_code": r.get("voucher_code",""),
             "voucher_type": r.get("voucher_type",""),
@@ -4660,21 +4665,6 @@ def review_stats(a=Depends(get_current_admin)):
 # CITIES MANAGEMENT
 # ════════════════════════════════════════════════════════
 
-@router.get("/cities")
-def admin_get_cities(a=Depends(get_current_admin)):
-    cities = list(db.cities.find({}).sort("sort_order", 1))
-    return [{
-        "id":         str(c["_id"]),
-        "name":       c.get("name", ""),
-        "image_url":  c.get("image_url", ""),
-        "sort_order": c.get("sort_order", 0),
-        "active":     c.get("active", True),
-        "created_at": str(c.get("created_at", "")),
-        "country":    c.get("country", "") or "",
-        "names":      c.get("names") if isinstance(c.get("names"), dict) else {},
-    } for c in cities]
-
-
 @router.post("/cities/assign-country")
 def admin_assign_city_country(body: dict, a=Depends(get_current_admin)):
     """One explicit, admin-triggered step: give `country` to every city that has none yet (the cities that existed before cities
@@ -4684,7 +4674,12 @@ def admin_assign_city_country(body: dict, a=Depends(get_current_admin)):
     iso = _city.normalize_country((body or {}).get("country"))
     if not iso:
         raise HTTPException(400, "A supported country is required")
-    res = db.cities.update_many({"$or": [{"country": {"$exists": False}}, {"country": ""}, {"country": None}]}, {"$set": {"country": iso}})
+    _no_country = {"$or": [{"country": {"$exists": False}}, {"country": ""}, {"country": None}]}
+    if (body or {}).get("preview") in (True, "true", 1, "1"):
+        # Preview only: which cities WOULD be assigned. Nothing is written.
+        would = [{"id": str(c["_id"]), "name": c.get("name", "")} for c in db.cities.find(_no_country)]
+        return {"ok": True, "preview": True, "country": iso, "would_update": len(would), "cities": would}
+    res = db.cities.update_many(_no_country, {"$set": {"country": iso}})
     return {"ok": True, "country": iso, "updated": res.modified_count}
 
 
@@ -4730,81 +4725,8 @@ def admin_seed_cities(a=Depends(get_current_admin)):
     )
     return {"ok": True, "added": added, "skipped": skipped}
 
-@router.post("/cities")
-def admin_create_city(body: dict, a=Depends(get_current_admin)):
-    _check_perm(a, "Cities", "add")
-    name = body.get("name", "").strip()
-    if not name:
-        raise HTTPException(400, "City name required")
-    existing = db.cities.find_one({"name": {"$regex": f"^{name}$", "$options": "i"}})
-    if existing:
-        raise HTTPException(400, "City already exists")
-    is_active = bool(body.get("active", True))
-    from services import cities as _city
-    doc = {
-        "name":       name,
-        "image_url":  body.get("image_url", ""),
-        "sort_order": int(body.get("sort_order", 0)),
-        "active":     is_active,
-        "status":     "active" if is_active else "inactive",
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    if body.get("country") not in (None, ""):
-        iso = _city.normalize_country(body.get("country"))
-        if not iso:
-            raise HTTPException(400, "Unsupported country")
-        doc["country"] = iso
-    if body.get("names") not in (None, ""):
-        try:
-            doc["names"] = _city.clean_names(body.get("names"))
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-    result = db.cities.insert_one(doc)
-    return {"ok": True, "id": str(result.inserted_id)}
-
-
-@router.put("/cities/{city_id}")
-def admin_update_city(city_id: str, body: dict, a=Depends(get_current_admin)):
-    _check_perm(a, "Cities", "edit")
-    update = {}
-    for field in ["name", "image_url", "sort_order", "active"]:
-        if field in body:
-            update[field] = body[field]
-    # Sync 'status' field with 'active' so public API works correctly
-    if "active" in body:
-        update["status"] = "active" if bool(body["active"]) else "inactive"
-    from services import cities as _city
-    unset = {}
-    if "country" in body:
-        if body["country"] in (None, ""):
-            unset["country"] = ""                      # clear the mapping (the city becomes unassigned)
-        else:
-            iso = _city.normalize_country(body["country"])
-            if not iso:
-                raise HTTPException(400, "Unsupported country")
-            update["country"] = iso
-    if "names" in body:
-        try:
-            update["names"] = _city.clean_names(body["names"])
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-    if not update and not unset:
-        raise HTTPException(400, "Nothing to update")
-    ops = {}
-    if update:
-        ops["$set"] = update
-    if unset:
-        ops["$unset"] = unset
-    db.cities.update_one({"_id": ObjectId(city_id)}, ops)
-    return {"ok": True}
-
-
-@router.delete("/cities/{city_id}")
-def admin_delete_city(city_id: str, a=Depends(get_current_admin)):
-    _check_perm(a, "Cities", "delete")
-    db.cities.delete_one({"_id": ObjectId(city_id)})
-    return {"ok": True}
-
+# NOTE: list / create / update / delete / status / popular-order / import / verify of cities live in routers/admin_cities.py
+# (registered before this router). Image upload, seed and assign-country stay here.
 
 @router.post("/cities/{city_id}/upload-image")
 async def admin_upload_city_image(city_id: str, file: UploadFile = File(...), a=Depends(get_current_admin)):

@@ -75,6 +75,31 @@ def whole(v, field: str, minimum: int) -> int:
     return int(x)
 
 
+INDIA_DEFAULT_PARTNERS = ["Amazon", "Flipkart"]     # India's long-standing voucher partners; other countries have none until an admin sets them
+
+
+def clean_partners(v) -> list:
+    """Voucher partner names for a country: a list (or comma separated text) of up to 5 names, 2-30 characters each, no markup.
+    An empty value means "no partner names shown"."""
+    if v is None:
+        return []
+    items = v.split(",") if isinstance(v, str) else v
+    if not isinstance(items, (list, tuple)):
+        _bad("Voucher partners must be a list of names")
+    out = []
+    for it in items:
+        n = " ".join(str(it or "").split())
+        if not n:
+            continue
+        if len(n) < 2 or len(n) > 30 or any(ord(c) < 32 for c in n) or "<" in n or ">" in n:
+            _bad("Each voucher partner name must be 2 to 30 characters without markup")
+        if n.lower() not in [x.lower() for x in out]:
+            out.append(n)
+    if len(out) > 5:
+        _bad("Use at most 5 voucher partner names")
+    return out
+
+
 def percent(v, field: str = "Tax rate") -> float:
     if isinstance(v, bool) or v is None or (isinstance(v, str) and not v.strip()):
         _bad(f"{field} is required", "required")
@@ -310,7 +335,8 @@ def read_prices(code: str) -> dict:
                           "free_product_limit": int(d.get("free_product_limit", 10)),
                           "product_max_validity_days": int(d.get("product_max_validity_days", 365))}
         out["reward"] = {"configured": True, "active": True, "conversion_rate": float(d.get("conversion_rate", 0.10)),
-                         "min_withdraw_points": int(d.get("min_withdraw_points", 200))}
+                         "min_withdraw_points": int(d.get("min_withdraw_points", 200)),
+                         "voucher_partners": (list(d["voucher_partners"]) if isinstance(d.get("voucher_partners"), list) else list(INDIA_DEFAULT_PARTNERS))}
         return out
     cp = _cp(c["code"])
     saved = cp.get("store_plans") or {}
@@ -336,8 +362,9 @@ def read_prices(code: str) -> dict:
         out["product"] = {"configured": False, "active": False, **_row_money(None, tax), "free_product_limit": None, "product_max_validity_days": None}
     r = cp.get("reward")
     out["reward"] = ({"configured": True, "active": bool(r.get("active", True)), "conversion_rate": float(r["conversion_rate"]),
-                      "min_withdraw_points": int(r["min_withdraw_points"])}
-                     if r and r.get("conversion_rate") is not None else {"configured": False, "active": False, "conversion_rate": None, "min_withdraw_points": None})
+                      "min_withdraw_points": int(r["min_withdraw_points"]),
+                      "voucher_partners": list(r.get("voucher_partners") or [])}
+                     if r and r.get("conversion_rate") is not None else {"configured": False, "active": False, "conversion_rate": None, "min_withdraw_points": None, "voucher_partners": []})
     return out
 
 
@@ -406,12 +433,14 @@ def _save_india(section: str, data: dict) -> None:
         rate = money(data.get("conversion_rate"), "Conversion rate")
         if rate <= 0:
             _bad("Conversion rate must be greater than 0")
-        _upsert_pricing({"conversion_rate": rate, "min_withdraw_points": whole(data.get("min_withdraw_points"), "Minimum points", 1)})
+        upd = {"conversion_rate": rate, "min_withdraw_points": whole(data.get("min_withdraw_points"), "Minimum points", 1)}
+        if "voucher_partners" in data: upd["voucher_partners"] = clean_partners(data["voucher_partners"])
+        _upsert_pricing(upd)
 
 
 _KEYS = {"store_plans": ("plans",), "influencer": ("fee", "enabled"), "banner": ("price_per_day", "active"),
          "product": ("price_per_day", "free_product_limit", "product_max_validity_days", "active"),
-         "reward": ("conversion_rate", "min_withdraw_points", "active")}
+         "reward": ("conversion_rate", "min_withdraw_points", "active", "voucher_partners")}
 
 
 def _save_other(code: str, section: str, data: dict) -> None:
@@ -475,6 +504,7 @@ def _save_other(code: str, section: str, data: dict) -> None:
                 _bad("Conversion rate must be greater than 0")
         if "min_withdraw_points" in data: cur["min_withdraw_points"] = whole(data["min_withdraw_points"], "Minimum points", 1)
         if "active" in data: cur["active"] = bool(data["active"])
+        if "voucher_partners" in data: cur["voucher_partners"] = clean_partners(data["voucher_partners"])
         if cur.get("conversion_rate") is None or cur.get("min_withdraw_points") is None:
             _bad("Set both the conversion rate and the minimum points")
         cur.setdefault("active", True)
@@ -540,3 +570,24 @@ def ensure_indexes() -> None:
     db.pricing_countries.create_index("name_key", unique=True, name="pricing_countries_name", background=True, sparse=True)
     db.country_prices.create_index("country_code", unique=True, name="country_prices_code", background=True)
     db.pricing_history.create_index([("country_code", 1), ("at", -1)], name="pricing_history_country_at", background=True)
+
+
+# ── reward config for the customer wallet ────────────────────────────────────────────────────────────────────────────
+def wallet_reward(country: Optional[dict]) -> dict:
+    """What the customer wallet shows and what a withdrawal uses, for the account's country (`country` = utils.countries info or None).
+
+    No country on the account means India, as before. A country whose reward section is missing or inactive returns no amount and
+    `redeemable: False`: the amount is never taken from India or converted from INR."""
+    code = str((country or {}).get("code") or (country or {}).get("iso") or INDIA).upper()
+    c = get_country(code)
+    if not c:
+        return {"configured": False, "active": False, "country": code, "currency_code": None, "currency_symbol": None, "voucher_points": None,
+                "voucher_value": None, "conversion_rate": None, "voucher_partners": [], "redeemable": False}
+    r = read_prices(code)["reward"]
+    ok = bool(r.get("configured") and r.get("active"))
+    pts = r.get("min_withdraw_points") if ok else None
+    rate = r.get("conversion_rate") if ok else None
+    return {"configured": bool(r.get("configured")), "active": bool(r.get("active")), "country": code,
+            "currency_code": c["currency_code"], "currency_symbol": c["currency_symbol"], "voucher_points": pts,
+            "voucher_value": (round(pts * rate, 2) if ok else None), "conversion_rate": rate,
+            "voucher_partners": list(r.get("voucher_partners") or []) if ok else [], "redeemable": ok}

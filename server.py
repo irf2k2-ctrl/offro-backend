@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Redirect
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, wa_campaigns, dashboard_auth, maps, smart_link
 from routers import merchant_products, admin_products, admin_deals, public_products, collaborations
 from routers import translations_admin, translations_public
-from routers import admin_pricing, public_pricing, admin_store_status_diag
+from routers import admin_pricing, public_pricing, admin_store_status_diag, admin_cities
 from database import db
 import base64, io, re, html as _html
 from services.security import cors_origins, SecurityMiddleware
@@ -30,6 +30,7 @@ templates = Jinja2Templates(directory="templates")
 
 # Routers
 app.include_router(merchant_app.router,    prefix="/merchant")
+app.include_router(admin_cities.router,   prefix="/admin")   # Admin -> Cities (multi-country City Master); registered BEFORE admin so its fixed paths win
 app.include_router(admin.router,          prefix="/admin")
 app.include_router(users.router,          prefix="/user")
 app.include_router(public.router)

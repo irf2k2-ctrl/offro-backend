@@ -8,11 +8,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from routers import admin as ADM
+from routers import admin_cities as ADMC
 from routers import public as PUB
 from services import cities as C
 
 DB = sys.modules["database"].db
 app = FastAPI()
+app.include_router(ADMC.router, prefix="/admin")   # city routes moved to routers/admin_cities.py (registered before admin, as in server.py)
 app.include_router(ADM.router, prefix="/admin")
 app.include_router(PUB.router)
 web = TestClient(app)

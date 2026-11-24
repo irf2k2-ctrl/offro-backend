@@ -309,21 +309,31 @@ def request_account_deletion(data: dict, user=Depends(get_current_user)):
 # ══════════════════════════════════════════════════════════════════════════════
 # WALLET
 # ══════════════════════════════════════════════════════════════════════════════
+def _wallet_reward(user) -> dict:
+    """The reward settings for this account's country (no country on the account = India, as before)."""
+    from services import pricing_config as _pc
+    from utils.countries import account_country
+    return _pc.wallet_reward(account_country(user))
+
+
 @router.get("/wallet")
 def get_wallet(user=Depends(get_current_user)):
     visit   = user.get("visit_points", 0)
     pool    = user.get("pool_points", 0)
-    pricing = db.pricing.find_one({}) or {}
-    rate    = float(pricing.get("conversion_rate", 0.10))
-    min_w   = int(pricing.get("min_withdraw_points", 200))
+    reward  = _wallet_reward(user)
     total   = visit + pool
+    is_inr  = reward["currency_code"] == "INR"
+    rate    = reward["conversion_rate"] if reward["redeemable"] else None
     return {
         "visit_points":       visit,
         "pool_points":        pool,
         "total_points":       total,
-        "conversion_rate":    rate,
-        "min_withdraw_points": min_w,
-        "value_in_rupees":    round(total * rate, 2),
+        # Legacy fields (older apps). They keep their India meaning; for another country they carry no INR amount.
+        "conversion_rate":    rate if rate is not None else 0.0,
+        "min_withdraw_points": reward["voucher_points"] if reward["redeemable"] else 0,
+        "value_in_rupees":    round(total * rate, 2) if (is_inr and rate is not None) else 0.0,
+        # Country reward configuration (Pricing & Plans -> Reward Redemption Points). Never falls back to India for another country.
+        "reward": {**reward, "total_value": round(total * rate, 2) if rate is not None else None},
         "profile_image":      user.get("profile_image", None),
     }
 
@@ -1207,8 +1217,11 @@ def validate_influencer_discount_code(data: dict, user=Depends(get_current_user)
 
 @router.post("/wallet/withdraw")
 def withdraw(data: dict, user=Depends(get_current_user)):
-    pricing    = db.pricing.find_one({}) or {}
-    min_withdraw = int(pricing.get("min_withdraw_points", 200))
+    reward     = _wallet_reward(user)
+    if not reward["redeemable"]:
+        raise HTTPException(status_code=409, detail={"code": "reward_not_configured",
+                            "message": "Gift voucher redemption is not available for your country yet."})
+    min_withdraw = int(reward["voucher_points"])
     visit      = user.get("visit_points", 0)
     pool       = user.get("pool_points", 0)
     total      = visit + pool
@@ -1224,12 +1237,19 @@ def withdraw(data: dict, user=Depends(get_current_user)):
         "phone":        user.get("phone"),
         "email":        user.get("email", ""),
         "points":       amount,
-        "voucher_value": round(amount / 10, 2),
+        "voucher_value": round(amount * reward["conversion_rate"], 2),
+        "country":       reward["country"],
+        "currency_code": reward["currency_code"],
+        "currency_symbol": reward["currency_symbol"],
+        "conversion_rate": reward["conversion_rate"],
+        "voucher_partners": reward["voucher_partners"],
         "status":       "pending",
         "created_at":   datetime.utcnow(),
     })
     return {
-        "message":         "Gift Voucher request submitted! You will receive your Amazon/Flipkart voucher within 3-5 business days.",
+        "message":         ("Gift Voucher request submitted! You will receive your Amazon/Flipkart voucher within 3-5 business days."
+                            if reward["country"] == "IN" else
+                            "Gift Voucher request submitted! You will receive your voucher within 3-5 business days."),
         "remaining_points": total,
     }
 

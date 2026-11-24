@@ -370,10 +370,13 @@
     var r = c.reward || {}, v = e.vals || {};
     var rate = v.rate !== undefined ? v.rate : (r.configured ? r.conversion_rate : '');
     var min = v.min !== undefined ? v.min : (r.configured ? r.min_withdraw_points : '');
+    var partners = v.partners !== undefined ? v.partners : ((r.voucher_partners || []).join(', '));
     var ex = (rate !== '' && isFinite(Number(rate))) ? '100 points = ' + c.currency_symbol + ' ' + num(100 * Number(rate)) : '';
     return h`<div class="pp-edit"><h4>Reward redemption: ${c.name}</h4><div class="pp-form">
       ${raw(field('pp_r_rate', 'Value of 1 point (' + c.currency_code + ')', rate, 'number', 'min="0" step="any"'))}
-      ${raw(field('pp_r_min', 'Minimum points to redeem', min, 'number', 'min="1" step="1"'))}</div>
+      ${raw(field('pp_r_min', 'Minimum points to redeem', min, 'number', 'min="1" step="1"'))}
+      ${raw(field('pp_r_partners', 'Voucher partner names (optional, comma separated)', partners, 'text', 'maxlength="150"'))}</div>
+      <div class="pp-help">Shown to customers as “Promotional Gift Voucher · partners”. Leave empty to show no partner names. India defaults to Amazon, Flipkart.</div>
       <div class="pp-help" style="margin-top:8px">${ex}</div>
       ${raw(e.err ? h`<div class="pp-ferr" role="alert">${e.err}</div>` : '')}
       <div class="pp-toolbar" style="margin-top:12px"><button type="button" class="pp-btn pri" data-act="save-reward">Save</button><button type="button" class="pp-btn" data-act="cancel">Cancel</button></div></div>`;
@@ -451,9 +454,9 @@
   async function onSaveReward() {
     var e = st.edit;
     try {
-      await put('/countries/' + encodeURIComponent(e.code) + '/prices/reward', { conversion_rate: val('pp_r_rate'), min_withdraw_points: val('pp_r_min') }, 'Reward settings saved.');
+      await put('/countries/' + encodeURIComponent(e.code) + '/prices/reward', { conversion_rate: val('pp_r_rate'), min_withdraw_points: val('pp_r_min'), voucher_partners: val('pp_r_partners') }, 'Reward settings saved.');
       st.edit = null; await afterSave(false);
-    } catch (er) { e.err = er.message; e.vals = { rate: val('pp_r_rate'), min: val('pp_r_min') }; render(); }
+    } catch (er) { e.err = er.message; e.vals = { rate: val('pp_r_rate'), min: val('pp_r_min'), partners: val('pp_r_partners') }; render(); }
   }
 
   function onClick(ev) {

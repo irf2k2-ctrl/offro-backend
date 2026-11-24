@@ -1,0 +1,248 @@
+{
+ "version": "sa-v1",
+ "country": "SA",
+ "note": "PROPOSED list for review. Not imported until an admin confirms it in Admin > Cities > Import.",
+ "default_active": true,
+ "cities": [
+  {
+   "name": "Riyadh",
+   "name_ar": "الرياض",
+   "state": "Riyadh Province",
+   "sort_order": 1,
+   "is_popular": true,
+   "popular_order": 1
+  },
+  {
+   "name": "Jeddah",
+   "name_ar": "جدة",
+   "state": "Makkah Province",
+   "sort_order": 2,
+   "is_popular": true,
+   "popular_order": 2
+  },
+  {
+   "name": "Makkah",
+   "name_ar": "مكة المكرمة",
+   "state": "Makkah Province",
+   "sort_order": 3,
+   "is_popular": true,
+   "popular_order": 3
+  },
+  {
+   "name": "Madinah",
+   "name_ar": "المدينة المنورة",
+   "state": "Madinah Province",
+   "sort_order": 4,
+   "is_popular": true,
+   "popular_order": 4
+  },
+  {
+   "name": "Dammam",
+   "name_ar": "الدمام",
+   "state": "Eastern Province",
+   "sort_order": 5,
+   "is_popular": true,
+   "popular_order": 5
+  },
+  {
+   "name": "Khobar",
+   "name_ar": "الخبر",
+   "state": "Eastern Province",
+   "sort_order": 6,
+   "is_popular": true,
+   "popular_order": 6
+  },
+  {
+   "name": "Dhahran",
+   "name_ar": "الظهران",
+   "state": "Eastern Province",
+   "sort_order": 7
+  },
+  {
+   "name": "Taif",
+   "name_ar": "الطائف",
+   "state": "Makkah Province",
+   "sort_order": 8
+  },
+  {
+   "name": "Tabuk",
+   "name_ar": "تبوك",
+   "state": "Tabuk Province",
+   "sort_order": 9
+  },
+  {
+   "name": "Buraidah",
+   "name_ar": "بريدة",
+   "state": "Al-Qassim Province",
+   "sort_order": 10
+  },
+  {
+   "name": "Unaizah",
+   "name_ar": "عنيزة",
+   "state": "Al-Qassim Province",
+   "sort_order": 11
+  },
+  {
+   "name": "Abha",
+   "name_ar": "أبها",
+   "state": "Asir Province",
+   "sort_order": 12
+  },
+  {
+   "name": "Khamis Mushait",
+   "name_ar": "خميس مشيط",
+   "state": "Asir Province",
+   "sort_order": 13
+  },
+  {
+   "name": "Hail",
+   "name_ar": "حائل",
+   "state": "Hail Province",
+   "sort_order": 14
+  },
+  {
+   "name": "Najran",
+   "name_ar": "نجران",
+   "state": "Najran Province",
+   "sort_order": 15
+  },
+  {
+   "name": "Jazan",
+   "name_ar": "جازان",
+   "state": "Jazan Province",
+   "sort_order": 16
+  },
+  {
+   "name": "Hofuf",
+   "name_ar": "الهفوف",
+   "state": "Eastern Province",
+   "sort_order": 17
+  },
+  {
+   "name": "Mubarraz",
+   "name_ar": "المبرز",
+   "state": "Eastern Province",
+   "sort_order": 18
+  },
+  {
+   "name": "Jubail",
+   "name_ar": "الجبيل",
+   "state": "Eastern Province",
+   "sort_order": 19
+  },
+  {
+   "name": "Qatif",
+   "name_ar": "القطيف",
+   "state": "Eastern Province",
+   "sort_order": 20
+  },
+  {
+   "name": "Khafji",
+   "name_ar": "الخفجي",
+   "state": "Eastern Province",
+   "sort_order": 21
+  },
+  {
+   "name": "Ras Tanura",
+   "name_ar": "رأس تنورة",
+   "state": "Eastern Province",
+   "sort_order": 22
+  },
+  {
+   "name": "Yanbu",
+   "name_ar": "ينبع",
+   "state": "Madinah Province",
+   "sort_order": 23
+  },
+  {
+   "name": "Al Ula",
+   "name_ar": "العلا",
+   "state": "Madinah Province",
+   "sort_order": 24
+  },
+  {
+   "name": "Arar",
+   "name_ar": "عرعر",
+   "state": "Northern Borders Province",
+   "sort_order": 25
+  },
+  {
+   "name": "Sakaka",
+   "name_ar": "سكاكا",
+   "state": "Al-Jawf Province",
+   "sort_order": 26
+  },
+  {
+   "name": "Al Bahah",
+   "name_ar": "الباحة",
+   "state": "Al Bahah Province",
+   "sort_order": 27
+  },
+  {
+   "name": "Hafar Al-Batin",
+   "name_ar": "حفر الباطن",
+   "state": "Eastern Province",
+   "sort_order": 28
+  },
+  {
+   "name": "Al Kharj",
+   "name_ar": "الخرج",
+   "state": "Riyadh Province",
+   "sort_order": 29
+  },
+  {
+   "name": "Al Majmaah",
+   "name_ar": "المجمعة",
+   "state": "Riyadh Province",
+   "sort_order": 30
+  },
+  {
+   "name": "Ad Dawadmi",
+   "name_ar": "الدوادمي",
+   "state": "Riyadh Province",
+   "sort_order": 31
+  },
+  {
+   "name": "Az Zulfi",
+   "name_ar": "الزلفي",
+   "state": "Riyadh Province",
+   "sort_order": 32
+  },
+  {
+   "name": "Rabigh",
+   "name_ar": "رابغ",
+   "state": "Makkah Province",
+   "sort_order": 33
+  },
+  {
+   "name": "Al Qunfudhah",
+   "name_ar": "القنفذة",
+   "state": "Makkah Province",
+   "sort_order": 34
+  },
+  {
+   "name": "Bisha",
+   "name_ar": "بيشة",
+   "state": "Asir Province",
+   "sort_order": 35
+  },
+  {
+   "name": "Sharurah",
+   "name_ar": "شرورة",
+   "state": "Najran Province",
+   "sort_order": 36
+  },
+  {
+   "name": "Duba",
+   "name_ar": "ضباء",
+   "state": "Tabuk Province",
+   "sort_order": 37
+  },
+  {
+   "name": "Al Wajh",
+   "name_ar": "الوجه",
+   "state": "Tabuk Province",
+   "sort_order": 38
+  }
+ ]
+}

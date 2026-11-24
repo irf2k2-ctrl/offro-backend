@@ -41,7 +41,7 @@ TRUSTED_DEVICE_COOKIE = "offro_trusted"      # OLD cookie (plain tokens): never 
 
 ALL_MODULES = [
     "Accounts", "Stores", "Products", "Banners", "Admin Banners", "Popup Campaigns",
-    "Payments", "Gift Vouchers", "Notifications", "Categories", "Pricing & GST",
+    "Payments", "Gift Vouchers", "Notifications", "Categories", "Cities", "Pricing & GST",
     "Reviews", "Discounts", "Terms & Conditions", "Policies",
     "Social Media", "Live Chat", "Default Images", "User Management",
     "WhatsApp Campaigns",   # dedicated module (Phase 2A): never granted to an existing/seeded role except Super Admin

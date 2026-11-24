@@ -825,7 +825,11 @@ def get_cities(country: str = None, lang: str = ""):
     }
     if iso:
         _q = {"$and": [_q, {"country": iso}]}
-    docs = list(db.cities.find(_q).sort("sort_order", 1))
+    docs = list(db.cities.find(_q))
+    # Popular cities first (admin's popular_order), then the existing sort_order (ties keep their stored order, as before). With no flagged city the order is
+    # exactly the old one (sort_order ascending; the sort is stable).
+    docs.sort(key=lambda d: (0 if d.get("is_popular") else 1, int(d.get("popular_order") or 0) if d.get("is_popular") else 0,
+                             d.get("sort_order", 0) or 0))
     if iso and not docs:
         return []                                   # a country-specific request never falls back to other countries' cities or to store cities
     if docs:
@@ -843,6 +847,9 @@ def get_cities(country: str = None, lang: str = ""):
                 "country":      d.get("country", "") or "",
                 "names":        d.get("names") if isinstance(d.get("names"), dict) else {},
                 "display_name": _city.display_name(d, lang),
+                "state":         d.get("state", "") or "",
+                "is_popular":    bool(d.get("is_popular")),
+                "popular_order": (d.get("popular_order") if d.get("is_popular") else None),
             })
         return result
     # Fallback: derive cities from active stores

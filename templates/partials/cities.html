@@ -1,0 +1,22 @@
+<!-- ═══════════════════════════════════════════════════════════════
+     Admin -> Cities. Included by admin_dashboard.html. Logic: /static/js/cities.js, styles: /static/css/cities.css.
+     Talks only to /admin/cities/*. The server decides every permission and validation; the browser only hides controls the
+     caller cannot use. One City Master for every country (India, Saudi Arabia, Nepal, Jordan, ...).
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="section-cities" class="section ci">
+  <div class="page-title"><i class="fas fa-map-marker-alt me-2"></i>Cities</div>
+  <div class="ci-sub">One City Master for every country. Pick a country to manage its cities, Arabic names, Popular cities and images.</div>
+
+  <div id="ci_denied" class="ci-denied" hidden>
+    <div style="font-size:34px"><i class="fas fa-lock"></i></div>
+    <div style="font-weight:700;margin:8px 0">Access denied</div>
+    <div>You do not have permission to view Cities. Ask a Super Admin to grant the Cities module to your role.</div>
+  </div>
+
+  <div id="ci_body">
+    <div class="ci-tabs" id="ci_tabs" role="tablist" aria-label="Countries"></div>
+    <div id="ci_msg" aria-live="polite"></div>
+    <div id="ci_pane"></div>
+  </div>
+  <div id="ci_modal" class="ci-overlay" hidden></div>
+</div>

@@ -180,7 +180,8 @@ function _secUrl(u) {
 </script>
 <link rel="stylesheet" href="/static/css/wa_campaigns.css?v=2g3">
 <link rel="stylesheet" href="/static/css/translations.css?v=h4">
-<link rel="stylesheet" href="/static/css/pricing_plans.css?v=pp3">
+<link rel="stylesheet" href="/static/css/pricing_plans.css?v=pp4">
+<link rel="stylesheet" href="/static/css/cities.css?v=c1">
 </head>
 <body>
 
@@ -214,6 +215,7 @@ function _secUrl(u) {
   <div class="sep"></div>
   <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
   <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
+  <a href="#" onclick="showSection('cities',this)"><i class="fas fa-map-marker-alt fa-fw"></i> Cities</a>
   <a href="#" onclick="showSection('pricing_plans',this)"><i class="fas fa-layer-group fa-fw"></i> Pricing &amp; Plans</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('reviews',this)"><i class="fas fa-comment-dots fa-fw"></i> Rating &amp; Review</a>
@@ -1643,6 +1645,7 @@ function _secUrl(u) {
 <!-- Translations lives INSIDE .main so it gets the sidebar offset and padding like every other section. -->
 {% include "partials/translations.html" %}
 {% include "partials/pricing_plans.html" %}
+{% include "partials/cities.html" %}
 </div>
 
 <!-- RENEW SUBSCRIPTION MODAL -->
@@ -2442,6 +2445,7 @@ const RBAC_SECTION_MAP = {
   "Gift Vouchers":     ["gift_product_requests"],
   "Notifications":     ["notifications"],
   "Categories":        ["categories"],
+  "Cities":            ["cities"],
   "Pricing & GST":     ["pricing_plans"],
   "Reviews":           ["reviews"],
   "Discounts":         ["discounts"],
@@ -2593,16 +2597,18 @@ async function loadGiftProductRequests() {
         tbody.innerHTML = vouchers.map(v => {
             const date = _toISTDate(v.created_at);
             const pts = v.points || 0;
-            const val = (pts * (v.rate||0.1)).toFixed(2);
+            // Per-row currency: requests made before per-country rewards come back as INR from the API.
+            const cur = (v.currency_code && v.currency_code !== "INR") ? v.currency_code + " " : "₹";
+            const val = Number(v.voucher_value != null ? v.voucher_value : pts * (v.rate||0.1)).toFixed(2);
             const isPending = (v.status||"pending") === "pending";
             return `<tr>
                 <td><strong>${escHtml(v.user_name||v.name||"—")}</strong></td>
                 <td>${escHtml(v.phone||"—")}</td>
                 <td>${pts} pts</td>
-                <td>₹${val}</td>
+                <td>${escHtml(cur)}${val}</td>
                 <td style="font-size:12px;">${date}</td>
                 <td><span class="badge" style="background:${isPending?'#f59e0b':'#16a34a'};color:white;padding:3px 8px;border-radius:12px;font-size:11px;">${isPending?"Pending":"Fulfilled"}</span></td>
-                <td>${isPending?`<button class='btn-p' style='font-size:11px;padding:4px 10px;' onclick="openFulfillModal('${_secJs(v._id||v.id)}','${_secJs(v.user_name||v.name||"User")}',${_secJs(pts)},'${_secJs(val)}')">Fulfill</button>`:"<span style='color:var(--muted);font-size:12px;'>Done</span>"}</td>
+                <td>${isPending?`<button class='btn-p' style='font-size:11px;padding:4px 10px;' onclick="openFulfillModal('${_secJs(v._id||v.id)}','${_secJs(v.user_name||v.name||"User")}',${_secJs(pts)},'${_secJs(val)}','${_secJs(cur)}')">Fulfill</button>`:"<span style='color:var(--muted);font-size:12px;'>Done</span>"}</td>
             </tr>`;
         }).join("");
     } catch(e) {
@@ -2610,10 +2616,10 @@ async function loadGiftProductRequests() {
     }
 }
 
-function openFulfillModal(reqId, userName, points, value){
+function openFulfillModal(reqId, userName, points, value, cur){
   document.getElementById("fulfill_req_id").value=reqId;
   document.getElementById("fulfillUserName").innerText=userName;
-  document.getElementById("fulfillPoints").innerText=points+" pts = ₹"+value;
+  document.getElementById("fulfillPoints").innerText=points+" pts = "+(cur||"₹")+value;
   document.getElementById("fulfill_product_code").value="";
   document.getElementById("fulfill_product_type").value="Amazon";
   if (fulfillModal_inst) fulfillModal_inst.show();
@@ -2653,7 +2659,7 @@ function showSection(name, el){
     window.scrollTo({top:0, behavior:"instant"});
     return;
   }
-  if (name === 'cities') loadCities();
+  if(name==="cities" && window.CitiesAdmin) CitiesAdmin.open();
   if (name === 'default_images') loadDefaultImages();
   if (name === 'admin_banners') loadAdminBanners();
   document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));
@@ -9848,7 +9854,7 @@ function waMsgDeleteBtn(msgId) {
 
 const RBAC_MODULES = [
   "Accounts","Stores","Products","Banners","Admin Banners","Popup Campaigns",
-  "Payments","Gift Vouchers","Notifications","Categories","Pricing & GST",
+  "Payments","Gift Vouchers","Notifications","Categories","Cities","Pricing & GST",
   "Reviews","Discounts","Terms & Conditions","Policies",
   "Social Media","Live Chat","Default Images","User Management","Influencers",
   "WhatsApp Campaigns","Deals","Translations"
@@ -10145,7 +10151,8 @@ function rbacLogsNext() { rbacLogSkip += rbacLogLimit; rbacLoadLogs(); }
 <script src="/static/js/wa_campaigns_editor.js?v=2g3"></script>
 <script src="/static/js/wa_campaigns_admin.js?v=2g3"></script>
 <script src="/static/js/translations.js?v=h5"></script>
-<script src="/static/js/pricing_plans.js?v=pp3"></script>
+<script src="/static/js/pricing_plans.js?v=pp4"></script>
+<script src="/static/js/cities.js?v=c1"></script>
 
 </body>
 </html>
