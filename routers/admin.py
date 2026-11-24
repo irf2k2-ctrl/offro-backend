@@ -716,6 +716,7 @@ def list_merchants(a=Depends(get_current_admin)):
         _q = {"$and": [_q, _dc.account_query(_iso)]}
     return [{"_id": str(m["_id"]), "name": m.get("name"), "phone": m.get("phone"),
              "city": m.get("city"), "area": m.get("area"), "status": m.get("status", "active"),
+             "country_iso": _iso_of(m),
              "store_count": db.stores.count_documents({"merchant_id": str(m["_id"])})}
             for m in db.accounts.find(_q)]
 
@@ -1462,9 +1463,15 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
         sub_end_date = ""
 
     best_deal = max((d.get("discount", 0) for d in deals), default=0)
+    # Country: the store's own `country` when it has one, else the owner account's (phone-derived). Names/codes from the country master.
+    _ci = _countries_mod.country_info(str(s.get("country") or "").upper()) or _countries_mod.account_country(merchant)
 
     return {
         "_id":            sid,
+        "country_iso":    _ci["iso"] if _ci else "",
+        "country_name":   _ci["name"] if _ci else "",
+        "country_flag":   _ci["flag"] if _ci else "",
+        "country":        str(s.get("country") or ""),
         "store_name":     s.get("store_name", ""),
         "category":       s.get("category", ""),
         "city":           s.get("city", ""),
@@ -1552,7 +1559,7 @@ def list_stores(a=Depends(get_current_admin)):
         try: merch_obj_ids.append(ObjectId(mid))
         except: pass
     merchants = {}
-    for m in list(db.accounts.find({"_id": {"$in": merch_obj_ids}}, {"name": 1, "phone": 1})) or list(db.merchants.find({"_id": {"$in": merch_obj_ids}}, {"name": 1, "phone": 1})):
+    for m in list(db.accounts.find({"_id": {"$in": merch_obj_ids}}, {"name": 1, "phone": 1, "phone_country": 1})) or list(db.merchants.find({"_id": {"$in": merch_obj_ids}}, {"name": 1, "phone": 1, "phone_country": 1})):
         merchants[str(m["_id"])] = m
     
     result = [_fmt_store_fast(s, sub_map, deal_map, merchants) for s in stores]
@@ -1650,6 +1657,47 @@ def migrate_store_images(a=Depends(get_current_admin)):
         }
     }
 
+# ── Country <-> city rules for Stores and Influencers (the one City Master + country master; nothing is stored apart from `country`) ──
+def _country_input(a, value) -> str:
+    """ISO code of an explicitly chosen country: 400 when blank/unsupported, 403 outside a country-restricted dashboard user's country."""
+    from services import city_master as _cm
+    try:
+        iso = _cm.require_country(value)
+    except _cm.CityError as e:
+        raise HTTPException(400, e.message)
+    scope = _dc.scope(a)
+    if scope and scope != iso:
+        raise HTTPException(403, "Your account is limited to another country")
+    return iso
+
+
+def _check_city_country(city, iso, strict=True):
+    """Reject a city that does not belong to the country (City Master). `strict` False = the country was only derived, not chosen."""
+    from services import city_master as _cm
+    err = _cm.check_city_in_country(city, iso, strict)
+    if err:
+        raise HTTPException(400, err.message)
+
+
+def _iso_of(doc) -> str:
+    info = _countries_mod.account_country(doc or {})
+    return info["iso"] if info else ""
+
+
+@router.get("/country-options")
+def country_options(a=Depends(get_current_admin)):
+    """Supported countries (the one country master) for the Store / Influencer / Popup forms. A country-restricted user sees theirs only."""
+    scope = _dc.scope(a)
+    return [c for c in _countries_mod.supported_countries() if c and (not scope or c["iso"] == scope)]
+
+
+@router.get("/country-cities")
+def country_cities(country: str = "", a=Depends(get_current_admin)):
+    """Active cities of one country (English names) for the forms' City selects: [{id, name, state}]."""
+    from services import city_master as _cm
+    return _cm.country_cities(_country_input(a, country))
+
+
 @router.post("/stores")
 def create_store(data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Stores", "add")
@@ -1662,6 +1710,16 @@ def create_store(data: dict, a=Depends(get_current_admin)):
     except: raise HTTPException(400, "Invalid merchant_id")
     if not merchant: raise HTTPException(404, "Merchant not found")
     _guard_account(a, merchant)
+    # Country: chosen in the form (validated, must match the owner's country when that is known) else the owner's. A city from
+    # another country is never saved. No `country` sent (older clients) = the previous behaviour, minus a clear cross-country city.
+    _explicit = str(data.get("country") or "").strip()
+    _owner = _iso_of(merchant)
+    _iso = _country_input(a, _explicit) if _explicit else _owner
+    if _explicit and _owner and _owner != _iso:
+        raise HTTPException(400, "The store's country must match its merchant's country (%s)." % _countries_mod.country_info(_owner)["name"])
+    _city_in = data.get("city") or merchant.get("city", "")
+    if _iso and _city_in:
+        _check_city_country(_city_in, _iso, strict=bool(_explicit))
 
     # Upload image to Cloudinary once; fall back to storing base64 in "image" if CDN not set
     _raw_img  = data.get("image","") or ""
@@ -1686,6 +1744,8 @@ def create_store(data: dict, a=Depends(get_current_admin)):
         "badge": data.get("badge", ""),
         "created_at": datetime.utcnow()
     }
+    if _explicit:
+        store["country"] = _iso
     result = db.stores.insert_one(store)
     sid = str(result.inserted_id)
     qr = generate_qr_base64(sid)
@@ -1773,6 +1833,30 @@ def update_store(id: str, data: dict, a=Depends(get_current_admin)):
     if data.get("merchant_id") and str(data["merchant_id"]).strip() and _dc.scope(a):   # cannot hand a store to another country's merchant
         _dc.require_account(a, _dc._account_by_key(str(data["merchant_id"]).strip()))
     upd = {f: data[f] for f in ["store_name","category","city","state","area","address","phone","lat","lng","about"] if data.get(f) is not None}
+    # Country / city rules - checked only when the country or the city is actually being changed, so unrelated edits and status
+    # toggles on existing records keep working. A changed country needs a city of that country (and a merchant of that country).
+    _new_mid = str(data.get("merchant_id") or "").strip()
+
+    def _owner_of(key):
+        try:
+            return (db.accounts.find_one({"_id": ObjectId(key)}) or db.merchants.find_one({"_id": ObjectId(key)})) if key else None
+        except Exception:
+            return None
+    _owner = _iso_of(_owner_of(_new_mid or str(store.get("merchant_id") or "")))
+    _cur = str(store.get("country") or "").upper() or _iso_of(_owner_of(str(store.get("merchant_id") or "")))
+    _explicit = str(data.get("country") or "").strip()
+    _iso = _country_input(a, _explicit) if _explicit else (str(store.get("country") or "").upper() or _owner)
+    _city_changed = data.get("city") is not None and str(data["city"]).strip() != str(store.get("city") or "").strip()
+    _country_changed = bool(_explicit) and _iso != _cur
+    if _explicit and _owner and _owner != _iso:
+        raise HTTPException(400, "The store's country must match its merchant's country (%s). Choose a merchant of %s to move it." % (
+            _countries_mod.country_info(_owner)["name"], _countries_mod.country_info(_iso)["name"]))
+    if _new_mid and not _explicit and store.get("country") and _owner and _owner != str(store["country"]).upper():
+        raise HTTPException(400, "This store belongs to another country than that merchant; set the store's country as well.")
+    if _iso and (_city_changed or _country_changed):
+        _check_city_country(data["city"] if data.get("city") is not None else store.get("city"), _iso, strict=bool(_explicit))
+    if _explicit:
+        upd["country"] = _iso
     if "points_per_scan" in data and data["points_per_scan"] is not None:
         upd["points_per_scan"] = int(data["points_per_scan"])
     if "visit_points" in data and data["visit_points"] is not None:
@@ -2599,6 +2683,7 @@ def _influencer_row(d):
     """Admin-facing influencer representation. Phone is intentionally
     included here (admin-only view) but this shape must never be reused
     for a public/merchant-facing endpoint."""
+    _ci = _countries_mod.country_info(str(d.get("country") or "").upper()) or _countries_mod.account_country({"phone": str(d.get("phone") or "")})
     return {
         "_id":          str(d["_id"]),
         "name":         d.get("name", ""),
@@ -2612,6 +2697,11 @@ def _influencer_row(d):
         "review_count": d.get("review_count", 0),
         "status":       d.get("status", "active"),
         "phone":        d.get("phone", ""),
+        # Country: the profile's own `country` when it has one, else the one its phone number belongs to (country master; never from the city).
+        "country":      str(d.get("country") or ""),
+        "country_iso":  (_ci or {}).get("iso", ""),
+        "country_name": (_ci or {}).get("name", ""),
+        "country_flag": (_ci or {}).get("flag", ""),
         "created_at":   d["created_at"].strftime("%d %b %Y") if d.get("created_at") else "",
         "updated_at":   d["updated_at"].strftime("%d %b %Y") if d.get("updated_at") else "",
         # Influencer subscription/publish feature: absent on every record
@@ -2725,6 +2815,15 @@ def create_influencer(body: dict, a=Depends(get_current_admin)):
     city = (body.get("city", "") or "").strip()
     if not city:
         raise HTTPException(400, "City is required")
+    # Country: chosen in the form -> the city must belong to it (City Master) and the phone, when it carries a calling code, must be
+    # of that country. Not sent (older clients) = unchanged behaviour, except a city that clearly belongs to another country.
+    _explicit = str(body.get("country") or "").strip()
+    _pci = _countries_mod.account_country({"phone": (body.get("phone", "") or "").strip()})
+    _iso = _country_input(a, _explicit) if _explicit else (_pci["iso"] if _pci else "")
+    if _explicit and str(body.get("phone", "") or "").strip().startswith("+") and _pci and _pci["iso"] != _iso:
+        raise HTTPException(400, "The phone number's country must match the influencer's country (%s)." % _countries_mod.country_info(_iso)["name"])
+    if _iso:
+        _check_city_country(city, _iso, strict=bool(_explicit))
     category_str, categories_list = _normalize_influencer_categories(body.get("categories"), body.get("category", ""))
     status = str(body.get("status", "active")).strip().lower()
     if status not in ("active", "inactive"):
@@ -2775,6 +2874,8 @@ def create_influencer(body: dict, a=Depends(get_current_admin)):
         "created_at": now,
         "updated_at": now,
     }
+    if _explicit:
+        doc["country"] = _iso
     res = db.influencers.insert_one(doc)
     return {"ok": True, "_id": str(res.inserted_id)}
 
@@ -2840,6 +2941,21 @@ def update_influencer(influencer_id: str, body: dict, a=Depends(get_current_admi
         }
     if "photo_url" in body:
         update["photo_url"] = _resolve_influencer_photo(body["photo_url"], existing.get("photo_url", ""))
+    # Country / city rules - only when the country or the city is being changed (a status toggle or a name edit on an existing record
+    # is never blocked); a changed country needs a city of that country, and nothing is reassigned silently.
+    _explicit = str(body.get("country") or "").strip()
+    _cur = str(existing.get("country") or "").upper() or (_countries_mod.account_country({"phone": str(existing.get("phone") or "")}) or {}).get("iso", "")
+    _iso = _country_input(a, _explicit) if _explicit else (str(existing.get("country") or "").upper() or _cur)
+    _city_changed = "city" in body and update.get("city") != str(existing.get("city") or "").strip()
+    _country_changed = bool(_explicit) and _iso != _cur
+    if _explicit:
+        _ph = str(update.get("phone", existing.get("phone", "")) or "").strip()
+        _pci = _countries_mod.account_country({"phone": _ph}) if _ph.startswith("+") else None
+        if _pci and _pci["iso"] != _iso:
+            raise HTTPException(400, "The phone number's country must match the influencer's country (%s)." % _countries_mod.country_info(_iso)["name"])
+        update["country"] = _iso
+    if _iso and (_city_changed or _country_changed):
+        _check_city_country(update.get("city", existing.get("city", "")), _iso, strict=bool(_explicit))
     if not update:
         raise HTTPException(400, "Nothing to update")
     update["updated_at"] = datetime.utcnow()

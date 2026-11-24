@@ -122,6 +122,48 @@ def country_name(iso: str) -> str:
     return info.get("name") or iso
 
 
+# ── country <-> city validation (stores, influencers) ───────────────────────────────────────────────────
+def _same_name_docs(city) -> list:
+    nm = " ".join(str(city or "").split())
+    if not nm:
+        return []
+    q = {"$or": [{"name_key": name_key(nm)}, {"name": {"$regex": "^" + re.escape(nm) + "$", "$options": "i"}}]}
+    return list(db.cities.find(q))
+
+
+def check_city_in_country(city, iso: str, strict: bool = True) -> Optional[CityError]:
+    """None when `city` may be saved for country `iso`, else the CityError saying why. Nothing is written or changed.
+
+    * a City Master entry of that country with this name  -> OK
+    * the name exists ONLY under other countries           -> rejected (cross-country), always
+    * the name exists only without a country (legacy)      -> OK for India / when not strict; rejected for another country when strict
+    * the name is not in the master at all                 -> OK for India (the bundled India list is wider than the master) and when
+                                                              not strict (older callers that never sent a country); rejected otherwise
+    `strict` is True when the caller explicitly chose the country, False when it was only derived from the owner / phone."""
+    nm = " ".join(str(city or "").split())
+    if not nm or not iso:
+        return None
+    docs = _same_name_docs(nm)
+    if any(str(d.get("country") or "").upper() == iso for d in docs):
+        return None
+    elsewhere = sorted({str(d.get("country") or "").upper() for d in docs if d.get("country")})
+    legacy = [d for d in docs if not d.get("country")]
+    where = country_name(iso)
+    if elsewhere and not legacy:
+        names = ", ".join(country_name(c) for c in elsewhere)
+        return CityError("city_country_mismatch", "%s belongs to %s, not %s." % (nm, names, where), field="city")
+    if iso == "IN" or not strict:
+        return None
+    if legacy:
+        return CityError("city_not_assigned", "%s is not assigned to %s in the City Master." % (nm, where), field="city")
+    return CityError("city_not_in_country", "%s is not a city of %s in the City Master." % (nm, where), field="city")
+
+
+def country_cities(iso: str) -> list:
+    """Active cities of ONE country for pickers: [{id, name, state}] sorted by English name (English only, as the dashboard shows)."""
+    return [{"id": r["id"], "name": r["name"], "state": r["state"]} for r in list_cities(iso=iso, status="active")]
+
+
 # ── lookup ───────────────────────────────────────────────────────────────────────────────────────────────
 def _no_country():
     return {"$or": [{"country": {"$exists": False}}, {"country": ""}, {"country": None}]}

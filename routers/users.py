@@ -467,6 +467,36 @@ def _resolve_own_account(user: dict):
         acct = db.accounts.find_one({"phone": {"$in": _phone_variants(user.get("phone", ""))}})
     return acct
 
+def _city_master():
+    from services import city_master as _cm
+    return _cm
+
+
+def _own_country_iso(acct) -> str:
+    """The signed-in account's country (country master, from its phone); '' when it cannot be told."""
+    from utils import countries as _c
+    info = _c.account_country(acct or {})
+    return info["iso"] if info else ""
+
+
+def _check_profile_city(acct, data, existing, new_city, update):
+    """A CHANGED city must belong to the account's country (City Master). An unchanged legacy city never blocks an edit.
+    The app sends `country` (must equal the account's); older builds send none and only a clearly cross-country city is refused."""
+    if new_city == str(existing.get("city") or "").strip():
+        return
+    sent = str(data.get("country") or "").strip().upper()
+    own = _own_country_iso(acct)
+    if sent and own and sent != own:
+        raise HTTPException(400, "Your profile country must be your account's country.")
+    iso = sent or own or str(existing.get("country") or "").upper()
+    if iso:
+        err = _city_master().check_city_in_country(new_city, iso, strict=bool(sent))
+        if err:
+            raise HTTPException(400, err.message)
+    if sent:
+        update["country"] = sent
+
+
 @router.post("/influencer-profile")
 def create_influencer_profile(data: dict, user=Depends(get_current_user)):
     """Create the influencer profile for the AUTHENTICATED account. One
@@ -497,6 +527,17 @@ def create_influencer_profile(data: dict, user=Depends(get_current_user)):
     city = (data.get("city", "") or "").strip()
     if not city:
         raise HTTPException(400, "City is required")
+    # The city must belong to the account's country (City Master). The app sends `country`; it must be the account's own country.
+    # Older app builds send none: the account's country is used and only a city that clearly belongs to another country is refused.
+    _own_iso = _own_country_iso(acct)
+    _sent = str(data.get("country") or "").strip().upper()
+    if _sent and _own_iso and _sent != _own_iso:
+        raise HTTPException(400, "Your profile country must be your account's country.")
+    _iso = _sent or _own_iso
+    if _iso:
+        _err = _city_master().check_city_in_country(city, _iso, strict=bool(_sent))
+        if _err:
+            raise HTTPException(400, _err.message)
     category_str, categories_list = _normalize_influencer_categories(data.get("categories"), data.get("category", ""))
     state = (data.get("state", "") or "").strip()
     # FIX (Issue 2): validate only when the caller actually supplied a
@@ -527,6 +568,7 @@ def create_influencer_profile(data: dict, user=Depends(get_current_user)):
         "phone": phone,
         "account_id": str(acct["_id"]),
         "created_at": now, "updated_at": now,
+        **({"country": _iso} if _sent else {}),
         # ── Influencer Subscription Fee + Payment + Publish ─────────────
         # A brand-new self-service profile always starts UNPAID/draft —
         # this is what makes "Save" (this endpoint) a draft-only action per
@@ -673,6 +715,7 @@ def update_my_influencer_profile(data: dict, user=Depends(get_current_user)):
         new_city = (data["city"] or "").strip()
         if not new_city:
             raise HTTPException(400, "City cannot be empty")
+        _check_profile_city(acct, data, existing, new_city, update)
         update["city"] = new_city
     if "category" in data or "categories" in data:
         category_str, categories_list = _normalize_influencer_categories(data.get("categories"), data.get("category", ""))
@@ -842,6 +885,7 @@ def publish_my_influencer_profile(data: dict, user=Depends(get_current_user)):
         new_city = (data["city"] or "").strip()
         if not new_city:
             raise HTTPException(400, "City cannot be empty")
+        _check_profile_city(acct, data, existing, new_city, update)
         update["city"] = new_city
     if "category" in data or "categories" in data:
         category_str, categories_list = _normalize_influencer_categories(data.get("categories"), data.get("category", ""))

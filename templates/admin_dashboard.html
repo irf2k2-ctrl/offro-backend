@@ -574,7 +574,7 @@ function _secUrl(u) {
       </div>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Store</th><th>Merchant</th><th>Category</th><th>City/Area</th><th>Pts</th><th>New?</th><th>Status</th><th>Deal</th><th>Subscription</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Store</th><th>Merchant</th><th>Category</th><th>Country</th><th>City/Area</th><th>Pts</th><th>New?</th><th>Status</th><th>Deal</th><th>Subscription</th><th>Actions</th></tr></thead>
       <tbody id="stores_table"></tbody>
     </table></div>
     <div id="stores_pagination" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--border);background:white;border-radius:0 0 12px 12px;"></div>
@@ -1056,7 +1056,7 @@ function _secUrl(u) {
     </div>
     <div class="table-wrap"><table>
       <thead><tr>
-        <th>Photo</th><th>Name</th><th>Mobile</th><th>City</th><th>Category</th><th>Rating</th><th>Status</th><th>Subscription</th><th>Actions</th>
+        <th>Photo</th><th>Name</th><th>Mobile</th><th>Country</th><th>City</th><th>Category</th><th>Rating</th><th>Status</th><th>Subscription</th><th>Actions</th>
       </tr></thead>
       <tbody id="inf_body"></tbody>
     </table></div>
@@ -1067,6 +1067,10 @@ function _secUrl(u) {
       <div class="mb-2">
         <label class="form-label">Name *</label>
         <input id="inf_name" class="form-control" placeholder="e.g. Priya Sharma">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Country *</label>
+        <select id="inf_country" class="form-control" onchange="onInfCountryChange()"><option value="">— Select Country —</option></select>
       </div>
       <div class="mb-2">
         <label class="form-label">State *</label>
@@ -1257,14 +1261,25 @@ function _secUrl(u) {
           <label class="form-label fw-semibold">Target Audience</label>
           <select id="pcm_target" class="form-select" onchange="pcmToggleCities()">
             <option value="all">All Users</option>
-            <option value="selected_city">Selected City</option>
+            <option value="selected_city">Selected Countries / Cities</option>
           </select>
         </div>
-        <!-- City selection -->
-        <div id="pcm_cities_wrap" class="mb-3" style="display:none">
-          <label class="form-label fw-semibold">Select Cities</label>
-          <div id="pcm_cities_list" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg);display:flex;flex-wrap:wrap;gap:6px;">
-            <span style="color:var(--muted);font-size:12px">Loading cities...</span>
+        <!-- Country + city selection (shown for "Selected Countries / Cities") -->
+        <div id="pcm_cities_wrap" style="display:none">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Select Countries</label>
+            <div id="pcm_countries_list" style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg);display:flex;flex-wrap:wrap;gap:6px;">
+              <span style="color:var(--muted);font-size:12px">Loading countries...</span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px">Selecting a country targets all of its active cities.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Select Cities</label>
+            <div id="pcm_cities_list" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg);">
+              <span style="color:var(--muted);font-size:12px">Loading cities...</span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px">Cities are grouped by country. Untick a city to leave it out of a selected country, or tick single cities.</div>
+            <div id="pcm_legacy_note" style="display:none;font-size:11px;color:#b26a00;margin-top:4px"></div>
           </div>
         </div>
         <!-- Click Action -->
@@ -1705,6 +1720,8 @@ function _secUrl(u) {
             <input id="store_name" class="form-control" placeholder="Store name"></div>
           <div class="col-md-6"><label class="form-label">Category</label>
             <select id="store_category" class="form-select"></select></div>
+          <div class="col-md-6"><label class="form-label">Country *</label>
+            <select id="store_country" class="form-select" onchange="onStoreCountryChange()"><option value="">— Select Country —</option></select></div>
           <div class="col-md-6"><label class="form-label">State</label>
             <select id="store_state" class="form-select" onchange="onStoreStateChange()"><option value="">— Select State —</option></select></div>
           <div class="col-md-6"><label class="form-label">City</label>
@@ -2129,13 +2146,13 @@ async function loadInfluencers() {
       return;
     }
     if (!r.ok) {
-      document.getElementById("inf_body").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
+      document.getElementById("inf_body").innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
       return;
     }
     allInfluencers = await r.json();
     renderInfluencers();
   } catch(e) {
-    document.getElementById("inf_body").innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
+    document.getElementById("inf_body").innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
   }
   if (!infCitiesCache.length) {
     try {
@@ -2150,7 +2167,8 @@ async function loadInfluencers() {
   // the table's "All Cities" FILTER, matching OffrO's curated serviceable-
   // city list (the same list influencer city authorization is checked
   // against server-side — unchanged).
-  populateInfStateDropdown();
+  await fillCountrySelect('inf_country', document.getElementById('inf_country')?.value || '');
+  if (!document.getElementById('inf_edit_id')?.value) await locRender(INF_LOC, document.getElementById('inf_country')?.value || '', '', '', false);
   if (!categoriesList.length) {
     try { await loadCategories(); } catch(e) {}
   }
@@ -2167,6 +2185,92 @@ async function loadInfluencers() {
   }
 }
 
+// ═══ Country → City pickers (Stores + Influencers) ═══════════════════════════════════════════════════════
+// ONE country master (/admin/country-options) and ONE City Master (/admin/country-cities?country=XX, English names). India keeps its
+// existing State → City lists (INDIA_STATES_CITIES) and adds any City Master cities of the chosen state; other countries use the master only.
+const STORE_LOC = {country:'store_country', state:'store_state', city:'store_city'};
+const INF_LOC   = {country:'inf_country',   state:'inf_state',   city:'inf_city'};
+const _locSeq = {};
+let _countryOpts = null;
+const _countryCities = {};
+async function loadCountryOptions() {
+  if (_countryOpts) return _countryOpts;
+  try { const r = await fetch('/admin/country-options', {credentials:'include'}); _countryOpts = r.ok ? await r.json() : null; } catch(e) { _countryOpts = null; }
+  return _countryOpts || [];
+}
+async function loadCountryCities(iso) {
+  if (!iso) return [];
+  if (_countryCities[iso]) return _countryCities[iso];
+  try {
+    const r = await fetch('/admin/country-cities?country=' + encodeURIComponent(iso), {credentials:'include'});
+    if (!r.ok) return [];
+    _countryCities[iso] = await r.json();
+  } catch(e) { return []; }
+  return _countryCities[iso];
+}
+async function fillCountrySelect(id, selected) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const opts = await loadCountryOptions();
+  sel.innerHTML = '<option value="">— Select Country —</option>' +
+    opts.map(c => `<option value="${escHtml(c.iso)}">${escHtml(((c.flag || '') + ' ' + c.name).trim())}</option>`).join('');
+  sel.value = selected || '';
+}
+function _locUnique(list) {
+  const seen = new Set(), out = [];
+  list.forEach(n => { const k = String(n).toLowerCase(); if (n && !seen.has(k)) { seen.add(k); out.push(n); } });
+  return out.sort((a, b) => a.localeCompare(b));
+}
+function locStates(iso, master) {
+  const fromMaster = (master || []).map(c => c.state).filter(Boolean);
+  return _locUnique(iso === 'IN' ? Object.keys(INDIA_STATES_CITIES).concat(fromMaster) : fromMaster);
+}
+function locCityNames(iso, state, master) {
+  const st = (state || '').toLowerCase();
+  let names = [];
+  if (iso === 'IN') {
+    if (state && INDIA_STATES_CITIES[state]) names = names.concat(INDIA_STATES_CITIES[state]);
+    if (state) names = names.concat((master || []).filter(c => (c.state || '').toLowerCase() === st).map(c => c.name));
+  } else {
+    names = (master || []).filter(c => !st || (c.state || '').toLowerCase() === st).map(c => c.name);
+  }
+  return _locUnique(names);
+}
+// Fill the State + City selects for a country. A city/state that is not valid for the country is CLEARED, except the record's own
+// existing value when keepLegacy is set (editing an older record that never had a country or a master city).
+async function locRender(ids, iso, state, city, keepLegacy) {
+  const seq = (_locSeq[ids.city] = (_locSeq[ids.city] || 0) + 1);
+  const cSel = document.getElementById(ids.country), stSel = document.getElementById(ids.state), ctSel = document.getElementById(ids.city);
+  if (!stSel || !ctSel) return;
+  if (cSel && cSel.value !== (iso || '')) cSel.value = iso || '';
+  const master = iso ? await loadCountryCities(iso) : [];
+  if (seq !== _locSeq[ids.city]) return;            // a newer change superseded this render
+  const states = locStates(iso, master);
+  state = state || '';
+  if (state && !states.includes(state)) { if (keepLegacy) states.push(state); else state = ''; }
+  stSel.innerHTML = '<option value="">' + (!iso ? '— Select Country first —' : states.length ? '— Select State —' : '— No states —') + '</option>' +
+    states.map(x => `<option value="${escHtml(x)}">${escHtml(x)}</option>`).join('');
+  stSel.value = state;
+  stSel.disabled = !iso || !states.length;
+  const names = locCityNames(iso, state, master);
+  let chosen = '';
+  if (city) { const hit = names.find(n => n.toLowerCase() === String(city).toLowerCase()); if (hit) chosen = hit; }
+  let legacy = '';
+  if (city && !chosen && keepLegacy) { names.push(city); chosen = city; legacy = city; }
+  ctSel.innerHTML = '<option value="">' + (!iso ? '— Select Country first —' : (iso === 'IN' && !state && !names.length) ? '— Select state first —' : '— Select City —') + '</option>' +
+    names.map(n => `<option value="${escHtml(n)}">${escHtml(n)}${n === legacy ? ' (existing)' : ''}</option>`).join('');
+  ctSel.value = chosen;
+  ctSel.disabled = !iso;
+}
+function locStateChanged(ids) {
+  const iso = document.getElementById(ids.country)?.value || '';
+  return locRender(ids, iso, document.getElementById(ids.state)?.value || '', document.getElementById(ids.city)?.value || '', false);
+}
+function locCountryChanged(ids) {
+  return locRender(ids, document.getElementById(ids.country)?.value || '', '', '', false);   // another country: state and city are cleared
+}
+function onInfCountryChange() { return locCountryChanged(INF_LOC); }
+
 function populateInfStateDropdown(selectedState) {
   // Reuses the SAME INDIA_STATES_CITIES object the Store form uses — no
   // separate influencer-specific state/city list.
@@ -2178,20 +2282,7 @@ function populateInfStateDropdown(selectedState) {
     ).join('');
 }
 
-function onInfStateChange(preselectCity) {
-  const state = document.getElementById("inf_state")?.value || "";
-  const citySel = document.getElementById("inf_city");
-  if (!citySel) return;
-  citySel.innerHTML = '<option value="">— Select City —</option>';
-  if (state && INDIA_STATES_CITIES[state]) {
-    INDIA_STATES_CITIES[state].sort().forEach(c => {
-      const o = document.createElement("option");
-      o.value = c; o.innerText = c;
-      if (preselectCity && c === preselectCity) o.selected = true;
-      citySel.appendChild(o);
-    });
-  }
-}
+function onInfStateChange() { return locStateChanged(INF_LOC); }
 
 function renderInfluencers() {
   const q = (document.getElementById("inf_search")?.value||"").toLowerCase();
@@ -2226,6 +2317,7 @@ function renderInfluencers() {
       <td>${photo}</td>
       <td><b>${escHtml(i.name)}</b></td>
       <td>${escHtml(i.phone || '—')}</td>
+      <td style="white-space:nowrap">${i.country_iso ? escHtml(((i.country_flag||'')+' '+(i.country_name||i.country_iso)).trim()) : '—'}</td>
       <td>${escHtml(i.city)}</td>
       <td>${escHtml(i.category||'—')}</td>
       <td>⭐ ${(i.rating||0).toFixed ? i.rating.toFixed(1) : i.rating} (${i.review_count||0})</td>
@@ -2237,7 +2329,7 @@ function renderInfluencers() {
         <button class="btn-sm-danger" onclick="deleteInfluencerRow('${_secJs(i._id)}')">Delete</button>
       </td>
     </tr>`;
-  }).join("") : '<tr><td colspan="9" style="text-align:center;color:var(--muted);">No influencers yet</td></tr>';
+  }).join("") : '<tr><td colspan="10" style="text-align:center;color:var(--muted);">No influencers yet</td></tr>';
 }
 
 function infPreviewPhoto(input) {
@@ -2257,8 +2349,8 @@ function cancelInfluencerEdit() {
   document.getElementById('inf_save_btn_label').innerText = 'Add Influencer';
   document.getElementById('inf_cancel_edit_btn').style.display = 'none';
   document.getElementById('inf_name').value = '';
-  populateInfStateDropdown('');
-  document.getElementById('inf_city').innerHTML = '<option value="">Select state first</option>';
+  document.getElementById('inf_country').value = '';
+  locRender(INF_LOC, '', '', '', false);
   document.getElementById('inf_category').value = '';
   document.getElementById('inf_phone').value = '';
   document.getElementById('inf_instagram').value = '';
@@ -2298,9 +2390,9 @@ function editInfluencer(id) {
   document.getElementById('inf_save_btn_label').innerText = 'Save Changes';
   document.getElementById('inf_cancel_edit_btn').style.display = 'inline-block';
   document.getElementById('inf_name').value = inf.name || '';
-  const state = inf.state || _findStateForCity(inf.city || '');
-  populateInfStateDropdown(state);
-  onInfStateChange(inf.city || '');
+  const iso = inf.country_iso || '';
+  const state = inf.state || (iso === 'IN' || !iso ? _findStateForCity(inf.city || '') : '');
+  fillCountrySelect('inf_country', iso).then(() => locRender(INF_LOC, iso, state, inf.city || '', true));
   const catSel = document.getElementById('inf_category');
   if (catSel) {
     // Preserve compatibility: if this influencer's stored category isn't in
@@ -2339,10 +2431,12 @@ async function saveInfluencer() {
   const name = document.getElementById('inf_name').value.trim();
   const city = document.getElementById('inf_city').value;
   const msg = document.getElementById('inf_msg');
+  const country = document.getElementById('inf_country').value;
   if (!name) { msg.style.color='red'; msg.innerText='Name is required'; return; }
+  if (!country) { msg.style.color='red'; msg.innerText='Country is required'; return; }
   if (!city) { msg.style.color='red'; msg.innerText='City is required'; return; }
   const body = {
-    name, city,
+    name, city, country,
     state: document.getElementById('inf_state').value,
     category: document.getElementById('inf_category').value.trim(),
     phone: document.getElementById('inf_phone').value.trim(),
@@ -2989,20 +3083,20 @@ async function migrateStoreImages() {
 }
 
 async function loadStores(){
-  document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--muted)"><div class="spinner-border spinner-border-sm text-success me-2"></div>Loading stores...</td></tr>`;
+  document.getElementById("stores_table").innerHTML=`<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--muted)"><div class="spinner-border spinner-border-sm text-success me-2"></div>Loading stores...</td></tr>`;
   try {
     let r=await fetch("/admin/stores",{credentials:"include"});
     if (r.status===401||r.status===403) { window.location.href='/admin'; return; }
     const raw=await r.json();
     if (!r.ok) {
-      document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:24px;color:#c0392b;">⚠️ ${escHtml(raw.detail||('Server error '+r.status))}</td></tr>`;
+      document.getElementById("stores_table").innerHTML=`<tr><td colspan="11" style="text-align:center;padding:24px;color:#c0392b;">⚠️ ${escHtml(raw.detail||('Server error '+r.status))}</td></tr>`;
       return;
     }
     allStores=Array.isArray(raw)?raw:[];
     populateCityFilter("store_city_filter",allStores,"city");
     filterStores();
   } catch(e) {
-    document.getElementById("stores_table").innerHTML=`<tr><td colspan="10" style="text-align:center;padding:24px;color:red">Error loading stores: ${escHtml(e.message)}</td></tr>`;
+    document.getElementById("stores_table").innerHTML=`<tr><td colspan="11" style="text-align:center;padding:24px;color:red">Error loading stores: ${escHtml(e.message)}</td></tr>`;
   }
 }
 function filterStores(){
@@ -3011,7 +3105,7 @@ function filterStores(){
   let status=document.getElementById("store_status_filter").value;
   _filteredStores=allStores.filter(s=>{
     let cm=!city||(s.city||"").toLowerCase()===city.toLowerCase();
-    let sm=!search||(s.store_name||"").toLowerCase().includes(search)||(s.merchant_name||"").toLowerCase().includes(search)||(s.city||"").toLowerCase().includes(search)||(s.phone||"").includes(search)||(s.merchant_phone||"").includes(search);
+    let sm=!search||(s.store_name||"").toLowerCase().includes(search)||(s.merchant_name||"").toLowerCase().includes(search)||(s.city||"").toLowerCase().includes(search)||(s.country_name||"").toLowerCase().includes(search)||(s.phone||"").includes(search)||(s.merchant_phone||"").includes(search);
     let stm=!status||(s.status||"")===(status);
     return cm&&sm&&stm;
   });
@@ -3096,6 +3190,7 @@ function renderStoresPage(){
         ${s.merchant_phone ? `<div style="color:var(--muted);font-size:11px">${escHtml(s.merchant_phone)}</div>` : ''}
       </td>
       <td style="font-size:12px">${escHtml(s.category||"—")}</td>
+      <td style="font-size:12px;white-space:nowrap">${s.country_iso?escHtml(((s.country_flag||"")+" "+(s.country_name||s.country_iso)).trim()):"—"}</td>
       <td style="font-size:12px">${escHtml(s.city||"—")}${s.area?`<br><small style="color:var(--muted)">${escHtml(s.area)}</small>`:""}  </td>
       <td style="font-size:12px">${s.points_per_scan||0}</td>
       <td>${newBadge}</td><td>${statusBadge}</td><td>${dealBadge}</td>
@@ -3120,7 +3215,7 @@ function renderStoresPage(){
       </td>
     </tr>`;
   });
-  document.getElementById("stores_table").innerHTML=html||`<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No stores found</td></tr>`;
+  document.getElementById("stores_table").innerHTML=html||`<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px">No stores found</td></tr>`;
   renderPagination("stores_pagination", f.length, _storesPage, "goStorePage");
 }
 
@@ -3174,46 +3269,19 @@ const INDIA_STATES_CITIES = {
   "Lakshadweep":["Kavaratti"]
 };
 
-function populateStoreStateDropdown(selectedState) {
-  const sel = document.getElementById("store_state");
-  if (!sel) return;
-  sel.innerHTML = '<option value="">— Select State —</option>' +
-    Object.keys(INDIA_STATES_CITIES).sort().map(s =>
-      `<option value="${s}"${s === selectedState ? ' selected' : ''}>${s}</option>`
-    ).join('');
-}
-
 function onStoreStateChange() {
-  const state = document.getElementById("store_state")?.value || "";
-  const citySel = document.getElementById("store_city");
-  if (!citySel) return;
-  citySel.innerHTML = '<option value="">— Select City —</option>';
-  if (state && INDIA_STATES_CITIES[state]) {
-    INDIA_STATES_CITIES[state].sort().forEach(c => {
-      const o = document.createElement("option");
-      o.value = c; o.innerText = c;
-      citySel.appendChild(o);
-    });
-  }
+  locStateChanged(STORE_LOC);
   loadAreasForCity(""); // reset areas when state changes
 }
+function onStoreCountryChange() {
+  locCountryChanged(STORE_LOC);
+  loadAreasForCity(""); // the city was cleared, so are its areas
+}
 
-function setStoreCityDropdown(state, city, area) {
-  populateStoreStateDropdown(state || "");
-  const citySel = document.getElementById("store_city");
-  if (!citySel) return;
-  // Populate cities for the given state
-  if (state && INDIA_STATES_CITIES[state]) {
-    citySel.innerHTML = '<option value="">— Select City —</option>' +
-      INDIA_STATES_CITIES[state].sort().map(c =>
-        `<option value="${escHtml(c)}"${c === city ? ' selected' : ''}>${escHtml(c)}</option>`
-      ).join('');
-  } else if (city) {
-    // Legacy: state unknown — just show the city as-is
-    citySel.innerHTML = `<option value="${escHtml(city)}" selected>${escHtml(city)}</option>`;
-  } else {
-    citySel.innerHTML = '<option value="">— Select City —</option>';
-  }
+// Fills Country -> State -> City for the store form; the record's own existing city/state stay selectable (marked "(existing)").
+async function setStoreCityDropdown(state, city, area, iso) {
+  await fillCountrySelect('store_country', iso || '');
+  await locRender(STORE_LOC, iso || '', state || '', city || '', true);
   if (city) loadAreasForCity(city, area || "");
 }
 
@@ -3252,11 +3320,9 @@ async function openCreateStore(){
   let sel=document.getElementById("store_merchant");
   sel.innerHTML='<option value="">-- Select Merchant --</option>';
   merchantsList.forEach(m=>{sel.innerHTML+=`<option value="${m._id}">${escHtml(m.name)} (${escHtml(m.phone)})</option>`;});
-  sel.onchange=function(){let m=merchantsList.find(x=>x._id===this.value);if(m){setStoreCityDropdown(m.state||"",m.city||"",m.area||"");document.getElementById("store_phone").value=m.phone||"";}};
+  sel.onchange=function(){let m=merchantsList.find(x=>x._id===this.value);if(m){setStoreCityDropdown(m.state||"",m.city||"",m.area||"",m.country_iso||"");document.getElementById("store_phone").value=m.phone||"";}};
   ["store_name","store_address","store_phone","store_lat","store_lng"].forEach(id=>document.getElementById(id).value="");
-  populateStoreStateDropdown("");
-  const _csCitySel = document.getElementById("store_city");
-  if (_csCitySel) _csCitySel.innerHTML = '<option value="">— Select City —</option>';
+  setStoreCityDropdown("","","","");                // Country first, nothing chosen yet
   loadAreasForCity(""); // reset area dropdown
   document.getElementById("store_points").value="10";
   document.getElementById("store_image_b64").value="";
@@ -3350,7 +3416,7 @@ async function openEditStore(id){
   sel.onchange=null;
   document.getElementById("store_name").value=s.store_name||"";
   document.getElementById("store_address").value=s.address||"";
-  setStoreCityDropdown(s.state||"", s.city||"", s.area||"");
+  setStoreCityDropdown(s.state||"", s.city||"", s.area||"", s.country_iso||"");
   document.getElementById("store_phone").value=s.phone||"";
   document.getElementById("store_points").value=(s.points_per_scan!=null&&s.points_per_scan!==undefined)?s.points_per_scan:10;
   document.getElementById("store_lat").value=s.lat||"";
@@ -3395,6 +3461,7 @@ async function submitStore(){
   let mid=document.getElementById("store_merchant").value;
   if(!name){document.getElementById("store_msg").innerText="Store name required";return;}
   if(!editingStore&&!mid){document.getElementById("store_msg").innerText="Select a merchant";return;}
+  if(!document.getElementById("store_country").value){document.getElementById("store_msg").innerText="Select a country";return;}
   const _sbtn=document.getElementById("storeSubmitBtn");
   if(_sbtn&&_sbtn.disabled)return;
   if(_sbtn){_sbtn.disabled=true;_sbtn.textContent="Saving…";}
@@ -3402,6 +3469,7 @@ async function submitStore(){
   document.getElementById("store_msg").innerText="Saving...";
   // When editing, only include merchant_id if a merchant was explicitly selected
   let payloadBase={store_name:name,category:document.getElementById("store_category").value,
+    country:document.getElementById("store_country").value,
     state:document.getElementById("store_state")?.value||"",
     city:document.getElementById("store_city").value,area:document.getElementById("store_area").value,
     address:document.getElementById("store_address").value,phone:document.getElementById("store_phone").value,
@@ -8658,7 +8726,6 @@ function saveDiFile(type) { diUploadFile(type); }
 // ══════════════════════════════════════════════════════════════════
 // POPUP CAMPAIGNS
 // ══════════════════════════════════════════════════════════════════
-let _pcmCitiesCache = [];
 
 async function loadPopupCampaigns() {
   const tbody = document.getElementById('popup_campaigns_body');
@@ -8684,7 +8751,9 @@ async function loadPopupCampaigns() {
         ? `<img src="${_secUrl(imgSrc)}" style="width:60px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" onerror="this.style.display='none'">`
         : `<div style="width:60px;height:80px;background:#f0f4f2;border-radius:8px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-image" style="color:#ccc"></i></div>`;
       const target = c.target === 'selected_city'
-        ? `City: ${(c.cities||[]).join(', ') || '—'}`
+        ? (c.audience_version === 2
+            ? `${(c.countries||[]).length ? 'Countries: ' + c.countries.join(', ') : ''}${(c.countries||[]).length && (c.city_targets||[]).length ? ' · ' : ''}${(c.city_targets||[]).length ? 'Cities: ' + c.city_targets.map(x => x.city + ' (' + x.country + ')').join(', ') : ''}${(c.excluded_cities||[]).length ? ' · Excl: ' + c.excluded_cities.map(x => x.city).join(', ') : ''}`
+            : `City: ${(c.cities||[]).join(', ') || '—'}`)
         : 'All Users';
       const start = c.start_dt ? c.start_dt.replace('T',' ').substring(0,16) : '—';
       const end   = c.end_dt   ? c.end_dt.replace('T',' ').substring(0,16)   : '—';
@@ -8739,7 +8808,7 @@ function openPopupCampaignModal(data = null) {
 
   pcmToggleCities();
   pcmToggleActionValue();
-  _pcmLoadCities(data?.cities||[]);
+  _pcmLoadAudience(data);
   document.getElementById('popupCampaignModal').style.display = 'flex';
 }
 
@@ -8799,35 +8868,87 @@ function pcmToggleActionValue() {
   input.type            = action === 'open_url' ? 'url' : 'text';
 }
 
-async function _pcmLoadCities(selectedCities = []) {
-  const container = document.getElementById('pcm_cities_list');
-  if (!container) return;
-  if (_pcmCitiesCache.length) {
-    _renderPcmCities(_pcmCitiesCache, selectedCities);
-    return;
-  }
-  container.innerHTML = '<span style="color:var(--muted);font-size:12px">Loading cities...</span>';
-  try {
-    const r = await fetch('/cities', { credentials: 'include' });
-    const data = await r.json();
-    _pcmCitiesCache = Array.isArray(data) ? data.map(c => c.name||c) : [];
-    _renderPcmCities(_pcmCitiesCache, selectedCities);
-  } catch(e) {
-    container.innerHTML = '<span style="color:var(--muted);font-size:12px">Could not load cities</span>';
-  }
+// ── Audience: countries + cities grouped by country (country codes, never city-name matching across countries) ──
+// State is the DOM: each city checkbox carries data-iso + data-city. _pcmCountries = countries targeted as a WHOLE (their cities
+// are the checked ones; unticked ones become exclusions). A ticked city of a country that is not in that set is an individual city.
+let _pcmGroups = [];            // [{iso, name, flag, cities:[names]}]
+let _pcmCountries = new Set();
+function _pcmCityBoxes(iso) { return Array.from(document.querySelectorAll('#pcm_cities_list input[data-iso="' + iso + '"]')); }
+function _pcmSyncCountry(iso) {
+  const boxes = _pcmCityBoxes(iso), n = boxes.filter(b => b.checked).length;
+  if (boxes.length && n === 0) _pcmCountries.delete(iso);
+  else if (boxes.length && n === boxes.length) _pcmCountries.add(iso);
+  const cb = document.querySelector('#pcm_countries_list input[data-country="' + iso + '"]');
+  if (cb) { cb.checked = _pcmCountries.has(iso); cb.indeterminate = !cb.checked && n > 0; }
+  const cnt = document.getElementById('pcm_count_' + iso);
+  if (cnt) cnt.textContent = boxes.length ? n + '/' + boxes.length : '';
 }
-
-function _renderPcmCities(cities, selected = []) {
-  const container = document.getElementById('pcm_cities_list');
-  if (!container) return;
-  const selLower = selected.map(s => s.toLowerCase());
-  container.innerHTML = cities.map(city => {
-    const checked = selLower.includes(city.toLowerCase()) ? 'checked' : '';
-    return `<label style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:#fff;border:1px solid var(--border);border-radius:20px;cursor:pointer;font-size:12px;white-space:nowrap;">
-      <input type="checkbox" value="${escHtml(city)}" ${checked} style="accent-color:var(--primary);">
-      ${escHtml(city)}
-    </label>`;
-  }).join('');
+function pcmCountryToggled(iso, on) {
+  if (on) _pcmCountries.add(iso); else _pcmCountries.delete(iso);
+  _pcmCityBoxes(iso).forEach(b => { b.checked = on; });     // a country brings ALL its cities; unticking removes them
+  _pcmSyncCountry(iso);
+}
+function pcmCityToggled(iso) { _pcmSyncCountry(iso); }
+function _pcmRender(sel) {
+  // sel = {countries:Set, excluded:Set('ISO|city'), singles:Set('ISO|city'), legacy:Set(lower names)|null}
+  const cl = document.getElementById('pcm_countries_list'), ct = document.getElementById('pcm_cities_list');
+  const key = (iso, c) => iso + '|' + String(c).toLowerCase();
+  cl.innerHTML = _pcmGroups.map(g => `<label style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:#fff;border:1px solid var(--border);border-radius:20px;cursor:pointer;font-size:12px;white-space:nowrap;">
+      <input type="checkbox" data-country="${escHtml(g.iso)}" style="accent-color:var(--primary);" onchange="pcmCountryToggled('${escHtml(g.iso)}', this.checked)">
+      ${escHtml(((g.flag || '') + ' ' + g.name).trim())}</label>`).join('') || '<span style="color:var(--muted);font-size:12px">No countries available</span>';
+  ct.innerHTML = _pcmGroups.map(g => `<div style="margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:4px">${escHtml(((g.flag || '') + ' ' + g.name).trim())} <span id="pcm_count_${escHtml(g.iso)}" style="font-weight:400;color:var(--muted)"></span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${g.cities.length ? g.cities.map(c => {
+        let on;
+        if (sel.legacy) on = sel.legacy.has(c.toLowerCase());
+        else on = sel.countries.has(g.iso) ? !sel.excluded.has(key(g.iso, c)) : sel.singles.has(key(g.iso, c));
+        return `<label style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:#fff;border:1px solid var(--border);border-radius:20px;cursor:pointer;font-size:12px;white-space:nowrap;">
+          <input type="checkbox" data-iso="${escHtml(g.iso)}" data-city="${escHtml(c)}" ${on ? 'checked' : ''} style="accent-color:var(--primary);" onchange="pcmCityToggled('${escHtml(g.iso)}')">
+          ${escHtml(c)}</label>`;
+      }).join('') : '<span style="color:var(--muted);font-size:12px">No active cities yet</span>'}</div></div>`).join('');
+  _pcmCountries = new Set(sel.legacy ? [] : sel.countries);
+  _pcmGroups.forEach(g => _pcmSyncCountry(g.iso));
+  // a country ticked with no cities yet (future cities) stays ticked
+  _pcmCountries.forEach(iso => { const cb = document.querySelector('#pcm_countries_list input[data-country="' + iso + '"]'); if (cb) cb.checked = true; });
+}
+async function _pcmLoadAudience(data) {
+  const ct = document.getElementById('pcm_cities_list');
+  if (!ct) return;
+  ct.innerHTML = '<span style="color:var(--muted);font-size:12px">Loading cities...</span>';
+  const note = document.getElementById('pcm_legacy_note'); if (note) { note.style.display = 'none'; note.textContent = ''; }
+  try {
+    if (!_pcmGroups.length) {
+      const opts = await loadCountryOptions();
+      _pcmGroups = await Promise.all(opts.map(async c => ({iso: c.iso, name: c.name, flag: c.flag || '', cities: (await loadCountryCities(c.iso)).map(x => x.name)})));
+    }
+  } catch (e) { ct.innerHTML = '<span style="color:var(--muted);font-size:12px">Could not load countries / cities</span>'; return; }
+  const sel = {countries: new Set(), excluded: new Set(), singles: new Set(), legacy: null};
+  if (data && data.audience_version === 2) {
+    (data.countries || []).forEach(c => sel.countries.add(c));
+    (data.excluded_cities || []).forEach(x => sel.excluded.add(x.country + '|' + String(x.city).toLowerCase()));
+    (data.city_targets || []).forEach(x => sel.singles.add(x.country + '|' + String(x.city).toLowerCase()));
+  } else if (data && data.target === 'selected_city') {
+    // an older campaign: targeted by city NAME. Its cities are ticked where the City Master has them; it is saved in the new format
+    // only if the admin saves it here.
+    sel.legacy = new Set((data.cities || []).map(c => String(c).toLowerCase()));
+    const known = new Set(); _pcmGroups.forEach(g => g.cities.forEach(c => known.add(c.toLowerCase())));
+    const missing = (data.cities || []).filter(c => !known.has(String(c).toLowerCase()));
+    if (note && missing.length) { note.style.display = 'block'; note.textContent = 'Not in the City Master (dropped if you save): ' + missing.join(', '); }
+  }
+  _pcmRender(sel);
+}
+function pcmAudiencePayload() {
+  const countries = [], excluded = [], singles = [];
+  _pcmGroups.forEach(g => {
+    const boxes = _pcmCityBoxes(g.iso);
+    if (_pcmCountries.has(g.iso)) {
+      countries.push(g.iso);
+      boxes.filter(b => !b.checked).forEach(b => excluded.push({country: g.iso, city: b.dataset.city}));
+    } else {
+      boxes.filter(b => b.checked).forEach(b => singles.push({country: g.iso, city: b.dataset.city}));
+    }
+  });
+  return {countries, excluded_cities: excluded, city_targets: singles};
 }
 
 async function savePopupCampaign() {
@@ -8852,9 +8973,10 @@ async function savePopupCampaign() {
     });
   }
 
-  // Selected cities
-  const cityCheckboxes = document.querySelectorAll('#pcm_cities_list input[type=checkbox]:checked');
-  const cities = Array.from(cityCheckboxes).map(cb => cb.value);
+  // Selected countries / cities (country codes); All Users sends none of it
+  const _isSel = document.getElementById('pcm_target').value === 'selected_city';
+  const aud = _isSel ? pcmAudiencePayload() : {};
+  if (_isSel && !aud.countries.length && !aud.city_targets.length) { msg.textContent = 'Select at least one country or city'; msg.style.color = 'red'; return; }
 
   const payload = {
     name,
@@ -8863,7 +8985,7 @@ async function savePopupCampaign() {
     end_dt:       endDt,
     frequency:    document.getElementById('pcm_frequency').value,
     target:       document.getElementById('pcm_target').value,
-    cities,
+    ...aud,
     click_action: document.getElementById('pcm_click_action').value,
     action_value: document.getElementById('pcm_action_value').value.trim(),
     is_active:    document.getElementById('pcm_is_active').checked,
