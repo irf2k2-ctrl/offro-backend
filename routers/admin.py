@@ -508,6 +508,12 @@ def add_category(data: dict, a=Depends(get_current_admin)):
         "sort_order": sort_order,
         "status": "active",
     }
+    if data.get("names"):
+        from services import category_names as _cn
+        try:
+            obj["names"] = _cn.clean(data.get("names"))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     db.categories.insert_one(obj)
     return _category_list()
 
@@ -520,6 +526,12 @@ def update_category(name: str, data: dict, a=Depends(get_current_admin)):
     if "icon"       in data: upd["icon"]        = data["icon"]
     if "sort_order" in data: upd["sort_order"]  = int(data["sort_order"])
     if "status"     in data: upd["status"]      = data["status"]
+    if "names"      in data:
+        from services import category_names as _cn
+        try:
+            upd["names"] = _cn.clean(data["names"])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     if upd:
         db.categories.update_one({"name": name}, {"$set": upd})
     return _category_list()
@@ -1420,26 +1432,19 @@ def _fmt_store_fast(s, sub_map, deal_map, merchants):
 
     sub_plan   = sub.get("plan", "")
     raw_status = sub.get("status", "")
-    # Derive effective subscription status from end_date
-    if not sub:
+    # Derive effective subscription status from end_date (shared rule:
+    # services/store_status.py - valid through the end date, IST).
+    from services import store_status as _ss
+    if not sub or not _ss.counts(raw_status):
         sub_status = "unpaid"
     else:
-        try:
-            from datetime import timezone
-            ed = sub.get("end_date")
-            now_dt = datetime.utcnow()
-            if isinstance(ed, datetime):
-                sub_status = "active" if ed >= now_dt else "expired"
-            elif isinstance(ed, str) and ed:
-                from datetime import datetime as _dt
-                ed_parsed = _dt.fromisoformat(ed.replace("Z",""))
-                sub_status = "active" if ed_parsed >= now_dt else "expired"
-            elif raw_status in ("active", "paid"):
-                sub_status = "active"
-            else:
-                sub_status = "unpaid"
-        except Exception:
-            sub_status = raw_status or "unpaid"
+        _ed = _ss.parse_dt(sub.get("end_date"))
+        if _ed is not None:
+            sub_status = "expired" if _ss.is_expired(_ed) else "active"
+        elif raw_status in ("active", "paid"):
+            sub_status = "active"
+        else:
+            sub_status = "unpaid"
     sub_label  = f"{sub_plan} ({sub_status})" if sub_plan else ""
 
     # Format subscription end date for display
@@ -1519,11 +1524,16 @@ def list_stores(a=Depends(get_current_admin)):
     ).sort("created_at", -1))
     
     # Map: store_id → latest subscription (first match since sorted desc)
+    # Prefer the newest PAID subscription: an abandoned/failed renewal leaves a
+    # newer "pending" row whose future end_date must not make the store Active.
+    from services import store_status as _ss
     sub_map = {}
     for sub in all_subs:
         sid = sub.get("store_id", "")
-        if sid not in sub_map:
+        if _ss.counts(sub.get("status")) and sid not in sub_map:
             sub_map[sid] = sub
+    for sub in all_subs:
+        sub_map.setdefault(sub.get("store_id", ""), sub)
     
     # Batch load all active deals in ONE query
     all_deals = list(db.deals.find(

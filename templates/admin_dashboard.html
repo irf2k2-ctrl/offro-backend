@@ -859,6 +859,10 @@ function _secUrl(u) {
           <label style="font-size:11px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">SUBTITLE</label>
           <input id="new_cat_subtitle" class="form-control" placeholder="e.g. 500+ places" style="width:160px;">
         </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">ARABIC NAME</label>
+          <input id="new_cat_name_ar" class="form-control" placeholder="e.g. مطعم" dir="rtl" style="width:140px;">
+        </div>
         <button class="btn-p" onclick="addCategory()">+ Add Category</button>
       </div>
       <!-- Categories grid with image upload -->
@@ -2756,6 +2760,7 @@ function renderCategories(){
           <div style="font-size:22px">${escHtml(icon)}</div>
           <div style="color:#fff;font-weight:700;font-size:13px">${escHtml(name)}</div>
           ${sub?`<div style="color:rgba(255,255,255,.8);font-size:10px">${escHtml(sub)}</div>`:""}
+          <div onclick="editCategoryAr('${_secJs(name)}')" title="Arabic name (click to edit)" dir="rtl" style="cursor:pointer;color:#fff;font-size:11px;opacity:.9;text-align:left">${escHtml((cat.names&&cat.names.ar)||"+ العربية")}</div>
         </div>
         <button onclick="deleteCategory('${_secJs(name)}')" title="Delete" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.4);border:none;color:#fff;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;line-height:1;">×</button>
       </div>
@@ -2767,16 +2772,26 @@ async function addCategory(){
   if(!name)return;
   const icon=document.getElementById("new_cat_icon").value.trim()||"🏪";
   const subtitle=document.getElementById("new_cat_subtitle").value.trim();
+  const nameAr=(document.getElementById("new_cat_name_ar")||{value:""}).value.trim();
   const r=await fetch("/admin/categories",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({name,icon,subtitle}),credentials:"include"});
+    body:JSON.stringify({name,icon,subtitle,names:nameAr?{ar:nameAr}:{}}),credentials:"include"});
   if(r.ok){
     categoriesList=await r.json();
     document.getElementById("new_category").value="";
     document.getElementById("new_cat_icon").value="";
     document.getElementById("new_cat_subtitle").value="";
+    if(document.getElementById("new_cat_name_ar")) document.getElementById("new_cat_name_ar").value="";
     renderCategories();
     populateCategoryDropdown();
   }
+}
+async function editCategoryAr(name){
+  const cur=((categoriesList.find(c=>(c.name||c)===name)||{}).names||{}).ar||"";
+  const v=prompt("Arabic name for "+name+" (leave empty to use the built-in/English name):",cur);
+  if(v===null)return;
+  const r=await fetch("/admin/categories/"+encodeURIComponent(name),{method:"PUT",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({names:v.trim()?{ar:v.trim()}:{}}),credentials:"include"});
+  if(r.ok){categoriesList=await r.json();renderCategories();}
 }
 async function deleteCategory(name){
   if(!confirm(`Delete "${name}"?`))return;

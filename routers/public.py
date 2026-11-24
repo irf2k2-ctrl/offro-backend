@@ -170,19 +170,23 @@ def get_stores(city: str = None, category: str = None):
         except Exception: pass
     _sub_query = {"store_id": {"$in": store_ids + _oid_store_ids}}
     _active_subs = set()
+    # Shared rule (services/store_status.py): only PAID/active rows count, and a
+    # subscription is valid through its end date (IST) - the same rule the admin
+    # dashboard and the merchant app use, so all three always agree.
+    from services import store_status as _ss
     for _sub in db.subscriptions.find(_sub_query, {"store_id": 1, "end_date": 1, "status": 1}):
+        if not _ss.counts(_sub.get("status")):
+            continue
         _ed = _sub.get("end_date")
         _sid_str = str(_sub["store_id"])  # str(ObjectId) gives hex; str(str) is a no-op
         if _ed is None:
             # No end_date = perpetual/lifetime subscription — always active
             _active_subs.add(_sid_str)
             continue
-        try:
-            _ed_dt = _ed if isinstance(_ed, _dt) else _dt.fromisoformat(str(_ed).replace("Z",""))
-            if _ed_dt >= _now:
-                _active_subs.add(_sid_str)
-        except Exception:
-            pass
+        if _ss.parse_dt(_ed) is None:
+            continue
+        if not _ss.is_expired(_ed):
+            _active_subs.add(_sid_str)
     # If a store has no subscription record at all it is NOT shown publicly
     stores = [s for s in stores if str(s["_id"]) in _active_subs]
     store_ids = [str(s["_id"]) for s in stores]
@@ -862,6 +866,23 @@ def _city_keys(d: dict) -> set:
     return {k for k in keys if k}
 
 
+def _store_in_country(store: dict, iso: str) -> bool:
+    """Stores carry no country of their own: it is the owner account's country (no/unparseable country = India, as everywhere)."""
+    try:
+        from utils import countries as _ct
+        acct = None
+        mid = store.get("merchant_id")
+        if mid:
+            try:
+                acct = db.accounts.find_one({"_id": ObjectId(str(mid))})
+            except Exception:
+                acct = None
+        info = _ct.account_country(acct) if acct else None
+        return (info["iso"] if info else "IN") == iso
+    except Exception:
+        return iso == "IN"
+
+
 @router.get("/city-status")
 def get_city_status(city: str = "", country: str = None):
     """Is `city` inside OffrO's SERVICE AREA (an active city of the City Master, for `country` when given)?
@@ -894,6 +915,17 @@ def get_city_status(city: str = "", country: str = None):
         for k in ks:
             if _re.search(r"(?<!\w)" + _re.escape(k) + r"(?!\w)", name):
                 return {**base, "supported": True}
+    # A city that has (or had) stores is a city OffrO serves even when it is missing from / differently spelled in the City Master
+    # or has no country on its City Master record yet; its stores may simply all be expired right now. Only a place with no
+    # store record at all and no City Master match is "outside the service area". Deleted stores / drafts do not count.
+    _sq = {"status": {"$nin": ["deleted", "draft", "rejected"]}}
+    for st in db.stores.find(_sq, {"city": 1, "merchant_id": 1}):
+        sk = str(st.get("city") or "").strip().lower()
+        if not sk or not (sk == name or _re.search(r"(?<!\w)" + _re.escape(sk) + r"(?!\w)", name)):
+            continue
+        if iso and not _store_in_country(st, iso):
+            continue
+        return {**base, "supported": True}
     return {**base, "supported": False}
 
 
@@ -916,7 +948,7 @@ def get_areas(city: str = ""):
     return {"city": city, "areas": []}
 
 @router.get("/categories")
-def get_categories():
+def get_categories(lang: str = ""):
     """Return ALL admin-created categories for the Flutter app.
     All active categories are returned regardless of store subscription status.
     The /stores endpoint handles its own subscription filtering separately.
@@ -924,6 +956,7 @@ def get_categories():
       1. Rich: multiple docs each with {name, image_url, icon, subtitle, sort_order}
       2. Legacy: single doc with {categories: ["Grocery","Restaurant",...]}
     """
+    from services import category_names as _cn
     # Schema 1: try rich per-document format first
     rich_cats = list(db.categories.find({"name": {"$exists": True}, "status": {"$ne": "deleted"}}, {"_id":0}).sort("sort_order",1))
     if rich_cats:
@@ -944,6 +977,9 @@ def get_categories():
                 "icon":       cat.get("icon", "🏪"),
                 "image_url":  safe_img,
                 "sort_order": cat.get("sort_order", 0),
+                # additive: translations ({lang: name}, admin-entered + built-in glossary) and the name in ?lang= (English when none)
+                "names":        _cn.names_for(cat),
+                "display_name": _cn.category_display_name(cat, lang),
             })
         return result
     # Schema 2: legacy single-doc with categories array
