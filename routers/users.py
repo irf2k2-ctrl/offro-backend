@@ -1215,6 +1215,33 @@ def validate_influencer_discount_code(data: dict, user=Depends(get_current_user)
     }
 
 
+def _withdraw_amount(raw, default: int) -> int:
+    """The requested points as a whole number >= the country's minimum; anything else is a 422 with a stable code (never a 500).
+    No amount means "the minimum", as before."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return default
+    bad = HTTPException(status_code=422, detail={"code": "invalid_amount", "field": "amount",
+                                                 "message": "Enter a whole number of points greater than zero."})
+    if isinstance(raw, bool):
+        raise bad
+    if isinstance(raw, int):
+        n = raw
+    elif isinstance(raw, float):
+        if raw != raw or raw in (float("inf"), float("-inf")) or raw != int(raw):
+            raise bad
+        n = int(raw)
+    elif isinstance(raw, str) and raw.strip().lstrip("+-").isdigit() and raw.strip().isascii():
+        n = int(raw.strip())
+    else:
+        raise bad
+    if n <= 0:
+        raise bad
+    if n < default:
+        raise HTTPException(status_code=422, detail={"code": "amount_below_minimum", "field": "amount",
+                                                     "message": f"The minimum is {default} points per request."})
+    return n
+
+
 @router.post("/wallet/withdraw")
 def withdraw(data: dict, user=Depends(get_current_user)):
     reward     = _wallet_reward(user)
@@ -1225,12 +1252,18 @@ def withdraw(data: dict, user=Depends(get_current_user)):
     visit      = user.get("visit_points", 0)
     pool       = user.get("pool_points", 0)
     total      = visit + pool
-    amount     = int(data.get("amount", min_withdraw))
+    amount     = _withdraw_amount(data.get("amount"), min_withdraw)
     if total < min_withdraw:
         raise HTTPException(status_code=400, detail=f"Minimum {min_withdraw} points required. You have {total}.")
     if total < amount:
         raise HTTPException(status_code=400, detail=f"Not enough points. You have {total}.")
-    db.accounts.update_one({"_id": user["_id"]}, {"$set": {"pending_withdraw": True}})
+    # One pending request at a time: fulfilling it (Admin -> Gift Vouchers) clears the flag.
+    pending_msg = {"code": "withdraw_pending", "message": "You already have a gift voucher request being processed."}
+    if db.withdraw_requests.find_one({"user_id": str(user["_id"]), "status": "pending"}):
+        raise HTTPException(status_code=409, detail=pending_msg)
+    claim = db.accounts.update_one({"_id": user["_id"], "pending_withdraw": {"$ne": True}}, {"$set": {"pending_withdraw": True}})
+    if claim.matched_count == 0 and db.withdraw_requests.find_one({"user_id": str(user["_id"]), "status": "pending"}):
+        raise HTTPException(status_code=409, detail=pending_msg)      # a second tap racing the first
     db.withdraw_requests.insert_one({
         "user_id":      str(user["_id"]),
         "user_name":    user.get("name"),

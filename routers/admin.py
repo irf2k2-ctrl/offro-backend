@@ -2922,6 +2922,50 @@ def save_review_visibility(body: dict, a=Depends(get_current_admin)):
 
 # ===================== GIFT VOUCHER / WITHDRAW REQUESTS =====================
 
+# ── gift voucher requests: per-request currency / partners (Pricing & Plans -> Reward Redemption Points) ─────────────────────
+_INDIA_VOUCHER_PARTNERS = ["Amazon", "Flipkart"]
+
+
+def _wd_points(r) -> int:
+    try:
+        return int(r.get("points", r.get("amount", 200)))
+    except (TypeError, ValueError):
+        return 200
+
+
+def _wd_currency(r) -> tuple:
+    """(code, symbol) stored with the request. Requests made before per-country rewards carry none: they were all rupees."""
+    code = str(r.get("currency_code") or "INR").strip().upper() or "INR"
+    sym = str(r.get("currency_symbol") or ("₹" if code == "INR" else code))
+    return code, sym
+
+
+def _wd_value(r) -> float:
+    """The voucher value stored with the request (points x the conversion rate of ITS country at the time). A legacy request without
+    one was always points / 10 in rupees."""
+    v = r.get("voucher_value")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    return round(_wd_points(r) / 10, 2)
+
+
+def _wd_money(r) -> str:
+    """"₹20" for rupees, "SAR 5" for any other currency - never a rupee sign on a non-INR request."""
+    code, sym = _wd_currency(r)
+    n = _wd_value(r)
+    num = str(int(n)) if n == int(n) else ("%.2f" % n).rstrip("0").rstrip(".")
+    return f"{sym}{num}" if code == "INR" else f"{code} {num}"
+
+
+def _wd_partner_options(r) -> list:
+    """The voucher providers the Fulfill dialog offers for THIS request: the partner names stored with it (its country's settings).
+    Rupee requests without any keep India's Amazon / Flipkart; another country without partner names gets none (the admin types one)."""
+    partners = [str(x).strip() for x in (r.get("voucher_partners") or []) if str(x).strip()]
+    if partners:
+        return partners
+    return list(_INDIA_VOUCHER_PARTNERS) if _wd_currency(r)[0] == "INR" else []
+
+
 @router.get("/withdraw-requests")
 def get_withdraw_requests(a=Depends(get_current_admin)):
     """Get all pending gift voucher withdrawal requests"""
@@ -2941,6 +2985,7 @@ def get_withdraw_requests(a=Depends(get_current_admin)):
             "currency_code": r.get("currency_code") or "INR",
             "currency_symbol": r.get("currency_symbol") or "₹",
             "voucher_partners": r.get("voucher_partners") or [],
+            "voucher_partner_options": _wd_partner_options(r),
             "status": r.get("status","pending"),
             "voucher_code": r.get("voucher_code",""),
             "voucher_type": r.get("voucher_type",""),
@@ -2953,21 +2998,41 @@ def get_withdraw_requests(a=Depends(get_current_admin)):
 def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Payments", "edit")
     """Send gift voucher to user - deduct points and clear pending flag"""
-    voucher_code = (body.get("voucher_code","")).strip()
-    voucher_type = body.get("voucher_type","Amazon")  # Amazon or Flipkart
+    # product_code / product_type are the names the Fulfill dialog used to send; both spellings are accepted.
+    voucher_code = str(body.get("voucher_code", body.get("product_code", "")) or "").strip()
     if not voucher_code:
         raise HTTPException(400, "Voucher code is required")
-    
-    req = db.withdraw_requests.find_one({"_id": ObjectId(request_id)})
+    try:
+        req = db.withdraw_requests.find_one({"_id": ObjectId(request_id)})
+    except Exception:
+        req = None
     if not req:
         raise HTTPException(404, "Request not found")
     _dc.require_record(a, req, ("user_id",), ("phone",))
     if req.get("status") == "fulfilled":
         raise HTTPException(400, "Already fulfilled")
+    # The provider must be one this request's country offers; a country without partner names takes any plain name the admin types.
+    voucher_type = " ".join(str(body.get("voucher_type", body.get("product_type", "")) or "").split())
+    options = _wd_partner_options(req)
+    if options:
+        if not voucher_type:
+            voucher_type = options[0]
+        hit = [o for o in options if o.lower() == voucher_type.lower()]
+        if not hit:
+            raise HTTPException(400, {"code": "invalid_voucher_type", "field": "voucher_type",
+                                      "message": "Choose one of this request's voucher partners: " + ", ".join(options)})
+        voucher_type = hit[0]
+    else:
+        if not voucher_type:
+            raise HTTPException(400, {"code": "voucher_type_required", "field": "voucher_type", "message": "Enter the voucher provider"})
+        if len(voucher_type) < 2 or len(voucher_type) > 40 or "<" in voucher_type or ">" in voucher_type or any(ord(c) < 32 for c in voucher_type):
+            raise HTTPException(400, {"code": "invalid_voucher_type", "field": "voucher_type",
+                                      "message": "The voucher provider must be 2 to 40 characters without markup"})
     
     user_id = req.get("user_id")
-    points = int(req.get("points", req.get("amount", 200)))
-    
+    points = _wd_points(req)
+    code, _sym = _wd_currency(req)
+
     # Deduct points from user now
     user = db.accounts.find_one({"_id": ObjectId(user_id)}) or db.users.find_one({"_id": ObjectId(user_id)})
     if user:
@@ -2995,7 +3060,10 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
             "user_id": user_id,
             "type": "debit",
             "points": points,
-            "description": f"Gift Voucher Redeemed: {voucher_type} ₹{round(points/10,2)}",
+            # The value and currency stored with the request (never a rupee calculation for another country).
+            "description": f"Gift Voucher Redeemed: {voucher_type} {_wd_money(req)}",
+            "currency_code": code,
+            "voucher_value": _wd_value(req),
             "date": datetime.utcnow().strftime("%Y-%m-%d")
         })
     

@@ -1844,10 +1844,9 @@ function _secUrl(u) {
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Voucher Type</label>
-          <select id="fulfill_product_type" class="form-control">
-            <option value="Amazon">Amazon Gift Voucher</option>
-            <option value="Flipkart">Flipkart Gift Voucher</option>
-          </select>
+          <select id="fulfill_product_type" class="form-control"></select>
+          <input type="text" id="fulfill_product_text" class="form-control" maxlength="40" placeholder="Voucher provider (e.g. the store name)" style="display:none;">
+          <small class="text-muted" id="fulfill_type_hint"></small>
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Voucher Code</label>
@@ -2594,6 +2593,9 @@ async function loadGiftProductRequests() {
             tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;padding:24px;color:var(--muted)'>No reward redemption requests yet.</td></tr>";
             return;
         }
+        // The voucher providers each request's country offers (stored with the request); the Fulfill dialog is built from them.
+        window._wdOpts = {};
+        vouchers.forEach(v => { window._wdOpts[v._id || v.id] = v.voucher_partner_options || []; });
         tbody.innerHTML = vouchers.map(v => {
             const date = _toISTDate(v.created_at);
             const pts = v.points || 0;
@@ -2621,23 +2623,31 @@ function openFulfillModal(reqId, userName, points, value, cur){
   document.getElementById("fulfillUserName").innerText=userName;
   document.getElementById("fulfillPoints").innerText=points+" pts = "+(cur||"₹")+value;
   document.getElementById("fulfill_product_code").value="";
-  document.getElementById("fulfill_product_type").value="Amazon";
+  const opts = (window._wdOpts && window._wdOpts[reqId]) || [];
+  const sel = document.getElementById("fulfill_product_type"), txt = document.getElementById("fulfill_product_text");
+  sel.innerHTML = opts.map(o => `<option value="${escHtml(o)}">${escHtml(o)} Gift Voucher</option>`).join("");
+  sel.style.display = opts.length ? "" : "none";
+  txt.style.display = opts.length ? "none" : "";
+  txt.value = "";
+  document.getElementById("fulfill_type_hint").innerText = opts.length ? "" : "No voucher partners are set for this request's country (Pricing & Plans). Type the provider.";
   if (fulfillModal_inst) fulfillModal_inst.show();
 }
 
 async function submitFulfill(){
   let reqId=document.getElementById("fulfill_req_id").value;
   let code=document.getElementById("fulfill_product_code").value.trim();
-  let type=document.getElementById("fulfill_product_type").value;
+  const sel=document.getElementById("fulfill_product_type");
+  let type=(sel.style.display==="none"?document.getElementById("fulfill_product_text").value:sel.value).trim();
   if(!code){alert("Please enter the voucher code");return;}
+  if(!type){alert("Please choose or enter the voucher provider");return;}
   let r=await fetch(`/admin/withdraw-requests/${reqId}/fulfill`,{
     method:"POST",credentials:"include",
     headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({product_code:code,product_type:type})
+    body:JSON.stringify({voucher_code:code,voucher_type:type})
   });
-  let d=await r.json();
+  let d=await r.json().catch(()=>({}));
   if(r.ok){if (fulfillModal_inst) fulfillModal_inst.hide();loadGiftProductRequests();alert("✅ "+d.message);}
-  else alert("❌ "+(d.detail||"Error"));
+  else {const det=d.detail; alert("❌ "+((det&&det.message)||(typeof det==="string"?det:"")||"Error"));}
 }
 
 function showSection(name, el){
