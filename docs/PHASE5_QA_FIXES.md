@@ -15,3 +15,7 @@
 * **Default content for every empty city (addendum)** - no backend logic change was needed: `/stores` already answers 200 `[]` for a city
   with no record, outside the service area, or with only expired/inactive/deleted stores, and `/default-images` (country mapping + rotation)
   is independent of cities. `/city-status` is kept for compatibility but the app no longer uses it for the empty state.
+* **Temporary store-status diagnostic** - `GET /admin/diagnostics/store-status?name=test store stage` (or `?store_id=`): Super Admin dashboard
+  session only, read-only, no payment identifiers or customer data. Reports the store's own status/`subscription_end`, every subscription row
+  (whitelisted fields), and the final status under the admin-dashboard, customer-app, current merchant-app and pre-Phase-5 merchant rules.
+  Remove `routers/admin_store_status_diag.py` and its `include_router` line in `server.py` when the investigation is finished.

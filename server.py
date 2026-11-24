@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Redirect
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, wa_campaigns, dashboard_auth, maps, smart_link
 from routers import merchant_products, admin_products, admin_deals, public_products, collaborations
 from routers import translations_admin, translations_public
-from routers import admin_pricing, public_pricing
+from routers import admin_pricing, public_pricing, admin_store_status_diag
 from database import db
 import base64, io, re, html as _html
 from services.security import cors_origins, SecurityMiddleware
@@ -46,6 +46,7 @@ app.include_router(wa_template_test.router, prefix="/admin")  # single-recipient
 app.include_router(wa_campaigns.router, prefix="/admin")  # WhatsApp Campaign Manager 2A: permission-gated admin API; sends nothing
 app.include_router(dashboard_auth.router, prefix="/admin")  # RBAC dashboard auth — /admin/auth/*
 app.include_router(translations_admin.router, prefix="/admin")   # Translation module admin API (Phase G): /admin/translations/*
+app.include_router(admin_store_status_diag.router, prefix="/admin")  # TEMPORARY read-only store-status diagnostic (remove after investigation)
 app.include_router(admin_pricing.router, prefix="/admin")   # Pricing & Plans module: /admin/pricing-config/* (country-wise prices, tax, reward conversion)
 app.include_router(public_pricing.router)             # read-only country pricing for the apps: /country-pricing/{code}
 app.include_router(translations_public.router)                 # Public read-only translation API (Phase G): /translations/*
