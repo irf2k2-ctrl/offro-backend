@@ -344,7 +344,7 @@ def get_wallet(user=Depends(get_current_user)):
 # Checks accounts collection first (unified), falls back to users/merchants.
 # ══════════════════════════════════════════════════════════════════════════════
 @router.post("/account-login")
-def account_login(data: dict):
+def account_login(data: dict, request: Request):
     """
     Single login for all accounts. No role selection needed.
     Checks accounts collection → falls back to users → merchants.
@@ -355,6 +355,11 @@ def account_login(data: dict):
         raise HTTPException(status_code=400, detail="Phone is required")
 
     variants = _phone_variants(raw_phone, _ph.request_country(data))      # lookup keys only; token/verification logic below is unchanged
+
+    # D2: a phone number alone never yields a session. Needs a verified OTP proof for THIS number (checked with MSG91 by the server), or an
+    # existing session of the same account (switch mode / restore); old apps that send only the phone get HTTP 426. See services/login_proof.py.
+    from services import login_proof as _lp
+    _lp.require_login_proof(request, data, variants)
 
     # ── Primary: unified accounts collection ──
     acct = db.accounts.find_one({"phone": {"$in": variants}})

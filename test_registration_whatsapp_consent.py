@@ -12,6 +12,14 @@ import services.wa_eligibility as E
 
 fake = sys.modules["database"].db
 c = TestClient(server.app)
+
+
+@pytest.fixture(autouse=True)
+def _login_proof_not_under_test(monkeypatch):
+    """These tests are about phone-format matching / consent, not about the OTP proof (Phase 2 D2). The proof rule itself is tested for real in
+    test_phase2_d2_login_proof.py; here it is stepped over so the account lookup underneath is still exercised exactly as before."""
+    from services import login_proof
+    monkeypatch.setattr(login_proof, "require_login_proof", lambda *a, **k: "otp")
 A = {"Authorization": "Bearer at"}
 VER = C.REGISTRATION_CONSENT_VERSION
 TEXT = "I agree to the Terms & Conditions and Privacy Policy and consent to receive updates and promotional messages from OffrO via WhatsApp."

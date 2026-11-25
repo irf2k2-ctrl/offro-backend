@@ -9,6 +9,7 @@ import uuid, qrcode, io, base64
 import time as _time
 from services import default_images as _di          # country mapping for Default Images
 from utils import countries as _countries_mod
+from services import payment_country as _pcountry
 from services import dashboard_country as _dc        # Dashboard user country access (Stage 4)
 
 # In-memory cache for /stores list (15-second TTL)
@@ -2437,8 +2438,10 @@ def admin_stats(a=Depends(get_current_admin)):
 # ===================== SUBSCRIPTIONS (Admin view) =====================
 
 @router.get("/subscriptions")
-def list_subscriptions(a=Depends(get_current_admin)):
+def list_subscriptions(country: str = "", a=Depends(get_current_admin)):
     _check_perm(a, "Payments", "view")
+    _pc_want = _pcountry.parse_filter(country)
+    _pcs = _pcountry.PaymentCountries()
     result = []
     for s in db.subscriptions.find(_scope(a, ("merchant_id",), ("merchant_phone",))).sort("created_at", -1):
         fd = s.get("from_date"); ed = s.get("end_date")
@@ -2470,6 +2473,7 @@ def list_subscriptions(a=Depends(get_current_admin)):
                 "from_date":      fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
                 "end_date":       ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
                 "created_at":     (s["created_at"] + __import__("datetime").timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if s.get("created_at") else "",
+                **_pcs.fields(s, (infl or {}).get("account_id") and [infl.get("account_id")] or [], [(infl or {}).get("phone")]),
             })
             continue
         merchant = None
@@ -2491,16 +2495,19 @@ def list_subscriptions(a=Depends(get_current_admin)):
             "from_date":      fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
             "end_date":       ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
             "created_at":     (s["created_at"] + __import__("datetime").timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if s.get("created_at") else "",
+            **_pcs.fields(s, [s.get("merchant_id")], [merchant.get("phone") if merchant else None]),
         })
-    return result
+    return [r for r in result if _pcountry.keep(r, _pc_want)]
 
 
 # ===================== MERCHANT PAYMENT TRANSACTIONS =====================
 
 @router.get("/merchant-transactions")
-def list_merchant_transactions(a=Depends(get_current_admin)):
+def list_merchant_transactions(country: str = "", a=Depends(get_current_admin)):
     """All payment transactions made by merchants (subscriptions + invoices)."""
     _check_perm(a, "Payments", "view")
+    _pc_want = _pcountry.parse_filter(country)
+    _pcs = _pcountry.PaymentCountries()
     result = []
     for inv in db.invoices.find(_scope(a, ("merchant_id",), ("merchant_phone",))).sort("created_at", -1):
         fd = inv.get("from_date"); ed = inv.get("end_date")
@@ -2517,8 +2524,9 @@ def list_merchant_transactions(a=Depends(get_current_admin)):
             "from_date":     fd.strftime("%d %b %Y") if isinstance(fd, datetime) else str(fd or ""),
             "end_date":      ed.strftime("%d %b %Y") if isinstance(ed, datetime) else str(ed or ""),
             "created_at":    (inv["created_at"] + timedelta(hours=5,minutes=30)).strftime("%d %b %Y, %I:%M %p") if inv.get("created_at") else "",
+            **_pcs.fields(inv, [inv.get("merchant_id"), inv.get("account_id")], [inv.get("merchant_phone")]),
         })
-    return result
+    return [r for r in result if _pcountry.keep(r, _pc_want)]
 
 # ===================== POLICY MANAGEMENT =====================
 
@@ -4720,9 +4728,11 @@ def toggle_merchant_banner(bid: str, a=Depends(get_current_admin)):
 # ═══════════════════════════════════════════════════════════
 
 @router.get("/invoices/full")
-def list_all_invoices(a=Depends(get_current_admin)):
+def list_all_invoices(country: str = "", a=Depends(get_current_admin)):
     """All merchant invoices: stores, banners, and vouchers — TASK 10: no zero amounts."""
     _check_perm(a, "Payments", "view")
+    _pc_want = _pcountry.parse_filter(country)
+    _pcs = _pcountry.PaymentCountries()
     def _fmt(v):
         if not v: return ""
         if isinstance(v, datetime): return v.strftime("%d %b %Y")
@@ -4776,6 +4786,7 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "end_date":        _fmt(ed),
             "created_at":      _fmtdt(inv.get("created_at")),
             "_status":         "paid",
+            **_pcs.fields(inv, [inv.get("merchant_id"), inv.get("account_id")], [inv.get("merchant_phone")]),
         })
 
     # 2. Paid banners not already in invoices collection
@@ -4808,10 +4819,43 @@ def list_all_invoices(a=Depends(get_current_admin)):
             "end_date":        _fmt(b.get("end_date")),
             "created_at":      _fmtdt(b.get("created_at")),
             "_status":         "paid",
+            **_pcs.fields(b, [b.get("merchant_id")], [b.get("merchant_phone")]),
         })
 
+    result = [r for r in result if _pcountry.keep(r, _pc_want)]
     result.sort(key=lambda x: x.get("created_at",""), reverse=True)
     return result
+
+@router.get("/payments/country-report")
+def payments_country_report(a=Depends(get_current_admin)):
+    """READ-ONLY report of historical payment records whose country / currency is not stored or cannot be told (nothing is changed).
+    Counts only - no names, phones or ids."""
+    _check_perm(a, "Payments", "view")
+    pcs = _pcountry.PaymentCountries()
+    sources = (
+        ("invoices", db.invoices, ("merchant_id", "account_id"), ("merchant_phone",)),
+        ("subscriptions", db.subscriptions, ("merchant_id",), ("merchant_phone",)),
+        ("merchant_banners_paid", db.merchant_banners, ("merchant_id",), ("merchant_phone",)),
+    )
+    out, total = {}, 0
+    for name, col, idf, phf in sources:
+        q = {"payment_status": "paid"} if name == "merchant_banners_paid" else {}
+        sc = _scope(a, idf, phf) if _dc.scope(a) else {}
+        if sc:
+            q = {"$and": [q, sc]} if q else sc
+        stat = {"records": 0, "country_from_record": 0, "country_from_owner": 0, "country_unresolved": 0,
+                "currency_recorded": 0, "currency_legacy_default_inr": 0, "currency_not_recorded": 0}
+        for r in col.find(q):
+            f = pcs.fields(r, [r.get(k) for k in idf], [r.get(k) for k in phf])
+            stat["records"] += 1
+            stat["country_from_record" if f["country_source"] == "record" else
+                 "country_unresolved" if f["country_source"] == "unresolved" else "country_from_owner"] += 1
+            stat["currency_" + f["currency_source"]] += 1
+        out[name] = stat
+        total += stat["records"]
+    return {"total_records": total, "collections": out, "read_only": True,
+            "note": "No record was modified. Records without a stored country take their country from the paying account."}
+
 
 @router.get("/banner-pricing")
 def get_banner_pricing(a=Depends(get_current_admin)):

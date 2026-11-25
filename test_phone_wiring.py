@@ -13,6 +13,14 @@ from services import wa_consent as W
 from utils import phone as P
 
 fake = sys.modules["database"].db
+
+
+@pytest.fixture(autouse=True)
+def _login_proof_not_under_test(monkeypatch):
+    """These tests are about phone-format matching / consent, not about the OTP proof (Phase 2 D2). The proof rule itself is tested for real in
+    test_phase2_d2_login_proof.py; here it is stepped over so the account lookup underneath is still exercised exactly as before."""
+    from services import login_proof
+    monkeypatch.setattr(login_proof, "require_login_proof", lambda *a, **k: "otp")
 c = TestClient(server.app)
 
 IN_LOCAL = "9876543210"

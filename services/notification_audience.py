@@ -10,6 +10,11 @@ Targets
   city       CUSTOMER accounts (role "user", or no roles field = legacy customer) whose `city` is the selected city AND whose country is the
              city's country. The country comes from the City Master (a city that exists in one country) or from `target_country`; if it
              cannot be established the request is refused - it never falls back to India or to "any country".
+  country    (Phase 2 / Task 4) every account (customers AND merchants - exactly the population "all_users" has always reached) whose country
+             is the selected one. It is "all_users" narrowed to one country, so an unrestricted admin can now do deliberately what a
+             country-restricted admin's "all_users" already did implicitly. A country-restricted admin may select only their own country;
+             an admin with assigned cities still reaches only those cities. The country must be given and supported (never defaulted).
+             Legacy `users` records carry no reliable country and are never included.
   specific   unchanged (one phone number).
   offers     REFUSED. The apps subscribe every device to the `offers` topic and the server stores no offers opt-in, so "Offers Subscribers"
              cannot be told apart from "everyone" - it is not guessed.
@@ -32,7 +37,7 @@ from utils import countries as _countries
 BATCH = 1000                      # records read per database page
 SEND_BATCH = 500                  # devices sent per batch
 INLINE_MAX = 500                  # more devices than this are sent in the background so the request cannot time out
-BROADCAST_TARGETS = ("all", "all_users", "city")
+BROADCAST_TARGETS = ("all", "all_users", "city", "country")
 OFFERS_MESSAGE = ("The 'Offers Subscribers' target is disabled: the apps subscribe every device to it and the server keeps no offers opt-in, "
                   "so it would reach everyone. Use 'All Users' or a city target.")
 
@@ -119,7 +124,19 @@ def build(admin: dict, target: str, city: str = "", country: str = "") -> dict:
         raise HTTPException(403, "This target is not available for your account")
     assigned = city_restriction(admin)
     iso, clauses, out_city = "", [], ""
-    if target == "city":
+    if target == "country":
+        want = str(country or "").strip().upper()
+        if not want:
+            raise HTTPException(400, "Select a country")
+        if not _countries.country_info(want):
+            raise HTTPException(400, "The selected country is not supported")
+        if own and own != want:                                       # also refuses INVALID_SCOPE (equals no country)
+            raise HTTPException(403, "You can only send to your own country")
+        iso = want
+        clauses.append(_dc.account_query(iso))
+        if assigned is not None:
+            clauses.append(_city_regex(assigned))
+    elif target == "city":
         info = resolve_city(city, country)
         iso = info["iso"]
         if own and own != iso:
@@ -136,7 +153,7 @@ def build(admin: dict, target: str, city: str = "", country: str = "") -> dict:
             clauses.append(_city_regex(assigned))
     q = {"$and": clauses} if clauses else {}
     # legacy `users` hold no reliable country: read them only when no country is being applied (as the old code did)
-    colls = [db.accounts] if (own or target == "city") else [db.accounts, db.users]
+    colls = [db.accounts] if (own or target in ("city", "country")) else [db.accounts, db.users]
     seen, tokens = set(), []
     eligible = no_token = dup = 0
     for coll in colls:

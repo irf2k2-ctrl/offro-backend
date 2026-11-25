@@ -804,20 +804,24 @@ function _secUrl(u) {
           <select id="notif_target" class="form-select" onchange="toggleNotifTarget()">
             <option value="all_users">👥 All Users (FCM topic)</option>
             <option value="city">🏙️ City-wise Users</option>
+            <option value="country">🌍 All Users in a Country</option>
             <option value="offers" disabled>🎁 Offers Subscribers (disabled)</option>
             <option value="specific">📱 Specific User (by phone)</option>
           </select>
         </div>
         <div class="mb-3" id="notif_city_row" style="display:none;">
+          <div id="notif_city_wrap">
           <label class="form-label">City Name</label>
           <input id="notif_city" class="form-control" placeholder="e.g. Ballari, Bangalore, Hubli">
+          </div>
           <label class="form-label mt-2">Country</label>
           <select id="notif_country" class="form-select">
-            <option value="">Auto (from City Master)</option>
+            <option value="" id="notif_country_auto">Auto (from City Master)</option>
             <option value="IN">India</option><option value="JO">Jordan</option><option value="NP">Nepal</option>
             <option value="PH">Philippines</option><option value="SA">Saudi Arabia</option>
           </select>
-          <div style="font-size:11px;color:var(--muted);margin-top:3px;">Reaches customers of this city in this country only. If the same city name exists in more than one country, choose the country. <code id="notif_city_topic_preview" style="display:none"></code></div>
+          <div id="notif_city_help" style="font-size:11px;color:var(--muted);margin-top:3px;">Reaches customers of this city in this country only. If the same city name exists in more than one country, choose the country. <code id="notif_city_topic_preview" style="display:none"></code></div>
+          <div id="notif_country_help" style="font-size:11px;color:var(--muted);margin-top:3px;display:none;">Reaches every account (customers and merchants) in the selected country, the same people "All Users" reaches there. Accounts without a device token are skipped.</div>
         </div>
         <div class="mb-3" id="notif_phone_row" style="display:none;">
           <label class="form-label">Phone Number</label>
@@ -847,6 +851,8 @@ function _secUrl(u) {
         <div class="mb-3" id="notif_topic_preview_box" style="background:#f0f7f3;border-radius:8px;padding:10px 14px;font-size:12px;color:var(--primary);">
           📡 Audience: <strong id="notif_topic_label">all_users</strong>
         </div>
+        <div class="mb-3" id="notif_audience_box" style="display:none;font-size:13px;border:1px solid var(--border);border-radius:8px;padding:10px 14px;"></div>
+        <button class="btn-o me-2" type="button" onclick="previewNotifAudience()" id="notif_preview_btn"><i class="fas fa-users me-1"></i> Check audience</button>
         <button class="btn-p" onclick="sendNotification()" id="notif_send_btn"><i class="fas fa-paper-plane me-1"></i> Send Notification</button>
         <p id="notif_msg" class="mt-2" style="font-size:13px;"></p>
       </div>
@@ -934,6 +940,15 @@ function _secUrl(u) {
           <option value="product">Product</option>
           <option value="influencer">Influencer</option>
         </select>
+        <select id="txn_country_filter" class="form-select" style="max-width:170px;" onchange="filterTxns()" title="Filter by country">
+          <option value="">All Countries</option>
+          <option value="IN">India</option>
+          <option value="JO">Jordan</option>
+          <option value="NP">Nepal</option>
+          <option value="PH">Philippines</option>
+          <option value="SA">Saudi Arabia</option>
+          <option value="NONE">Country not known</option>
+        </select>
         <span id="txn_total" style="font-size:13px;color:var(--muted);"></span>
         <button class="btn btn-sm" onclick="exportPaymentsPDF()" style="background:var(--primary);color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-pdf me-1"></i>PDF</button>
         <button class="btn btn-sm" onclick="exportPaymentsCSV()" style="background:#6c757d;color:white;border:none;border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;"><i class="fas fa-file-csv me-1"></i>CSV</button>
@@ -941,7 +956,7 @@ function _secUrl(u) {
       <div style="overflow-x:auto;">
       <table class="table table-hover" style="min-width:960px;">
         <thead><tr>
-          <th>Date</th><th>Invoice No</th><th>Merchant</th><th>Phone</th>
+          <th>Date</th><th>Invoice No</th><th>Merchant</th><th>Phone</th><th>Country</th><th>Currency</th>
           <th>Item</th><th>Type</th><th>Plan</th><th>Orig Amt</th><th>Disc Code</th><th>Disc Val</th><th>Final Amt</th><th>GST</th><th>Total</th><th>Status</th><th>Download</th>
         </tr></thead>
         <tbody id="txn_body"></tbody>
@@ -3738,16 +3753,18 @@ function downloadInvoicePdf(inv) {
     <div class="row"><span class="label">Date</span><span class="value">${(inv.created_at||'—').slice(0,10)}</span></div>
     <div class="row"><span class="label">Merchant</span><span class="value">${escHtml(inv.merchant_name||'—')}</span></div>
     <div class="row"><span class="label">Phone</span><span class="value">${escHtml(inv.merchant_phone||'—')}</span></div>
+    <div class="row"><span class="label">Country</span><span class="value">${escHtml(txnCountryLabel(inv))}</span></div>
+    <div class="row"><span class="label">Currency</span><span class="value">${escHtml(inv.currency_code||'Not recorded')}</span></div>
     <div class="row"><span class="label">Item</span><span class="value">${escHtml(inv.item_label||inv.store_name||'—')}</span></div>
     <div class="row"><span class="label">Type</span><span class="value">${escHtml(inv.type||'—')}</span></div>
     <div class="row"><span class="label">Plan</span><span class="value">${escHtml(inv.plan||'—')}</span></div>
     <hr style="margin:20px 0;border-color:#d4e8de">
-    <div class="row"><span class="label">Original Amount</span><span class="value">₹${parseFloat(inv.original_amount||inv.base_price||0).toFixed(2)}</span></div>
+    <div class="row"><span class="label">Original Amount</span><span class="value">${txnMoney(inv,inv.original_amount||inv.base_price||0)}</span></div>
     <div class="row"><span class="label">Discount Code</span><span class="value">${escHtml(inv.discount_code||'—')}</span></div>
-    <div class="row"><span class="label">Discount Value</span><span class="value" style="color:#c0392b">${parseFloat(inv.discount_amount||0)>0?'−₹'+parseFloat(inv.discount_amount).toFixed(2):'—'}</span></div>
-    <div class="row"><span class="label">Final Amount (pre-tax)</span><span class="value">₹${parseFloat(inv.final_amount||(parseFloat(inv.base_price||0)-parseFloat(inv.discount_amount||0))||0).toFixed(2)}</span></div>
-    <div class="row"><span class="label">GST (18%)</span><span class="value">₹${parseFloat(inv.gst||0).toFixed(2)}</span></div>
-    <div class="total-row"><span style="font-weight:800;color:#3E5F55;font-size:16px">Total Paid</span><span style="font-weight:800;color:#3E5F55;font-size:16px">₹${parseFloat(inv.total||0).toFixed(2)}</span></div>
+    <div class="row"><span class="label">Discount Value</span><span class="value" style="color:#c0392b">${parseFloat(inv.discount_amount||0)>0?'−'+txnMoney(inv,inv.discount_amount):'—'}</span></div>
+    <div class="row"><span class="label">Final Amount (pre-tax)</span><span class="value">${txnMoney(inv,inv.final_amount||(parseFloat(inv.base_price||0)-parseFloat(inv.discount_amount||0))||0)}</span></div>
+    <div class="row"><span class="label">GST (18%)</span><span class="value">${txnMoney(inv,inv.gst||0)}</span></div>
+    <div class="total-row"><span style="font-weight:800;color:#3E5F55;font-size:16px">Total Paid</span><span style="font-weight:800;color:#3E5F55;font-size:16px">${txnMoney(inv,inv.total||0)}</span></div>
     <div style="margin-top:24px"><span class="badge">● Paid</span></div>
     <p style="font-size:11px;color:#6b8c7e;margin-top:40px">OFFRO — Discover • Save • Earn | This is a computer-generated invoice.</p>
     <button onclick="window.print()" style="margin-top:16px;background:#3E5F55;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">🖨 Print / Save PDF</button>
@@ -3761,10 +3778,12 @@ function filterTxns() {
   const q      = (document.getElementById('txn_search')?.value||'').toLowerCase();
   const status = document.getElementById('txn_status_filter')?.value||'';
   const type   = document.getElementById('txn_type_filter')?.value||'';
+  const ctry   = document.getElementById('txn_country_filter')?.value||'';
   let rows = (typeof _allTxnRows !== 'undefined' && _allTxnRows.length ? _allTxnRows : allTxns);
   if (q)      rows = rows.filter(i=>(i.merchant_name||'').toLowerCase().includes(q)||(i.invoice_no||'').toLowerCase().includes(q)||(i.store_name||'').toLowerCase().includes(q));
   if (status) rows = rows.filter(i=>{ const st=i._status||(i.invoice_no==='PENDING'?'pending':'paid'); return st===status||(status==='paid'&&(st==='free'||st==='paid')); });
   if (type)   rows = rows.filter(i=>(i.type||'store')===type);
+  if (ctry)   rows = rows.filter(i=> ctry==='NONE' ? !i.country : i.country===ctry);
   renderTxnRows(rows);
 }
 
@@ -3791,25 +3810,27 @@ function exportPaymentsPDF() {
     t.invoice_no || "-",
     t.merchant_name || "-",
     t.merchant_phone || "-",
+    t.country || "-",
+    t.currency_code || "-",
     t.store_name || "-",
     t.plan || "-",
-    "₹" + (t.base_price||0).toFixed(2),
-    "₹" + (t.gst||0).toFixed(2),
-    "₹" + (t.total||0).toFixed(2),
+    (t.base_price||0).toFixed(2),
+    (t.gst||0).toFixed(2),
+    (t.total||0).toFixed(2),
     t.razorpay_payment_id || "manual"
   ]);
   
   doc.autoTable({
     startY: 22,
-    head: [["Date","Invoice No","Merchant","Phone","Store","Plan","Base","GST","Total","Payment ID"]],
+    head: [["Date","Invoice No","Merchant","Phone","Country","Currency","Store","Plan","Base","GST","Total","Payment ID"]],
     body: rows,
     styles: { fontSize: 8, cellPadding: 2 },
     headStyles: { fillColor: [62, 95, 85], textColor: 255, fontStyle: "bold", fontSize: 8 },
     alternateRowStyles: { fillColor: [240, 249, 244] },
     columnStyles: {
-      0: { cellWidth: 22 }, 1: { cellWidth: 28 }, 2: { cellWidth: 30 },
-      3: { cellWidth: 24 }, 4: { cellWidth: 30 }, 5: { cellWidth: 18 },
-      6: { cellWidth: 18 }, 7: { cellWidth: 15 }, 8: { cellWidth: 18 }, 9: { cellWidth: 38 }
+      0: { cellWidth: 20 }, 1: { cellWidth: 26 }, 2: { cellWidth: 26 },
+      3: { cellWidth: 22 }, 4: { cellWidth: 14 }, 5: { cellWidth: 14 }, 6: { cellWidth: 26 }, 7: { cellWidth: 16 },
+      8: { cellWidth: 16 }, 9: { cellWidth: 14 }, 10: { cellWidth: 16 }, 11: { cellWidth: 34 }
     },
     didDrawPage: (data) => {
       doc.setFontSize(8); doc.setTextColor(150);
@@ -3819,23 +3840,25 @@ function exportPaymentsPDF() {
   });
   
   // Summary footer
-  const total = (_allTxnRows && _allTxnRows.length ? _allTxnRows : allTxns).reduce((s,t)=>s+(t.total||0),0);
-  const gstTotal = (_allTxnRows && _allTxnRows.length ? _allTxnRows : allTxns).reduce((s,t)=>s+(t.gst||0),0);
+  const _exp = (_allTxnRows && _allTxnRows.length ? _allTxnRows : allTxns);
+  const total = txnRevenueByCurrency(_exp);   // per currency: different currencies are never added together
   const finalY = doc.lastAutoTable.finalY + 6;
   doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(62,95,85);
-  doc.text(`Total Records: ${allTxns.length}   |   Total GST: ₹${gstTotal.toFixed(2)}   |   Total Revenue: ₹${total.toFixed(2)}`, 14, finalY);
+  doc.text(`Total Records: ${allTxns.length}   |   Total Revenue: ${total}`, 14, finalY);
   
   doc.save(`OffrO_Payments_${new Date().toISOString().slice(0,10)}.pdf`);
 }
 
 // ===== EXPORT PAYMENTS CSV =====
 function exportPaymentsCSV() {
-  const headers = ["Date","Invoice No","Merchant","Phone","Store","Plan","Base Price","GST","Total","Payment ID"];
+  const headers = ["Date","Invoice No","Merchant","Phone","Country","Currency","Store","Plan","Base Price","GST","Total","Payment ID"];
   const rows = (_allTxnRows && _allTxnRows.length ? _allTxnRows : allTxns).map(t => [
     t.created_at||"",
     t.invoice_no||"",
     t.merchant_name||"",
     t.merchant_phone||"",
+    t.country||"",
+    t.currency_code||"",
     t.store_name||"",
     t.plan||"",
     (t.base_price||0).toFixed(2),
@@ -4864,18 +4887,27 @@ const _TOPIC_LABELS = {
   "all_users": "all_users",
   "offers":    "offers",
   "city":      "customers of the selected city",
+  "country":   "all accounts of the selected country",
   "specific":  "direct (token)",
 };
 
 function toggleNotifTarget() {
   const target = document.getElementById("notif_target").value;
   document.getElementById("notif_phone_row").style.display  = target === "specific" ? ""     : "none";
-  document.getElementById("notif_city_row").style.display   = target === "city"     ? ""     : "none";
+  document.getElementById("notif_city_row").style.display   = (target === "city" || target === "country") ? "" : "none";
+  const _isCountry = target === "country";
+  document.getElementById("notif_city_wrap").style.display = _isCountry ? "none" : "";
+  document.getElementById("notif_city_help").style.display = _isCountry ? "none" : "";
+  document.getElementById("notif_country_help").style.display = _isCountry ? "" : "none";
+  const _auto = document.getElementById("notif_country_auto"); if (_auto) _auto.hidden = _isCountry;
+  if (_isCountry && !document.getElementById("notif_country").value) document.getElementById("notif_country").value = "";
+  const _ab = document.getElementById("notif_audience_box"); if (_ab) _ab.style.display = "none";
   document.getElementById("notif_topic_preview_box").style.display = target === "specific" ? "none" : "";
   // Update topic preview label
   const city = document.getElementById("notif_city").value.trim();
   let label = _TOPIC_LABELS[target] || target;
   if (target === "city") label = city ? city + " (customers)" : "— enter city —";
+  if (target === "country") { const _cs = document.getElementById("notif_country"); label = _cs && _cs.value ? _cs.options[_cs.selectedIndex].text + " (all accounts)" : "— select country —"; }
   document.getElementById("notif_topic_label").innerText = label;
 }
 
@@ -4915,6 +4947,7 @@ async function loadNotifications() {
       if (n.target === "all_users" || n.target === "all") return "👥 All Users";
       if (n.target === "offers") return "🎁 Offers";
       if (n.target === "city") return `🏙️ ${n.target_city || "City"}`;
+      if (n.target === "country") return `🌍 ${n.country || "Country"}`;
       if (n.target === "specific") return `📱 ${n.target_phone || "—"}`;
       return n.target || "—";
     };
@@ -5045,6 +5078,35 @@ async function _niUpload() {
   }
 }
 
+// Dry run: the server returns counts only (nothing is uploaded, sent, stored; no phone numbers, no device tokens).
+async function _notifAudienceCounts(msgEl) {
+  const target = document.getElementById("notif_target").value;
+  const body = {
+    title: (document.getElementById("notif_title").value.trim() || "preview"), body: (document.getElementById("notif_body").value.trim() || "preview"),
+    target, dry_run: true,
+    target_city: target === "city" ? document.getElementById("notif_city").value.trim() : "",
+    target_country: (target === "city" || target === "country") ? document.getElementById("notif_country").value : "",
+  };
+  try {
+    const r = await fetch("/admin/notifications/send", {method: "POST", credentials: "include", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if (!r.ok) { if (msgEl) { msgEl.style.color = "var(--danger)"; msgEl.innerText = d.detail || ("Error " + r.status); } return null; }
+    return d;
+  } catch(e) { if (msgEl) { msgEl.style.color = "var(--danger)"; msgEl.innerText = "Error: " + e.message; } return null; }
+}
+async function previewNotifAudience() {
+  const target = document.getElementById("notif_target").value;
+  const msgEl = document.getElementById("notif_msg"), box = document.getElementById("notif_audience_box");
+  if (target === "specific") { msgEl.style.color = "var(--muted)"; msgEl.innerText = "A specific-user message goes to one phone number."; return; }
+  if (target === "city" && !document.getElementById("notif_city").value.trim()) { msgEl.style.color = "var(--danger)"; msgEl.innerText = "City name required"; return; }
+  if (target === "country" && !document.getElementById("notif_country").value) { msgEl.style.color = "var(--danger)"; msgEl.innerText = "Select a country"; return; }
+  msgEl.innerText = "";
+  const d = await _notifAudienceCounts(msgEl);
+  if (!d) { box.style.display = "none"; return; }
+  box.style.display = "";
+  box.innerHTML = `<strong>${d.unique_tokens}</strong> device(s) will be tried.<br>Eligible accounts: <strong>${d.eligible_records}</strong> &middot; skipped: <strong>${d.skipped_no_token + d.skipped_duplicate}</strong> (${d.skipped_no_token} without a device token, ${d.skipped_duplicate} duplicate device)${d.country ? `<br>Country: ${escHtml(d.country)}` : ""}`;
+}
+
 async function sendNotification() {
   const title  = document.getElementById("notif_title").value.trim();
   const body   = document.getElementById("notif_body").value.trim();
@@ -5057,6 +5119,16 @@ async function sendNotification() {
   if (!title || !body) { msgEl.style.color="var(--danger)"; msgEl.innerText="Title and message are required"; return; }
   if (target === "specific" && !phone) { msgEl.style.color="var(--danger)"; msgEl.innerText="Phone number required"; return; }
   if (target === "city" && !city) { msgEl.style.color="var(--danger)"; msgEl.innerText="City name required"; return; }
+  if (target === "country" && !document.getElementById("notif_country").value) { msgEl.style.color="var(--danger)"; msgEl.innerText="Select a country"; return; }
+
+  // Show who will be reached BEFORE anything is sent (counts only - no phone numbers or device tokens).
+  if (target !== "specific") {
+    const pv = await _notifAudienceCounts(msgEl);
+    if (!pv) return;
+    if (!confirm(`This will be sent to ${pv.unique_tokens} device(s).\nEligible accounts: ${pv.eligible_records}\nSkipped: ${pv.skipped_no_token + pv.skipped_duplicate} (${pv.skipped_no_token} without a device token, ${pv.skipped_duplicate} duplicate device)\n\nSend now?`)) {
+      msgEl.style.color = "var(--muted)"; msgEl.innerText = "Cancelled - nothing was sent."; return;
+    }
+  }
 
   btn.disabled = true;
   msgEl.style.color = "var(--muted)"; msgEl.innerText = "Sending…";
@@ -5073,7 +5145,7 @@ async function sendNotification() {
     title, body, target,
     target_phone: target === "specific" ? phone : "",
     target_city:  target === "city"     ? city  : "",
-    target_country: target === "city" ? (document.getElementById("notif_country")||{value:""}).value : "",
+    target_country: (target === "city" || target === "country") ? (document.getElementById("notif_country")||{value:""}).value : "",
     image_url: imageUrl,
     use_topic: target !== "specific"
   };
@@ -7249,6 +7321,7 @@ async function loadMerchantTxnsFull() {
           gst: s.gst??0,
           total: total,
           created_at: s.created_at||'',
+          country: s.country||'', country_name: s.country_name||'', currency_code: s.currency_code||'', currency_symbol: s.currency_symbol||'',
           _status: total===0?'free':'pending',
         });
       }
@@ -7274,17 +7347,32 @@ async function loadMerchantTxnsFull() {
     safe('txn_total_merchants', uniqueMerchants.size);
     safe('txn_total_subs',      paid.length);
     safe('txn_pending_subs',    pending.length);
-    safe('txn_total_revenue',   '₹'+revenue.toFixed(2));
+    safe('txn_total_revenue',   txnRevenueByCurrency(paid));
 
     _allTxnRows = invoices;
     renderTxnRows(invoices);
   } catch(e) { console.error('loadMerchantTxnsFull:', e); }
 }
 
+// Payments are shown in the currency they were charged in. Nothing is converted; a row with no recorded currency shows the bare number.
+function txnMoney(inv, v) {
+  const sym = inv.currency_symbol || inv.currency_code || '';
+  const n = (parseFloat(v)||0).toFixed(2);
+  return sym ? (sym.length > 1 ? sym + ' ' + n : sym + n) : n;
+}
+function txnCountryLabel(inv) { return inv.country ? (inv.country_name ? inv.country_name + ' (' + inv.country + ')' : inv.country) : 'Not known'; }
+// Revenue per currency - amounts of different currencies are never added together.
+function txnRevenueByCurrency(rows) {
+  const t = {};
+  rows.forEach(i => { const c = i.currency_code || '—'; t[c] = (t[c]||0) + (parseFloat(i.total)||0); });
+  const parts = Object.keys(t).sort().map(c => (c==='—' ? '' : c + ' ') + t[c].toFixed(2) + (c==='—' ? ' (no currency recorded)' : ''));
+  return parts.length ? parts.join(' · ') : '0.00';
+}
+
 function renderTxnRows(rows) {
   const tbody = document.getElementById('txn_body');
   if (!tbody) return;
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="16" style="text-align:center;padding:24px;color:var(--muted)">No transactions found.</td></tr>'; return; }
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="17" style="text-align:center;padding:24px;color:var(--muted)">No transactions found.</td></tr>'; return; }
 
   const typeColor = {store:'#3E5F55', banner:'#c0392b', voucher:'#856404', product:'#856404', 'merchant-product':'#856404'};
   tbody.innerHTML = rows.map(inv => {
@@ -7313,15 +7401,17 @@ function renderTxnRows(rows) {
       <td style="font-size:12px;font-weight:600;color:var(--primary)">${escHtml(inv.invoice_no||'—')}</td>
       <td style="font-size:13px">${escHtml(inv.merchant_name||'—')}</td>
       <td style="font-size:12px;color:var(--muted)">${escHtml(inv.merchant_phone||'—')}</td>
+      <td style="font-size:12px">${escHtml(txnCountryLabel(inv))}</td>
+      <td style="font-size:12px">${inv.currency_code ? escHtml(inv.currency_code) : '<span style="color:var(--muted)" title="No currency was recorded for this historical payment">—</span>'}</td>
       <td style="font-size:12px">${escHtml(inv.item_label||inv.store_name||'—')}</td>
       <td>${typeBadge}</td>
       <td style="font-size:12px">${escHtml(inv.plan||'—')}</td>
-      <td style="font-size:13px">₹${origAmt.toFixed(2)}</td>
+      <td style="font-size:13px">${txnMoney(inv,origAmt)}</td>
       <td style="font-size:12px;color:var(--muted)">${escHtml(discCode)}</td>
-      <td style="font-size:12px;color:#c0392b">${discVal>0?'−₹'+discVal.toFixed(2):'—'}</td>
-      <td style="font-size:13px">₹${finalAmt.toFixed(2)}</td>
-      <td style="font-size:13px">₹${gstAmt.toFixed(2)}<br><span style="font-size:10px;color:var(--muted)">18%</span></td>
-      <td style="font-size:13px;font-weight:700;color:var(--primary)">₹${totalAmt.toFixed(2)}</td>
+      <td style="font-size:12px;color:#c0392b">${discVal>0?'−'+txnMoney(inv,discVal):'—'}</td>
+      <td style="font-size:13px">${txnMoney(inv,finalAmt)}</td>
+      <td style="font-size:13px">${txnMoney(inv,gstAmt)}</td>
+      <td style="font-size:13px;font-weight:700;color:var(--primary)">${txnMoney(inv,totalAmt)}</td>
       <td>${statusBadge}</td>
       <td>${dlBtn}</td>
     </tr>`;
@@ -7982,6 +8072,78 @@ async function openAccountDetail(accountId, name) {
   }
 }
 
+// ── Support/Admin account edit (Phase 2 / Task 3): name + WhatsApp-OTP-verified mobile change. Dashboard only; the server enforces every rule. ──
+async function _acctEditApi(method, path, body) {
+  const r = await fetch('/admin' + path, {method, credentials:'include', headers:{'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined});
+  let d = {}; try { d = await r.json(); } catch(e) {}
+  if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : ('Request failed (' + r.status + ')'));
+  return d;
+}
+function _acctEditMsg(t, ok) { const el = document.getElementById('ae_msg'); if (el) { el.style.color = ok ? '#1a6640' : '#c0392b'; el.textContent = t || ''; } }
+function closeAccountEdit() { const m = document.getElementById('acctEditOverlay'); if (m) m.remove(); }
+async function openAccountEdit(acctId, name) {
+  closeAccountEdit();
+  const o = document.createElement('div');
+  o.id = 'acctEditOverlay';
+  o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10050;display:flex;align-items:center;justify-content:center;padding:16px;';
+  o.innerHTML = `<div style="background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:90vh;overflow:auto;padding:20px 22px;">
+    <div class="d-flex justify-content-between align-items-center mb-3"><div class="fw-bold" style="color:var(--primary);font-size:16px;">Edit account</div>
+      <button onclick="closeAccountEdit()" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button></div>
+    <div class="fw-bold mb-2" style="font-size:13px;">Name</div>
+    <div class="d-flex gap-2 mb-3"><input id="ae_name" class="form-control" maxlength="80" value="${escHtml(name||'')}"><button class="btn-p" id="ae_name_btn">Save name</button></div>
+    <hr>
+    <div class="fw-bold mb-1" style="font-size:13px;">Change mobile number</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">The new number gets a WhatsApp code. The old number stays in use until the code is verified.</div>
+    <div id="ae_open"></div>
+    <div id="ae_form">
+      <div class="d-flex gap-2 mb-2">
+        <select id="ae_country" class="form-select" style="max-width:150px;"><option value="IN">India (+91)</option><option value="JO">Jordan (+962)</option><option value="NP">Nepal (+977)</option><option value="PH">Philippines (+63)</option><option value="SA">Saudi Arabia (+966)</option></select>
+        <input id="ae_phone" class="form-control" placeholder="New mobile number" inputmode="tel" autocomplete="off">
+      </div>
+      <label style="font-size:12px;display:block;margin-bottom:6px;"><input type="checkbox" id="ae_unavail"> The old number is not available (needs Super Admin approval)</label>
+      <input id="ae_reason" class="form-control mb-2" placeholder="Reason (required when the old number is not available)" maxlength="200" style="display:none;">
+      <button class="btn-p" id="ae_req_btn">Send WhatsApp code to new number</button>
+    </div>
+    <div id="ae_msg" style="font-size:12px;margin-top:10px;min-height:16px;"></div></div>`;
+  document.body.appendChild(o);
+  document.getElementById('ae_unavail').onchange = e => { document.getElementById('ae_reason').style.display = e.target.checked ? '' : 'none'; };
+  document.getElementById('ae_name_btn').onclick = async () => {
+    try { const d = await _acctEditApi('PUT', `/accounts/${encodeURIComponent(acctId)}/edit-name`, {name: document.getElementById('ae_name').value});
+      _acctEditMsg(d.changed ? 'Name updated.' : 'No change.', true); } catch(e) { _acctEditMsg(e.message, false); }
+  };
+  document.getElementById('ae_req_btn').onclick = async () => {
+    try { const un = document.getElementById('ae_unavail').checked;
+      await _acctEditApi('POST', `/accounts/${encodeURIComponent(acctId)}/phone-change`, {new_phone: document.getElementById('ae_phone').value, country: document.getElementById('ae_country').value, old_number_unavailable: un, reason: document.getElementById('ae_reason').value});
+      _acctEditMsg(un ? 'Sent for Super Admin approval.' : 'Code sent on WhatsApp.', true); await _acctEditRefresh(acctId);
+    } catch(e) { _acctEditMsg(e.message, false); }
+  };
+  await _acctEditRefresh(acctId);
+}
+async function _acctEditRefresh(acctId) {
+  const box = document.getElementById('ae_open'); if (!box) return;
+  try {
+    const d = await _acctEditApi('GET', `/accounts/${encodeURIComponent(acctId)}/phone-changes`);
+    const live = (d.requests||[]).find(r => r.status === 'awaiting_otp' || r.status === 'pending_approval');
+    document.getElementById('ae_form').style.display = live ? 'none' : '';
+    if (!live) { box.innerHTML = ''; return; }
+    const id = escHtml(live.id);
+    box.innerHTML = `<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;font-size:13px;">
+      New number: <strong style="font-family:monospace;">${escHtml(live.new_phone_masked)}</strong> (${escHtml(live.new_country)})<br>
+      Status: <strong>${live.status === 'pending_approval' ? 'Waiting for Super Admin approval' : 'Waiting for the WhatsApp code'}</strong>
+      ${live.reason ? `<br><span style="color:var(--muted);">Reason: ${escHtml(live.reason)}</span>` : ''}
+      ${live.status === 'awaiting_otp' ? `<div class="d-flex gap-2 mt-2"><input id="ae_code" class="form-control" placeholder="Code" maxlength="8" inputmode="numeric" autocomplete="one-time-code" style="max-width:140px;"><button class="btn-p" id="ae_verify">Verify &amp; change number</button><button class="btn-o" id="ae_resend">Resend</button></div>`
+        : `<div class="d-flex gap-2 mt-2"><button class="btn-p" id="ae_approve">Approve (Super Admin)</button><button class="btn-o" id="ae_reject">Reject</button></div>`}
+      <div class="mt-2"><button class="btn-o" id="ae_cancel" style="font-size:12px;">Cancel request</button></div></div>`;
+    const act = (el, path, body, okMsg, done) => { const b = document.getElementById(el); if (!b) return; b.onclick = async () => {
+      try { await _acctEditApi('POST', path, body && body()); _acctEditMsg(okMsg, true); if (done) done(); else await _acctEditRefresh(acctId); } catch(e) { _acctEditMsg(e.message, false); } }; };
+    act('ae_verify', `/phone-changes/${live.id}/verify`, () => ({code: document.getElementById('ae_code').value}), 'Mobile number changed.', () => { closeAccountEdit(); if (typeof loadAccounts === 'function') loadAccounts(); });
+    act('ae_resend', `/phone-changes/${live.id}/resend`, null, 'A new code was sent.');
+    act('ae_approve', `/phone-changes/${live.id}/approve`, null, 'Approved. Code sent on WhatsApp.');
+    act('ae_reject', `/phone-changes/${live.id}/reject`, () => ({}), 'Rejected.');
+    act('ae_cancel', `/phone-changes/${live.id}/cancel`, null, 'Request cancelled.');
+  } catch(e) { _acctEditMsg(e.message, false); }
+}
+
 function renderAccountDetailHTML(d) {
   const roles = roleBadgeHtml(d.roles);
   const visitPts  = d.visit_pts||0;
@@ -8015,6 +8177,9 @@ function renderAccountDetailHTML(d) {
     <div class="d-flex gap-2 mb-4 flex-wrap">
       <button class="btn-p" style="font-size:13px;" onclick="openWalletFromAcct('${_secJs(acctId)}','${_secJs(acctName)}')">
         <i class="fas fa-history me-1"></i> Rewards History
+      </button>
+      <button class="btn-o" style="font-size:13px;" onclick="openAccountEdit('${_secJs(acctId)}','${_secJs(acctName)}')">
+        <i class="fas fa-pen me-1"></i> Edit
       </button>
       <button class="btn-o" style="font-size:13px;" onclick="openAddPointsFromAcct('${_secJs(acctId)}','${_secJs(acctName)}')">
         <i class="fas fa-plus-circle me-1"></i> Add Points

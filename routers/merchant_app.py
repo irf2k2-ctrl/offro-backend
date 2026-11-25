@@ -447,13 +447,16 @@ def merchant_register(data: dict):
     return {"message": "Registered successfully. You can now login.", "merchant_id": str(merchant_oid)}
 
 @router.post("/login")
-def merchant_login(data: dict):
+def merchant_login(data: dict, request: Request):
     """Unified merchant login — checks accounts first, falls back to merchants."""
     from routers.users import _phone_variants as _pv
     phone = str(data.get("phone", "")).strip()
     if not phone:
         raise HTTPException(400, "Phone required")
     variants = _pv(phone, __import__("utils.phone", fromlist=["x"]).request_country(data))      # lookup keys only; token logic below is unchanged
+    # D2: same proof rule as /user/account-login (services/login_proof.py): phone alone is never enough.
+    from services import login_proof as _lp
+    _lp.require_login_proof(request, data, variants)
 
     # Check unified accounts collection first
     acct = db.accounts.find_one({"phone": {"$in": variants}})
