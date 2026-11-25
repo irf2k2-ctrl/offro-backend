@@ -224,6 +224,40 @@ def _require_store_location(*, lat, lng, city, state):
     return lat_f, lng_f
 
 
+def _store_country_rules(m: dict, data: dict, *, city, phone, existing_city=None, creating=False) -> dict:
+    """Country rules for a merchant's Store (Phase 1). The merchant never chooses a country: it is the ACCOUNT's (utils.countries.account_country).
+    The app may also send `country` (its own account's, derived invisibly); that marks a build that offers City Master suggestions:
+      * `country` that is not the account's -> 400;
+      * the store's city must belong to that country (City Master): a city of ANOTHER country is always refused; a city unknown to
+        the master is refused for a non-India country only when the app sent `country` (older builds and India stay lenient);
+      * a city that did not change on an edit never blocks it (legacy stores keep saving);
+      * with `country` sent for a non-India account the store phone must be a valid mobile of that country (stored as E.164);
+        India's phone handling is exactly as before.
+    Returns {"country": iso-or-"", "phone": value to store or None (= leave as sent)}."""
+    from utils import countries as _ctry
+    from utils import phone as _ph
+    from services import city_master as _cm
+    info = _ctry.account_country(m or {})
+    own = info["iso"] if info else ""
+    sent = str(data.get("country") or "").strip().upper()
+    if sent and own and sent != own:
+        raise HTTPException(400, "The store's country must be your account's country.")
+    iso = sent or own
+    out = {"country": sent, "phone": None}
+    city_s = " ".join(str(city or "").split())
+    if iso and city_s and (creating or city_s.lower() != " ".join(str(existing_city or "").split()).lower()):
+        err = _cm.check_city_in_country(city_s, iso, strict=bool(sent))
+        if err:
+            raise HTTPException(400, err.message)
+    ph = str(phone or "").strip()
+    if sent and sent != "IN" and ph:
+        reg = _ph.register_phone(ph, sent)
+        if not reg.phone:
+            raise HTTPException(400, "Please enter a valid mobile number for your country.")
+        out["phone"] = reg.phone
+    return out
+
+
 def _mid(m: dict) -> str:
     """Return the correct merchant_id for DB queries.
 
@@ -572,6 +606,7 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         lat=data.get("lat"), lng=data.get("lng"),
         city=data.get("city"), state=data.get("state"),
     )
+    _rules = _store_country_rules(m, data, city=data.get("city"), phone=data.get("phone"), creating=True)
     store = {
         "merchant_id": _mid(m),
         "merchant_name": m.get("name"),
@@ -581,7 +616,7 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "city":          data.get("city", ""),
         "area":          data.get("area") or m.get("area", ""),
         "address":       data.get("address", ""),
-        "phone":         data.get("phone") or m.get("phone", ""),
+        "phone":         _rules["phone"] or data.get("phone") or m.get("phone", ""),
         "about":         data.get("about", ""),
         "open_time":     data.get("open_time", ""),
         "close_time":    data.get("close_time", ""),
@@ -594,6 +629,8 @@ def create_merchant_store(data: dict, m=Depends(get_merchant)):
         "is_new_in_town": False,
         "created_at":   datetime.utcnow(),
     }
+    if _rules["country"]:
+        store["country"] = _rules["country"]       # only a build that sent the (account's) country stamps it; older stores/builds: nothing new
     # Optional Store Logo ("Upload Logo") picked on the Add Store screen — same
     # field the edit endpoint writes (image2_url); omitted when none was chosen.
     _logo2 = data.get("image2")
@@ -677,6 +714,12 @@ def update_merchant_store(sid: str, data: dict, m=Depends(get_merchant)):
     # blanking out valid coordinates on purpose". Store location stays
     # independent of the merchant's account location (accounts.city/state)
     # either way.
+    _rules = _store_country_rules(m, data, city=upd.get("city", store.get("city")), phone=upd.get("phone"),
+                                  existing_city=store.get("city"), creating=False)
+    if _rules["phone"]:
+        upd["phone"] = _rules["phone"]
+    if _rules["country"] and not store.get("country"):
+        upd["country"] = _rules["country"]
     lat_supplied = str(upd.get("lat", "")).strip() != ""
     lng_supplied = str(upd.get("lng", "")).strip() != ""
     if lat_supplied or lng_supplied:

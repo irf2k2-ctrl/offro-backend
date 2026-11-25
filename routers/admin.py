@@ -3198,9 +3198,23 @@ def fulfill_withdraw_request(request_id: str, body: dict, a=Depends(get_current_
 
 # ===================== PROMO SLIDERS =====================
 
+def _slider_visible(a, d) -> bool:
+    """A country-restricted user sees a promo slider only when it is theirs: targeted to ONLY their country (`countries`), else - for a
+    merchant-attributed slider with no targeting - when its merchant is in their country. Global / legacy sliders stay with unrestricted users."""
+    from services import banner_countries as _bc
+    if not _dc.scope(a):
+        return True
+    if _bc.of(d):
+        return _bc.visible_to_admin(a, d)
+    if d.get("merchant_id") or d.get("merchant_phone"):
+        return _dc.record_in_scope(a, d, ("merchant_id",), ("merchant_phone",))
+    return False
+
+
 @router.get("/promo-sliders")
 def list_promo_sliders(a=Depends(get_current_admin)):
-    docs = list(db.promo_sliders.find().sort("sort_order", 1))
+    from services import banner_countries as _bc
+    docs = [d for d in db.promo_sliders.find().sort("sort_order", 1) if _slider_visible(a, d)]
     result = []
     for d in docs:
         created = d.get("created_at", "")
@@ -3233,6 +3247,7 @@ def list_promo_sliders(a=Depends(get_current_admin)):
             "deleted_by_admin": d.get("deleted_by_admin", False),
             "invoice_no":    d.get("invoice_no", ""),
             "approval_status": d.get("approval_status", "approved"),
+            "countries":     _bc.of(d),              # [] = all countries
         })
     return result
 
@@ -3241,6 +3256,8 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "add")
     if not data.get("image_url"):
         raise HTTPException(400, "image_url required")
+    from services import banner_countries as _bc
+    _countries_sel = _bc.for_admin(a, data.get("countries"))
     # Auto-calculate end_date from from_date + days if not provided
     from_date = data.get("from_date", "")
     days      = int(data.get("days", 0))
@@ -3271,6 +3288,7 @@ def create_promo_slider(data: dict, a=Depends(get_current_admin)):
         "merchant_name":  data.get("merchant_name", ""),
         "merchant_phone": merchant_phone_norm,
         "source":         "admin",
+        "countries":      _countries_sel,
         "created_at":     datetime.utcnow(),
     }
     r = db.promo_sliders.insert_one(doc)
@@ -3281,6 +3299,19 @@ def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "edit")
     upd = {}
     import re as _re
+    from services import banner_countries as _bc
+    if _dc.scope(a) or "countries" in data:
+        try:
+            _cur = db.promo_sliders.find_one({"_id": ObjectId(sid)})
+        except Exception:
+            raise HTTPException(400, "Invalid slider ID")
+        if _cur is None:
+            if _dc.scope(a):
+                raise HTTPException(404, "Not found")
+        elif not _slider_visible(a, _cur):
+            raise HTTPException(404, "Not found")
+    if "countries" in data:
+        upd["countries"] = _bc.for_admin(a, data.get("countries"))
     for f in ["title", "image_url", "link_url", "from_date", "end_date", "merchant_name"]:
         if f in data: upd[f] = data[f]
     if "merchant_phone" in data:
@@ -3310,6 +3341,13 @@ def update_promo_slider(sid: str, data: dict, a=Depends(get_current_admin)):
 @router.delete("/promo-sliders/{sid}")
 def delete_promo_slider(sid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "delete")
+    if _dc.scope(a):
+        try:
+            _cur = db.promo_sliders.find_one({"_id": ObjectId(sid)})
+        except Exception:
+            raise HTTPException(400, "Invalid slider ID")
+        if _cur is None or not _slider_visible(a, _cur):
+            raise HTTPException(404, "Not found")
     db.promo_sliders.delete_one({"_id": ObjectId(sid)})
     return {"message": "Deleted"}
 
@@ -5182,7 +5220,10 @@ async def admin_update_default_images(
 def list_admin_banners(a=Depends(get_current_admin)):
     """Admin-created banners — stored in admin_banners (separate from promo_sliders = merchant banners)."""
     banners = []
+    from services import banner_countries as _bc
     for b in db.admin_banners.find().sort("sort_order", 1):
+        if not _bc.visible_to_admin(a, b):          # country-restricted users only see banners targeted to their own country
+            continue
         created = b.get("created_at", "")
         created_str = created.strftime("%d %b %Y %H:%M") if isinstance(created, datetime) else str(created)[:16]
         banners.append({
@@ -5194,6 +5235,7 @@ def list_admin_banners(a=Depends(get_current_admin)):
             "sort":       b.get("sort_order", 0),
             "is_pinned":  b.get("is_pinned", False),
             "is_active":  b.get("is_active", True),
+            "countries":  _bc.of(b),               # [] = all countries (every banner made before country targeting)
             "created_at": created_str,
         })
     return banners
@@ -5203,6 +5245,8 @@ def list_admin_banners(a=Depends(get_current_admin)):
 def create_admin_banner(data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "add")
     """Creates an admin banner in the admin_banners collection."""
+    from services import banner_countries as _bc
+    _countries_sel = _bc.for_admin(a, data.get("countries"))
     doc = {
         "image_url":  data.get("image_url", ""),
         "title":      data.get("title", ""),
@@ -5212,6 +5256,7 @@ def create_admin_banner(data: dict, a=Depends(get_current_admin)):
         "is_pinned":  bool(data.get("is_pinned", False)),
         "is_active":  bool(data.get("is_active", True)),
         "source":     "admin",
+        "countries":  _countries_sel,
         "created_at": datetime.utcnow(),
     }
     res = db.admin_banners.insert_one(doc)
@@ -5222,7 +5267,18 @@ def create_admin_banner(data: dict, a=Depends(get_current_admin)):
 def update_admin_banner(bid: str, data: dict, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "edit")
     from bson import ObjectId
+    from services import banner_countries as _bc
     update = {}
+    if _dc.scope(a) or "countries" in data:
+        try:
+            _cur = db.admin_banners.find_one({"_id": ObjectId(bid)})
+        except Exception:
+            raise HTTPException(400, "Invalid banner ID")
+        if _cur is None and _dc.scope(a):
+            raise HTTPException(404, "Not found")
+        _bc.require_visible(a, _cur)
+    if "countries" in data:
+        update["countries"] = _bc.for_admin(a, data.get("countries"))
     for f in ["image_url", "title", "subtitle", "link_url", "is_pinned", "is_active"]:
         if f in data:
             update[f] = data[f]
@@ -5241,6 +5297,14 @@ def update_admin_banner(bid: str, data: dict, a=Depends(get_current_admin)):
 def delete_admin_banner(bid: str, a=Depends(get_current_admin)):
     _check_perm(a, "Banners", "delete")
     from bson import ObjectId
+    from services import banner_countries as _bc
+    if _dc.scope(a):
+        try:
+            _bc.require_visible(a, db.admin_banners.find_one({"_id": ObjectId(bid)}))
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(400, "Invalid banner ID")
     try:
         db.admin_banners.delete_one({"_id": ObjectId(bid)})
     except Exception:

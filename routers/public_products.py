@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request as _Req
 
 from database import db
 from services import products as P
+from services.owner_country import OwnerCountries, requested_country, INVALID
 from routers.public import _get_user_optional
 
 router = APIRouter(tags=["Products (public)"])
@@ -38,7 +39,7 @@ def _store_clauses(store_id: str):
 
 def _store_info(sid: str) -> dict:
     try:
-        s = db.stores.find_one({"_id": ObjectId(sid)}, {"store_name": 1, "city": 1, "rating": 1, "admin_rating": 1})
+        s = db.stores.find_one({"_id": ObjectId(sid)}, {"store_name": 1, "city": 1, "rating": 1, "admin_rating": 1, "merchant_id": 1})
     except Exception:
         s = None
     return s or {}
@@ -48,18 +49,30 @@ def _dstr(d):
     return d.strftime("%d %b %Y") if hasattr(d, "strftime") else str(d or "")
 
 
-def _card(p: dict) -> dict:
+def _owner_fields(p: dict, own: OwnerCountries = None, store_owner: str = "") -> dict:
+    """country + display currency of the product's owner (the merchant account; the store's owner when the product has none).
+    Display only: the stored price is never converted. India / legacy owners: INR and the rupee sign, as before."""
+    own = own or OwnerCountries()
+    return own.fields(p.get("merchant_id"), store_owner)
+
+
+def _card(p: dict, own: OwnerCountries = None, store_owner: str = "") -> dict:
     return {"_id": str(p["_id"]), "title": p.get("title", ""), "offer_text": p.get("description", ""),
             "logo_url": p.get("image_url", ""), "price": str(p.get("price", "") or ""),
             "original_price": str(p.get("original_price", "") or ""),
-            "rating": float(p.get("rating") or 0)}
+            "rating": float(p.get("rating") or 0), **_owner_fields(p, own, store_owner)}
 
 
 # ── Discover Products (home) ───────────────────────────────────────────────────
 @router.get("/products-public")
-def products_public(city: str = ""):
+def products_public(city: str = "", country: str = ""):
     wanted = city.strip().lower()
     out = []
+    own = OwnerCountries()
+    # Optional `country` (new apps): only products whose owner is in that country. Not sent (older apps / guests): unchanged.
+    want_c = requested_country(country)
+    if want_c == INVALID:
+        return []
     for p in db[PRODUCTS].find(_visible()).sort("_id", -1):
         sid = str(p.get("store_id", ""))
         st = _store_info(sid) if sid else {}
@@ -68,6 +81,8 @@ def products_public(city: str = ""):
             dc = (pcity or "").strip().lower()
             if not dc or not (re.search(re.escape(wanted), dc) or re.search(re.escape(dc), wanted)):
                 continue
+        if want_c and own.iso(p.get("merchant_id"), str(st.get("merchant_id") or "")) != want_c:
+            continue
         img = p.get("image_url", "")
         out.append({
             "id": str(p["_id"]), "title": p.get("title", ""), "text": p.get("description", ""),
@@ -79,6 +94,7 @@ def products_public(city: str = ""):
             "is_active": True, "source": p.get("source", "merchant"),
             "rating": float(st.get("rating") or st.get("admin_rating") or 0),
             "rating_count": int(p.get("rating_count") or 0),
+            **_owner_fields(p, own, str(st.get("merchant_id") or "")),
         })
     return out
 
@@ -89,8 +105,9 @@ def store_products(store_id: str, limit: int = 30) -> list:
     rating = _store_info(store_id)
     r = float(rating.get("rating") or rating.get("admin_rating") or 0)
     rows = []
+    own = OwnerCountries()
     for p in db[PRODUCTS].find(_visible(_store_clauses(store_id))).sort("created_at", -1).limit(limit):
-        c = _card(p)
+        c = _card(p, own, str(rating.get("merchant_id") or ""))
         c.update({"discount": p.get("discount_label", ""), "validity": _dstr(p.get("end_date")),
                   "end_date": _dstr(p.get("end_date")), "rating": r})
         rows.append(c)
@@ -113,7 +130,8 @@ def similar_products(pid: str, limit: int = 6):
     extra = {"_id": {"$ne": src["_id"]}}
     if src.get("city"):
         extra["city"] = {"$regex": f"^{re.escape(src['city'])}$", "$options": "i"}
-    return [_card(p) for p in db[PRODUCTS].find(_visible(extra)).sort("_id", -1).limit(limit)]
+    own = OwnerCountries()
+    return [_card(p, own) for p in db[PRODUCTS].find(_visible(extra)).sort("_id", -1).limit(limit)]
 
 
 # ── Events ─────────────────────────────────────────────────────────────────────

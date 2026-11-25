@@ -1360,6 +1360,11 @@ function _secUrl(u) {
             </select>
           </div>
         </div>
+<div class="mb-3">
+          <label class="form-label fw-semibold">Countries</label>
+          <div id="abm_countries" class="di-countries"></div>
+          <div class="di-country-hint">Select one or more countries. Leave all unticked to show it in <strong>all countries</strong>. Older banners with nothing selected keep showing everywhere.</div>
+        </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Floating Stores on Banner</label>
           <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Select stores to float as cards over this banner. Leave empty to show top stores automatically.</div>
@@ -4493,6 +4498,7 @@ async function openSliderModal() {
   document.getElementById("sl_link_url").value = "";
   document.getElementById("sl_order").value = "0";
   document.getElementById("sl_active").checked = true;
+  bnCountryPicker('sl_countries', []);
   const _prevEl = document.getElementById("sl_merchant_name_preview");
   if (_prevEl) _prevEl.textContent = "";
   // Date fields — default to today + 30 days
@@ -4633,6 +4639,7 @@ async function editSlider(s) {
     document.getElementById("sl_city").value = s.city || '';
     document.getElementById("sl_city").readOnly = !!(s.store_id && s.city);
   }
+  bnCountryPicker('sl_countries', s.countries || []);
   sliderModalInst.show();
 }
 
@@ -4777,6 +4784,7 @@ async function saveSlider() {
     ...((_slStoreId) ? {store_id: _slStoreId} : {}),
     ...((_slStoreName) ? {store_name: _slStoreName} : {}),
     city:            _slCity,
+    countries:       bnCountryValues('sl_countries'),
     pay_from_date:   _slPayFrom  || undefined,
     pay_to_date:     _slPayTo    || undefined,
     pay_amount:      _slPayAmt   || undefined,
@@ -6739,6 +6747,11 @@ async function saveStore() {
             </select>
           </div>
         </div>
+<div class="mb-3">
+          <label class="form-label fw-semibold">Countries</label>
+          <div id="sl_countries" class="di-countries"></div>
+          <div class="di-country-hint">Select one or more countries. Leave all unticked to show it in <strong>all countries</strong>. Older banners with nothing selected keep showing everywhere.</div>
+        </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="sl_active" checked>
           <label class="form-check-label" for="sl_active">Active (show in app)</label>
@@ -8044,6 +8057,22 @@ async function toggleAccountStatus(accountId, currentStatus) {
 // ════════════════════════════════════════════════════════
 // ADMIN BANNERS JS
 // ════════════════════════════════════════════════════════
+// Country targeting of banners: the one country master (served by the backend); nothing ticked = all countries.
+let _bnCountries = null;
+async function bnCountryPicker(boxId, selected) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  if (_bnCountries === null) {
+    try { const r = await fetch('/admin/auth/countries', {credentials:'include'}); _bnCountries = r.ok ? await r.json() : []; }
+    catch (e) { _bnCountries = []; }
+  }
+  const sel = (selected || []).map(x => String(x).toUpperCase());
+  box.innerHTML = _bnCountries.map(c => `<label class="di-country"><input type="checkbox" value="${escHtml(c.iso)}" ${sel.includes(String(c.iso).toUpperCase()) ? 'checked' : ''}> ${escHtml((c.flag ? c.flag + ' ' : '') + c.name)}</label>`).join('');
+}
+function bnCountryValues(boxId) {
+  return Array.from(document.querySelectorAll('#' + boxId + ' input[type=checkbox]:checked')).map(cb => cb.value);
+}
+
 async function loadAdminBanners() {
   const tbody = document.getElementById('admin_banners_body');
   tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>';
@@ -8077,7 +8106,7 @@ function renderAdminBanners() {
       : `<span class="badge" style="background:#fef3f2;color:#c0392b;border:1px solid #f5c6c6;font-size:11px">Inactive</span>`;
     return `<tr>
       <td>${imgHtml}</td>
-      <td style="font-weight:600;color:var(--text)">${b.title ? escHtml(b.title) : '<span style="color:var(--muted);font-style:italic">—</span>'}</td>
+      <td style="font-weight:600;color:var(--text)">${b.title ? escHtml(b.title) : '<span style="color:var(--muted);font-style:italic">—</span>'}<div style="font-size:11px;font-weight:400;color:var(--muted)">${(b.countries||[]).length ? escHtml(b.countries.join(', ')) : 'All countries'}</div></td>
       <td style="color:var(--muted);font-size:12px">${escHtml(b.subtitle || '—')}</td>
       <td style="font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.link_url ? `<a href="${_secUrl(b.link_url)}" target="_blank" style="color:var(--primary)">${escHtml(b.link_url)}</a>` : '—'}</td>
       <td style="text-align:center">${b.sort_order ?? 0}</td>
@@ -8117,6 +8146,7 @@ function openAdminBannerModal(data) {
   // Populate floating stores picker
   const pinnedIds = Array.isArray(data?.floating_store_ids) ? data.floating_store_ids : [];
   renderAbmStoresList(pinnedIds);
+  bnCountryPicker('abm_countries', data?.countries || []);
 }
 
 function closeAdminBannerModal() {
@@ -8178,6 +8208,7 @@ async function saveAdminBanner() {
     sort_order:        sort,
     is_active:         isActive,
     floating_store_ids: floatingIds,
+    countries:         bnCountryValues('abm_countries'),
     pay_from_date:     _abmPayFrom || undefined,
     pay_to_date:       _abmPayTo   || undefined,
     pay_amount:        _abmPayAmt  || undefined,

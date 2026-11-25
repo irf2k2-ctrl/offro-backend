@@ -1259,11 +1259,13 @@ def resolve_maps_link(
         raise HTTPException(status_code=422, detail=LOCATION_NOT_EXACT_MESSAGE)
 
     # City / state / area come ONLY from the verified coordinates.
+    country = ""
     if not (city and state and area):
         try:
             from routers.public import _nominatim_reverse
 
             geo = _nominatim_reverse(lat, lng) or {}
+            country = geo.get("country", "") or ""
             state = state or geo.get("state", "")
             city = city or geo.get("city", "")
             area = area or geo.get("area", "")
@@ -1284,6 +1286,7 @@ def resolve_maps_link(
         "state": state,
         "city": city,
         "area": area,
+        "country": country,
         "url": resolved_url,
         "place_id": place_id or "",
     }

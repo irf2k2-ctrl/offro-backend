@@ -6,8 +6,11 @@ import datetime, base64, re
 
 router = APIRouter()
 
-# ── Auth helper ────────────────────────────────────────────────────────────────
-def _require_admin(request: Request):
+# ── Auth helper ───────────────────────────────────────────
+def _require_admin(request: Request, action: str = None):
+    """The signed-in dashboard user, with the role resolved (role_name / permissions / assigned_cities) exactly as
+    routers.admin.get_current_admin does. When `action` ("view" | "add" | "edit" | "delete") is given, the user must hold that
+    permission on the "Popup Campaigns" module (Super Admin always does). A missing role grants nothing (fail closed)."""
     token = (request.cookies.get("admin_token") or
              request.headers.get("x-admin-token", "")).strip()
     if not token:
@@ -17,8 +20,83 @@ def _require_admin(request: Request):
     if du:
         if du.get("status") in ("disabled", "suspended"):
             raise HTTPException(403, "Account is " + du.get("status", "disabled"))
+        role = None
+        try:
+            role = db.dashboard_roles.find_one({"_id": du["role_id"]}) if du.get("role_id") else None
+        except Exception:
+            role = None
+        role = role or {"role_name": "Unknown", "permissions": {}}
+        du["role"] = role
+        du["role_name"] = role.get("role_name", "Unknown")
+        du["permissions"] = role.get("permissions", {})
+        du["assigned_cities"] = du.get("assigned_cities", [])
+        if action and du["role_name"] != "Super Admin":
+            if not ((du["permissions"] or {}).get(MODULE) or {}).get(action, False):
+                raise HTTPException(403, "Access denied: Missing " + action + " permission for " + MODULE)
         return du
     raise HTTPException(401, "Unauthorized")           # legacy admins.token sessions were retired (Patch B)
+
+
+MODULE = "Popup Campaigns"
+
+
+# ── Who may touch which campaign (country + assigned cities) ───────────────────────────────────────────────────────────
+def _scope_of(admin: dict):
+    """(country, cities): the restriction of this dashboard user.
+      country  '' = none (Super Admin / a user with no country); an ISO code; or dashboard_country.INVALID_SCOPE (fail closed)
+      cities   None = no city restriction (Super Admin or '*'); otherwise the set of lower-cased assigned city names (an empty
+               set = no city at all, the same rule routers.admin._city_filter applies to every other module)"""
+    from services import dashboard_country as _dc
+    iso = _dc.scope(admin)
+    if admin.get("role_name") == "Super Admin":
+        return "", None
+    assigned = admin.get("assigned_cities") or []
+    if "*" in assigned:
+        return iso, None
+    return iso, {" ".join(str(c or "").split()).lower() for c in assigned if str(c or "").strip()}
+
+
+def _is_restricted(admin: dict) -> bool:
+    iso, cities = _scope_of(admin)
+    return bool(iso) or cities is not None
+
+
+def campaign_in_scope(d: dict, admin: dict) -> bool:
+    """May this dashboard user see / change a campaign with these audience fields?
+    Unrestricted users: always. A restricted user may only handle a campaign whose WHOLE audience is inside their scope:
+      * "All Users" campaigns and legacy (pre-country) campaigns are global: country-restricted users never get them;
+        a user restricted only by assigned cities gets a legacy campaign only when every one of its city names is assigned;
+      * a country-restricted user: every targeted country / city_target must be their own country;
+      * a city-restricted user: the audience must be individual cities, all assigned (a whole-country target would reach
+        cities they do not have)."""
+    iso, cities = _scope_of(admin)
+    if not iso and cities is None:
+        return True
+    if d.get("target", "all") != "selected_city":
+        return False
+    if d.get("audience_version") != 2:
+        if iso:
+            return False
+        names = [_key(c) for c in (d.get("cities") or [])]
+        return bool(names) and all(n in cities for n in names)
+    countries = [str(c).upper() for c in (d.get("countries") or [])]
+    singles = [(str(x.get("country", "")).upper(), _key(x.get("city"))) for x in (d.get("city_targets") or [])]
+    if not countries and not singles:
+        return False
+    if iso and (any(c != iso for c in countries) or any(c != iso for c, _ in singles)):
+        return False
+    if cities is not None:
+        if countries:
+            return False
+        if any(n not in cities for _, n in singles):
+            return False
+    return True
+
+
+def _require_in_scope(d: dict, admin: dict):
+    if not campaign_in_scope(d, admin):
+        raise HTTPException(403, "This campaign is outside your country / city access.")
+
 
 def _fmt(doc: dict) -> dict:
     doc["id"] = str(doc.pop("_id"))
@@ -157,14 +235,16 @@ def campaign_matches(d: dict, city: str = "", country: str = "") -> bool:
 # ── Admin: list ────────────────────────────────────────────────────────────────
 @router.get("/admin/popup-campaigns")
 def list_popup_campaigns(request: Request):
-    _require_admin(request)
+    adm = _require_admin(request, "view")
     docs = list(db.popup_campaigns.find().sort("_id", -1))
+    if _is_restricted(adm):
+        docs = [d for d in docs if campaign_in_scope(d, adm)]
     return [_fmt(d) for d in docs]
 
 # ── Admin: create ──────────────────────────────────────────────────────────────
 @router.post("/admin/popup-campaigns")
 async def create_popup_campaign(request: Request):
-    _require_admin(request)
+    adm = _require_admin(request, "add")
     data = await request.json()
     now  = datetime.datetime.utcnow()
     doc  = {
@@ -180,6 +260,7 @@ async def create_popup_campaign(request: Request):
         "updated_at":   now,
     }
     doc.update(_audience_fields(data)[0])
+    _require_in_scope(doc, adm)
     result = db.popup_campaigns.insert_one(doc)
     if doc["image_url"].startswith("data:image"):
         proxy = f"/popup-image/{result.inserted_id}"
@@ -192,7 +273,7 @@ async def create_popup_campaign(request: Request):
 # ── Admin: update ──────────────────────────────────────────────────────────────
 @router.put("/admin/popup-campaigns/{cid}")
 async def update_popup_campaign(cid: str, request: Request):
-    _require_admin(request)
+    adm = _require_admin(request, "edit")
     data = await request.json()
     now  = datetime.datetime.utcnow()
     upd  = {
@@ -208,13 +289,19 @@ async def update_popup_campaign(cid: str, request: Request):
     }
     _set, _unset = _audience_fields(data)
     upd.update(_set)
-    if upd["image_url"].startswith("data:image"):
-        upd["_raw_image"] = upd["image_url"]
-        upd["image_url"]  = f"/popup-image/{cid}"
     try:
         _oid = ObjectId(cid)
     except Exception:
         raise HTTPException(400, "Invalid id")
+    if _is_restricted(adm):
+        existing = db.popup_campaigns.find_one({"_id": _oid})
+        if not existing:
+            raise HTTPException(404, "Campaign not found")
+        _require_in_scope(existing, adm)           # the campaign as stored must be theirs ...
+        _require_in_scope(upd, adm)                # ... and so must the audience they are saving
+    if upd["image_url"].startswith("data:image"):
+        upd["_raw_image"] = upd["image_url"]
+        upd["image_url"]  = f"/popup-image/{cid}"
     _op = {"$set": upd}
     if _unset:
         _op["$unset"] = _unset
@@ -224,21 +311,36 @@ async def update_popup_campaign(cid: str, request: Request):
 # ── Admin: delete ──────────────────────────────────────────────────────────────
 @router.delete("/admin/popup-campaigns/{cid}")
 def delete_popup_campaign(cid: str, request: Request):
-    _require_admin(request)
+    adm = _require_admin(request, "delete")
     try:
-        db.popup_campaigns.delete_one({"_id": ObjectId(cid)})
+        _oid = ObjectId(cid)
     except Exception:
         raise HTTPException(400, "Invalid id")
+    if _is_restricted(adm):
+        existing = db.popup_campaigns.find_one({"_id": _oid})
+        if not existing:
+            raise HTTPException(404, "Campaign not found")
+        _require_in_scope(existing, adm)
+    db.popup_campaigns.delete_one({"_id": _oid})
     return {"ok": True}
 
 # ── Admin: toggle active ───────────────────────────────────────────────────────
 @router.patch("/admin/popup-campaigns/{cid}/toggle")
 async def toggle_popup_campaign(cid: str, request: Request):
-    _require_admin(request)
+    adm = _require_admin(request, "edit")
     data = await request.json()
     try:
+        _oid = ObjectId(cid)
+    except Exception:
+        raise HTTPException(400, "Invalid id")
+    if _is_restricted(adm):
+        existing = db.popup_campaigns.find_one({"_id": _oid})
+        if not existing:
+            raise HTTPException(404, "Campaign not found")
+        _require_in_scope(existing, adm)
+    try:
         db.popup_campaigns.update_one(
-            {"_id": ObjectId(cid)},
+            {"_id": _oid},
             {"$set": {"is_active": bool(data.get("is_active", False)),
                       "updated_at": datetime.datetime.utcnow()}}
         )

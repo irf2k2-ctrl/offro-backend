@@ -124,8 +124,14 @@ def _normalize_iso_utc(ts):
 
 # =================== PUBLIC STORES LIST ===================
 @router.get("/stores")
-def get_stores(city: str = None, category: str = None):
-    """Public endpoint - Flutter app fetches this"""
+def get_stores(city: str = None, category: str = None, country: str = None):
+    """Public endpoint - Flutter app fetches this.
+    Optional `country` (ISO code, sent by new apps): only stores whose owner account is in that country - the same city name in two
+    countries never mixes. Not sent (older apps / guests): unfiltered, exactly as before. An unsupported code returns []."""
+    from services.owner_country import OwnerCountries as _OC, requested_country as _rc, INVALID as _INV
+    _want_c = _rc(country)
+    if _want_c == _INV:
+        return []
     query = {"status": "active"}
     if city:
         # FIX: escape the city string before using it in $regex — city comes
@@ -153,6 +159,9 @@ def get_stores(city: str = None, category: str = None):
         # Needed by the Home Main Store Card's Open/Closed + hours row.
         "open_time":1,"close_time":1
     }))
+    if _want_c:
+        _oc = _OC()
+        stores = [s for s in stores if _oc.iso(s.get("merchant_id")) == _want_c]
     if not stores:
         return []
 
@@ -271,6 +280,7 @@ def get_stores(city: str = None, category: str = None):
 # =================== SINGLE STORE ===================
 @router.get("/stores/{store_id}")
 def get_store(store_id: str):
+    from services.owner_country import OwnerCountries as _OwnerCountries
     from fastapi import HTTPException as _HTTPEx
     try:
         store = db.stores.find_one({"_id": ObjectId(store_id)})
@@ -348,6 +358,8 @@ def get_store(store_id: str):
         "open_time":    store.get("open_time", ""),
         "close_time":   store.get("close_time", ""),
         "cost_for_two": store.get("cost_for_two", ""),
+        # additive: the country and display currency of the store's owner (cost for two and the products are priced in it); India: INR / ₹
+        **_OwnerCountries().fields(store.get("merchant_id")),
         "dine_in":      store.get("dine_in", False),
         "is_trending":  store.get("is_trending", False),
         "is_new_in_town": store.get("is_new_in_town", False),
@@ -402,7 +414,7 @@ def _influencer_public_visibility_filter() -> dict:
     }
 
 @router.get("/influencers")
-def get_influencers_public(city: str = None):
+def get_influencers_public(city: str = None, country: str = None):
     """Public endpoint — Home Screen 'City Influencers' section.
     Same city-filter convention as /stores above (escaped regex, case-
     insensitive). Only status=active influencers are ever returned."""
@@ -411,6 +423,14 @@ def get_influencers_public(city: str = None):
         import re as _re
         query["city"] = {"$regex": _re.escape(city.strip()), "$options": "i"}
     docs = list(db.influencers.find(query).sort("created_at", -1))
+    # Optional `country` (new apps): the influencer's country (own field, else account, else phone). Not sent: unchanged.
+    from services.owner_country import OwnerCountries as _OC, requested_country as _rc, INVALID as _INV
+    _want_c = _rc(country)
+    if _want_c == _INV:
+        return []
+    if _want_c:
+        _oc = _OC()
+        docs = [d for d in docs if _oc.influencer_iso(d) == _want_c]
     return [_public_influencer_row(d) for d in docs]
 
 @router.get("/influencers/{influencer_id}")
@@ -685,7 +705,7 @@ CITY_AREAS = {
 
 
 @router.get("/deals/all")
-def get_all_active_deals(city: str = ""):
+def get_all_active_deals(city: str = "", country: str = ""):
     """Return only active store deals (offers) for the Hot Deals screen.
     Products are excluded. Each deal includes store image, name, area, validity.
     """
@@ -718,14 +738,24 @@ def get_all_active_deals(city: str = ""):
     # as before via deal_q's status=="active" and store_q's
     # status=="active" below — only the redundant, inconsistent
     # subscription-freshness pre-filter was removed.
+    from services.owner_country import OwnerCountries as _OC, requested_country as _rc, INVALID as _INV
+    _want_c = _rc(country)          # optional, sent by new apps; not sent = unfiltered as before
+    if _want_c == _INV:
+        return []
     store_q = {"status": "active"}
     if city:
-        store_q["city"] = {"$regex": city, "$options": "i"}
+        import re as _re
+        store_q["city"] = {"$regex": _re.escape(city.strip()), "$options": "i"}   # escaped: a GPS city may hold regex characters
 
     stores_raw = list(db.stores.find(store_q, {
         "store_name": 1, "category": 1, "city": 1, "area": 1, "address": 1, "phone": 1,
-        "image_url": 1, "image_thumb": 1, "_thumb": 1, "image": 1, "images": 1,
+        "image_url": 1, "image_thumb": 1, "_thumb": 1, "image": 1, "images": 1, "merchant_id": 1,
     }))
+    if _want_c:
+        _oc = _OC()
+        stores_raw = [s for s in stores_raw if _oc.iso(s.get("merchant_id")) == _want_c]
+        if not stores_raw:
+            return []
     stores_map = {str(s["_id"]): s for s in stores_raw}
 
     # Step 3: Active deals only (no products)
@@ -1059,7 +1089,9 @@ def _nominatim_reverse(lat: float, lng: float) -> dict:
         city    = (addr.get("city") or addr.get("town") or addr.get("county") or addr.get("village") or "")
         area    = (addr.get("suburb") or addr.get("neighbourhood") or addr.get("quarter") or addr.get("locality") or "")
         address = data.get("display_name", "")[:250]
-        return {"state": state, "city": city, "area": area, "address": address}
+        # additive: the ISO country code of the place (upper-case; "" when unknown) so an app can tell a location of ANOTHER country
+        return {"state": state, "city": city, "area": area, "address": address,
+                "country": str(addr.get("country_code") or "").strip().upper()}
     except Exception:
         return {}
 
@@ -1392,11 +1424,25 @@ def _public_banner_cta(d, store_id):
     return ("store", store_id, store_id)
 
 @router.get("/promo-sliders")
-def get_promo_sliders_public():
-    """Returns active, non-expired merchant banners (promo sliders) for the home screen."""
+def get_promo_sliders_public(country: str = ""):
+    """Returns active, non-expired merchant banners (promo sliders) for the home screen.
+    Optional `country` (sent by new apps): a slider that targets countries (`countries`) is shown only to those; otherwise a merchant's
+    slider follows its owner's country; an admin slider with neither is global. Not sent (older apps / guests): unfiltered, as before."""
     from datetime import datetime as _dt
+    from services import banner_countries as _bc
+    from services.owner_country import OwnerCountries as _OC, requested_country as _rc, INVALID as _INV
     _now = _dt.utcnow()
     docs = list(db.promo_sliders.find({"is_active": True}).sort("sort_order", 1))
+    _want_c = _rc(country)
+    if _want_c:
+        _oc = _OC()
+
+        def _slider_shown(d):
+            if _bc.of(d):
+                return _want_c != _INV and _bc.targets(d, _want_c)
+            _own = _oc.owner_iso_of_banner(d)
+            return True if _own is None else (_want_c != _INV and _own == _want_c)
+        docs = [d for d in docs if _slider_shown(d)]
     # Store names for the Home hero strip (one query for all slides).
     from bson import ObjectId as _OID
     _oids = []
@@ -1463,10 +1509,17 @@ def get_promo_sliders_public():
     return result
 
 @router.get("/admin-banners")
-def get_admin_banners_public():
+def get_admin_banners_public(country: str = ""):
     """Returns active admin banners from the banners collection (Admin Dashboard → Banners module).
-    This is the Home Screen banner section — completely separate from promo_sliders."""
+    This is the Home Screen banner section — completely separate from promo_sliders.
+    Optional `country` (sent by new apps): banners targeted to other countries are left out; a banner with no `countries` (every banner made
+    before targeting, or "All countries") is shown everywhere. Not sent: unfiltered, as before. An unsupported code gets the global ones only."""
+    from services import banner_countries as _bc
+    from services.owner_country import requested_country as _rc, INVALID as _INV
     docs = list(db.admin_banners.find({"is_active": True}).sort("sort_order", 1))
+    _want_c = _rc(country)
+    if _want_c:
+        docs = [d for d in docs if (not _bc.of(d)) or (_want_c != _INV and _bc.targets(d, _want_c))]
     result = []
     for d in docs:
         img = d.get("image_url", "") or d.get("image", "")
