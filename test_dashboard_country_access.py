@@ -532,9 +532,13 @@ class TestDirectApiAttemptsOnOtherCountryRecords:
 
 class TestNotificationsAndMessaging:
     def test_topic_targets_are_refused_for_a_restricted_user(self, world):
-        for t in ("offers", "city"):
-            r = web.post("/admin/notifications/send", headers=H("in-mgr"), json={"title": "t", "body": "b", "target": t, "target_city": "Ballari"})
-            assert r.status_code == 403
+        # Phase 2 Stage 1: "offers" stays refused. "city" is no longer refused outright - it is a direct-token send limited to the
+        # city's own country - so a restricted user is refused only for a city of ANOTHER country (see test_phase2_stage1_cde.py).
+        r = web.post("/admin/notifications/send", headers=H("in-mgr"), json={"title": "t", "body": "b", "target": "offers", "target_city": "Ballari"})
+        assert r.status_code == 403
+        DB.cities.insert_one({"name": "Riyadh", "slug": "riyadh", "country": "SA", "status": "active"})
+        r = web.post("/admin/notifications/send", headers=H("in-mgr"), json={"title": "t", "body": "b", "target": "city", "target_city": "Riyadh"})
+        assert r.status_code == 403
         r = web.post("/admin/notifications/send", headers=H("in-mgr"), json={"title": "t", "body": "b", "target": "specific", "target_phone": "+966501234567"})
         assert r.status_code == 404
 

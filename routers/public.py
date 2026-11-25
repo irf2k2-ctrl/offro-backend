@@ -967,22 +967,12 @@ def get_city_status(city: str = "", country: str = None):
 
 
 @router.get("/areas")
-def get_areas(city: str = ""):
-    """Return predefined area list for a given city (case-insensitive)."""
-    city_key = city.strip().lower() if city else ""
-    # Try exact match first
-    if city_key in CITY_AREAS:
-        return {"city": city, "areas": CITY_AREAS[city_key]}
-    # Try partial match
-    for key, areas in CITY_AREAS.items():
-        if city_key in key or key in city_key:
-            return {"city": city, "areas": areas}
-    # Fallback: return areas from DB for this city
-    if city_key:
-        db_areas = db.stores.distinct("area", {"city": {"$regex": city_key, "$options": "i"}, "area": {"$exists": True, "$ne": ""}})
-        if db_areas:
-            return {"city": city, "areas": sorted([a for a in db_areas if a])}
-    return {"city": city, "areas": []}
+def get_areas(city: str = "", country: str = None):
+    """Return predefined area list for a given city (case-insensitive). Optional `country` (older apps send none).
+    A blank city returns an empty list; the city text is escaped; see services/areas.py."""
+    from services import areas as _areas
+    from services.owner_country import requested_country as _rc
+    return {"city": city, "areas": _areas.areas_for(city, CITY_AREAS, _rc(country))}
 
 @router.get("/categories")
 def get_categories(lang: str = ""):

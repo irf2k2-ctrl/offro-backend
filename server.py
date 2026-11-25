@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Redirect
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, wa_campaigns, dashboard_auth, maps, smart_link
 from routers import merchant_products, admin_products, admin_deals, public_products, collaborations
 from routers import translations_admin, translations_public
-from routers import admin_pricing, public_pricing, admin_store_status_diag, admin_cities
+from routers import admin_pricing, public_pricing, admin_store_status_diag, admin_cities, country_diagnostics, security_audit
 from database import db
 import base64, io, re, html as _html
 from services.security import cors_origins, SecurityMiddleware
@@ -48,6 +48,8 @@ app.include_router(wa_campaigns.router, prefix="/admin")  # WhatsApp Campaign Ma
 app.include_router(dashboard_auth.router, prefix="/admin")  # RBAC dashboard auth — /admin/auth/*
 app.include_router(translations_admin.router, prefix="/admin")   # Translation module admin API (Phase G): /admin/translations/*
 app.include_router(admin_store_status_diag.router, prefix="/admin")  # TEMPORARY read-only store-status diagnostic (remove after investigation)
+app.include_router(country_diagnostics.router, prefix="/admin")   # READ-ONLY country diagnostics: /admin/country-diagnostics (Accounts view permission)
+app.include_router(security_audit.router, prefix="/admin")   # READ-ONLY permanent audit trail: GET /admin/security-audit (User Management view)
 app.include_router(admin_pricing.router, prefix="/admin")   # Pricing & Plans module: /admin/pricing-config/* (country-wise prices, tax, reward conversion)
 app.include_router(public_pricing.router)             # read-only country pricing for the apps: /country-pricing/{code}
 app.include_router(translations_public.router)                 # Public read-only translation API (Phase G): /translations/*
@@ -348,6 +350,13 @@ def startup():
         _pc.ensure_indexes()
     except Exception as e:
         print(f"⚠️  Pricing & Plans indexes skipped ({type(e).__name__})")
+    # Permanent security audit trail (Phase 2, Stage 1): indexes on a NEW, empty collection only; no TTL, nothing purged.
+    try:
+        from services import security_audit as _sec_audit
+        if not _sec_audit.ensure_indexes_safe():
+            print("⚠️  Security audit indexes skipped (see logs)")
+    except Exception as e:
+        print(f"⚠️  Security audit indexes skipped ({type(e).__name__})")
     # Translation module (Phase G): indexes on NEW, empty collections only; nothing is published or changed at startup.
     try:
         from services import translations as _tr, translation_audit as _tr_audit

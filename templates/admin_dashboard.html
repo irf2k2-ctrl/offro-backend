@@ -203,6 +203,7 @@ function _secUrl(u) {
   <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
   <div class="sep"></div>
   <a href="#" onclick="showSection('accounts',this)"><i class="fas fa-id-badge fa-fw"></i> Accounts</a>
+  <a href="#" onclick="showSection('country_diag',this)"><i class="fas fa-globe fa-fw"></i> Country Diagnostics</a>
   <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
   <a href="#" onclick="showSection('deals',this)"><i class="fas fa-tags fa-fw"></i> Deals</a>
   <a href="#" onclick="showSection('product_cards',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
@@ -458,6 +459,36 @@ function _secUrl(u) {
       </table>
     </div>
   </div>
+</div>
+
+<!-- ═══ COUNTRY DIAGNOSTICS (read-only) ═══ -->
+<div id="section-country_diag" class="section">
+  <div class="section-header">
+    <div class="page-title" style="margin:0">🌍 Country Diagnostics</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <select id="cd_country" class="form-select" style="max-width:150px;" onchange="loadCountryDiag(1)"><option value="">All countries</option></select>
+      <select id="cd_source" class="form-select" style="max-width:150px;" onchange="loadCountryDiag(1)">
+        <option value="">All sources</option><option value="explicit">Explicit</option><option value="parsed">Parsed</option>
+        <option value="legacy_india">Legacy India</option><option value="unresolved">Unresolved</option>
+      </select>
+      <select id="cd_issue" class="form-select" style="max-width:190px;" onchange="loadCountryDiag(1)">
+        <option value="">All accounts</option><option value="unresolved">Country unresolved</option>
+        <option value="country_mismatch">Country / prefix mismatch</option><option value="legacy_india">Bare number taken as India</option>
+        <option value="invalid_phone_country">Invalid stored country</option>
+      </select>
+      <select id="cd_role" class="form-select" style="max-width:140px;" onchange="loadCountryDiag(1)">
+        <option value="">All roles</option><option value="customer">Customer</option><option value="merchant">Merchant</option>
+        <option value="influencer">Influencer</option><option value="other">No role</option>
+      </select>
+    </div>
+  </div>
+  <div class="text-muted" style="font-size:12px;margin:6px 0 10px;">Read-only. Shows how each account's country is resolved today. Nothing on this page changes any account.</div>
+  <div id="cd_summary" class="mb-3"></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Name</th><th>Phone</th><th>Roles</th><th>Stored country</th><th>Resolved country</th><th>Source</th><th>Issues</th><th>City</th><th>Status</th></tr></thead>
+    <tbody id="cd_body"></tbody>
+  </table></div>
+  <div id="cd_pager" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;"></div>
 </div>
 
 <!-- ═══ UNIFIED ACCOUNTS ═══ -->
@@ -773,14 +804,20 @@ function _secUrl(u) {
           <select id="notif_target" class="form-select" onchange="toggleNotifTarget()">
             <option value="all_users">👥 All Users (FCM topic)</option>
             <option value="city">🏙️ City-wise Users</option>
-            <option value="offers">🎁 Offers Subscribers</option>
+            <option value="offers" disabled>🎁 Offers Subscribers (disabled)</option>
             <option value="specific">📱 Specific User (by phone)</option>
           </select>
         </div>
         <div class="mb-3" id="notif_city_row" style="display:none;">
           <label class="form-label">City Name</label>
           <input id="notif_city" class="form-control" placeholder="e.g. Ballari, Bangalore, Hubli">
-          <div style="font-size:11px;color:var(--muted);margin-top:3px;">Topic will be: <code id="notif_city_topic_preview">—</code></div>
+          <label class="form-label mt-2">Country</label>
+          <select id="notif_country" class="form-select">
+            <option value="">Auto (from City Master)</option>
+            <option value="IN">India</option><option value="JO">Jordan</option><option value="NP">Nepal</option>
+            <option value="PH">Philippines</option><option value="SA">Saudi Arabia</option>
+          </select>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px;">Reaches customers of this city in this country only. If the same city name exists in more than one country, choose the country. <code id="notif_city_topic_preview" style="display:none"></code></div>
         </div>
         <div class="mb-3" id="notif_phone_row" style="display:none;">
           <label class="form-label">Phone Number</label>
@@ -808,7 +845,7 @@ function _secUrl(u) {
           </div>
         </div>
         <div class="mb-3" id="notif_topic_preview_box" style="background:#f0f7f3;border-radius:8px;padding:10px 14px;font-size:12px;color:var(--primary);">
-          📡 Will send to FCM topic: <strong id="notif_topic_label">all_users</strong>
+          📡 Audience: <strong id="notif_topic_label">all_users</strong>
         </div>
         <button class="btn-p" onclick="sendNotification()" id="notif_send_btn"><i class="fas fa-paper-plane me-1"></i> Send Notification</button>
         <p id="notif_msg" class="mt-2" style="font-size:13px;"></p>
@@ -2532,7 +2569,7 @@ window._rbacMe = null;
 
 // Maps RBAC module name → sidebar section IDs that need "view" permission
 const RBAC_SECTION_MAP = {
-  "Accounts":          ["accounts"],
+  "Accounts":          ["accounts","country_diag"],
   "Stores":            ["stores"],
   "Deals":             ["deals"],
   "Products":          ["product_cards"],
@@ -2771,6 +2808,7 @@ function showSection(name, el){
   if(name==="cities" && window.CitiesAdmin) CitiesAdmin.open();
   if (name === 'default_images') loadDefaultImages();
   if (name === 'admin_banners') loadAdminBanners();
+  if (name === 'country_diag') loadCountryDiag(1);
   document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));
   document.querySelectorAll(".sidebar a").forEach(a=>a.classList.remove("active"));
   let sec = document.getElementById("section-"+name);
@@ -4825,7 +4863,7 @@ async function deleteSlider(id) {
 const _TOPIC_LABELS = {
   "all_users": "all_users",
   "offers":    "offers",
-  "city":      null,  // dynamic: {city}_users
+  "city":      "customers of the selected city",
   "specific":  "direct (token)",
 };
 
@@ -4837,7 +4875,7 @@ function toggleNotifTarget() {
   // Update topic preview label
   const city = document.getElementById("notif_city").value.trim();
   let label = _TOPIC_LABELS[target] || target;
-  if (target === "city") label = city ? city.toLowerCase().replace(/ /g, "_") + "_users" : "— enter city —";
+  if (target === "city") label = city ? city + " (customers)" : "— enter city —";
   document.getElementById("notif_topic_label").innerText = label;
 }
 
@@ -4867,6 +4905,7 @@ async function loadNotifications() {
         sent:    `<span style="background:#e8f5e9;color:#2e7d32;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;">✅ Sent</span>`,
         partial: `<span style="background:#fff3e0;color:#e65100;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;">⚠️ Partial</span>`,
         failed:  `<span style="background:#fde8e8;color:#c0392b;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;">❌ Failed</span>`,
+        sending: `<span style="background:#e8f0fe;color:#1a73e8;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;">⏳ Sending…</span>`,
         queued:  `<span style="background:#e8f0fe;color:#1a73e8;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;">⏳ Queued</span>`,
         skipped_no_tokens: `<span style="background:#f5f5f5;color:#757575;padding:2px 9px;border-radius:12px;font-size:11px;">⊘ No tokens</span>`,
       };
@@ -4883,7 +4922,7 @@ async function loadNotifications() {
       <td><strong>${escHtml(n.title||"—")}</strong><br><span style="font-size:11px;color:var(--muted)">${escHtml((n.body||"").substring(0,50))}…</span></td>
       <td style="font-size:12px;">${targetLabel(n)}<br><span style="font-size:10px;color:var(--muted)">topic: ${escHtml(n.topic||"—")}</span></td>
       <td style="font-size:12px;color:var(--muted)">${n.sent_at||n.created_at||"—"}</td>
-      <td style="font-size:12px;text-align:center;">${n.processed||0} <span style="color:var(--danger)">/ ${n.failed||0}✗</span></td>
+      <td style="font-size:12px;text-align:center;">${n.processed||0} <span style="color:var(--danger)">/ ${n.failed_count||0}✗</span>${n.skipped_count ? `<br><span style="font-size:10px;color:var(--muted)">skipped ${n.skipped_count}</span>` : ""}</td>
       <td>${statusBadge(n.status)}</td>
       <td style="text-align:center;">
         <button onclick="deleteNotif('${_secJs(n._id)}')" title="Delete"
@@ -5034,6 +5073,7 @@ async function sendNotification() {
     title, body, target,
     target_phone: target === "specific" ? phone : "",
     target_city:  target === "city"     ? city  : "",
+    target_country: target === "city" ? (document.getElementById("notif_country")||{value:""}).value : "",
     image_url: imageUrl,
     use_topic: target !== "specific"
   };
@@ -5050,7 +5090,8 @@ async function sendNotification() {
       msgEl.innerText = d.detail || ("Error " + r.status);
     } else {
       msgEl.style.color = "var(--primary)";
-      msgEl.innerText = "✅ " + (d.message || "Notification sent!");
+      msgEl.innerText = "✅ " + (d.message || "Notification sent!") +
+        (d.eligible_records != null ? ` — eligible ${d.eligible_records}, sent ${d.sent_count||0}, failed ${d.failed_count||0}, skipped ${d.skipped_count||0}` : "");
       document.getElementById("notif_title").value = "";
       document.getElementById("notif_body").value  = "";
       const ni = document.getElementById("notif_image");
@@ -7118,6 +7159,61 @@ async function deleteMerchantProduct(id) {
 // ═══════════════════════════════════════════════════════════
 // EXTENDED loadMerchantTxns — adds banner & product invoices
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// COUNTRY DIAGNOSTICS (read-only; GET /admin/country-diagnostics)
+// ═══════════════════════════════════════════════════════════
+let _cdPage = 1;
+const _CD_SRC = {explicit:'Explicit', parsed:'Parsed', legacy_india:'Legacy India', unresolved:'Unresolved'};
+const _CD_ISSUE = {unresolved:'Unresolved', country_mismatch:'Prefix mismatch', invalid_phone_country:'Invalid stored country', legacy_india:'Bare number → India'};
+async function loadCountryDiag(page) {
+  _cdPage = page || 1;
+  const q = new URLSearchParams({page: _cdPage, page_size: 25});
+  [['cd_country','country'],['cd_source','source'],['cd_issue','issue'],['cd_role','role']].forEach(([id,k]) => {
+    const el = document.getElementById(id); if (el && el.value) q.set(k, el.value);
+  });
+  const body = document.getElementById('cd_body'), sum = document.getElementById('cd_summary');
+  try {
+    const r = await fetch('/admin/country-diagnostics?' + q.toString(), {credentials:'include'});
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      sum.innerHTML = '';
+      body.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">' + escHtml(e.detail || 'Could not load diagnostics') + '</td></tr>';
+      return;
+    }
+    const d = await r.json();
+    const sel = document.getElementById('cd_country');
+    if (sel && sel.options.length <= 1) {
+      (d.countries || []).forEach(c => sel.add(new Option(c.name + ' (' + c.iso + ')', c.iso)));
+      sel.add(new Option('Unresolved', 'unresolved'));
+    }
+    const s = d.summary, chip = (t, n, c) => '<span class="badge" style="background:' + c + ';color:#fff;margin:0 6px 6px 0;font-size:12px;padding:6px 10px;">' + escHtml(t) + ': ' + n + '</span>';
+    let h = '<div>' + chip('Accounts', s.total, '#3E5F55');
+    Object.keys(_CD_SRC).forEach(k => h += chip(_CD_SRC[k], s.by_source[k] || 0, k === 'unresolved' ? '#c0392b' : (k === 'legacy_india' ? '#d68910' : '#5d6d7e')));
+    h += '</div><div>';
+    Object.keys(s.by_issue).forEach(k => h += chip(_CD_ISSUE[k] || k, s.by_issue[k], s.by_issue[k] ? '#c0392b' : '#7f8c8d'));
+    h += '</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">';
+    h += ['customer','merchant','influencer','other'].map(g => {
+      const x = s.by_role[g] || {total:0, by_source:{}};
+      return '<b>' + (g === 'other' ? 'No role' : g.charAt(0).toUpperCase() + g.slice(1)) + '</b>: ' + x.total +
+        ' (unresolved ' + (x.by_source.unresolved || 0) + ', legacy India ' + (x.by_source.legacy_india || 0) + ')';
+    }).join(' &nbsp;·&nbsp; ');
+    h += '</div><div style="font-size:12px;color:var(--muted);margin-top:4px;"><b>By country</b>: ' +
+      Object.entries(s.by_country).map(([k, n]) => escHtml(k) + ' ' + n).join(' &nbsp;·&nbsp; ') + '</div>';
+    if (d.masked) h += '<div style="font-size:12px;color:var(--muted);margin-top:4px;">Phone numbers are masked for your role.</div>';
+    sum.innerHTML = h;
+    body.innerHTML = d.items.length ? d.items.map(i => '<tr>' +
+      '<td>' + escHtml(i.name) + '</td><td>' + escHtml(i.phone) + '</td><td>' + escHtml(i.roles.join(', ')) + '</td>' +
+      '<td>' + escHtml(i.stored_country || '—') + '</td><td>' + escHtml(i.country || 'Unresolved') + '</td>' +
+      '<td>' + escHtml(_CD_SRC[i.source] || i.source) + (i.reason ? ' <span style="color:var(--muted)">(' + escHtml(i.reason) + ')</span>' : '') + '</td>' +
+      '<td>' + (i.issues.map(x => escHtml(_CD_ISSUE[x] || x)).join(', ') || '—') + '</td>' +
+      '<td>' + escHtml(i.city) + '</td><td>' + escHtml(i.status) + '</td></tr>').join('')
+      : '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">No accounts match.</td></tr>';
+    document.getElementById('cd_pager').innerHTML = '<span style="font-size:13px;color:var(--muted)">' + d.total + ' account(s) · page ' + d.page + ' of ' + d.pages + '</span>' +
+      '<span><button class="btn btn-sm btn-outline-secondary me-2" ' + (d.page <= 1 ? 'disabled' : '') + ' onclick="loadCountryDiag(' + (d.page - 1) + ')">Prev</button>' +
+      '<button class="btn btn-sm btn-outline-secondary" ' + (d.page >= d.pages ? 'disabled' : '') + ' onclick="loadCountryDiag(' + (d.page + 1) + ')">Next</button></span>';
+  } catch (e) { console.error('countryDiag', e); body.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">Could not load diagnostics</td></tr>'; }
+}
+
 let _allTxnRows = [];
 
 async function loadMerchantTxnsFull() {
@@ -7276,8 +7372,9 @@ async function loadP2Revenue() {
   if (!document.getElementById('p2_rev_today')) return;
   try {
     const r = await fetch('/admin/products/revenue', {credentials:'include'});
-    const d = await r.json();
     const _sr = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+    if (!r.ok) { _sr('p2_rev_today','--'); _sr('p2_rev_month','--'); _sr('p2_rev_life','--'); return; }   // no Payments view permission
+    const d = await r.json();
     _sr('p2_rev_today', '₹' + (d.today      ?? 0));
     _sr('p2_rev_month', '₹' + (d.this_month ?? 0));
     _sr('p2_rev_life',  '₹' + (d.lifetime   ?? 0));

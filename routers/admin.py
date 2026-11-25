@@ -441,16 +441,20 @@ ADMIN_CITY_AREAS = {
 }
 
 @router.get("/areas")
-def admin_get_areas(city: str = ""):
-    city_key = city.strip().lower()
-    if city_key in ADMIN_CITY_AREAS:
-        return {"areas": ADMIN_CITY_AREAS[city_key]}
-    for k, v in ADMIN_CITY_AREAS.items():
-        if city_key in k or k in city_key:
-            return {"areas": v}
-    # Fallback: distinct areas from DB
-    db_areas = db.stores.distinct("area", {"city": {"$regex": city_key, "$options": "i"}})
-    return {"areas": sorted([a for a in db_areas if a])}
+def admin_get_areas(city: str = "", country: str = None, a=Depends(get_current_admin)):
+    """Areas of a city for the dashboard's store / merchant forms. Needs a dashboard session AND view access to Stores, Accounts or
+    Cities. A country-restricted user only ever gets their own country's areas. Blank city -> []; see services/areas.py."""
+    from services import areas as _areas
+    from services.owner_country import requested_country as _rc
+    if a.get("role_name") != "Super Admin":
+        perms = a.get("permissions", {}) or {}
+        if not any((perms.get(m, {}) or {}).get("view") for m in ("Stores", "Accounts", "Cities")):
+            raise HTTPException(403, "Access denied: Missing view permission for Stores")
+    iso = _rc(country)
+    own = _dc.scope(a)
+    if own:                                                    # restricted user: only their own country, whatever was asked
+        iso = own if iso in (None, own) else "!invalid"
+    return {"areas": _areas.areas_for(city, ADMIN_CITY_AREAS, iso)}
 
 @router.post("/login")
 def admin_login(data: dict = None):
@@ -2434,6 +2438,7 @@ def admin_stats(a=Depends(get_current_admin)):
 
 @router.get("/subscriptions")
 def list_subscriptions(a=Depends(get_current_admin)):
+    _check_perm(a, "Payments", "view")
     result = []
     for s in db.subscriptions.find(_scope(a, ("merchant_id",), ("merchant_phone",))).sort("created_at", -1):
         fd = s.get("from_date"); ed = s.get("end_date")
@@ -2495,6 +2500,7 @@ def list_subscriptions(a=Depends(get_current_admin)):
 @router.get("/merchant-transactions")
 def list_merchant_transactions(a=Depends(get_current_admin)):
     """All payment transactions made by merchants (subscriptions + invoices)."""
+    _check_perm(a, "Payments", "view")
     result = []
     for inv in db.invoices.find(_scope(a, ("merchant_id",), ("merchant_phone",))).sort("created_at", -1):
         fd = inv.get("from_date"); ed = inv.get("end_date")
@@ -3410,22 +3416,32 @@ def serve_notification_image(img_id: str):
 
 @router.get("/notifications")
 def list_notifications(a=Depends(get_current_admin)):
-    docs = list(db.notifications.find().sort("_id", -1).limit(100))
+    from services import country_diagnostics as _cdiag
+    _own = _dc.scope(a)
+    _full = _cdiag.sees_full_numbers(a)
+    docs = list(db.notifications.find({"country": _own} if _own else {}).sort("_id", -1).limit(100))
     result = []
     for d in docs:
+        _tp = d.get("target_phone", "")
         result.append({
             "_id": str(d["_id"]),
             "id": str(d["_id"]),
             "title": d.get("title",""),
             "body": d.get("body",""),
             "target": d.get("target","all_users"),
-            "target_phone": d.get("target_phone",""),
+            "target_phone": _tp if _full else _cdiag.mask_phone(_tp),
             "target_city":  d.get("target_city",""),
             "image_url": d.get("image_url",""),
             "status": d.get("status","sent"),
             "sent_at": d.get("sent_at",""),
             "created_at": d.get("created_at",""),
             "processed": d.get("processed", d.get("sent_count", 0)),
+            # additive (Stage 1): counts of the send; absent on older records
+            "country": d.get("country", ""),
+            "sent_count": d.get("sent_count", 0),
+            "failed_count": d.get("failed_count", 0),
+            "skipped_count": d.get("skipped_count", 0),
+            "eligible_records": d.get("eligible_records"),
         })
     return result
 
@@ -3478,28 +3494,42 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
     target     = (data.get("target") or "all_users").strip()
     use_topic  = data.get("use_topic", target != "specific")
     image_url  = (data.get("image_url") or "").strip()
-    # Upload to Cloudinary if it's a base64 image
-    if image_url and (image_url.startswith("data:") or not image_url.startswith("http")):
-        image_url = _cloudinary_upload(image_url, folder="offro/notifications")
+    dry_run    = bool(data.get("dry_run"))
 
     if not title or not body:
         raise HTTPException(400, "title and body are required")
 
+    from services import notification_audience as _aud
+    from services import security_audit as _sec
     _iso = _dc.scope(a)
-    if _iso:
-        # Country-restricted user: FCM topics are global, so topic targets (offers / city) are refused; a broadcast goes only to the
-        # accounts of the user's own country, and a specific recipient must belong to it.
-        if target == "specific":
+    _city_limit = _aud.city_restriction(a)
+    _plan = None
+    if target == "specific":
+        if _iso or _city_limit is not None:
+            # A restricted user may only message an account inside their own country / assigned cities.
             from routers.users import _phone_variants as _pv
             _rec = db.accounts.find_one({"phone": {"$in": _pv((data.get("target_phone") or "").strip())}})
             _dc.require_account(a, _rec)
-        elif target in ("all", "all_users"):
-            use_topic = False
-        else:
-            raise HTTPException(403, "This target is not available for a country-restricted user")
+            if _city_limit is not None and not _aud._in_assigned((_rec or {}).get("city"), _city_limit):
+                raise HTTPException(404, "Not found")
+    elif target in _aud.BROADCAST_TARGETS or target == "offers":
+        # Offers is refused and city / all are resolved here, BEFORE anything is uploaded or sent (HTTPException = nothing happened).
+        _plan = _aud.build(a, "all_users" if target == "all" else target,
+                           (data.get("target_city") or "").strip(), (data.get("target_country") or "").strip())
+        use_topic = False
+    else:
+        raise HTTPException(400, "Unknown notification target")
+
+    if dry_run:                                        # counts only: nothing is uploaded, sent, stored or audited
+        return {"dry_run": True, "target": target, **_aud.summary(_plan or {})}
+
+    # Upload to Cloudinary if it's a base64 image
+    if image_url and (image_url.startswith("data:") or not image_url.startswith("http")):
+        image_url = _cloudinary_upload(image_url, folder="offro/notifications")
 
     sent_at = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d %b %Y, %I:%M %p")
     sent_count = 0
+    fail_count = 0
     fcm_error  = ""
     status     = "queued"
 
@@ -3631,45 +3661,54 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
             access_token, _pid = _get_access_token(sa_json, project_id)
 
             # ── Determine how to send ──
-            if use_topic and target != "specific":
-                # Topic-based send: one call per relevant topic
-                if target in ("all", "all_users"):
-                    topics = ["all_users"]
-                elif target == "offers":
-                    topics = ["offers"]
-                elif target == "city":
-                    city_val = (data.get("target_city") or "").strip()
-                    if not city_val:
-                        raise ValueError("target_city is required for city target")
-                    topics = [city_val.lower().replace(" ", "_").replace("-", "_") + "_users"]
-                else:
-                    topics = ["all_users"]
+            if _plan is not None:
+                # Direct-token broadcast ONLY (no topic send: it caused duplicate notifications). The audience was already resolved
+                # (country, city, role, duplicates) by services/notification_audience.build; there is no recipient cap.
+                _tokens = _plan["tokens"]
 
-                # Direct-token broadcast ONLY (no topic send).
-                # Topic send was REMOVED — it caused duplicate notifications
-                # because every device received via BOTH topic subscription
-                # AND direct token. Direct tokens are more reliable and give
-                # per-token success/failure counts.
-                fail_count = 0
-                seen_tokens = set()
-                cursor_fields = {"fcm_token": 1}
-                _bq = {"fcm_token": {"$exists": True, "$ne": ""}}
-                if _iso:
-                    _bq = {"$and": [_bq, _dc.account_query(_iso)]}
-                for coll in ((db.accounts,) if _iso else (db.accounts, db.users)):
-                    for rec in coll.find(_bq, cursor_fields).limit(3000):
-                        tok = (rec.get("fcm_token") or "").strip()
-                        if not tok or tok in seen_tokens:
-                            continue
-                        seen_tokens.add(tok)
-                        try:
-                            mid = _fcm_send(access_token, _pid, _build_fcm_message(token=tok))
-                            sent_count += 1
-                        except Exception as fe:
-                            fail_count += 1
-                            fcm_error = str(fe)
-                print(f"[FCM] broadcast target={target}: sent={sent_count} failed={fail_count} total_tokens={len(seen_tokens)}")
-                status = "sent" if sent_count > 0 else ("failed" if fail_count > 0 else "skipped_no_tokens")
+                def _send_tok(tok):
+                    _fcm_send(access_token, _pid, _build_fcm_message(token=tok))
+
+                if len(_tokens) > _aud.INLINE_MAX:
+                    # Large audience: persist the record first, send in the background, and let the history show the final counts.
+                    _bg_doc = {
+                        "title": title, "body": body, "target": target, "target_phone": "",
+                        "target_city": data.get("target_city", "") if target == "city" else "",
+                        "country": _plan["country"], "image_url": image_url, "status": "sending", "sent_at": sent_at,
+                        "sent_count": 0, "processed": 0, "failed_count": 0,
+                        "eligible_records": _plan["eligible_records"], "unique_tokens": _plan["unique_tokens"],
+                        "skipped_no_token": _plan["skipped_no_token"], "skipped_duplicate": _plan["skipped_duplicate"],
+                        "skipped_count": _plan["skipped_no_token"] + _plan["skipped_duplicate"],
+                        "sent_by": {k: v for k, v in _sec.admin_ref(a).items() if k != "id"},
+                        "created_at": datetime.utcnow(),
+                    }
+                    _nid = db.notifications.insert_one(_bg_doc).inserted_id
+                    _admin_ref = _sec.admin_ref(a)
+
+                    def _bg():
+                        def _progress(s_, f_):
+                            db.notifications.update_one({"_id": _nid}, {"$set": {"sent_count": s_, "processed": s_, "failed_count": f_}})
+                        res = _aud.deliver(_tokens, _send_tok, _progress)
+                        st = _aud.final_status(res["sent"], res["failed"])
+                        db.notifications.update_one({"_id": _nid}, {"$set": {
+                            "status": st, "sent_count": res["sent"], "processed": res["sent"], "failed_count": res["failed"],
+                            "error_class": res["error"]}})
+                        _sec.record("notification.send", _admin_ref, "ok" if st == "sent" else "failed", module="Notifications",
+                                    target={"type": "notification", "id": str(_nid), "country": _plan["country"]},
+                                    details={"target": target, "city": _bg_doc["target_city"], **_aud.summary(_plan),
+                                             "sent": res["sent"], "failed": res["failed"], "final_status": st})
+                    import threading as _threading
+                    _threading.Thread(target=_bg, daemon=True, name="notif-send-" + str(_nid)).start()
+                    return {"message": "Sending to %d devices in the background. Check the history for the final counts." % len(_tokens),
+                            "status": "sending", "notification_id": str(_nid), "sent_count": 0, "failed_count": 0,
+                            "skipped_count": _bg_doc["skipped_count"], **_aud.summary(_plan), "error": ""}
+
+                _res = _aud.deliver(_tokens, _send_tok)
+                sent_count = _res["sent"]
+                fail_count = _res["failed"]
+                fcm_error = ("%d of %d sends failed (%s)" % (fail_count, len(_tokens), _res["error"])) if fail_count else ""
+                print(f"[FCM] broadcast target={target}: sent={sent_count} failed={fail_count} unique_tokens={len(_tokens)}")
+                status = _aud.final_status(sent_count, fail_count)
 
             else:
                 # Token-based send: used for specific user only
@@ -3719,6 +3758,7 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         print(f"[FCM] env vars missing — queued only")
 
     # ── Persist to DB always ──
+    _fail = fail_count
     doc = {
         "title": title, "body": body, "target": target,
         "target_phone": data.get("target_phone", ""),
@@ -3727,14 +3767,27 @@ def send_notification(data: dict, a=Depends(get_current_admin)):
         "status": status, "sent_at": sent_at,
         "sent_count": sent_count, "processed": sent_count,
         "created_at": datetime.utcnow(),
+        "country": (_plan or {}).get("country", "") or _iso,
+        "sent_by": {k: v for k, v in _sec.admin_ref(a).items() if k != "id"},
     }
-    db.notifications.insert_one(doc)
+    _extra = {}
+    if _plan is not None:
+        _extra = {**_aud.summary(_plan), "failed_count": _fail, "skipped_count": _plan["skipped_no_token"] + _plan["skipped_duplicate"]}
+        doc.update({k: v for k, v in _extra.items() if k not in ("city", "country")})
+    _nid = db.notifications.insert_one(doc).inserted_id
+    if target != "specific":
+        _sec.record("notification.send", _sec.admin_ref(a), "ok" if status == "sent" else "failed", module="Notifications",
+                    target={"type": "notification", "id": str(_nid), "country": doc["country"]},
+                    details={"target": target, "city": doc["target_city"] if target == "city" else "", **_extra,
+                             "sent": sent_count, "final_status": status})
 
     msg_out = "Notification sent!" if status == "sent" else f"Notification saved (status: {status})"
     return {
         "message": msg_out,
         "status": status,
         "sent_count": sent_count,
+        "notification_id": str(_nid),
+        **_extra,
         "error": fcm_error if status not in ("sent", "queued") else "",
     }
 
@@ -4669,6 +4722,7 @@ def toggle_merchant_banner(bid: str, a=Depends(get_current_admin)):
 @router.get("/invoices/full")
 def list_all_invoices(a=Depends(get_current_admin)):
     """All merchant invoices: stores, banners, and vouchers — TASK 10: no zero amounts."""
+    _check_perm(a, "Payments", "view")
     def _fmt(v):
         if not v: return ""
         if isinstance(v, datetime): return v.strftime("%d %b %Y")

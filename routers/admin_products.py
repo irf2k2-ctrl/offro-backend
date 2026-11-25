@@ -357,6 +357,7 @@ def summary(a=Depends(get_current_admin)):
 @router.get("/products/revenue")
 def revenue(a=Depends(get_current_admin)):
     """Money collected through product orders (create + renew) that were paid."""
+    _check_perm(a, "Payments", "view")
     now = datetime.utcnow()
     today, month, epoch = datetime(now.year, now.month, now.day), datetime(now.year, now.month, 1), datetime(2020, 1, 1)
 
