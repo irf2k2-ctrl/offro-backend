@@ -25,6 +25,19 @@ body.rbac-ready .sidebar a[onclick] { opacity: 1; }
 body.rbac-ready .sidebar a[onclick][style*="display: none"] { opacity: 0; }
 
 .sidebar .sep{height:1px;background:rgba(255,255,255,.1);margin:8px 0;}
+/* ── Sidebar groups (expand / collapse). Links inside keep their own styling and handlers. ── */
+.sidebar .nav-group{display:flex;flex-direction:column;}
+.sidebar .nav-group-head{display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:none;color:#fff;font-weight:700;font-size:14.5px;line-height:1.2;padding:10px 13px;border-radius:8px;cursor:pointer;text-align:left;transition:background .15s;}
+.sidebar .nav-group-head:hover{background:rgba(255,255,255,0.10);}
+.sidebar .nav-group-head:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+.sidebar .nav-group-head .nav-chev{font-size:11px;color:#fff;opacity:.85;transition:transform .2s ease;}
+.sidebar .nav-group.open .nav-chev{transform:rotate(180deg);}
+.sidebar .nav-group-body{display:grid;grid-template-rows:0fr;visibility:hidden;transition:grid-template-rows .2s ease,visibility 0s linear .2s;}
+.sidebar .nav-group.open .nav-group-body{grid-template-rows:1fr;visibility:visible;transition:grid-template-rows .2s ease,visibility 0s;}
+.sidebar .nav-group-inner{overflow:hidden;min-height:0;display:flex;flex-direction:column;gap:1px;}
+.sidebar .nav-group-inner a{font-size:12.5px;padding:8px 13px 8px 26px;}
+.sidebar .nav-group.nav-empty{display:none;}
+@media (prefers-reduced-motion:reduce){.sidebar .nav-group-body,.sidebar .nav-chev{transition:none!important;}}
 .sidebar .logout{margin-top:auto;color:#f4a49a!important;}
 .sidebar .logout:hover{background:rgba(255,100,80,.15)!important;}
 .main{margin-left:230px;padding:24px;min-height:100vh;}
@@ -185,7 +198,7 @@ function _secUrl(u) {
 </head>
 <body>
 
-<div class="sidebar">
+<div class="sidebar" id="sidebar">
 <button class="sidebar-close-btn" onclick="closeSidebar()"><i class="fas fa-times"></i></button>
   <div class="sidebar-logo">
     <img src="https://base44.app/api/apps/69dc008cb5876dcb8680be38/files/mp/public/69dc008cb5876dcb8680be38/1caf87ac0_ea8e1d785_realpngfile.png" 
@@ -202,41 +215,66 @@ function _secUrl(u) {
   </div>
   <a href="#" class="active" onclick="showSection('overview',this)"><i class="fas fa-chart-pie fa-fw"></i> Overview</a>
   <div class="sep"></div>
-  <a href="#" onclick="showSection('accounts',this)"><i class="fas fa-id-badge fa-fw"></i> Accounts</a>
-  <a href="#" onclick="showSection('country_diag',this)"><i class="fas fa-globe fa-fw"></i> Country Diagnostics</a>
-  <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
-  <a href="#" onclick="showSection('deals',this)"><i class="fas fa-tags fa-fw"></i> Deals</a>
-  <a href="#" onclick="showSection('product_cards',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
-  <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
-  <a href="#" onclick="showSection('admin_banners',this)"><i class="fas fa-ad fa-fw"></i> Admin Banners</a>
-  <a href="#" onclick="showSection('influencers',this)"><i class="fas fa-star fa-fw"></i> Influencers</a>
-  <a href="#" onclick="showSection('popup_campaigns',this)"><i class="fas fa-bullhorn fa-fw"></i> Popup Campaigns</a>
-  <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
-  <a href="#" onclick="showSection('gift_product_requests',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
-  <div class="sep"></div>
-  <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
-  <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
-  <a href="#" onclick="showSection('cities',this)"><i class="fas fa-map-marker-alt fa-fw"></i> Cities</a>
-  <a href="#" onclick="showSection('pricing_plans',this)"><i class="fas fa-layer-group fa-fw"></i> Pricing &amp; Plans</a>
-  <div class="sep"></div>
-  <a href="#" onclick="showSection('reviews',this)"><i class="fas fa-comment-dots fa-fw"></i> Rating &amp; Review</a>
-  <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
-  <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
-  <a href="#" onclick="showSection('policies',this)"><i class="fas fa-shield-alt fa-fw"></i> Policies</a>
-  <div class="sep"></div>
-  <a href="#" onclick="showSection('social',this)"><i class="fab fa-whatsapp fa-fw"></i> Social Media</a>
-  <a href="#" onclick="showSection('wa_chat',this)"><i class="fab fa-whatsapp fa-fw" style="color:#25D366"></i> Live Chat</a>
-  <a href="#" onclick="showSection('wa_campaigns',this)"><i class="fas fa-bullhorn fa-fw" style="color:#25D366"></i> WhatsApp Campaigns</a>
-  <a href="#" onclick="showSection('about',this)"><i class="fas fa-info-circle fa-fw"></i> About Us</a>
-  <a href="#" onclick="showSection('translations',this)"><i class="fas fa-language fa-fw"></i> Translations</a>
+  <div class="nav-group" data-group="store">
+    <button type="button" class="nav-group-head" aria-expanded="false" aria-controls="nav-body-store" onclick="toggleNavGroup('store')"><span>Store Management</span><i class="fas fa-chevron-down nav-chev" aria-hidden="true"></i></button>
+    <div class="nav-group-body" id="nav-body-store"><div class="nav-group-inner">
+      <a href="#" onclick="showSection('accounts',this)"><i class="fas fa-id-badge fa-fw"></i> Accounts</a>
+      <a href="#" onclick="showSection('country_diag',this)"><i class="fas fa-globe fa-fw"></i> Country Diagnostics</a>
+      <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
+      <a href="#" onclick="showSection('influencers',this)"><i class="fas fa-star fa-fw"></i> Influencers</a>
+      <a href="#" onclick="showSection('product_cards',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
+      <a href="#" onclick="showSection('categories',this)"><i class="fas fa-tags fa-fw"></i> Categories</a>
+      <a href="#" onclick="showSection('deals',this)"><i class="fas fa-tags fa-fw"></i> Deals</a>
+      <a href="#" onclick="showSection('cities',this)"><i class="fas fa-map-marker-alt fa-fw"></i> Cities</a>
+    </div></div>
+  </div>
+  <div class="nav-group" data-group="marketing">
+    <button type="button" class="nav-group-head" aria-expanded="false" aria-controls="nav-body-marketing" onclick="toggleNavGroup('marketing')"><span>Marketing</span><i class="fas fa-chevron-down nav-chev" aria-hidden="true"></i></button>
+    <div class="nav-group-body" id="nav-body-marketing"><div class="nav-group-inner">
+      <a href="#" onclick="showSection('promo_sliders',this)"><i class="fas fa-images fa-fw"></i> Banners</a>
+      <a href="#" onclick="showSection('admin_banners',this)"><i class="fas fa-ad fa-fw"></i> Admin Banners</a>
+      <a href="#" onclick="showSection('popup_campaigns',this)"><i class="fas fa-bullhorn fa-fw"></i> Popup Campaigns</a>
+      <a href="#" onclick="showSection('social',this)"><i class="fab fa-whatsapp fa-fw"></i> Social Media</a>
+      <a href="#" onclick="showSection('wa_campaigns',this)"><i class="fas fa-bullhorn fa-fw" style="color:#25D366"></i> WhatsApp Campaigns</a>
+      <a href="#" onclick="showSection('notifications',this)"><i class="fas fa-bell fa-fw"></i> Notifications</a>
+    </div></div>
+  </div>
+  <div class="nav-group" data-group="finance">
+    <button type="button" class="nav-group-head" aria-expanded="false" aria-controls="nav-body-finance" onclick="toggleNavGroup('finance')"><span>Finance</span><i class="fas fa-chevron-down nav-chev" aria-hidden="true"></i></button>
+    <div class="nav-group-body" id="nav-body-finance"><div class="nav-group-inner">
+      <a href="#" onclick="showSection('merchant_txns',this)"><i class="fas fa-money-bill-wave fa-fw"></i> Payments</a>
+      <a href="#" onclick="showSection('gift_product_requests',this)"><i class="fas fa-gift fa-fw"></i> Gift Vouchers</a>
+      <a href="#" onclick="showSection('pricing_plans',this)"><i class="fas fa-layer-group fa-fw"></i> Pricing &amp; Plans</a>
+      <a href="#" onclick="showSection('discounts',this)"><i class="fas fa-tag fa-fw"></i> Discount Codes</a>
+    </div></div>
+  </div>
+  <div class="nav-group" data-group="engagement">
+    <button type="button" class="nav-group-head" aria-expanded="false" aria-controls="nav-body-engagement" onclick="toggleNavGroup('engagement')"><span>Customer Engagement</span><i class="fas fa-chevron-down nav-chev" aria-hidden="true"></i></button>
+    <div class="nav-group-body" id="nav-body-engagement"><div class="nav-group-inner">
+      <a href="#" onclick="showSection('reviews',this)"><i class="fas fa-comment-dots fa-fw"></i> Rating &amp; Review</a>
+      <a href="#" onclick="showSection('wa_chat',this)"><i class="fab fa-whatsapp fa-fw" style="color:#25D366"></i> Live Chat</a>
+    </div></div>
+  </div>
+  <div class="nav-group" data-group="content">
+    <button type="button" class="nav-group-head" aria-expanded="false" aria-controls="nav-body-content" onclick="toggleNavGroup('content')"><span>Content &amp; Settings</span><i class="fas fa-chevron-down nav-chev" aria-hidden="true"></i></button>
+    <div class="nav-group-body" id="nav-body-content"><div class="nav-group-inner">
+      <a href="#" onclick="showSection('terms',this)"><i class="fas fa-file-contract fa-fw"></i> Terms & Conditions</a>
+      <a href="#" onclick="showSection('policies',this)"><i class="fas fa-shield-alt fa-fw"></i> Policies</a>
+      <a href="#" onclick="showSection('about',this)"><i class="fas fa-info-circle fa-fw"></i> About Us</a>
+      <a href="#" onclick="showSection('translations',this)"><i class="fas fa-language fa-fw"></i> Translations</a>
+      <a href="#" onclick="showSection('default_images',this)"><i class="fas fa-image fa-fw"></i> Default Images</a>
+    </div></div>
+  </div>
+  <div class="nav-group" data-group="admin">
+    <button type="button" class="nav-group-head" aria-expanded="false" aria-controls="nav-body-admin" onclick="toggleNavGroup('admin')"><span>Administration</span><i class="fas fa-chevron-down nav-chev" aria-hidden="true"></i></button>
+    <div class="nav-group-body" id="nav-body-admin"><div class="nav-group-inner">
+      <a href="#" onclick="showSection('rbac_users',this)"><i class="fas fa-users-cog fa-fw"></i> User Management</a>
+      <a href="#" onclick="showSection('rbac_roles',this)"><i class="fas fa-user-shield fa-fw"></i> Roles &amp; Permissions</a>
+      <a href="#" onclick="showSection('rbac_logs',this)"><i class="fas fa-history fa-fw"></i> Activity Logs</a>
+    </div></div>
+  </div>
   <div class="sep"></div>
 
-  <a href="#" onclick="showSection('default_images',this)"><i class="fas fa-image fa-fw"></i> Default Images</a>
-  <div class="sep"></div>
-  <a href="#" onclick="showSection('rbac_users',this)"><i class="fas fa-users-cog fa-fw"></i> User Management</a>
-  <a href="#" onclick="showSection('rbac_roles',this)"><i class="fas fa-user-shield fa-fw"></i> Roles &amp; Permissions</a>
-  <a href="#" onclick="showSection('rbac_logs',this)"><i class="fas fa-history fa-fw"></i> Activity Logs</a>
-  <div class="sep"></div>
   <a href="#" class="logout" onclick="logout()"><i class="fas fa-sign-out-alt fa-fw"></i> Logout</a>
 </div>
 
@@ -2677,7 +2715,53 @@ function _rbacApplySidebarVisibility() {
     }
     sep.style.display = hasVisible ? "" : "none";
   });
+  _navRefreshGroups();
 }
+
+// ── Sidebar groups: UI only. Visibility of each link is still decided above; a group with no visible link is hidden. ──
+var _NAV_KEY = "offro_admin_nav_groups";
+function _navLoad() { try { return JSON.parse(localStorage.getItem(_NAV_KEY) || "null") || null; } catch (e) { return null; } }
+function _navSave() {
+  try {
+    var o = {};
+    document.querySelectorAll(".sidebar .nav-group").forEach(function (g) { o[g.dataset.group] = g.classList.contains("open"); });
+    localStorage.setItem(_NAV_KEY, JSON.stringify(o));
+  } catch (e) {}
+}
+function _navSetOpen(g, open) {
+  g.classList.toggle("open", !!open);
+  var h = g.querySelector(".nav-group-head"); if (h) h.setAttribute("aria-expanded", open ? "true" : "false");
+}
+function toggleNavGroup(key) {
+  var g = document.querySelector('.sidebar .nav-group[data-group="' + key + '"]');
+  if (!g) return;
+  _navSetOpen(g, !g.classList.contains("open"));
+  _navSave();
+}
+function _navRefreshGroups() {
+  document.querySelectorAll(".sidebar .nav-group").forEach(function (g) {
+    var any = Array.prototype.some.call(g.querySelectorAll("a[onclick]"), function (a) { return a.style.display !== "none"; });
+    g.classList.toggle("nav-empty", !any);
+  });
+}
+// Open the group that holds the page being shown (by section name, so it also works when showSection is called without a link).
+function _navRevealSection(name) {
+  var links = document.querySelectorAll(".sidebar .nav-group a[onclick]");
+  for (var i = 0; i < links.length; i++) {
+    var m = links[i].getAttribute("onclick").match(/showSection\([\'"]([^\'",]+)[\'"],/);
+    if (m && m[1] === name) {
+      var g = links[i].closest(".nav-group");
+      if (g && !g.classList.contains("open")) { _navSetOpen(g, true); _navSave(); }
+      return;
+    }
+  }
+}
+(function _navInit() {
+  var saved = _navLoad();
+  document.querySelectorAll(".sidebar .nav-group").forEach(function (g) {
+    _navSetOpen(g, saved ? !!saved[g.dataset.group] : g.dataset.group === "store");
+  });
+})();
 
 async function loadSidebarProfile() {
   try {
@@ -2829,6 +2913,8 @@ function showSection(name, el){
   let sec = document.getElementById("section-"+name);
   if(sec) sec.classList.add("active");
   if(el) el.classList.add("active");
+  _navRevealSection(name);                       // sidebar: expand the group of the page being shown
+  if (window.innerWidth <= 768 && typeof closeSidebar === "function") closeSidebar();   // phone: close the drawer after choosing a page
   // Scroll page to top and reset any table horizontal scrolls
   window.scrollTo({top: 0, behavior: "instant"});
   if(sec) {

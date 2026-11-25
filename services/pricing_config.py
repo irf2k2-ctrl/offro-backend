@@ -557,9 +557,10 @@ def log(code: str, section: str, action: str, old, new, admin_ref: str) -> None:
 
 
 def history(code: Optional[str], limit: int = 50) -> list:
+    # Newest first. `_id` breaks ties: two saves inside one clock tick (coarse clocks, e.g. Windows) share an `at`, and without it their order is arbitrary.
     q = {"country_code": code} if code else {}
     out = []
-    for h in db.pricing_history.find(q).sort("at", -1).limit(max(1, min(int(limit), 200))):
+    for h in db.pricing_history.find(q).sort([("at", -1), ("_id", -1)]).limit(max(1, min(int(limit), 200))):
         out.append({"country_code": h.get("country_code"), "section": h.get("section"), "action": h.get("action"),
                     "old": h.get("old"), "new": h.get("new"), "by": h.get("by"), "at": h["at"].isoformat() + "Z"})
     return out

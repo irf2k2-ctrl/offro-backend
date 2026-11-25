@@ -426,3 +426,38 @@ def test_this_module_does_not_touch_wallet_withdraw_or_the_phone_country_list():
     src = inspect.getsource(PC)
     assert "withdraw_requests" not in src and "db.accounts" not in src and "db.users" not in src and "import razorpay" not in src and "razorpay_" not in src
     assert fake.withdraw_requests.count_documents({}) == 0
+
+
+# ── regression: history order must not depend on the clock's resolution ─────────────────────────────────────────────
+@pytest.fixture
+def coarse_clock(monkeypatch):
+    """A clock that returns the SAME instant for every call (what a ~15 ms-resolution clock does for writes made back to back)."""
+    from datetime import datetime as _dt
+    from services import pricing_config as pc
+    fixed = _dt(2026, 11, 26, 0, 0, 0)
+
+    class Frozen(_dt):
+        @classmethod
+        def utcnow(cls):
+            return fixed
+    monkeypatch.setattr(pc, "datetime", Frozen)
+
+
+def test_history_is_newest_first_even_when_timestamps_tie(coarse_clock):
+    _add()
+    c.put(BASE + "/countries/SA/prices/banner", json={"price_per_day": 1.5}, headers=SA_H)
+    c.put(BASE + "/countries/SA/prices/banner", json={"price_per_day": 2}, headers=SA_H)
+    assert len({x["at"] for x in c.get(BASE + "/history?country=SA", headers=SA_H).json()["history"]}) == 1      # the tie is real
+    h = c.get(BASE + "/history?country=SA", headers=SA_H).json()["history"]
+    assert [x["action"] for x in h] == ["update", "update", "create"]
+    assert h[0]["old"] == {"price": 1.5} and h[0]["new"] == {"price": 2}
+    assert h[1]["new"]["price"] == 1.5 and h[1]["old"]["price"] is None and h[2]["section"] == "country"
+
+
+def test_history_names_admin_and_changed_fields_even_when_timestamps_tie(coarse_clock):
+    _add()
+    c.put(BASE + "/countries/SA/prices/store_plans", json={"plans": [{"id": "1month", "price": 29}]}, headers=SA_H)
+    c.put(BASE + "/countries/SA/prices/store_plans", json={"plans": [{"id": "3months", "price": 79}]}, headers=SA_H)
+    h = c.get(BASE + "/history?country=SA", headers=SA_H).json()["history"]
+    assert h[0]["by"] == "Super Admin" and h[0]["action"] == "update"
+    assert "3months.price" in h[0]["new"] and "1month.price" not in (h[0]["new"] or {})
