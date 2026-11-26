@@ -323,7 +323,7 @@ function _secUrl(u) {
   <div class="section-header">
     <div style="color:var(--muted);font-size:12px;">Manage role templates and module-level permissions</div>
     <div style="display:flex;gap:8px">
-      <button class="btn-p" onclick="rbacLoadRoles()"><i class="fas fa-sync me-1"></i> Refresh</button>
+      <button class="btn-p" id="rbac_roles_refresh" type="button" onclick="rbacLoadRoles(true)"><i class="fas fa-sync me-1"></i> Refresh</button>
       <button class="btn-p" onclick="rbacShowRoleModal()"><i class="fas fa-plus me-1"></i> Add Role</button>
     </div>
   </div>
@@ -8222,7 +8222,10 @@ async function openAccountEdit(acctId, name) {
       <button class="btn-p" id="ae_req_btn">Send WhatsApp code to new number</button>
     </div>
     <div id="ae_msg" style="font-size:12px;margin-top:10px;min-height:16px;"></div></div>`;
-  document.body.appendChild(o);
+  // The account page is a Bootstrap modal, whose focus trap pulls focus back into the modal from anything outside it: a dialog appended to
+  // <body> could be seen but never typed into. Mount it INSIDE the open modal so the name / number / code fields take focus.
+  const host = document.getElementById('accountDetailModal');
+  (host && host.classList.contains('show') ? host : document.body).appendChild(o);
   document.getElementById('ae_unavail').onchange = e => { document.getElementById('ae_reason').style.display = e.target.checked ? '' : 'none'; };
   document.getElementById('ae_name_btn').onclick = async () => {
     try { const d = await _acctEditApi('PUT', `/accounts/${encodeURIComponent(acctId)}/edit-name`, {name: document.getElementById('ae_name').value});
@@ -8267,7 +8270,7 @@ function renderAccountDetailHTML(d) {
   const poolPts   = d.pool_pts||0;
   const totalPts  = visitPts + poolPts;
   const acctId    = d.account_id || d._id || d.user_id || d.id || '';
-  const acctName  = (d.full_name || d.name || '').replace(/'/g, "\\'");
+  const acctName  = (d.full_name || d.name || '');          // raw: _secJs() escapes it for the onclick attribute (escaping twice left a stray backslash in names like D'Souza)
   const isMerchant = (d.roles||[]).includes('merchant');
 
   // Invoices table rows
@@ -10554,22 +10557,53 @@ async function rbacDeleteUser(id, name) {
 async function rbacEditUser(id) { await rbacShowUserModal(id); }
 
 // ── Roles ──
-async function rbacLoadRoles() {
+let _rbacRolesSeq = 0;
+// manual=true (the Refresh button): show progress, always re-fetch from the server (never a cached copy), re-read the signed-in user's
+// own permissions too, and say clearly whether it worked. Automatic calls (opening the page, after save/delete) keep their own messages.
+async function rbacLoadRoles(manual) {
+  const seq = ++_rbacRolesSeq;
+  const btn = document.getElementById("rbac_roles_refresh");
+  const msg = document.getElementById("rbac_roles_msg");
+  const table = document.getElementById("rbac_roles_table");
+  const label = btn ? btn.innerHTML : "";
+  const say = (text, color) => { if (msg) { msg.innerText = text; msg.style.color = color; } };
+  if (manual) {
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Refreshing...'; }
+    say("Refreshing...", "var(--muted)");
+  }
   try {
-    let res = await fetch("/admin/auth/roles", { credentials: "include" });
-    if (res.status===403||res.status===401) { document.getElementById("rbac_roles_table").innerHTML = _accessDeniedHtml("Roles & Permissions"); return; } if (!res.ok) { document.getElementById("rbac_roles_table").innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>'; return; }
+    let res = await fetch("/admin/auth/roles?_=" + Date.now(), { credentials: "include", cache: "no-store" });
+    if (seq !== _rbacRolesSeq) return;                                     // a newer request started: let it win
+    if (res.status===403||res.status===401) { table.innerHTML = _accessDeniedHtml("Roles & Permissions"); if (manual) say("", ""); return; }
+    if (!res.ok) {
+      let why = ""; try { why = (await res.json()).detail || ""; } catch (e) {}
+      if (manual) say("Could not refresh roles" + (why ? ": " + why : " (HTTP " + res.status + ")") + ". Showing the last loaded list.", "var(--danger)");
+      else table.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger)">Failed to load. Please refresh.</td></tr>';
+      return;
+    }
     let roles = await res.json();
+    if (seq !== _rbacRolesSeq) return;
     let html = "";
     for (let r of roles) {
+      const perms = r.permissions || {};
       let permCount = 0, permTotal = RBAC_MODULES.length * RBAC_ACTIONS.length;
-      for (let mod of RBAC_MODULES) { for (let act of RBAC_ACTIONS) { if (r.permissions[mod] && r.permissions[mod][act]) permCount++; } }
+      for (let mod of RBAC_MODULES) { for (let act of RBAC_ACTIONS) { if (perms[mod] && perms[mod][act]) permCount++; } }
       let permPct = Math.round((permCount / permTotal) * 100);
       let typeBadge = r.is_system_role ? '<span style="background:var(--light);color:var(--primary);padding:2px 10px;border-radius:20px;font-size:10px;font-weight:700">SYSTEM</span>' : '<span style="background:#f0f0f0;color:var(--muted);padding:2px 10px;border-radius:20px;font-size:10px;font-weight:700">CUSTOM</span>';
       let editBtn = r.is_system_role ? '<button class="btn btn-sm" onclick="rbacEditRole(\''+_secJs(r.id)+'\')"><i class="fas fa-edit"></i></button>' : '<button class="btn btn-sm" onclick="rbacEditRole(\''+_secJs(r.id)+'\')"><i class="fas fa-edit"></i></button> <button class="btn btn-sm" onclick="rbacDeleteRole(\''+_secJs(r.id)+'\',\''+_secJs(r.role_name)+'\')"><i class="fas fa-trash text-danger"></i></button>';
       html += '<tr><td><strong>' + escHtml(r.role_name) + '</strong></td><td style="font-size:12px">' + (escHtml(r.description||"—")) + '</td><td><div style="background:#e0e0e0;border-radius:10px;height:8px;width:100px;overflow:hidden"><div style="background:var(--primary);height:8px;border-radius:10px;width:' + permPct + '%"></div></div><small style="color:var(--muted)">' + permPct + '% (' + permCount + '/' + permTotal + ')</small></td><td>' + typeBadge + '</td><td>' + editBtn + '</td></tr>';
     }
     document.getElementById("rbac_roles_table").innerHTML = html || '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No roles found</td></tr>';
-  } catch (e) { console.error("rbacLoadRoles", e); }
+    if (manual) {
+      if (typeof loadSidebarProfile === "function") loadSidebarProfile();   // the signed-in user's own permissions may have changed too
+      say("\u2713 Refreshed " + new Date().toLocaleTimeString() + " (" + roles.length + " role" + (roles.length === 1 ? "" : "s") + ")", "#2d8a56");
+    }
+  } catch (e) {
+    console.error("rbacLoadRoles", e);
+    if (seq === _rbacRolesSeq && manual) say("Could not refresh roles: " + (e && e.message ? e.message : "network error") + ". Showing the last loaded list.", "var(--danger)");
+  } finally {
+    if (manual && btn) { btn.disabled = false; btn.innerHTML = label; }     // always give the button back, even if a newer load took over
+  }
 }
 
 function rbacShowRoleModal() {
@@ -10605,7 +10639,8 @@ function rbacRenderPermMatrix(existing) {
       let checked = p[act] ? "checked" : "";
       html += '<td><input type="checkbox" class="form-check-input perm-chk" data-mod="' + escHtml(mod) + '" data-act="' + escHtml(act) + '" ' + checked + '></td>';
     }
-    html += '<td><input type="checkbox" class="form-check-input perm-all" data-mod="' + escHtml(mod) + '" onchange="rbacToggleRow(this)"></td></tr>';
+    const allOn = RBAC_ACTIONS.every(act => p[act]) ? "checked" : "";
+    html += '<td><input type="checkbox" class="form-check-input perm-all" data-mod="' + escHtml(mod) + '" onchange="rbacToggleRow(this)" ' + allOn + '></td></tr>';
   }
   document.getElementById("rbac_perm_matrix").innerHTML = html;
 }
