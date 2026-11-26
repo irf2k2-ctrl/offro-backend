@@ -13,8 +13,8 @@ fake = sys.modules["database"].db
 ORIG = "templates/admin_dashboard.html"
 ALL = ["overview", "accounts", "stores", "influencers", "product_cards", "categories", "deals", "cities", "promo_sliders", "admin_banners",
        "popup_campaigns", "social", "wa_campaigns", "notifications", "merchant_txns", "gift_product_requests", "pricing_plans", "discounts",
-       "reviews", "wa_chat", "terms", "policies", "about", "translations", "default_images", "rbac_users", "rbac_roles", "rbac_logs", "country_diag"]
-GROUPS = {"store": ["accounts", "country_diag", "stores", "influencers", "product_cards", "categories", "deals", "cities"],
+       "reviews", "wa_chat", "terms", "policies", "about", "translations", "default_images", "rbac_users", "rbac_roles", "rbac_logs"]
+GROUPS = {"store": ["accounts", "stores", "influencers", "product_cards", "categories", "deals", "cities"],
           "marketing": ["promo_sliders", "admin_banners", "popup_campaigns", "social", "wa_campaigns", "notifications"],
           "finance": ["merchant_txns", "gift_product_requests", "pricing_plans", "discounts"],
           "engagement": ["reviews", "wa_chat"],

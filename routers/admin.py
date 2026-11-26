@@ -3424,9 +3424,8 @@ def serve_notification_image(img_id: str):
 
 @router.get("/notifications")
 def list_notifications(a=Depends(get_current_admin)):
-    from services import country_diagnostics as _cdiag
     _own = _dc.scope(a)
-    _full = _cdiag.sees_full_numbers(a)
+    _full = _dc.sees_full_numbers(a)
     docs = list(db.notifications.find({"country": _own} if _own else {}).sort("_id", -1).limit(100))
     result = []
     for d in docs:
@@ -3437,7 +3436,7 @@ def list_notifications(a=Depends(get_current_admin)):
             "title": d.get("title",""),
             "body": d.get("body",""),
             "target": d.get("target","all_users"),
-            "target_phone": _tp if _full else _cdiag.mask_phone(_tp),
+            "target_phone": _tp if _full else _dc.mask_phone(_tp),
             "target_city":  d.get("target_city",""),
             "image_url": d.get("image_url",""),
             "status": d.get("status","sent"),

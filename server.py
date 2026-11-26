@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Redirect
 from routers import admin, users, public, merchant_app, popup_campaigns, webhook, wa_chat, wa_template_test, wa_campaigns, dashboard_auth, maps, smart_link
 from routers import merchant_products, admin_products, admin_deals, public_products, collaborations
 from routers import translations_admin, translations_public
-from routers import admin_pricing, public_pricing, admin_store_status_diag, admin_cities, country_diagnostics, security_audit, admin_account_edit
+from routers import admin_pricing, public_pricing, admin_store_status_diag, admin_cities, security_audit, admin_account_edit, admin_pending_archive
 from database import db
 import base64, io, re, html as _html
 from services.security import cors_origins, SecurityMiddleware
@@ -49,7 +49,7 @@ app.include_router(dashboard_auth.router, prefix="/admin")  # RBAC dashboard aut
 app.include_router(translations_admin.router, prefix="/admin")   # Translation module admin API (Phase G): /admin/translations/*
 app.include_router(admin_store_status_diag.router, prefix="/admin")  # TEMPORARY read-only store-status diagnostic (remove after investigation)
 app.include_router(admin_account_edit.router, prefix="/admin")   # Support/Admin account edit: name + OTP-verified number change (Accounts edit permission)
-app.include_router(country_diagnostics.router, prefix="/admin")   # READ-ONLY country diagnostics: /admin/country-diagnostics (Accounts view permission)
+app.include_router(admin_pending_archive.router, prefix="/admin")   # Payments > Archived Pending Transactions: /admin/payments/archive/* (list + manual delete of ARCHIVED rows only)
 app.include_router(security_audit.router, prefix="/admin")   # READ-ONLY permanent audit trail: GET /admin/security-audit (User Management view)
 app.include_router(admin_pricing.router, prefix="/admin")   # Pricing & Plans module: /admin/pricing-config/* (country-wise prices, tax, reward conversion)
 app.include_router(public_pricing.router)             # read-only country pricing for the apps: /country-pricing/{code}
@@ -407,6 +407,14 @@ def startup():
         _wa_worker.start_worker_if_enabled()
     except Exception as e:
         print(f"⚠️  WhatsApp worker setup skipped ({type(e).__name__})")
+    # Old abandoned PENDING subscriptions (no Razorpay ids) -> archive after PENDING_ARCHIVE_AFTER_DAYS (90); archive purged after
+    # PENDING_ARCHIVE_RETENTION_DAYS (90). Background job; PENDING_ARCHIVE_ENABLED=0 turns it off. Never touches payment processing.
+    try:
+        from services import pending_archive as _pend_archive
+        _pend_archive.ensure_indexes_safe()
+        _pend_archive.start_if_enabled()
+    except Exception as e:
+        print(f"⚠️  pending-transaction archive setup skipped ({type(e).__name__})")
     # Ensure OTP TTL index for auto-expiry of otp_sessions collection
     try:
         from routers.otp_service import _ensure_otp_indexes

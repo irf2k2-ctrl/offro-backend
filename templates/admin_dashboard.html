@@ -165,6 +165,8 @@ td[style*="sticky"]{background:#fff;}
 .wa-reply-box{background:#fff;border-top:1px solid var(--border);padding:12px 16px;display:flex;gap:10px;align-items:flex-end;flex-shrink:0;position:relative;}
 .wa-send-btn{background:#25D366;color:#fff;border:none;border-radius:50%;width:42px;height:42px;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;flex-shrink:0;}
 
+.pay-tab{background:none;border:none;border-bottom:3px solid transparent;padding:8px 14px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;}
+.pay-tab.active{color:var(--primary);border-bottom-color:var(--primary);}
 </style>
 <script>
 /* ── XSS-safe output helpers (security hardening) ──────────────────────────────
@@ -219,7 +221,6 @@ function _secUrl(u) {
     <button type="button" class="nav-group-head" aria-expanded="false" aria-controls="nav-body-store" onclick="toggleNavGroup('store')"><span>Store Management</span><i class="fas fa-chevron-down nav-chev" aria-hidden="true"></i></button>
     <div class="nav-group-body" id="nav-body-store"><div class="nav-group-inner">
       <a href="#" onclick="showSection('accounts',this)"><i class="fas fa-id-badge fa-fw"></i> Accounts</a>
-      <a href="#" onclick="showSection('country_diag',this)"><i class="fas fa-globe fa-fw"></i> Country Diagnostics</a>
       <a href="#" onclick="showSection('stores',this)"><i class="fas fa-store fa-fw"></i> Stores</a>
       <a href="#" onclick="showSection('influencers',this)"><i class="fas fa-star fa-fw"></i> Influencers</a>
       <a href="#" onclick="showSection('product_cards',this)"><i class="fas fa-id-card fa-fw"></i> Products</a>
@@ -497,36 +498,6 @@ function _secUrl(u) {
       </table>
     </div>
   </div>
-</div>
-
-<!-- ═══ COUNTRY DIAGNOSTICS (read-only) ═══ -->
-<div id="section-country_diag" class="section">
-  <div class="section-header">
-    <div class="page-title" style="margin:0">🌍 Country Diagnostics</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-      <select id="cd_country" class="form-select" style="max-width:150px;" onchange="loadCountryDiag(1)"><option value="">All countries</option></select>
-      <select id="cd_source" class="form-select" style="max-width:150px;" onchange="loadCountryDiag(1)">
-        <option value="">All sources</option><option value="explicit">Explicit</option><option value="parsed">Parsed</option>
-        <option value="legacy_india">Legacy India</option><option value="unresolved">Unresolved</option>
-      </select>
-      <select id="cd_issue" class="form-select" style="max-width:190px;" onchange="loadCountryDiag(1)">
-        <option value="">All accounts</option><option value="unresolved">Country unresolved</option>
-        <option value="country_mismatch">Country / prefix mismatch</option><option value="legacy_india">Bare number taken as India</option>
-        <option value="invalid_phone_country">Invalid stored country</option>
-      </select>
-      <select id="cd_role" class="form-select" style="max-width:140px;" onchange="loadCountryDiag(1)">
-        <option value="">All roles</option><option value="customer">Customer</option><option value="merchant">Merchant</option>
-        <option value="influencer">Influencer</option><option value="other">No role</option>
-      </select>
-    </div>
-  </div>
-  <div class="text-muted" style="font-size:12px;margin:6px 0 10px;">Read-only. Shows how each account's country is resolved today. Nothing on this page changes any account.</div>
-  <div id="cd_summary" class="mb-3"></div>
-  <div class="table-wrap"><table>
-    <thead><tr><th>Name</th><th>Phone</th><th>Roles</th><th>Stored country</th><th>Resolved country</th><th>Source</th><th>Issues</th><th>City</th><th>Status</th></tr></thead>
-    <tbody id="cd_body"></tbody>
-  </table></div>
-  <div id="cd_pager" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;"></div>
 </div>
 
 <!-- ═══ UNIFIED ACCOUNTS ═══ -->
@@ -956,6 +927,11 @@ function _secUrl(u) {
   <!-- MERCHANT TRANSACTIONS -->
   <div id="section-merchant_txns" class="section">
     <div class="page-title">Merchant Payment Transactions</div>
+    <div id="pay_tabs" style="display:flex;gap:8px;margin:0 0 14px;border-bottom:1px solid #e3e8e6;">
+      <button type="button" id="pay_tab_btn_active" class="pay-tab active" onclick="switchPayTab('active')">Payments</button>
+      <button type="button" id="pay_tab_btn_archive" class="pay-tab" onclick="switchPayTab('archive')">Archived Pending Transactions <span id="arch_tab_count" style="font-size:11px;color:var(--muted);"></span></button>
+    </div>
+    <div id="pay_pane_active">
     <!-- Stats row -->
     <div class="row g-3 mb-3">
       <div class="col-6 col-md-3"><div class="card-stat"><h3 id="txn_total_merchants">--</h3><p>Total Merchants</p></div></div>
@@ -999,6 +975,35 @@ function _secUrl(u) {
         </tr></thead>
         <tbody id="txn_body"></tbody>
       </table>
+      </div>
+    </div>
+    </div>
+    <!-- ═══ ARCHIVED PENDING TRANSACTIONS ═══ -->
+    <div id="pay_pane_archive" style="display:none;">
+      <div class="text-muted" id="arch_info" style="font-size:12px;margin-bottom:10px;"></div>
+      <div class="table-wrap">
+        <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <input id="arch_search" class="form-control" placeholder="Search merchant / store / phone..." style="max-width:240px;" oninput="archDebounce()">
+          <label style="font-size:12px;color:var(--muted);margin:0;">From <input id="arch_from" type="date" class="form-control" style="display:inline-block;width:150px;" onchange="loadArchive(1)"></label>
+          <label style="font-size:12px;color:var(--muted);margin:0;">To <input id="arch_to" type="date" class="form-control" style="display:inline-block;width:150px;" onchange="loadArchive(1)"></label>
+          <select id="arch_country" class="form-select" style="max-width:170px;" onchange="loadArchive(1)" title="Filter by country">
+            <option value="">All Countries</option><option value="IN">India</option><option value="JO">Jordan</option><option value="NP">Nepal</option>
+            <option value="PH">Philippines</option><option value="SA">Saudi Arabia</option><option value="NONE">Country not known</option>
+          </select>
+          <span id="arch_count" style="font-size:13px;color:var(--muted);"></span>
+          <span id="arch_selected" style="font-size:13px;font-weight:600;">0 selected</span>
+          <button type="button" id="arch_delete_btn" class="btn btn-sm btn-danger" disabled onclick="deleteArchSelected()" style="border-radius:8px;padding:5px 14px;font-size:12px;"><i class="fas fa-trash me-1"></i>Delete Selected</button>
+        </div>
+        <div style="overflow-x:auto;">
+        <table class="table table-hover" style="min-width:900px;">
+          <thead><tr>
+            <th style="width:34px;"><input type="checkbox" id="arch_select_all" onchange="toggleArchAll(this.checked)" title="Select all on this page"></th>
+            <th>Created</th><th>Archived</th><th>Auto-delete on</th><th>Merchant</th><th>Phone</th><th>Country</th><th>Item</th><th>Plan</th><th>Total</th><th>Status</th>
+          </tr></thead>
+          <tbody id="arch_body"><tr><td colspan="11" style="text-align:center;padding:24px;color:var(--muted)">Open this tab to load archived transactions.</td></tr></tbody>
+        </table>
+        </div>
+        <div id="arch_pager" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;"></div>
       </div>
     </div>
   </div>
@@ -2622,7 +2627,7 @@ window._rbacMe = null;
 
 // Maps RBAC module name → sidebar section IDs that need "view" permission
 const RBAC_SECTION_MAP = {
-  "Accounts":          ["accounts","country_diag"],
+  "Accounts":          ["accounts"],
   "Stores":            ["stores"],
   "Deals":             ["deals"],
   "Products":          ["product_cards"],
@@ -2907,7 +2912,6 @@ function showSection(name, el){
   if(name==="cities" && window.CitiesAdmin) CitiesAdmin.open();
   if (name === 'default_images') loadDefaultImages();
   if (name === 'admin_banners') loadAdminBanners();
-  if (name === 'country_diag') loadCountryDiag(1);
   document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));
   document.querySelectorAll(".sidebar a").forEach(a=>a.classList.remove("active"));
   let sec = document.getElementById("section-"+name);
@@ -7317,59 +7321,83 @@ async function deleteMerchantProduct(id) {
 // ═══════════════════════════════════════════════════════════
 // EXTENDED loadMerchantTxns — adds banner & product invoices
 // ═══════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════
-// COUNTRY DIAGNOSTICS (read-only; GET /admin/country-diagnostics)
-// ═══════════════════════════════════════════════════════════
-let _cdPage = 1;
-const _CD_SRC = {explicit:'Explicit', parsed:'Parsed', legacy_india:'Legacy India', unresolved:'Unresolved'};
-const _CD_ISSUE = {unresolved:'Unresolved', country_mismatch:'Prefix mismatch', invalid_phone_country:'Invalid stored country', legacy_india:'Bare number → India'};
-async function loadCountryDiag(page) {
-  _cdPage = page || 1;
-  const q = new URLSearchParams({page: _cdPage, page_size: 25});
-  [['cd_country','country'],['cd_source','source'],['cd_issue','issue'],['cd_role','role']].forEach(([id,k]) => {
-    const el = document.getElementById(id); if (el && el.value) q.set(k, el.value);
-  });
-  const body = document.getElementById('cd_body'), sum = document.getElementById('cd_summary');
+// ═══════════════════════════════════════
+// ARCHIVED PENDING TRANSACTIONS (Payments tab; GET /admin/payments/archive, POST /admin/payments/archive/delete)
+// ═══════════════════════════════════════
+let _archPage = 1, _archTimer = null;
+const _archSel = new Set();
+function payCanDelete() {
+  const me = window._rbacMe; if (!me) return false;
+  return me.role === 'Super Admin' || !!((me.permissions || {}).Payments || {}).delete;
+}
+function switchPayTab(which) {
+  const arch = which === 'archive';
+  document.getElementById('pay_pane_active').style.display = arch ? 'none' : '';
+  document.getElementById('pay_pane_archive').style.display = arch ? '' : 'none';
+  document.getElementById('pay_tab_btn_active').classList.toggle('active', !arch);
+  document.getElementById('pay_tab_btn_archive').classList.toggle('active', arch);
+  if (arch) loadArchive(1);
+}
+function archDebounce() { clearTimeout(_archTimer); _archTimer = setTimeout(() => loadArchive(1), 300); }
+function updateArchSelection() {
+  const n = _archSel.size, btn = document.getElementById('arch_delete_btn');
+  document.getElementById('arch_selected').textContent = n + ' selected';
+  btn.disabled = n === 0;
+  btn.style.display = payCanDelete() ? '' : 'none';
+  const boxes = Array.from(document.querySelectorAll('#arch_body .arch-cb'));
+  const all = document.getElementById('arch_select_all');
+  all.checked = boxes.length > 0 && boxes.every(b => b.checked);
+  all.indeterminate = n > 0 && !all.checked && boxes.some(b => b.checked);
+  all.disabled = boxes.length === 0;
+}
+function toggleArchRow(id, on) { if (on) _archSel.add(id); else _archSel.delete(id); updateArchSelection(); }
+function toggleArchAll(on) {
+  document.querySelectorAll('#arch_body .arch-cb').forEach(b => { b.checked = on; if (on) _archSel.add(b.value); else _archSel.delete(b.value); });
+  updateArchSelection();
+}
+async function loadArchive(page) {
+  _archPage = page || 1; _archSel.clear();
+  const q = new URLSearchParams({page: _archPage, page_size: 50});
+  [['arch_search','search'],['arch_from','date_from'],['arch_to','date_to'],['arch_country','country']].forEach(([id,k]) => {
+    const v = (document.getElementById(id)?.value || '').trim(); if (v) q.set(k, v); });
+  const body = document.getElementById('arch_body');
   try {
-    const r = await fetch('/admin/country-diagnostics?' + q.toString(), {credentials:'include'});
-    if (!r.ok) {
-      const e = await r.json().catch(() => ({}));
-      sum.innerHTML = '';
-      body.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">' + escHtml(e.detail || 'Could not load diagnostics') + '</td></tr>';
-      return;
-    }
+    const r = await fetch('/admin/payments/archive?' + q.toString(), {credentials:'include'});
     const d = await r.json();
-    const sel = document.getElementById('cd_country');
-    if (sel && sel.options.length <= 1) {
-      (d.countries || []).forEach(c => sel.add(new Option(c.name + ' (' + c.iso + ')', c.iso)));
-      sel.add(new Option('Unresolved', 'unresolved'));
+    if (!r.ok) {
+      body.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--muted)">' + escHtml(d.detail || 'Could not load archived transactions') + '</td></tr>';
+      updateArchSelection(); return;
     }
-    const s = d.summary, chip = (t, n, c) => '<span class="badge" style="background:' + c + ';color:#fff;margin:0 6px 6px 0;font-size:12px;padding:6px 10px;">' + escHtml(t) + ': ' + n + '</span>';
-    let h = '<div>' + chip('Accounts', s.total, '#3E5F55');
-    Object.keys(_CD_SRC).forEach(k => h += chip(_CD_SRC[k], s.by_source[k] || 0, k === 'unresolved' ? '#c0392b' : (k === 'legacy_india' ? '#d68910' : '#5d6d7e')));
-    h += '</div><div>';
-    Object.keys(s.by_issue).forEach(k => h += chip(_CD_ISSUE[k] || k, s.by_issue[k], s.by_issue[k] ? '#c0392b' : '#7f8c8d'));
-    h += '</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">';
-    h += ['customer','merchant','influencer','other'].map(g => {
-      const x = s.by_role[g] || {total:0, by_source:{}};
-      return '<b>' + (g === 'other' ? 'No role' : g.charAt(0).toUpperCase() + g.slice(1)) + '</b>: ' + x.total +
-        ' (unresolved ' + (x.by_source.unresolved || 0) + ', legacy India ' + (x.by_source.legacy_india || 0) + ')';
-    }).join(' &nbsp;·&nbsp; ');
-    h += '</div><div style="font-size:12px;color:var(--muted);margin-top:4px;"><b>By country</b>: ' +
-      Object.entries(s.by_country).map(([k, n]) => escHtml(k) + ' ' + n).join(' &nbsp;·&nbsp; ') + '</div>';
-    if (d.masked) h += '<div style="font-size:12px;color:var(--muted);margin-top:4px;">Phone numbers are masked for your role.</div>';
-    sum.innerHTML = h;
-    body.innerHTML = d.items.length ? d.items.map(i => '<tr>' +
-      '<td>' + escHtml(i.name) + '</td><td>' + escHtml(i.phone) + '</td><td>' + escHtml(i.roles.join(', ')) + '</td>' +
-      '<td>' + escHtml(i.stored_country || '—') + '</td><td>' + escHtml(i.country || 'Unresolved') + '</td>' +
-      '<td>' + escHtml(_CD_SRC[i.source] || i.source) + (i.reason ? ' <span style="color:var(--muted)">(' + escHtml(i.reason) + ')</span>' : '') + '</td>' +
-      '<td>' + (i.issues.map(x => escHtml(_CD_ISSUE[x] || x)).join(', ') || '—') + '</td>' +
-      '<td>' + escHtml(i.city) + '</td><td>' + escHtml(i.status) + '</td></tr>').join('')
-      : '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">No accounts match.</td></tr>';
-    document.getElementById('cd_pager').innerHTML = '<span style="font-size:13px;color:var(--muted)">' + d.total + ' account(s) · page ' + d.page + ' of ' + d.pages + '</span>' +
-      '<span><button class="btn btn-sm btn-outline-secondary me-2" ' + (d.page <= 1 ? 'disabled' : '') + ' onclick="loadCountryDiag(' + (d.page - 1) + ')">Prev</button>' +
-      '<button class="btn btn-sm btn-outline-secondary" ' + (d.page >= d.pages ? 'disabled' : '') + ' onclick="loadCountryDiag(' + (d.page + 1) + ')">Next</button></span>';
-  } catch (e) { console.error('countryDiag', e); body.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">Could not load diagnostics</td></tr>'; }
+    document.getElementById('arch_count').textContent = d.total === d.archived_total ? d.archived_total + ' archived' : d.total + ' of ' + d.archived_total + ' archived';
+    document.getElementById('arch_tab_count').textContent = '(' + d.archived_total + ')';
+    document.getElementById('arch_info').textContent = 'Pending transactions older than ' + d.retention.archive_after_days + ' days with no Razorpay order or payment ID are moved here. Archived records are deleted permanently ' + d.retention.retention_days + ' days after they were archived.';
+    body.innerHTML = d.items.length ? d.items.map(i =>
+      '<tr><td><input type="checkbox" class="arch-cb" value="' + escHtml(i.id) + '" onchange="toggleArchRow(this.value, this.checked)"></td>' +
+      '<td>' + escHtml(i.created_at || '—') + '</td><td>' + escHtml(i.archived_at || '—') + '</td><td>' + escHtml(i.delete_on || '—') + '</td>' +
+      '<td>' + escHtml(i.merchant_name || '—') + '</td><td>' + escHtml(i.merchant_phone || '—') + '</td><td>' + escHtml(txnCountryLabel(i)) + '</td>' +
+      '<td>' + escHtml(i.item_label || i.store_name || '—') + '</td><td>' + escHtml(i.plan || '—') + '</td><td>' + escHtml(txnMoney(i, i.total)) + '</td>' +
+      '<td><span class="badge" style="background:#fff3cd;color:#856404;">Pending (archived)</span></td></tr>').join('')
+      : '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--muted)">No archived transactions found.</td></tr>';
+    document.getElementById('arch_pager').innerHTML = '<span style="font-size:13px;color:var(--muted)">Page ' + d.page + ' of ' + d.pages + '</span>' +
+      '<span><button class="btn btn-sm btn-outline-secondary me-2" ' + (d.page <= 1 ? 'disabled' : '') + ' onclick="loadArchive(' + (d.page - 1) + ')">Prev</button>' +
+      '<button class="btn btn-sm btn-outline-secondary" ' + (d.page >= d.pages ? 'disabled' : '') + ' onclick="loadArchive(' + (d.page + 1) + ')">Next</button></span>';
+  } catch (e) {
+    console.error('archive', e);
+    body.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--muted)">Could not load archived transactions</td></tr>';
+  }
+  updateArchSelection();
+}
+async function deleteArchSelected() {
+  const ids = Array.from(_archSel);
+  if (!ids.length) return;
+  if (!confirm('Permanently delete ' + ids.length + ' archived transaction' + (ids.length === 1 ? '' : 's') + '?\n\nThis cannot be undone. Only archived records are deleted; the active Payments list is not affected.')) return;
+  try {
+    const r = await fetch('/admin/payments/archive/delete', {method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids})});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { showToast('❌ ' + (d.detail || 'Delete failed'), 'danger'); return; }
+    showToast('✅ ' + d.deleted + ' archived transaction' + (d.deleted === 1 ? '' : 's') + ' deleted', 'success');
+  } catch (e) { showToast('❌ Network error: ' + e.message, 'danger'); return; }
+  loadArchive(_archPage);
 }
 
 let _allTxnRows = [];
@@ -7447,12 +7475,15 @@ function txnMoney(inv, v) {
   return sym ? (sym.length > 1 ? sym + ' ' + n : sym + n) : n;
 }
 function txnCountryLabel(inv) { return inv.country ? (inv.country_name ? inv.country_name + ' (' + inv.country + ')' : inv.country) : 'Not known'; }
-// Revenue per currency - amounts of different currencies are never added together.
+// Revenue per currency - amounts of different currencies are never added together and never converted.
+// Zero totals are not shown. An amount with no recorded currency is shown separately as "Unrecorded Currency" (never assumed INR).
 function txnRevenueByCurrency(rows) {
-  const t = {};
-  rows.forEach(i => { const c = i.currency_code || '—'; t[c] = (t[c]||0) + (parseFloat(i.total)||0); });
-  const parts = Object.keys(t).sort().map(c => (c==='—' ? '' : c + ' ') + t[c].toFixed(2) + (c==='—' ? ' (no currency recorded)' : ''));
-  return parts.length ? parts.join(' · ') : '0.00';
+  const t = {}, UNK = '\u2014';
+  rows.forEach(i => { const c = i.currency_code || UNK; t[c] = (t[c]||0) + (parseFloat(i.total)||0); });
+  const nonZero = c => Math.abs(t[c]) >= 0.005;                 // a total that rounds to 0.00 is not shown
+  const parts = Object.keys(t).filter(c => c !== UNK && nonZero(c)).sort().map(c => c + ' ' + t[c].toFixed(2));
+  if (t[UNK] !== undefined && nonZero(UNK)) parts.push('Unrecorded Currency ' + t[UNK].toFixed(2));
+  return parts.length ? parts.join(' \u00b7 ') : '0.00';
 }
 
 function renderTxnRows(rows) {

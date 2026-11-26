@@ -1,5 +1,5 @@
 """NOTE: file name sorts AFTER test_banner_media.py on purpose (it swaps the shared fake `database` at import).
-Phase 2 / Stage 1: Task A (read-only country diagnostics + shared resolver) and Task B (Payments permission on payment endpoints).
+Phase 2 / Stage 1: Task A (shared country resolver; the read-only diagnostics page that used it has since been removed) and Task B (Payments permission on payment endpoints).
 Run:  python -m pytest test_phase2_stage1.py -q -W ignore"""
 import copy
 import sys
@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import server
-from services import country_diagnostics as D
+from services import dashboard_country as D
 from utils import countries as C
 from utils import phone as PH
 
@@ -77,17 +77,6 @@ def test_resolver_returns_source():
     assert r({"phone": "501234567"})["source"] == "unresolved"       # a bare non-Indian number is NOT taken as India
 
 
-def test_classify_flags():
-    assert D.classify({"phone_country": "IN", "phone": "+966501234567"})["issues"] == ["country_mismatch"]
-    assert D.classify({"phone_country": "SA", "phone": "+966501234567"})["issues"] == []
-    assert D.classify({"phone_country": "SA", "phone": "x", "phone_e164": "+639171234567"})["issues"] == ["country_mismatch"]
-    assert D.classify({"phone_country": "SA", "phone": "+971501234567"})["issues"] == ["country_mismatch"]   # unsupported prefix
-    assert D.classify({"phone_country": "XX", "phone": "+966501234567"})["issues"] == ["invalid_phone_country"]
-    assert D.classify({"phone": "9876543210"})["issues"] == ["legacy_india"]
-    assert D.classify({"phone": "501234567"})["issues"] == ["unresolved"]
-    assert D.classify({"phone": "+919876543210"})["issues"] == []
-
-
 def test_mask_phone():
     assert D.mask_phone("+966501234567") == "+96" + "•" * 8 + "67"
     assert D.mask_phone("") == "" and D.mask_phone("12345") == "•••••"
@@ -109,91 +98,6 @@ def _world():
         {"name": "Uae", "phone": "+971501234567", "roles": ["merchant"]},                                             # unresolved (unsupported)
     ])
     yield
-
-
-def _get(h, **q):
-    return c.get("/admin/country-diagnostics", params=q, headers=h)
-
-
-def _snapshot():
-    return {n: sorted(map(str, fake[n].find({}))) for n in ("accounts", "invoices", "subscriptions", "activity_logs")}   # not dashboard_users: the existing session check only stamps last_active_at
-
-
-# ── Task A ────────────────────────────────────────────────────────────────────────────────────────────────────────
-def test_super_admin_sees_summary_and_full_numbers():
-    h = _user("sa1", "Super Admin")
-    r = _get(h); assert r.status_code == 200
-    j = r.json(); s = j["summary"]
-    assert j["masked"] is False
-    assert s["total"] == 7
-    assert s["by_source"] == {"explicit": 3, "parsed": 1, "legacy_india": 1, "unresolved": 2}
-    assert s["by_issue"] == {"unresolved": 2, "country_mismatch": 1, "invalid_phone_country": 0, "legacy_india": 1}
-    assert s["by_role"]["customer"]["total"] == 4 and s["by_role"]["merchant"]["total"] == 3 and s["by_role"]["influencer"]["total"] == 1
-    assert s["by_role"]["customer"]["by_source"]["unresolved"] == 1
-    assert s["by_country"] == {"IN": 3, "SA": 1, "NP": 1, "unresolved": 2}
-    assert "9876543210" in [i["phone"] for i in j["items"]]
-
-
-def test_filters():
-    h = _user("sa1", "Super Admin")
-    names = lambda **q: sorted(i["name"] for i in _get(h, **q).json()["items"])
-    assert names(issue="unresolved") == ["Ghost", "Uae"]
-    assert names(issue="country_mismatch") == ["Bad"]
-    assert names(issue="legacy_india") == ["Asha"]
-    assert names(source="parsed") == ["Nep"]
-    assert names(country="unresolved") == ["Ghost", "Uae"]
-    assert names(country="sa") == ["Sara"]
-    assert names(role="influencer") == ["Nep"]
-    assert names(role="merchant", source="unresolved") == ["Uae"]
-    # the summary does not move with the list filters
-    assert _get(h, issue="unresolved").json()["summary"]["total"] == 7
-    assert _get(h, issue="unresolved").json()["total"] == 2
-    for bad in ({"country": "ZZ"}, {"source": "x"}, {"issue": "x"}, {"role": "x"}):
-        assert _get(h, **bad).status_code == 422
-
-
-def test_paging():
-    h = _user("sa1", "Super Admin")
-    j = _get(h, page_size=3, page=3).json()
-    assert j["pages"] == 3 and len(j["items"]) == 1 and j["total"] == 7
-
-
-def test_needs_accounts_view_permission():
-    assert _get(_user("none", "Nobody", {})).status_code == 403
-    assert _get(_user("fin", "Finance", {"Payments": VIEW})).status_code == 403
-    assert _get(_user("acc", "Accounts", {"Accounts": VIEW})).status_code == 200
-    assert c.get("/admin/country-diagnostics").status_code in (401, 403)
-
-
-def test_unrestricted_non_super_admin_sees_full_numbers_restricted_sees_masked():
-    full = _get(_user("acc", "Accounts", {"Accounts": VIEW})).json()
-    assert full["masked"] is False
-    city = _get(_user("cty", "Accounts", {"Accounts": VIEW}, cities=("Pune",))).json()
-    assert city["masked"] is True and {i["name"] for i in city["items"]} == {"Asha", "Ravi"}
-    assert all("•" in i["phone"] for i in city["items"])
-
-
-def test_country_restricted_admin_scope_and_masking():
-    h = _user("sa_admin", "Accounts", {"Accounts": VIEW}, country="SA")
-    j = _get(h).json()
-    assert j["masked"] is True and j["scope"] == "SA"
-    assert [i["name"] for i in j["items"]] == ["Sara"]
-    assert j["summary"]["total"] == 1 and j["summary"]["by_source"]["unresolved"] == 0       # unresolved accounts are hidden
-    assert "+966501234567" not in str(j) and "501234567" not in str(j)
-    jin = _get(_user("in_admin", "Accounts", {"Accounts": VIEW}, country="IN")).json()
-    assert sorted(i["name"] for i in jin["items"]) == ["Asha", "Bad", "Ravi"]     # explicit IN (incl. the mismatched one) + legacy India
-    assert _get(_user("in2", "Accounts", {"Accounts": VIEW}, country="IN"), country="SA").json()["items"] == []
-    assert _get(_user("bad", "Accounts", {"Accounts": VIEW}, country="XX")).json()["items"] == []   # corrupt scope fails closed
-
-
-def test_diagnostics_never_write():
-    h = _user("sa1", "Super Admin")
-    before = _snapshot()
-    for q in ({}, {"issue": "unresolved"}, {"country": "IN", "source": "legacy_india"}):
-        assert _get(h, **q).status_code == 200
-    assert _snapshot() == before
-    for m in (c.post, c.put, c.delete, c.patch):
-        assert m("/admin/country-diagnostics", headers=h).status_code == 405
 
 
 # ── Task B ────────────────────────────────────────────────────────────────────────────────────────────────────────

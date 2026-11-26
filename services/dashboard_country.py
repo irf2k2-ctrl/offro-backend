@@ -175,3 +175,23 @@ def require_record(admin: dict, rec: Optional[dict], id_fields: Iterable[str] = 
                    phone_fields: Iterable[str] = ()) -> None:
     if not record_in_scope(admin, rec, id_fields, phone_fields):
         raise HTTPException(404, "Not found")
+
+
+# ── phone privacy for list screens (used by Notifications) ──────────────────────────────────────────────────────────────
+def sees_full_numbers(admin: dict) -> bool:
+    """Full phone numbers only for Super Admin and for dashboard users with NO country restriction and NO city restriction."""
+    admin = admin or {}
+    if admin.get("role_name") == SUPER_ADMIN:
+        return True
+    cities = admin.get("assigned_cities") or []
+    return not scope(admin) and "*" in cities
+
+
+def mask_phone(value) -> str:
+    """'+966501234567' -> '+96•••••••67'. Keeps just enough to recognise the number; '' stays ''."""
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    if len(s) <= 6:
+        return "•" * len(s)
+    return s[:3] + "•" * (len(s) - 5) + s[-2:]
