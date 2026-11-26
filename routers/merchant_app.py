@@ -848,6 +848,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     taxable_amount = max(0.0, round(price - discount_amount, 2))
     gst_amt     = round(taxable_amount * gst / 100, 2)
     total       = round(taxable_amount + gst_amt, 2)
+    _cc.check_min_payable(ctx, total, bool(disc["code"]))
     total_paise = _cc.to_minor(total, _cur) if ctx else int(total * 100)
 
     from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
@@ -954,7 +955,7 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
     pay_mode    = "manual"   # fallback: admin confirms payment manually
     manual_reason = None
     if ctx:                  # another country: Razorpay only if this currency is enabled; otherwise the manual path, with the reason
-        _route = _cc.payment_route(_cur, bool(rp_configured))
+        _route = _cc.payment_route(_cur, bool(rp_configured), total_paise)
         manual_reason = _route["manual_reason"]
         if _route["mode"] != "razorpay":
             rp_configured = False
@@ -973,7 +974,11 @@ def initiate_subscription(data: dict, m=Depends(get_merchant)):
                 rp_data = rp_res.json()
             except Exception:
                 rp_data = {}
-            if "id" in rp_data:
+            if "id" in rp_data and ctx and not _cc.gateway_order_matches(rp_data, total_paise, _cur):
+                # another country: Razorpay answered with a different amount/currency than OffrO calculated - never hand that order to the app
+                pay_mode = "manual"
+                manual_reason = "gateway_amount_mismatch"
+            elif "id" in rp_data:
                 rp_order_id = rp_data["id"]
                 pay_mode    = "razorpay"
             else:
@@ -1816,6 +1821,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     final_pre_tax = max(0.0, round(base_price - discount_amount, 2))
     gst_amount    = round(final_pre_tax * gst_pct / 100, 2)
     total         = round(final_pre_tax + gst_amount, 2)
+    _cc.check_min_payable(ctx, total, bool(disc["code"]))
     amount_paise  = _cc.to_minor(total, _cur) if ctx else int(total * 100)
 
     plan_label = f"{days} Day{'s' if days!=1 else ''} Banner"
@@ -1858,7 +1864,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     manual_reason  = None
     _try_rzp = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
     if ctx:                # another country: Razorpay only when this currency is enabled, else manual with the reason
-        _route = _cc.payment_route(_cur, _try_rzp)
+        _route = _cc.payment_route(_cur, _try_rzp, amount_paise)
         manual_reason = _route["manual_reason"]
         _try_rzp = _route["mode"] == "razorpay"
 
@@ -1870,7 +1876,11 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
                            "receipt": f"bnr_{order_id[:8]}"})
             rp_data = rp.json() if hasattr(rp, 'json') else {}
             rp_order_id = rp_data.get("id")
-            if rp_order_id:
+            if rp_order_id and ctx and not _cc.gateway_order_matches(rp_data, amount_paise, _cur):
+                rp_order_id = None
+                pay_mode = "manual"
+                manual_reason = "gateway_amount_mismatch"
+            elif rp_order_id:
                 pay_mode = "razorpay"
             else:
                 pay_mode = "manual"
@@ -2351,6 +2361,12 @@ def validate_discount_code(data: dict, m=Depends(get_merchant)):
     if str(disc.get("type", "VALUE")).upper() != "PERCENTAGE" and str(disc.get("currency") or "INR").upper() != _lab["currency_code"]:
         raise HTTPException(400, f"Code '{code}' is a fixed-amount code and cannot be used for {_lab['currency_code']} orders. Use a percentage code.")
     _sym = _lab["currency_symbol"]
+    _pre = data.get("pre_tax_amount")             # optional preview amount from the checkout screen (order creation re-checks authoritatively)
+    if _ctx and _pre is not None:
+        try:
+            _cc.check_min_payable(_ctx, _cc.preview_total(_ctx, disc, float(_pre)), True)
+        except (TypeError, ValueError):
+            pass
     return {
         "code":  code,
         "type":  disc.get("type", "VALUE"),

@@ -148,35 +148,45 @@ def _price_block(tier_decision: dict, discount_code):
     sub = round(max(0.0, base - d_amt), 2)
     gst = round(sub * gst_pct / 100, 2)
     total = round(sub + gst, 2)
+    _cc.check_min_payable(_cc.current(), total, bool(disc["code"]))
     return {"disc": disc, "base": base, "discount_amount": d_amt, "sub": sub,
             "gst_pct": gst_pct, "gst": gst, "total": total,
             "paise": _cc.to_minor(total, _cur()) if _cc.current() else int(round(total * 100))}
 
 
 def _razorpay_order(paise, receipt, notes=None):
+    """-> (razorpay_order_id | None, pay_mode, manual_reason | None). Never sends a zero amount, never raises or rounds an amount up to a
+    minimum, and (non-India) never returns a Razorpay order whose amount/currency differ from what OffrO calculated."""
     if paise <= 0:
-        return None, "manual"
+        return None, "manual", None
     if not (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET):
-        return None, "manual"
-    if _cc.current() and _cc.payment_route(_cur(), True)["mode"] != "razorpay":
-        return None, "manual"                  # this country's currency is not enabled on Razorpay: manual activation path
+        return None, "manual", None
+    if _cc.current():
+        route = _cc.payment_route(_cur(), True, paise)      # currency enabled on Razorpay + the configured per-currency minimum
+        if route["mode"] != "razorpay":
+            return None, "manual", route["manual_reason"]   # manual activation path, with the reason
     try:
         body = {"amount": paise, "currency": _cur(), "receipt": receipt}
         if notes:
             body["notes"] = notes
         rp = _razorpay_request("POST", "/v1/orders", auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), json_data=body)
-        rid = (rp.json() if hasattr(rp, "json") else {}).get("id")
-        return rid, ("razorpay" if rid else "manual")
+        data = rp.json() if hasattr(rp, "json") else {}
+        rid = data.get("id")
+        if rid and _cc.current() and not _cc.gateway_order_matches(data, paise, _cur()):
+            return None, "manual", "gateway_amount_mismatch"   # never hand a differing order to the app
+        return rid, ("razorpay" if rid else "manual"), None
     except Exception:
-        return None, "manual"
+        return None, "manual", None
 
 
-def _manual_reason(paise, pay_mode):
+def _manual_reason(paise, pay_mode, known=None):
     """Why a PAID order is in manual mode for a non-India merchant (None for India and for Razorpay orders)."""
     cx = _cc.current()
     if not cx or paise <= 0 or pay_mode == "razorpay":
         return None
-    return _cc.payment_route(cx["currency_code"], bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET))["manual_reason"]
+    if known:
+        return known
+    return _cc.payment_route(cx["currency_code"], bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET), paise)["manual_reason"]
 
 
 def _invoice(m, prod, order, paid: bool, rp_payment_id=""):
@@ -287,8 +297,9 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
         **_cc.labels(_cc.current()),
     }
     oid = db[ORDERS].insert_one(order).inserted_id
-    rp_id, pay_mode = _razorpay_order(pb["paise"], f"prd_{str(oid)[:8]}")
-    db[ORDERS].update_one({"_id": oid}, {"$set": {"razorpay_order_id": rp_id, "pay_mode": pay_mode}})
+    rp_id, pay_mode, why = _razorpay_order(pb["paise"], f"prd_{str(oid)[:8]}")
+    mreason = _manual_reason(pb["paise"], pay_mode, why)
+    db[ORDERS].update_one({"_id": oid}, {"$set": {"razorpay_order_id": rp_id, "pay_mode": pay_mode, **({"manual_reason": mreason} if mreason else {})}})
     return {
         "order_id": str(oid), "plan_label": "Free product" if d["tier"] == "free" else "Additional product",
         "pricing_tier": d["tier"], "store_id": store_id, "from_date": _dstr(start), "end_date": _dstr(end),
@@ -298,7 +309,7 @@ def create_product_order(data: dict, m=Depends(get_merchant)):
         "discount_msg": disc["message"], "amount_display": pb["total"], "amount_paise": pb["paise"],
         "pay_mode": pay_mode, "razorpay_key": RAZORPAY_KEY_ID, "razorpay_order_id": rp_id,
         "free_limit": d["free_limit"], "free_remaining": max(0, d["free_limit"] - d["used"]),
-        **_cc.labels(_cc.current()), "manual_reason": _manual_reason(pb["paise"], pay_mode),
+        **_cc.labels(_cc.current()), "manual_reason": mreason,
     }
 
 
@@ -521,8 +532,9 @@ def renew_order(pid: str, data: dict, m=Depends(get_merchant)):
         **_cc.labels(_cc.current()),
     }
     oid = db[ORDERS].insert_one(order).inserted_id
-    rp_id, pay_mode = _razorpay_order(pb["paise"], f"ren_{pid[:8]}", {"product_id": pid, "type": "renew"})
-    db[ORDERS].update_one({"_id": oid}, {"$set": {"razorpay_order_id": rp_id, "pay_mode": pay_mode}})
+    rp_id, pay_mode, why = _razorpay_order(pb["paise"], f"ren_{pid[:8]}", {"product_id": pid, "type": "renew"})
+    mreason = _manual_reason(pb["paise"], pay_mode, why)
+    db[ORDERS].update_one({"_id": oid}, {"$set": {"razorpay_order_id": rp_id, "pay_mode": pay_mode, **({"manual_reason": mreason} if mreason else {})}})
     return {"order_id": rp_id or "", "product_order_id": str(oid), "amount": pb["total"], "currency": _cur(),
             "key": RAZORPAY_KEY_ID, "gst": pb["gst"], "end_date": _dstr(end), "days": days, "price_per_day": d["price_per_day"], "pricing_tier": d["tier"],
             "free_remaining": max(0, d["free_limit"] - d["used"]), "base_price": pb["base"],
@@ -531,7 +543,7 @@ def renew_order(pid: str, data: dict, m=Depends(get_merchant)):
             "discount_amount": pb["discount_amount"], "discount_msg": disc["message"],
             "amount_display": pb["total"], "amount_paise": pb["paise"], "pay_mode": pay_mode,
             "razorpay_key": RAZORPAY_KEY_ID, "razorpay_order_id": rp_id,
-            **_cc.labels(_cc.current()), "manual_reason": _manual_reason(pb["paise"], pay_mode)}
+            **_cc.labels(_cc.current()), "manual_reason": mreason}
 
 
 @router.post("/products/{pid}/renew/verify")

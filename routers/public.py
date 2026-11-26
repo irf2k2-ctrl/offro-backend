@@ -1064,12 +1064,20 @@ def get_terms_public(type: str, lang: str = ""):
 # =================== TERMS ===================
 # /terms/{type} handled above
 
-def _nominatim_reverse(lat: float, lng: float) -> dict:
-    """Call Nominatim reverse geocoding and return state/city/area/address."""
+def normalize_geo_lang(lang) -> str:
+    """The app language for geocoding: 'en' or 'ar' only (anything else, or nothing, is 'en'). A regional tag such as 'ar-SA' is 'ar'."""
+    base = str(lang or "").strip().lower().replace("_", "-").split("-")[0]
+    return base if base in ("en", "ar") else "en"
+
+
+def _nominatim_reverse(lat: float, lng: float, lang: str = "en") -> dict:
+    """Call Nominatim reverse geocoding and return state/city/area/address, in the app language ('en' or 'ar').
+    Without accept-language Nominatim answers in the place's local language (Arabic in Saudi Arabia)."""
     import requests as _req, urllib.parse
     try:
         r = _req.get(
-            f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json&addressdetails=1",
+            f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json&addressdetails=1"
+            f"&accept-language={normalize_geo_lang(lang)}",
             headers={"User-Agent": "OffrO/2.0 (location-based deals app)"},
             timeout=8,
         )
@@ -1087,9 +1095,9 @@ def _nominatim_reverse(lat: float, lng: float) -> dict:
 
 
 @router.get("/reverse-geocode")
-def reverse_geocode_endpoint(lat: float, lng: float):
-    """Reverse geocode lat/lng → state, city, area, address via Nominatim."""
-    result = _nominatim_reverse(lat, lng)
+def reverse_geocode_endpoint(lat: float, lng: float, lang: str = "en"):
+    """Reverse geocode lat/lng → state, city, area, address via Nominatim, in the app language (?lang=en|ar, default en)."""
+    result = _nominatim_reverse(lat, lng, lang)
     if not result:
         return {"error": "Could not resolve location details. Check coordinates and try again."}
     return result

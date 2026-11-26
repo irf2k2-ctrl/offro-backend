@@ -53,8 +53,8 @@ def _world(monkeypatch):
         calls.append(json_data)
 
         class R:
-            def json(self):
-                return {"id": "order_TEST%d" % len(calls)}
+            def json(self):   # like Razorpay: the created order echoes the amount and currency it was given
+                return {"id": "order_TEST%d" % len(calls), "amount": json_data.get("amount"), "currency": json_data.get("currency")}
         return R()
     for mod in (MA, MP):
         monkeypatch.setattr(mod, "_razorpay_request", fake_rzp, raising=False)

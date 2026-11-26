@@ -680,7 +680,7 @@ def _extract_address_components(place_data: dict):
 # Google Places API (New)
 # ---------------------------------------------------------------------------
 
-def _get_place_details(place_id: str):
+def _get_place_details(place_id: str, lang: str = "en"):
     """
     Get coordinates/name/address for a Google Place ID
     using Places API (New).
@@ -721,6 +721,7 @@ def _get_place_details(place_id: str):
             endpoint,
             params={
                 "key": GOOGLE_MAPS_API_KEY,
+                "languageCode": lang if lang in ("en", "ar") else "en",
             },
             timeout=HTTP_TIMEOUT,
             headers={
@@ -1188,6 +1189,7 @@ def _exact_coordinates(url: str):
 @router.get("/resolve-maps-link")
 def resolve_maps_link(
     url: str = Query(..., description="Google Maps URL"),
+    lang: str = Query("en", description="App language for the returned place details: en or ar"),
 ):
     """
     Resolve a Google Maps link to an EXACT location.
@@ -1202,6 +1204,8 @@ def resolve_maps_link(
     """
 
     url = url.strip()
+    from routers.public import normalize_geo_lang
+    lang = normalize_geo_lang(lang)
 
     if not url:
         raise HTTPException(status_code=400, detail="Google Maps link is required.")
@@ -1241,7 +1245,7 @@ def resolve_maps_link(
     # Places API gives its exact coordinates. (No name search, no Resolution
     # API: those can return a best-guess place.)
     if (lat is None or lng is None) and place_id and GOOGLE_MAPS_API_KEY:
-        details = _get_place_details(place_id)
+        details = _get_place_details(place_id, lang)
         if details:
             lat = details.get("lat")
             lng = details.get("lng")
@@ -1264,7 +1268,7 @@ def resolve_maps_link(
         try:
             from routers.public import _nominatim_reverse
 
-            geo = _nominatim_reverse(lat, lng) or {}
+            geo = _nominatim_reverse(lat, lng, lang) or {}
             country = geo.get("country", "") or ""
             state = state or geo.get("state", "")
             city = city or geo.get("city", "")

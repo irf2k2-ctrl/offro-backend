@@ -52,13 +52,64 @@ def to_minor(amount: float, currency: str = "INR") -> int:
     return int(round(amount * 100))
 
 
-def payment_route(currency: str, keys_present: bool = True) -> dict:
+def gateway_minimum_minor(currency: str) -> int:
+    """The smallest order Razorpay accepts for [currency], in minor units, from RAZORPAY_MIN_ORDER_MINOR ("SAR:100,AED:200"; empty =
+    no known minimum). It is configuration, not a guess: the amount is never raised to it (that would charge more than OffrO's
+    calculated total) - an order below it is not sent to the gateway."""
+    cur = (currency or "").upper()
+    for part in os.environ.get("RAZORPAY_MIN_ORDER_MINOR", "").split(","):
+        code, _, val = part.partition(":")
+        if code.strip().upper() == cur:
+            try:
+                return max(0, int(val.strip()))
+            except ValueError:
+                return 0
+    return 0
+
+
+def payment_route(currency: str, keys_present: bool = True, amount_minor: Optional[int] = None) -> dict:
     """{'mode': 'razorpay'|'manual', 'manual_reason': None|str} for a NON-India currency."""
     cur = (currency or "").upper()
     if cur in international_currencies() and keys_present:
+        if amount_minor is not None and 0 < amount_minor < gateway_minimum_minor(cur):
+            return {"mode": "manual", "manual_reason": "below_gateway_minimum"}
         return {"mode": "razorpay", "manual_reason": None}
     reason = "currency_not_enabled" if cur not in international_currencies() else "payment_gateway_not_configured"
     return {"mode": "manual", "manual_reason": reason}
+
+
+MIN_PAYABLE = 1.0   # non-India: a PAID order is at least 1 unit of its currency (SAR 1.00); a 100% discount (0) is the free path, never a gateway order
+
+
+def check_min_payable(ctx: Optional[dict], total: float, discounted: bool = True) -> None:
+    """Non-India only (ctx is None for India: nothing changes there). Raises 400 when a discount leaves a payable amount that is above 0
+    but below MIN_PAYABLE - the order is stopped here, the amount is never rounded up and nothing is sent to the gateway.
+    A total of exactly 0 (a 100% discount) is allowed: it activates without payment."""
+    if not ctx or not discounted:
+        return
+    if 0 < round(float(total), 2) < MIN_PAYABLE:
+        cur = ctx.get("currency_code") or ""
+        raise HTTPException(400, {"code": "payable_below_minimum",
+                                  "message": f"This discount leaves a payable amount of {cur} {float(total):.2f}, which is below the minimum of {cur} {MIN_PAYABLE:.2f}. "
+                                             f"Please use a different code (the payable amount must be at least {cur} {MIN_PAYABLE:.2f}, or free)."})
+
+
+def preview_total(ctx: dict, disc_doc: dict, pre_tax: float) -> float:
+    """Final payable for a discount PREVIEW (same arithmetic as order creation: discount on the pre-tax amount, then tax)."""
+    v = float(disc_doc.get("value", 0) or 0)
+    amt = round(pre_tax * v / 100.0, 2) if str(disc_doc.get("type", "VALUE")).upper() == "PERCENTAGE" else v
+    amt = max(0.0, min(round(amt, 2), round(pre_tax, 2)))
+    taxable = max(0.0, round(pre_tax - amt, 2))
+    return round(taxable + round(taxable * float(ctx["tax_percent"]) / 100, 2), 2)
+
+
+def gateway_order_matches(rp_data: dict, amount_minor: int, currency: str) -> bool:
+    """True only when the order Razorpay created carries EXACTLY the amount and currency OffrO calculated."""
+    try:
+        return (int(rp_data.get("amount")) == int(amount_minor)
+                and str(rp_data.get("currency") or "").upper() == (currency or "").upper())
+    except (TypeError, ValueError):
+        return False
 
 
 def resolve(account: dict) -> Optional[dict]:
