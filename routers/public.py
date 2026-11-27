@@ -1084,16 +1084,21 @@ def _nominatim_reverse(lat: float, lng: float, lang: str = "en") -> dict:
         data = r.json()
         addr = data.get("address", {})
         state   = addr.get("state", "")
-        city    = (addr.get("city") or addr.get("town") or addr.get("county") or addr.get("village") or "")
+        # City: first settlement-level key present, in the long-standing order (unchanged). The key is remembered so a weak one
+        # (town / county / village) can be cross-checked against Google's typed hierarchy below.
+        city_key = next((k for k in ("city", "town", "county", "village") if addr.get(k)), "")
+        city    = addr.get(city_key, "") if city_key else ""
         area    = (addr.get("suburb") or addr.get("neighbourhood") or addr.get("quarter") or addr.get("locality") or "")
         address = data.get("display_name", "")[:250]
         # additive: the ISO country code of the place (upper-case; "" when unknown) so an app can tell a location of ANOTHER country
         out = {"state": state, "city": city, "area": area, "address": address,
                "country": str(addr.get("country_code") or "").strip().upper()}
         # Nominatim answers in the LOCAL language for a place with no name in the requested one (OSM often has no name:en for a
-        # neighbourhood): bring every field to the app language through the fallback provider(s); coordinates/country untouched.
+        # neighbourhood), and cannot tell a neighbourhood from a city: Google's typed components correct both. Coordinates/country untouched.
         from services import geo_names
-        return {**geo_names.complete_names(out, lat, lng, normalize_geo_lang(lang)), "country": out["country"]}
+        gl = normalize_geo_lang(lang)
+        out = {**out, **geo_names.fix_city_level(out, lat, lng, gl, out["country"], city_key)}
+        return {**geo_names.complete_names(out, lat, lng, gl), "country": out["country"]}
     except Exception:
         return {}
 

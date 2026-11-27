@@ -18,9 +18,11 @@ URL = "https://www.google.com/maps/@{lat},{lng},17z/data=!3d{lat}!4d{lng}"
 # country -> (lat, lng, ISO, what OSM (Nominatim) answers for lang=en / lang=ar, what Google Geocoding answers for en)
 CASES = {
     # Jordan: the reported bug - OSM has no English name for the neighbourhood, so "en" returns Arabic city/area next to an English state
-    "JO": dict(lat=31.7384, lng=35.9340, nom_en={"state": "Amman", "town": "خريبة السوق", "suburb": "خريبة السوق"},
-               nom_ar={"state": "عمان", "town": "خريبة السوق", "suburb": "خريبة السوق"},
-               g_en={"state": "Amman", "city": "Khreibet Al-Souq", "area": "Khreibet Al-Souq"}, state_en="Amman", city_en="Khreibet Al-Souq", city_ar="خريبة السوق"),
+    "JO": dict(lat=31.7384, lng=35.9340, nom_en={"state": "Amman", "town": "خريبة السوق", "suburb": "منطقة المقابلين"},
+               nom_ar={"state": "عمان", "town": "خريبة السوق", "suburb": "منطقة المقابلين"},
+               g_en={"state": "Amman Governorate", "city": "Amman", "area": "Khreibet Al-Souq", "subs": ["Al-Muqabalain"]},
+               g_ar={"state": "محافظة العاصمة", "city": "عمان", "area": "خريبة السوق", "subs": ["المقابلين"]},
+               state_en="Amman", city_en="Amman", city_ar="عمان"),
     "SA": dict(lat=24.7136, lng=46.6753, nom_en={"state": "Riyadh Region", "city": "Riyadh", "suburb": "حي المنسية"},
                nom_ar={"state": "منطقة الرياض", "city": "الرياض", "suburb": "حي المنسية"},
                g_en={"state": "Riyadh Province", "city": "Riyadh", "area": "Al Munsiyah"}, state_en="Riyadh Region", city_en="Riyadh", city_ar="الرياض"),
@@ -42,9 +44,16 @@ class _Resp:
         return self.body
 
 
+@pytest.fixture(autouse=True)
+def _fresh_caches():
+    G._CACHE.clear(); G._LOGGED.clear()
+    yield
+
+
 @pytest.fixture
 def providers(monkeypatch):
     """Fake Nominatim + Google Geocoding; records every request so a test can see which providers were asked, and in which language."""
+    G._CACHE.clear(); G._LOGGED.clear(); fake.cities.delete_many({})
     log = []
     state = {"country": "JO", "google": True}
 
@@ -57,12 +66,16 @@ def providers(monkeypatch):
             return _Resp({"address": addr, "display_name": "x"})
         if "maps.googleapis.com/maps/api/geocode" in url:
             log.append(("google", params["language"]))
-            if params["language"] != "en" or not k["g_en"]:
+            if state.get("google_answer") is not None:
+                return _Resp(state["google_answer"])
+            g = k.get("g_ar") if params["language"] == "ar" else k["g_en"]
+            if not g:
                 return _Resp({"status": "ZERO_RESULTS", "results": []})
             comps = [{"long_name": v, "types": t} for v, t in (
-                (k["g_en"].get("state"), ["administrative_area_level_1"]), (k["g_en"].get("city"), ["locality"]),
-                (k["g_en"].get("area"), ["sublocality_level_1"])) if v]
-            return _Resp({"status": "OK", "results": [{"address_components": comps, "formatted_address": "English address"}]})
+                (g.get("state"), ["administrative_area_level_1"]), (g.get("city"), ["locality", "political"]),
+                (g.get("area"), ["sublocality_level_1", "sublocality"])) if v]
+            comps += [{"long_name": v, "types": ["neighborhood"]} for v in g.get("subs", [])]
+            return _Resp({"status": "OK", "results": [{"address_components": comps, "formatted_address": "English address" if params["language"] == "en" else "عنوان"}]})
         raise AssertionError("unexpected request " + url)
 
     monkeypatch.setattr(G.requests, "get", fake_get)
@@ -89,17 +102,17 @@ def pasted(country, lang):
 def test_jordan_english_app_gets_english_city_state_and_area(providers, path):
     log, st = providers
     j = path("JO", "en")
-    assert (j["state"], j["city"], j["area"]) == ("Amman", "Khreibet Al-Souq", "Khreibet Al-Souq"), j
+    assert (j["state"], j["city"], j["area"]) == ("Amman", "Amman", "Khreibet Al-Souq"), j      # City = Google's locality; the neighbourhood is the Area
     assert j["country"] == "JO"
     assert ("google", "en") in log                                                    # the fallback was asked in English as well
 
 
 @pytest.mark.parametrize("path", [gps, pasted])
-def test_jordan_arabic_app_stays_arabic_and_needs_no_fallback(providers, path):
+def test_jordan_arabic_app_is_arabic_and_city_is_the_city_not_the_neighbourhood(providers, path):
     log, st = providers
     j = path("JO", "ar")
-    assert (j["state"], j["city"], j["area"]) == ("عمان", "خريبة السوق", "خريبة السوق")
-    assert [x for x in log if x[0] == "google"] == []
+    assert (j["state"], j["city"], j["area"]) == ("عمان", "عمان", "منطقة المقابلين"), j
+    assert [x for x in log if x[0] == "google"] == [("google", "ar")]                 # the cross-check is asked in the SAME language
 
 
 @pytest.mark.parametrize("path", [gps, pasted])
@@ -138,7 +151,7 @@ def test_no_english_name_anywhere_keeps_the_provider_name_not_a_wrong_city(provi
     j = gps("JO", "en")
     assert j["state"] == "Amman" and j["city"] == "خريبة السوق"                      # graceful: original name kept, nothing invented
     st["google"] = True
-    CASES["JO"]["g_en"], saved = {"state": "Amman", "city": "خريبة السوق"}, CASES["JO"]["g_en"]    # provider also only has the Arabic name
+    CASES["JO"]["g_en"], saved = {"state": "Amman", "city": "خريبة السوق", "area": "منطقة المقابلين"}, CASES["JO"]["g_en"]    # provider also only has the Arabic name
     try:
         assert gps("JO", "en")["city"] == "خريبة السوق"
     finally:
@@ -154,8 +167,8 @@ def test_coordinates_never_change_and_pasted_url_keeps_exact_pin(providers):
 def test_places_partial_english_result_is_completed_per_field(providers):
     """Places gave the state in English but no city/area: Nominatim filled them in Arabic - the merged result is brought to English."""
     log, st = providers
-    out = G.complete_names({"state": "Amman", "city": "خريبة السوق", "area": "خريبة السوق", "address": "Amman"}, 31.7384, 35.9340, "en")
-    assert out["state"] == "Amman" and out["city"] == "Khreibet Al-Souq" and out["area"] == "Khreibet Al-Souq"
+    out = G.complete_names({"state": "Amman", "city": "خريبة السوق", "area": "منطقة المقابلين", "address": "Amman"}, 31.7384, 35.9340, "en")
+    assert out["state"] == "Amman" and out["city"] == "Amman" and out["area"] == "Khreibet Al-Souq"
 
 
 def test_language_check_unit():
@@ -183,7 +196,7 @@ def test_city_master_is_neither_rewritten_nor_fuzzy_matched():
 
 # ───────────── all five countries x GPS / pasted link x English / Arabic ─────────────
 EXPECT = {   # (country, lang) -> (state, city, area) the app must show; None = whatever the provider has (nothing to translate)
-    ("JO", "en"): ("Amman", "Khreibet Al-Souq", "Khreibet Al-Souq"), ("JO", "ar"): ("عمان", "خريبة السوق", "خريبة السوق"),
+    ("JO", "en"): ("Amman", "Amman", "Khreibet Al-Souq"), ("JO", "ar"): ("عمان", "عمان", "منطقة المقابلين"),
     ("SA", "en"): ("Riyadh Region", "Riyadh", "Al Munsiyah"),          ("SA", "ar"): ("منطقة الرياض", "الرياض", "حي المنسية"),
     ("IN", "en"): ("Maharashtra", "Pune", "Kothrud"),                  ("IN", "ar"): ("Maharashtra", "Pune", "Kothrud"),
     ("NP", "en"): ("Bagmati Province", "Kathmandu", "Baneshwor"),      ("NP", "ar"): ("Bagmati Province", "काठमाडौँ", "Baneshwor"),
@@ -296,3 +309,96 @@ def test_response_never_contains_the_key(providers, monkeypatch):
     monkeypatch.setattr(G, "_google_key", lambda: KEY)
     j = gps("JO", "en")
     assert KEY not in str(j)
+
+
+# ───────────── Google REQUEST_DENIED: reasons, safe logging, fallback ─────────────
+DENIED = {
+    "billing_not_enabled": "You must enable Billing on the Google Cloud Project at https://console.cloud.google.com/project/_/billing/enable Learn more at https://developers.google.com/maps/gmp-get-started",
+    "referrer_restricted": "API keys with referer restrictions cannot be used with this API.",
+    "ip_or_app_restricted": "This IP, site or mobile application is not authorized to use this API key. Request received from IP address 203.0.113.9, with empty referer",
+    "api_not_enabled_or_not_allowed_for_key": "This API project is not authorized to use this API.",
+    "invalid_key": "The provided API key is invalid.",
+    "unrecognised": "Something else",
+}
+
+
+@pytest.mark.parametrize("code", sorted(DENIED))
+def test_request_denied_reason_is_classified_logged_safely_and_names_are_kept(providers, monkeypatch, capsys, code):
+    log, st = providers
+    st["google_answer"] = {"status": "REQUEST_DENIED", "error_message": DENIED[code]}
+    monkeypatch.setattr(G, "_google_key", lambda: KEY)
+    j = gps("JO", "en")
+    assert (j["state"], j["city"], j["area"]) == ("Amman", "خريبة السوق", "منطقة المقابلين")            # provider names preserved, nothing invented
+    assert j["country"] == "JO"
+    out = capsys.readouterr().out
+    assert f"reason={code}" in out and "REQUEST_DENIED" in out
+    assert KEY not in out and "203.0.113.9" not in out and "console.cloud.google.com" not in out and "key=" not in out     # no key / IP / raw message
+
+
+def test_request_denied_is_not_retried_on_every_request(providers, monkeypatch):
+    log, st = providers
+    st["google_answer"] = {"status": "REQUEST_DENIED", "error_message": DENIED["invalid_key"]}
+    monkeypatch.setattr(G, "_google_key", lambda: KEY)
+    gps("JO", "en"); gps("JO", "en")
+    assert len([x for x in log if x[0] == "google"]) == 1                                               # negative cache (60 s)
+
+
+@pytest.mark.parametrize("path", [gps, pasted], ids=["gps", "pasted-link"])
+def test_jordan_link_with_denied_google_still_resolves_with_original_names(providers, monkeypatch, path):
+    log, st = providers
+    st["google_answer"] = {"status": "REQUEST_DENIED", "error_message": DENIED["api_not_enabled_or_not_allowed_for_key"]}
+    monkeypatch.setattr(G, "_google_key", lambda: KEY)
+    for lang, want in (("en", ("Amman", "خريبة السوق", "منطقة المقابلين")), ("ar", ("عمان", "خريبة السوق", "منطقة المقابلين"))):
+        j = path("JO", lang)
+        assert (j["state"], j["city"], j["area"]) == want and j["country"] == "JO"
+
+
+def test_classify_google_denial_vocabulary():
+    for code, msg in DENIED.items():
+        assert G.classify_google_denial(msg)[0] == code
+    assert G.classify_google_denial(None)[0] == "unrecognised"
+
+
+# ───────────── city level: a neighbourhood must not be reported as the City ─────────────
+def test_city_level_demotes_a_name_google_lists_as_a_neighbourhood():
+    google = lambda lat, lng, lang: {"city": "Amman", "subs": ["Khreibet Al-Souq", "Al-Muqabalain"]}
+    f = {"state": "Amman", "city": "Khreibet Al-Souq", "area": "Al-Muqabalain", "address": "a"}
+    out = G.fix_city_level(f, 31.7, 35.9, "en", "JO", "town", provider=google)
+    assert out["city"] == "Amman" and out["area"] == "Al-Muqabalain" and out["state"] == "Amman"
+    out = G.fix_city_level({**f, "area": ""}, 31.7, 35.9, "en", "JO", "village", provider=google)
+    assert out["city"] == "Amman" and out["area"] == "Khreibet Al-Souq"                                  # the finer name is kept, not lost
+
+
+def test_city_level_leaves_everything_else_alone():
+    google = lambda lat, lng, lang: {"city": "Amman", "subs": ["Khreibet Al-Souq"]}
+    f = {"state": "S", "city": "Khreibet Al-Souq", "area": "A", "address": ""}
+    assert G.fix_city_level(f, 1, 1, "en", "JO", "city", provider=google) == f                           # a real `city` key is trusted
+    assert G.fix_city_level({**f, "city": "Zarqa"}, 1, 1, "en", "JO", "town", provider=google)["city"] == "Zarqa"    # Google does not call it a neighbourhood
+    assert G.fix_city_level(f, 1, 1, "en", "JO", "town", provider=lambda *a: {})["city"] == "Khreibet Al-Souq"       # no Google answer: unchanged
+    assert G.fix_city_level(f, 1, 1, "en", "JO", "town", provider=lambda *a: {"city": "", "subs": ["Khreibet Al-Souq"]})["city"] == "Khreibet Al-Souq"   # no locality: never guess
+    boom = lambda *a: (_ for _ in ()).throw(RuntimeError("x"))
+    assert G.fix_city_level(f, 1, 1, "en", "JO", "town", provider=boom) == f
+
+
+def test_city_level_never_overrides_a_city_the_city_master_lists():
+    fake.cities.delete_many({})
+    fake.cities.insert_one({"name": "Khreibet Al-Souq", "country": "JO", "name_key": CM.name_key("Khreibet Al-Souq")})
+    google = lambda lat, lng, lang: {"city": "Amman", "subs": ["Khreibet Al-Souq"]}
+    f = {"state": "S", "city": "Khreibet Al-Souq", "area": "A", "address": ""}
+    assert G.fix_city_level(f, 1, 1, "en", "JO", "town", provider=google) == f
+    assert G.fix_city_level(f, 1, 1, "en", "SA", "town", provider=google)["city"] == "Amman"             # the master entry is for JO only
+    assert fake.cities.count_documents({}) == 1                                                          # master untouched
+    fake.cities.delete_many({})
+
+
+def test_india_town_level_result_is_unchanged_when_google_has_no_opinion(providers, monkeypatch):
+    log, st = providers
+    st["country"] = "IN"
+    CASES["IN"]["nom_en"] = {"state": "Maharashtra", "town": "Baramati", "suburb": "Kothrud"}
+    st["google_answer"] = {"status": "ZERO_RESULTS", "results": []}
+    monkeypatch.setattr(G, "_google_key", lambda: KEY)
+    try:
+        j = gps("IN", "en")
+        assert (j["state"], j["city"], j["area"], j["country"]) == ("Maharashtra", "Baramati", "Kothrud", "IN")
+    finally:
+        CASES["IN"]["nom_en"] = {"state": "Maharashtra", "city": "Pune", "suburb": "Kothrud"}
