@@ -1277,6 +1277,15 @@ def resolve_maps_link(
         except Exception as exc:
             print(f"[MAPS] Reverse geocode warning: {type(exc).__name__}")
 
+    # One language for every field: Places and Nominatim can each answer a field in the local language when they have no name in the
+    # requested one, so re-check the merged result (same coordinates, same language, fallback providers) before returning it.
+    try:
+        from services import geo_names
+        fixed = geo_names.complete_names({"state": state, "city": city, "area": area, "address": address}, lat, lng, lang)
+        state, city, area, address = fixed["state"], fixed["city"], fixed["area"], fixed["address"]
+    except Exception as exc:
+        print(f"[MAPS] Language completion warning: {type(exc).__name__}")
+
     print(f"[MAPS] Resolved exact location {lat}, {lng}")
 
     return {

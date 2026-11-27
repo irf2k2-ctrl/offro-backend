@@ -51,13 +51,25 @@ def seed(n, status="approved"):
 body = lambda t="P": {"title": t, "offer_text": "o", "price": "50", "original_price": "80", "store_id": SID,
                       "store_name": "S", "city": "Pune", "logo_url": "data:image/png;base64,xx"}
 
+def _as_razorpay_paid(order_id=None, product_id=None):
+    """The merchant PAID through Razorpay: the order is a razorpay-mode order and the client presents a genuine signature.
+    (Verification of a paid order without this is rejected - see test_payment_verification_security.py.)"""
+    import hmac, hashlib
+    MA.RAZORPAY_KEY_SECRET = MP.RAZORPAY_KEY_SECRET = "test_secret"
+    q = {"_id": ObjectId(order_id)} if order_id else {"status": "created", **({"product_id": str(product_id)} if product_id else {})}
+    o = fake[MP.ORDERS].find_one(q, sort=[("created_at", -1)])
+    rid = "order_T" + str(o["_id"])[-8:]
+    fake[MP.ORDERS].update_one({"_id": o["_id"]}, {"$set": {"razorpay_order_id": rid, "pay_mode": "razorpay"}})
+    sig = hmac.new(b"test_secret", f"{rid}|pay_T1".encode(), hashlib.sha256).hexdigest()
+    return {"razorpay_order_id": rid, "razorpay_payment_id": "pay_T1", "razorpay_signature": sig}
+
 def merchant_create(t="P"):
     o = c.post("/merchant/products/order", json={"store_id": SID, "end_date": END}, headers=H)
     assert o.status_code == 200, o.text
     o = o.json(); pl = {**body(t), "order_id": o["order_id"], "end_date": END}
     if o["amount_paise"] == 0:
         return o, c.post("/merchant/products/activate-free", json=pl, headers=H)
-    return o, c.post("/merchant/products/verify", json=pl, headers=H)
+    return o, c.post("/merchant/products/verify", json={**pl, **_as_razorpay_paid(o["order_id"])}, headers=H)
 
 def test_products_api():
     # 1 settings endpoint exposes + validates free_product_limit
@@ -242,7 +254,7 @@ def test_duration_pricing_and_dashboard_fields():
     ro = c.post(f"/merchant/products/{exp}/renew", json={"end_date": ymd(6)}, headers=H).json()
     assert ro["days"] == 7 and ro["base_price"] == 70, ro                                                      # today..+6 = 7 days
     # rate stored per renewal; later rate change does not touch history
-    rv = c.post(f"/merchant/products/{live}/renew/verify", json={}, headers=H); assert rv.status_code == 200, rv.text
+    rv = c.post(f"/merchant/products/{live}/renew/verify", json=_as_razorpay_paid(product_id=live), headers=H); assert rv.status_code == 200, rv.text
     pl = fake.merchant_products.find_one({"_id": live}); assert pl["renewals"][0]["unit_price"] == 100 and pl["renewals"][0]["added_days"] == 10
     assert pl["duration_days"] == 20
     # admin dashboard row: duration + paid status/amount

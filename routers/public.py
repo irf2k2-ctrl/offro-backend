@@ -1088,8 +1088,12 @@ def _nominatim_reverse(lat: float, lng: float, lang: str = "en") -> dict:
         area    = (addr.get("suburb") or addr.get("neighbourhood") or addr.get("quarter") or addr.get("locality") or "")
         address = data.get("display_name", "")[:250]
         # additive: the ISO country code of the place (upper-case; "" when unknown) so an app can tell a location of ANOTHER country
-        return {"state": state, "city": city, "area": area, "address": address,
-                "country": str(addr.get("country_code") or "").strip().upper()}
+        out = {"state": state, "city": city, "area": area, "address": address,
+               "country": str(addr.get("country_code") or "").strip().upper()}
+        # Nominatim answers in the LOCAL language for a place with no name in the requested one (OSM often has no name:en for a
+        # neighbourhood): bring every field to the app language through the fallback provider(s); coordinates/country untouched.
+        from services import geo_names
+        return {**geo_names.complete_names(out, lat, lng, normalize_geo_lang(lang)), "country": out["country"]}
     except Exception:
         return {}
 

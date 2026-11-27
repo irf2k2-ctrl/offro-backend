@@ -1055,7 +1055,7 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
     payment_id = data.get("razorpay_payment_id")
     signature  = data.get("razorpay_signature")
     store_id   = data.get("store_id")
-    if not all([order_id, payment_id, signature, store_id]):
+    if not all([order_id, payment_id, signature, store_id]) or not all(isinstance(v, str) for v in (order_id, payment_id, signature, store_id)):
         raise HTTPException(400, "Missing payment fields")
 
     # Verify Razorpay signature
@@ -1066,8 +1066,22 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
     if not hmac.compare_digest(expected, signature):
         raise HTTPException(400, "Payment signature mismatch")
 
-    sub = db.subscriptions.find_one({"razorpay_order_id": order_id})
-    if not sub: raise HTTPException(404, "Subscription record not found")
+    mid = _mid(m)
+    # The subscription is found by its Razorpay order id AND the authenticated merchant: another merchant's order id (or a replayed
+    # payment) is indistinguishable from a missing record.
+    sub = db.subscriptions.find_one({"razorpay_order_id": order_id, "merchant_id": mid})
+    if not sub or not sub.get("razorpay_order_id") or str(sub["razorpay_order_id"]) != order_id:
+        raise HTTPException(404, "Subscription record not found")
+    # The store is the one the subscription was created for (the client's store_id is only compared) and must be this merchant's.
+    if str(sub.get("store_id") or "") != store_id:
+        raise HTTPException(400, "This payment belongs to a different store.")
+    try:
+        store_oid = ObjectId(store_id)
+    except Exception:
+        raise HTTPException(400, "Invalid store ID")
+    store_chk = db.stores.find_one({"_id": store_oid})
+    if not store_chk or str(store_chk.get("merchant_id") or "") != str(mid):
+        raise HTTPException(404, "Store not found")
     # IDEMPOTENCY GUARD: already paid → return existing invoice, never double-insert
     if sub.get("status") == "paid":
         existing_inv = db.invoices.find_one({"razorpay_payment_id": sub.get("razorpay_payment_id","")})
@@ -1076,15 +1090,27 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
             "invoice_no":   sub.get("invoice_no", existing_inv.get("invoice_no","") if existing_inv else ""),
             "store_status": "waiting_approval",
         }
+    if sub.get("status") != "pending":
+        raise HTTPException(409, "This subscription is not awaiting payment.")
+    # Mode separation: a manual-mode order is never completed by a Razorpay verification, and a zero-payable one never involves Razorpay.
+    if sub.get("pay_mode") == "manual":
+        raise HTTPException(409, {"code": "manual_payment_pending",
+                                  "message": "This subscription is awaiting manual payment confirmation. It cannot be verified as a Razorpay payment."})
+    if sub.get("pay_mode") == "free" or _order_payable_is_exactly_zero(sub):
+        raise HTTPException(400, "This subscription does not need payment. Use free activation.")
 
-    db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {
+    # Atomic claim: of two concurrent verifications only one moves pending -> paid, creates the invoice and counts the discount.
+    claimed = db.subscriptions.update_one({"_id": sub["_id"], "merchant_id": mid, "status": "pending"}, {"$set": {
         "status":             "paid",
         "razorpay_payment_id": payment_id,
         "paid_at":            datetime.utcnow(),
     }})
+    if claimed.modified_count != 1:
+        cur = db.subscriptions.find_one({"_id": sub["_id"]}) or {}
+        return {"message": "✅ Payment already verified.", "invoice_no": cur.get("invoice_no", ""), "store_status": "waiting_approval"}
     # Payment just succeeded — count discount usage exactly once, here.
     _mark_discount_used(sub.get("discount_code"))
-    db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {
+    db.stores.update_one({"_id": store_oid, "merchant_id": store_chk.get("merchant_id")}, {"$set": {
         "status":              "waiting_approval",
         "subscription_plan":   sub["plan"],
         "subscription_start":  sub["from_date"],
@@ -1131,27 +1157,82 @@ def verify_payment(data: dict, m=Depends(get_merchant)):
         "store_status":  "waiting_approval",
     }
 
+# ───────────── free-activation / payment-mode guards ─────────────
+def _order_payable_is_exactly_zero(rec: dict) -> bool:
+    """True ONLY when every server-stored payable figure of a subscription / banner order is exactly 0 and the total is present.
+    Anything else - a positive amount, a negative amount, a missing or non-numeric total - is NOT free (fail closed). A stored amount is
+    never rounded down to zero: the figures were calculated and rounded on the server when the order was created, and are compared as stored."""
+    rec = rec or {}
+    if rec.get("total") is None:
+        return False
+    for key in ("total", "amount_paise", "final_amount", "gst", "gst_amount"):
+        val = rec.get(key)
+        if val is None:
+            continue
+        try:
+            if float(val) != 0.0:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def _payment_required(what: str) -> HTTPException:
+    return HTTPException(400, {"code": "payment_required", "message": f"Payment is required for this {what}. It cannot be activated as a free order."})
+
+
 @router.post("/subscribe/free")
 def activate_free_subscription(data: dict, m=Depends(get_merchant)):
-    """Activate a 0-price subscription immediately (no payment gateway needed)."""
-    store_id       = data.get("store_id")
-    subscription_id = data.get("subscription_id")
+    """Activate a subscription whose server-calculated payable amount is EXACTLY ZERO (a 100% discount / a free plan).
+
+    Everything is validated BEFORE any status changes or invoice is written: the subscription must be the authenticated merchant's own,
+    its store must be that merchant's store AND the store the subscription was created for (the client's store_id is only compared, never
+    trusted), and the amount stored by the server must be exactly zero. A paid subscription can never be activated here."""
+    store_id        = str(data.get("store_id") or "").strip()
+    subscription_id = str(data.get("subscription_id") or "").strip()
     if not store_id or not subscription_id:
         raise HTTPException(400, "store_id and subscription_id required")
+    try:
+        sub_oid = ObjectId(subscription_id)
+        store_oid = ObjectId(store_id)
+    except Exception:
+        raise HTTPException(400, "Invalid subscription or store ID")
+    mid = _mid(m)
 
-    sub = db.subscriptions.find_one({"_id": ObjectId(subscription_id), "status": "pending"})
-    if not sub:
+    # 1. the subscription must be THIS merchant's (another merchant's is indistinguishable from a missing one)
+    sub = db.subscriptions.find_one({"_id": sub_oid})
+    if not sub or not sub.get("merchant_id") or str(sub.get("merchant_id")) != str(mid):
         raise HTTPException(404, "Subscription not found")
+    # 2. the store sent must be the store the subscription was created for, and must belong to this merchant
+    if str(sub.get("store_id") or "") != store_id:
+        raise HTTPException(400, "This subscription belongs to a different store.")
+    store = db.stores.find_one({"_id": store_oid})
+    if not store or str(store.get("merchant_id") or "") != str(mid):
+        raise HTTPException(404, "Store not found")
 
+    # 3. repeat call for a subscription already activated for free: answer with the existing record, create nothing
+    if sub.get("status") == "paid" and sub.get("free_activation") and _order_payable_is_exactly_zero(sub):
+        return {"message": "✅ Free subscription already activated.", "invoice_no": sub.get("invoice_no", ""),
+                "store_status": store.get("status", "waiting_approval"), "already_processed": True}
+    if sub.get("status") != "pending":
+        raise HTTPException(409, "This subscription is not awaiting activation.")
+
+    # 4. only an exactly-zero payable amount may be activated without payment
+    if not _order_payable_is_exactly_zero(sub):
+        raise _payment_required("subscription")
+
+    # ---- all validation passed: now (and only now) change anything ----
     now = datetime.utcnow()
-    db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {
-        "status": "paid",
-        "paid_at": now,
-        "free_activation": True,
-    }})
+    claimed = db.subscriptions.update_one(
+        {"_id": sub_oid, "merchant_id": sub.get("merchant_id"), "status": "pending"},
+        {"$set": {"status": "paid", "paid_at": now, "free_activation": True}})
+    if claimed.modified_count != 1:                      # a concurrent request activated it first: never a second invoice
+        cur = db.subscriptions.find_one({"_id": sub_oid}) or {}
+        return {"message": "✅ Free subscription already activated.", "invoice_no": cur.get("invoice_no", ""),
+                "store_status": "waiting_approval", "already_processed": True}
     # This IS the activation for this subscription — count usage exactly once.
     _mark_discount_used(sub.get("discount_code"))
-    db.stores.update_one({"_id": ObjectId(store_id)}, {"$set": {
+    db.stores.update_one({"_id": store_oid, "merchant_id": store.get("merchant_id")}, {"$set": {
         "status":             "waiting_approval",
         "subscription_plan":  sub["plan"],
         "subscription_start": sub["from_date"],
@@ -1160,14 +1241,13 @@ def activate_free_subscription(data: dict, m=Depends(get_merchant)):
 
     invoice_no = f"LS-FREE-{now.strftime('%Y%m%d')}-{str(sub['_id'])[-6:].upper()}"
     db.subscriptions.update_one({"_id": sub["_id"]}, {"$set": {"invoice_no": invoice_no}})  # FIX: keep in sync with invoices collection
-    store_doc  = db.stores.find_one({"_id": ObjectId(store_id)}, {"store_name": 1}) or {}
     db.invoices.insert_one({
         "invoice_no":      invoice_no,
-        "merchant_id":     _mid(m),
+        "merchant_id":     mid,
         "merchant_name":   m.get("name"),
         "merchant_phone":  m.get("phone"),
         "store_id":        store_id,
-        "store_name":      store_doc.get("store_name", ""),
+        "store_name":      store.get("store_name", ""),
         "plan":            sub["plan"],
         "base_price":      sub.get("price", 0),
         "original_amount": sub.get("original_amount", sub.get("price", 0)),
@@ -1184,8 +1264,8 @@ def activate_free_subscription(data: dict, m=Depends(get_merchant)):
         "created_at":      now,
         **_cc.stamp(sub),
     })
-    _log_tx(_mid(m), "subscription",
-            f"Free plan activated for '{store_doc.get('store_name','')}' — {sub['plan']}",
+    _log_tx(mid, "subscription",
+            f"Free plan activated for '{store.get('store_name','')}' — {sub['plan']}",
             amount=0,
             meta={"store_id": store_id, "plan": sub["plan"]})
 
@@ -1789,7 +1869,7 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
     # honor it immediately for a better error and no wasted order record.
     early_store_id = (data.get("store_id") or "").strip()
     if early_store_id:
-        _require_active_store(early_store_id, "banner")
+        _require_active_store(early_store_id, "banner", merchant_id=merchant_id)
 
     if days < 1:
         raise HTTPException(400, "days must be ≥ 1")
@@ -1916,35 +1996,48 @@ def create_banner_order(data: dict, m=Depends(get_merchant)):
 # ── POST /merchant/banners/activate-free  ──────────────────────────────────
 @router.post("/banners/activate-free")
 def activate_free_banner(data: dict, m=Depends(get_merchant)):
+    """Submit a banner whose server-calculated payable amount is EXACTLY ZERO (100% discount / free).
+    A pending status alone never qualifies: the stored amount must be zero. All validation happens before any state change."""
     merchant_id = _mid(m)
-    order_id    = data.get("order_id", "")
+    order_id    = str(data.get("order_id") or "").strip()
     title       = data.get("title", "")
     image_url, image_thumb, media_type = _banner_media(data)
+    try:
+        order_oid = ObjectId(order_id)
+    except Exception:
+        raise HTTPException(400, "Invalid order ID")
 
-    order = db.banner_orders.find_one({"_id": ObjectId(order_id), "merchant_id": merchant_id})
+    # the order must be THIS merchant's (another merchant's order is indistinguishable from a missing one)
+    order = db.banner_orders.find_one({"_id": order_oid, "merchant_id": merchant_id})
     if not order:
         raise HTTPException(404, "Order not found")
 
-    # IDEMPOTENCY GUARD: if already submitted → return existing data, never insert twice.
-    # (Mirrors the guard in verify_banner_payment below — prevents double-tap / retry
-    # from creating a second merchant_banners document for the same order, which showed
-    # up in the admin dashboard as a "duplicate" banner: one pending, one approved.)
+    # IDEMPOTENCY GUARD: if already submitted → return existing data, never insert twice (and never a second invoice).
     if order.get("status") in ("submitted", "paid"):
         existing_banner_id = order.get("banner_id", "")
         existing_banner = db.merchant_banners.find_one({"_id": ObjectId(existing_banner_id)}) if existing_banner_id else None
         existing_inv_no = (existing_banner or {}).get("invoice_no", "")
         return {"message": "Banner already activated.", "banner_id": existing_banner_id, "invoice_no": existing_inv_no}
+    if order.get("status") != "pending":
+        raise HTTPException(409, "This banner order is not awaiting activation.")
+
+    # An exactly-zero server-calculated payable is activated as a free banner. A NON-zero order may only be SUBMITTED (never activated,
+    # never marked paid, no invoice) when the server itself assigned it to manual payment when it was created; it then stays pending
+    # until an authorised admin approves it. A Razorpay-mode order, or one with no recorded mode, must be paid through Razorpay.
+    is_free = _order_payable_is_exactly_zero(order)
+    manual_submit = (not is_free) and order.get("pay_mode") == "manual"
+    if not is_free and not manual_submit:
+        raise _payment_required("banner order")
 
     # Read store/city from Flutter payload (Flutter sends these on activation)
     store_id   = (data.get("store_id")   or "").strip()
     store_name = (data.get("store_name") or "").strip()
     city       = (data.get("city")       or "").strip()
-    # BUG FIX: a draft/unsubscribed store must not be able to create a
-    # Banner via a direct API call, even if Flutter's own lock is bypassed.
-    # Checked BEFORE _mark_discount_used below so a rejected attempt never
-    # consumes the discount code's usage count.
-    _require_active_store(store_id, "banner")
-    # Fallback: look up city from store record if not provided directly
+    # a store bound to the order when it was created must be the store being activated
+    if order.get("store_id") and store_id and str(order["store_id"]) != store_id:
+        raise HTTPException(400, "This banner order belongs to a different store.")
+    # draft/unsubscribed or another merchant's store: rejected before anything changes (and before any discount usage is consumed)
+    _require_active_store(store_id, "banner", merchant_id=merchant_id)
     if not city and store_id:
         try:
             st = db.stores.find_one({"_id": ObjectId(store_id)}, {"city": 1})
@@ -1953,6 +2046,26 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         except Exception:
             pass
 
+    # atomic claim: two concurrent calls can never both create a banner + invoice
+    claim = db.banner_orders.update_one(
+        {"_id": order_oid, "merchant_id": merchant_id, "status": "pending", "free_claim": {"$exists": False}},
+        {"$set": {"free_claim": datetime.utcnow().isoformat()}})
+    if claim.modified_count != 1:
+        cur = db.banner_orders.find_one({"_id": order_oid}) or {}
+        bid = cur.get("banner_id", "")
+        b = db.merchant_banners.find_one({"_id": ObjectId(bid)}) if bid else None
+        return {"message": "Banner already activated.", "banner_id": bid, "invoice_no": (b or {}).get("invoice_no", "")}
+    try:
+        return _finish_free_banner(order, order_oid, order_id, merchant_id, m, data, title,
+                                   image_url, image_thumb, media_type, store_id, store_name, city, manual_submit)
+    except Exception:
+        # nothing was created: release the claim so the merchant can retry
+        db.banner_orders.update_one({"_id": order_oid, "status": "pending"}, {"$unset": {"free_claim": ""}})
+        raise
+
+
+def _finish_free_banner(order, order_oid, order_id, merchant_id, m, data, title,
+                        image_url, image_thumb, media_type, store_id, store_name, city, manual_submit=False):
     disc_code = order.get("discount_code")
     # Free activation IS the successful activation — count usage exactly once.
     _mark_discount_used(order.get("discount_code"))
@@ -2003,7 +2116,7 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
         "gst_amount":       order.get("gst_amount", 0),
         "total":            order.get("total", 0),
         "final_amount":     order.get("final_amount", order.get("total", 0)),
-        "payment_status":   "free",
+        "payment_status":   "manual_pending" if manual_submit else "free",
         "status":           "pending",
         "approval_status":  "pending",
         "created_at":       datetime.utcnow().isoformat(),
@@ -2011,7 +2124,13 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     res = db.merchant_banners.insert_one(banner)
     db.banner_orders.update_one({"_id": ObjectId(order_id)},
         {"$set": {"status": "submitted", "banner_id": str(res.inserted_id),
-                  "store_id": store_id, "city": city}})
+                  "store_id": store_id, "city": city, **({"manual_payment": True} if manual_submit else {})}})
+    if manual_submit:
+        # Manual payment: NO invoice and NOT paid. The banner waits for the existing admin approval; nothing here touches Razorpay.
+        _log_tx(merchant_id, "banner", f"Banner '{title}' – {order.get('days', 30)} days submitted (manual payment pending)",
+                amount=0, meta={"banner_id": str(res.inserted_id), "manual_payment": True})
+        return {"message": "Banner submitted for review. It will go live after the admin confirms your payment.",
+                "banner_id": str(res.inserted_id), "invoice_no": "", "manual_payment_pending": True}
 
     # Write free invoice for record-keeping
     invoice_no = f"BNR-FREE-{datetime.utcnow().strftime('%Y%m%d')}-{str(res.inserted_id)[-6:].upper()}"
@@ -2048,17 +2167,29 @@ def activate_free_banner(data: dict, m=Depends(get_merchant)):
     return {"message": "Banner submitted for review", "banner_id": str(res.inserted_id), "invoice_no": invoice_no}
 
 def _require_valid_razorpay_payment(order, rp_order_id, rp_payment_id, rp_signature):
-    """Fail-closed Razorpay check for banner / premium-product orders.
-    Orders with a stored razorpay_order_id and amount > 0 MUST present a matching
-    order id, a payment id and a valid signature. Zero-amount / manual orders
-    (no stored razorpay_order_id) keep their existing exemption."""
-    stored_oid = (order or {}).get("razorpay_order_id")
+    """Strict Razorpay-vs-manual separation for banner / product / renewal verification.
+
+    * Exactly-zero payable orders need no payment (free orders never reach Razorpay) -> allowed.
+    * Manual-mode orders (pay_mode "manual", or no Razorpay order was ever created for a non-zero amount) can NEVER be completed by
+      a Razorpay verification call - whatever ids the caller sends. They stay pending for the existing admin/manual approval workflow.
+    * Razorpay-mode orders need the stored Razorpay order id, the same order id in the request, a payment id and a valid
+      HMAC-SHA256 signature over "order_id|payment_id". Anything missing or wrong is rejected.
+    Raises HTTPException; returns None when the payment may be treated as complete."""
+    order = order or {}
     try:
-        paise = float((order or {}).get("amount_paise") or 0)
+        payable = float(order.get("amount_paise") or 0)
+        total = float(order.get("total") or 0)
     except (TypeError, ValueError):
-        paise = 0
-    if not stored_oid or paise <= 0:
+        payable, total = 1.0, 1.0           # unreadable amounts: treat as payable (fail closed)
+    if payable <= 0 and total <= 0 and _order_payable_is_exactly_zero(order):
         return
+    stored_oid = order.get("razorpay_order_id")
+    mode = order.get("pay_mode")
+    if mode == "manual" or not stored_oid:
+        raise HTTPException(409, {"code": "manual_payment_pending",
+                                  "message": "This order is awaiting manual payment confirmation. It cannot be verified as a Razorpay payment."})
+    if mode not in (None, "razorpay"):
+        raise HTTPException(409, "This order cannot be verified as a Razorpay payment.")
     if not RAZORPAY_KEY_SECRET:
         raise HTTPException(503, "Payment verification unavailable")
     if not (isinstance(rp_order_id, str) and isinstance(rp_payment_id, str)
@@ -2101,7 +2232,7 @@ def verify_banner_payment(data: dict, m=Depends(get_merchant)):
     city       = (data.get("city")       or "").strip()
     # BUG FIX: a draft/unsubscribed store must not be able to create a
     # Banner via a direct API call, even if Flutter's own lock is bypassed.
-    _require_active_store(store_id, "banner")
+    _require_active_store(store_id, "banner", merchant_id=merchant_id)
     # Fallback: look up city from store record if not provided directly
     if not city and store_id:
         try:
@@ -2402,7 +2533,7 @@ def _is_store_subscription_active(store_id: str) -> bool:
     except Exception:
         return False
 
-def _require_active_store(store_id: str, feature: str):
+def _require_active_store(store_id: str, feature: str, merchant_id=None):
     """BUG FIX — draft/unsubscribed stores must not be able to create a
     Banner or Product. Reuses the SAME store status field/values already
     used everywhere else in this codebase (routers/admin.py's
@@ -2427,6 +2558,8 @@ def _require_active_store(store_id: str, feature: str):
     store = db.stores.find_one({"_id": oid})
     if not store:
         raise HTTPException(404, "Store not found")
+    if merchant_id is not None and str(store.get("merchant_id") or "") != str(merchant_id):
+        raise HTTPException(404, "Store not found")   # not this merchant's store
     if store.get("status") != "active":
         if feature == "banner":
             raise HTTPException(403, "Subscribe your store to create banners.")
